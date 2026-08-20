@@ -148,8 +148,12 @@ gh pr checks --watch
 
 - **feature → develop**: **Squash and merge**。マージ後、ブランチは自動削除される。
 - コミットが Issue を閉じるよう `Closes #N` を PR に含めておく。
-- **develop → main（リリース）**: develop から main への PR を作り、レビューを経てマージ。
-  main は直線履歴（linear history）必須のため Squash / Rebase でマージする。
+- **develop → main（リリース）**: develop から main への PR を作り、レビューを経て
+  **Create a merge commit（マージコミット）**でマージする。
+  - **Squash / Rebase は使わない。** これらは develop のコミットを main 上に別 SHA で作り直すため、
+    main と develop の履歴が枝分かれする（過去に発生済み）。マージコミットなら develop の
+    コミットがそのまま main から辿れ、履歴が一本につながる。
+  - main の「直線履歴必須（linear history）」は無効化してある（マージコミットを許すため）。
 
 ## 10. やってはいけないこと
 
