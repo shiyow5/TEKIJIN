@@ -11,10 +11,13 @@
 
 ## 決定
 
-- **main は保護**し直 push 禁止（管理者含む）。安定版。直線履歴・会話解決必須。
+- **main は保護**（PR 経由、直線履歴・会話解決必須）。安定版。
 - **develop を既定・統合ブランチ**とする。feature ブランチから PR で入れる。
 - ブランチ命名: `<type>/<issue番号>-<slug>`。
-- マージ要件: **CI 緑 + AIレビュー + 人間レビュー1名以上**。
+- マージ要件: **CI 緑 + AIレビュー必須**。人間レビューは立場で非対称:
+  - **PL（@shiyow5）** は自分の PR を AIレビューのみでマージ可（`enforce_admins=false` による管理者バイパス）。
+  - **PL 以外のメンバー** は PL の承認が必須（`require_code_owner_reviews=true` + CODEOWNERS=@shiyow5）。
+  - 少人数（レビュー可能者が PL のみ）で運用を回すための構成。
 - feature→develop は Squash merge、マージ後ブランチ自動削除。
 - リリースは develop→main の PR。
 - 手順は `.claude/skills/dev-flow/SKILL.md` を唯一の正とし、`AGENTS.md` から全エージェントに周知。
