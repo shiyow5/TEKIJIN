@@ -1,0 +1,25 @@
+# TEKIJIN backend — tooling config only.
+# Application code is NOT implemented yet (spec is still being decided).
+# This file configures the formatter (ruff), linter (ruff), and test runner (pytest).
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+# Sensible default rule set. Adjust when the spec lands.
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = []
+
+[tool.ruff.lint.isort]
+known-first-party = ["tekijin"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-ra"

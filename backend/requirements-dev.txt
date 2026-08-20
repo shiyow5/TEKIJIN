@@ -1,0 +1,5 @@
+# Dev/CI tooling for the backend.
+# Runtime dependencies (FastAPI etc.) are intentionally NOT listed yet —
+# they are added when the spec is finalized.
+ruff>=0.6,<1.0
+pytest>=8.0,<9.0

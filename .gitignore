@@ -1,0 +1,89 @@
+# ============================================================
+# Dependencies
+# ============================================================
+node_modules/
+.pnpm-store/
+.npm/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.uv/
+*.egg-info/
+.eggs/
+
+# ============================================================
+# Build output
+# ============================================================
+frontend/.next/
+frontend/out/
+frontend/next-env.d.ts
+frontend/tsconfig.tsbuildinfo
+dist/
+build/
+
+# ============================================================
+# Environment & secrets
+# ============================================================
+.env
+.env.local
+.env.*.local
+.env.production
+!.env.example
+# JSON credentials / service accounts must never be committed
+*-service-account*.json
+*credentials*.json
+
+# ============================================================
+# Test & coverage
+# ============================================================
+coverage/
+.coverage
+htmlcov/
+.pytest_cache/
+.ruff_cache/
+frontend/playwright-report/
+frontend/test-results/
+frontend/playwright/.auth/
+
+# ============================================================
+# Docker
+# ============================================================
+docker-compose.override.yml
+
+# ============================================================
+# Logs
+# ============================================================
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# ============================================================
+# OS files
+# ============================================================
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# ============================================================
+# IDE
+# ============================================================
+.idea/
+*.iml
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# ============================================================
+# Local data / models (never commit datasets or model weights)
+# ============================================================
+data/
+*.sqlite
+*.duckdb
+*.bin
+*.gguf
+*.safetensors

@@ -1,0 +1,14 @@
+name: Setup Frontend
+description: Set up Node.js and install frontend dependencies
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 20
+
+    - name: Install frontend dependencies
+      shell: bash
+      run: npm --prefix frontend install --prefer-offline --no-audit --fund=false
