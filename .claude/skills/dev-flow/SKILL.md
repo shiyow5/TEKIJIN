@@ -2,7 +2,7 @@
 name: dev-flow
 description: >-
   TEKIJIN リポジトリの開発フロー（Issue 起票 → ブランチ作成 → 実装 → ローカル/CI 検証 →
-  PR 作成 → AIレビュー + 人間レビュー → マージ）を定義する。main への直 push は禁止で、
+  PR 作成 → AIレビュー →（メンバーは PL レビュー）→ マージ）を定義する。main への直 push は避け、
   develop を統合ブランチとする。コード変更・Issue 作成・ブランチ作成・PR 作成・マージ・
   レビュー対応を行うとき、または「開発の進め方」「ブランチ名」「PRの書き方」「どこにマージ」
   を尋ねられたときに必ず参照する。あらゆるコーディング支援エージェントが従う共通ルール。
@@ -60,7 +60,7 @@ gh issue create --title "feat: 専門性スコアラーの骨組み" --label fea
 ```
 
 - `type` = `feat` | `fix` | `refactor` | `docs` | `test` | `chore` | `perf` | `ci`
-- スラッグは英小文字とハイフン（kebab-case）。簡潔に。
+- スラッグは英小文字・数字・ハイフン（kebab-case）。簡潔に。
 - 例: `feat/12-expertise-scorer` / `fix/34-login-race` / `docs/7-repo-structure`
 
 ```bash
@@ -173,6 +173,6 @@ git push -u origin HEAD && gh pr create --base develop --fill
 # 6. CI
 gh pr checks --watch
 # 7. AIレビュー（例: /code-review）→ 指摘対応
-# 8. 人間レビュー（approve 1名以上 + 会話解決）
+# 8. レビュー（PL 以外は @shiyow5 の approve 必須 / PL は AIレビューのみで可）＋ 会話解決
 # 9. Squash merge（feature→develop）
 ```

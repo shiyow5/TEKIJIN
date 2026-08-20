@@ -46,30 +46,40 @@ jobs:
           if [ "$HEAD_REPO" = "$BASE_REPO" ]; then same_repo=1; fi
 
           # --- 1) 向き先（重大）: 許可は「feature → develop」と「develop → main（同一リポ）」のみ ---
-          if [ "$BASE_REF" = "develop" ]; then
-            summary "- ✅ 向き先: OK（→ develop）"
-          elif [ "$BASE_REF" = "main" ] && [ "$HEAD_REF" = "develop" ] && [ "$same_repo" -eq 1 ]; then
-            summary "- ✅ 向き先: OK（develop → main リリース）"
+          if [ "$HEAD_REF" = "main" ]; then
+            echo "::error title=向き先違反::main を head にした PR は許可されません（head=$HEAD_REF）"
+            summary "- ❌ **向き先**: main を head にはできません。"
+            fail=1
+          elif [ "$HEAD_REF" = "develop" ]; then
+            if [ "$BASE_REF" = "main" ] && [ "$same_repo" -eq 1 ]; then
+              summary "- ✅ 向き先: OK（develop → main リリース）"
+            else
+              echo "::error title=向き先違反::develop は main へのリリースPRのみ（base=$BASE_REF, same_repo=$same_repo）"
+              summary "- ❌ **向き先**: develop は main へのリリースPRのみ。現在 base=\`$BASE_REF\`。"
+              fail=1
+            fi
+          elif [ "$BASE_REF" = "develop" ]; then
+            summary "- ✅ 向き先: OK（feature → develop）"
           else
             echo "::error title=向き先違反::許可される向き先は「feature → develop」または「develop → main（同一リポ）」のみ（head=$HEAD_REF, base=$BASE_REF）"
             summary "- ❌ **向き先**: 「feature → develop」または「develop → main」のみ許可。現在 \`$HEAD_REF\` → \`$BASE_REF\`。"
             fail=1
           fi
 
-          # --- 2) ブランチ命名（重大）: <type>/<issue>-<slug>（slug は kebab-case） ---
-          # 同一リポの長命ブランチ（develop/main）は検査対象外
+          # --- 2) ブランチ命名（重大）: <type>/<issue>-<slug>（slug は英小文字・数字・ハイフン） ---
+          # 同一リポの長命ブランチ（develop/main）は検査対象外（向き先チェックで別途担保）
           if [ "$same_repo" -eq 1 ] && { [ "$HEAD_REF" = "develop" ] || [ "$HEAD_REF" = "main" ]; }; then
             summary "- ✅ ブランチ名: 長命ブランチのため検査対象外"
           elif printf '%s' "$HEAD_REF" | grep -qE "^($TYPES)/[0-9]+-[a-z0-9]+(-[a-z0-9]+)*$"; then
             summary "- ✅ ブランチ名: 規約に一致"
           else
             echo "::error title=ブランチ名違反::'<type>/<issue番号>-<slug>' 形式にしてください。slug は英小文字・数字・ハイフンのみ（例 feat/12-expertise-scorer）。現在: $HEAD_REF"
-            summary "- ❌ **ブランチ名**: \`<type>/<issue番号>-<slug>\`（slug は kebab-case）にしてください。例 \`feat/12-expertise-scorer\`。"
+            summary "- ❌ **ブランチ名**: \`<type>/<issue番号>-<slug>\`（slug は英小文字・数字・ハイフン）にしてください。例 \`feat/12-expertise-scorer\`。"
             fail=1
           fi
 
-          # --- 3) タイトル（警告）: Conventional Commits（release も許容） ---
-          if printf '%s' "$PR_TITLE" | grep -qE "^($TYPES|release)(\([a-z0-9-]+\))?!?: .+"; then
+          # --- 3) タイトル（警告）: Conventional Commits（release も許容。scope 文字種は制限しない） ---
+          if printf '%s' "$PR_TITLE" | grep -qE "^($TYPES|release)(\([^)]+\))?!?: .+"; then
             summary "- ✅ タイトル: Conventional Commits に一致"
           else
             echo "::warning title=タイトル体裁::PRタイトルは '<type>: 説明' 形式を推奨（type: $TYPES, release）。現在: $PR_TITLE"
@@ -77,8 +87,9 @@ jobs:
           fi
 
           # --- 4) Issue 紐付け（警告）: develop 向けPRは closing キーワード + #番号 を推奨 ---
+          # 語頭境界を要求し、'discloses' 等の部分一致を弾く
           if [ "$BASE_REF" = "develop" ]; then
-            if printf '%s' "$PR_BODY" | grep -qiE '(close[sd]?|fix(e[sd])?|resolve[sd]?)[[:space:]]+#[0-9]+'; then
+            if printf '%s' "$PR_BODY" | grep -qiE '(^|[^[:alnum:]])(close[sd]?|fix(e[sd])?|resolve[sd]?)[[:space:]]+#[0-9]+'; then
               summary "- ✅ Issue 紐付け: あり（closing キーワード）"
             else
               echo "::warning title=Issue紐付け::PR 本文に 'Closes #番号' 形式で関連 Issue を記載してください（マージで自動クローズ）。"
