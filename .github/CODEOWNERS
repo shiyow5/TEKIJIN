@@ -1,0 +1,11 @@
+# CODEOWNERS — PR に対して自動でレビュアーを要求する。
+# ここに書かれた人が、対象パスの既定レビュアーになる。
+# 実際のチームメンバーの GitHub アカウントを追加してください。
+
+# 既定オーナー（全ファイル）
+*       @shiyow5
+
+# 例: 領域ごとに担当を分ける場合
+# /backend/   @shiyow5
+# /frontend/  @teammate-a
+# /docs/      @teammate-b

@@ -48,6 +48,14 @@ make lint         # lint
 make test         # テスト
 ```
 
+## 開発フロー（重要）
+
+Issue → ブランチ → 実装 → `make check` → PR（develop向け）→ CI → AIレビュー + 人間レビュー → マージ。
+**`main` への直 push は禁止。`develop` が統合ブランチ。**
+
+- 手順の唯一の正: **[.claude/skills/dev-flow/SKILL.md](.claude/skills/dev-flow/SKILL.md)**
+- 全エージェント共通指示: [AGENTS.md](AGENTS.md) / 人間向け要約: [CONTRIBUTING.md](CONTRIBUTING.md)
+
 ## ツールチェーン
 
 | 対象 | 言語/FW | フォーマッタ | Linter | テスト |
