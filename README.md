@@ -50,7 +50,7 @@ make test         # テスト
 
 ## 開発フロー（重要）
 
-Issue → ブランチ → 実装 → `make check` → PR（develop向け）→ CI → AIレビュー + 人間レビュー → マージ。
+Issue → ブランチ → 実装 → `make check` → PR（develop向け）→ CI → AIレビュー →（メンバーは PL レビュー）→ マージ。
 **`main` への直 push は禁止。`develop` が統合ブランチ。**
 
 - 手順の唯一の正: **[.claude/skills/dev-flow/SKILL.md](.claude/skills/dev-flow/SKILL.md)**
