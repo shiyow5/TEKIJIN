@@ -9,7 +9,7 @@ on:
       - ".github/workflows/lint.yml"
       - ".github/actions/**"
   push:
-    branches: [main]
+    branches: [main, develop]
     paths:
       - "backend/**"
       - "frontend/**"

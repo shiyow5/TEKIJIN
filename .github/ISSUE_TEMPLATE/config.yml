@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 質問・相談（Slack）
+    url: https://slack.com
+    about: 実装方針の相談や雑談はSlackへ。バグ・機能はIssueで起票してください。
