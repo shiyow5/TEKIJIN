@@ -2,7 +2,7 @@
 name: dev-flow
 description: >-
   TEKIJIN リポジトリの開発フロー（Issue 起票 → ブランチ作成 → 実装 → ローカル/CI 検証 →
-  PR 作成 → AIレビュー + 人間レビュー → マージ）を定義する。main への直 push は禁止で、
+  PR 作成 → AIレビュー →（メンバーは PL レビュー）→ マージ）を定義する。main への直 push は避け、
   develop を統合ブランチとする。コード変更・Issue 作成・ブランチ作成・PR 作成・マージ・
   レビュー対応を行うとき、または「開発の進め方」「ブランチ名」「PRの書き方」「どこにマージ」
   を尋ねられたときに必ず参照する。あらゆるコーディング支援エージェントが従う共通ルール。
@@ -15,10 +15,12 @@ description: >-
 
 ## 0. 大原則（絶対）
 
-1. **`main` へ直接 push しない。** main は保護されており、管理者を含め直 push は不可。
+1. **`main` / `develop` へ直接 push しない。** 変更は必ず PR を通す。
 2. **`develop` が開発の統合ブランチ。** 日々の作業はここへ PR で入れる。
 3. **作業は必ず Issue → ブランチ → PR の順。** いきなりブランチを切らない、いきなり実装しない。
-4. **マージには CI 緑 + AIレビュー + 人間レビュー1名以上が必須。**
+4. **マージには CI 緑 + AIレビューが必須。人間レビューはメンバーの PR で必須。**
+   - **PL（@shiyow5）**: 自分の PR は **AIレビューのみでマージ可**（管理者バイパス）。
+   - **PL 以外のメンバー**: PR には **PL（コードオーナー @shiyow5）の承認が必須**。自分では承認・マージできない。
 5. **秘密情報（`.env`・鍵・トークン・サービスアカウント JSON）をコミットしない。**
 
 ブランチの関係:
@@ -58,7 +60,7 @@ gh issue create --title "feat: 専門性スコアラーの骨組み" --label fea
 ```
 
 - `type` = `feat` | `fix` | `refactor` | `docs` | `test` | `chore` | `perf` | `ci`
-- スラッグは英小文字とハイフン（kebab-case）。簡潔に。
+- スラッグは英小文字・数字・ハイフン（kebab-case）。簡潔に。
 - 例: `feat/12-expertise-scorer` / `fix/34-login-race` / `docs/7-repo-structure`
 
 ```bash
@@ -111,6 +113,8 @@ gh pr create --base develop --fill   # 向き先は必ず develop（リリース
 ## 6. CI を確認する
 
 PR を出すと、変更領域に応じて **Format Check / Lint / Test** が走る。
+加えて **PR Policy Check** が、ブランチ名・向き先・タイトル・Issue 紐付けの逸脱を点検する
+（重大な逸脱は失敗、体裁は警告）。警告が出たら直す。
 
 ```bash
 gh pr checks --watch
@@ -129,11 +133,16 @@ gh pr checks --watch
 - AIレビューの結果（要約や対応方針）を **PR にコメントとして残す**。「AIレビュー実施済み」を
   可視化する。
 
-## 8. 人間レビューを受ける（必須）
+## 8. 人間レビューを受ける
 
-- **1名以上の approve が必須**（ブランチ保護で強制）。作成者は自分の PR を approve できない。
-- レビュー指摘は PR 上で会話を解決（resolve）してからマージ。**未解決の会話が残っているとマージ不可**。
-- CODEOWNERS により既定レビュアーが自動でアサインされる。
+レビュー要件は立場で異なる（ブランチ保護 + CODEOWNERS で強制）。
+
+- **PL 以外のメンバーの PR**: **PL（@shiyow5）の approve が必須**。
+  自分の PR を自分で approve・マージすることはできない。
+- **PL（@shiyow5）の PR**: 人間の approve は不要。**AIレビュー（§7）を済ませればマージ可**
+  （管理者バイパス）。ただし AIレビューの重大指摘は必ず対応すること。
+- いずれも、レビュー指摘は PR 上で会話を解決（resolve）してからマージ。
+- CODEOWNERS（`@shiyow5`）により、レビュアーは自動でアサインされる。
 
 ## 9. マージする
 
@@ -144,8 +153,8 @@ gh pr checks --watch
 
 ## 10. やってはいけないこと
 
-- `main` / `develop` への直 push（保護で拒否される。管理者も main は不可）。
-- レビュー・CI をスキップしてのマージ。
+- `main` / `develop` への直 push（PR を通す）。
+- メンバーが PL の承認なしにマージすること。CI・AIレビューをスキップしてのマージ。
 - 秘密情報のコミット。誤ってコミットしたら履歴から除去し、トークンをローテーションする。
 - 1 PR に無関係な変更を混ぜる。Issue 単位に分ける。
 - 巨大 PR。レビュー不能なサイズにしない。
@@ -164,6 +173,6 @@ git push -u origin HEAD && gh pr create --base develop --fill
 # 6. CI
 gh pr checks --watch
 # 7. AIレビュー（例: /code-review）→ 指摘対応
-# 8. 人間レビュー（approve 1名以上 + 会話解決）
+# 8. レビュー（PL 以外は @shiyow5 の approve 必須 / PL は AIレビューのみで可）＋ 会話解決
 # 9. Squash merge（feature→develop）
 ```

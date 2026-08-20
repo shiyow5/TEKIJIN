@@ -15,10 +15,11 @@ Copilot など）への共通指示。人間の開発者も同じルールに従
 
 ## 絶対に守ること（抜粋）
 
-- `main` へ直接 push しない（保護済み）。`develop` が統合ブランチ。
+- `main` / `develop` へ直接 push しない。変更は PR を通す。`develop` が統合ブランチ。
 - 作業は Issue → ブランチ（`<type>/<issue>-<slug>`）→ PR（base=develop）の順。
 - push 前に `make check` をローカルで緑にする。
-- マージには CI 緑 + AIレビュー + 人間レビュー1名以上が必須。
+- マージには CI 緑 + AIレビューが必須。**PL 以外のメンバーの PR は PL（@shiyow5）の承認が必須**
+  （PL 自身の PR は AIレビューのみでマージ可）。
 - 秘密情報（.env・鍵・トークン）をコミットしない。
 
 ## タスクの入口
