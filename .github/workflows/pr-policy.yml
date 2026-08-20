@@ -1,0 +1,87 @@
+name: PR Policy Check
+
+# 開発フロー（.claude/skills/dev-flow/SKILL.md）への逸脱を PR 時に点検して警告する。
+# 重大な逸脱（ブランチ名・main への向き先）は fail、体裁の逸脱（タイトル・Issue紐付け）は warning。
+# 既定では「必須チェック」にはしていないのでマージはブロックしない（＝警告）。
+# ブロックしたい場合は、リポジトリの Branch protection の required status checks に
+# "Validate PR" を追加する。
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  validate:
+    name: Validate PR
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check branch, title, base and issue link
+        env:
+          # 入力はすべて env 経由で渡す（スクリプトインジェクション対策）
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          set -u
+          fail=0
+          summary() { echo "$1" >> "$GITHUB_STEP_SUMMARY"; }
+
+          echo "## PR ポリシー点検結果" >> "$GITHUB_STEP_SUMMARY"
+          summary ""
+          summary "- ブランチ: \`$HEAD_REF\` → \`$BASE_REF\`"
+          summary "- タイトル: \`$PR_TITLE\`"
+          summary ""
+
+          TYPES='feat|fix|refactor|docs|test|chore|perf|ci'
+
+          # --- 1) 向き先（重大）: main へは develop からのみ ---
+          if [ "$BASE_REF" = "main" ] && [ "$HEAD_REF" != "develop" ]; then
+            echo "::error title=向き先違反::main へは develop からのリリースPRのみ許可されています（head=$HEAD_REF）"
+            summary "- ❌ **向き先**: main へは \`develop\` からのみ。現在の head は \`$HEAD_REF\`。"
+            fail=1
+          else
+            summary "- ✅ 向き先: OK"
+          fi
+
+          # --- 2) ブランチ命名（重大）: <type>/<issue>-<slug> ---
+          # 長命ブランチ（develop/main）は検査対象外
+          if [ "$HEAD_REF" = "develop" ] || [ "$HEAD_REF" = "main" ]; then
+            summary "- ✅ ブランチ名: 長命ブランチのため検査対象外"
+          elif echo "$HEAD_REF" | grep -qE "^($TYPES)/[0-9]+-[a-z0-9._-]+$"; then
+            summary "- ✅ ブランチ名: 規約に一致"
+          else
+            echo "::error title=ブランチ名違反::'<type>/<issue番号>-<slug>' 形式にしてください（例 feat/12-expertise-scorer）。現在: $HEAD_REF"
+            summary "- ❌ **ブランチ名**: \`<type>/<issue番号>-<slug>\` にしてください（例 \`feat/12-expertise-scorer\`）。"
+            fail=1
+          fi
+
+          # --- 3) タイトル（警告）: Conventional Commits（release も許容） ---
+          if echo "$PR_TITLE" | grep -qE "^($TYPES|release)(\(.+\))?!?: .+"; then
+            summary "- ✅ タイトル: Conventional Commits に一致"
+          else
+            echo "::warning title=タイトル体裁::PRタイトルは '<type>: 説明' 形式を推奨（type: $TYPES, release）。現在: $PR_TITLE"
+            summary "- ⚠️ タイトル: \`<type>: 説明\` 形式を推奨（例 \`feat: 〜\`）。"
+          fi
+
+          # --- 4) Issue 紐付け（警告）: develop 向けPRは #番号 を推奨 ---
+          if [ "$BASE_REF" = "develop" ]; then
+            if echo "$PR_BODY" | grep -qE '#[0-9]+'; then
+              summary "- ✅ Issue 紐付け: あり"
+            else
+              echo "::warning title=Issue紐付け::PR 本文に関連 Issue（例 'Closes #12'）を記載してください。"
+              summary "- ⚠️ Issue 紐付け: 本文に \`Closes #番号\` を記載してください。"
+            fi
+          fi
+
+          summary ""
+          if [ "$fail" -ne 0 ]; then
+            summary "**結果: 重大な逸脱あり（このチェックは失敗）。** 修正してください。"
+            echo "重大な逸脱があります。ログの ::error を確認してください。"
+            exit 1
+          fi
+          summary "**結果: 重大な逸脱なし。** 警告があれば対応を推奨します。"

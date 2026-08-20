@@ -111,6 +111,8 @@ gh pr create --base develop --fill   # 向き先は必ず develop（リリース
 ## 6. CI を確認する
 
 PR を出すと、変更領域に応じて **Format Check / Lint / Test** が走る。
+加えて **PR Policy Check** が、ブランチ名・向き先・タイトル・Issue 紐付けの逸脱を点検する
+（重大な逸脱は失敗、体裁は警告）。警告が出たら直す。
 
 ```bash
 gh pr checks --watch
