@@ -148,16 +148,25 @@ gh pr checks --watch
 
 - **feature → develop**: **Squash and merge**。マージ後、ブランチは自動削除される。
 - コミットが Issue を閉じるよう `Closes #N` を PR に含めておく。
-- **develop → main（リリース）**: develop から main への PR を作り、レビューを経て
-  **Create a merge commit（マージコミット）**でマージする。
-  - **Squash / Rebase は使わない。** これらは develop のコミットを main 上に別 SHA で作り直すため、
-    main と develop の履歴が枝分かれする（過去に発生済み）。マージコミットなら develop の
-    コミットがそのまま main から辿れ、履歴が一本につながる。
-  - main の「直線履歴必須（linear history）」は無効化してある（マージコミットを許すため）。
+- **develop → main（リリース）**: **fast-forward + アノテートタグ**で行う。
+  1. develop から main へのリリース PR を作る（CI + AIレビュー + 差分の可視化のため）。
+  2. CI 緑・レビュー済みを確認したら、**GitHub の「Merge」ボタンは押さない**
+     （マージコミットが増え、main が develop より先行してしまうため）。
+     代わりに CLI で fast-forward する:
+     ```bash
+     git switch main && git pull
+     git merge --ff-only develop            # 新規コミットを作らず main を develop 先端へ
+     git tag -a vX.Y.Z -m "release vX.Y.Z"   # リリースの印はタグで残す
+     git push origin main --tags             # PL の管理者バイパスで push
+     ```
+  3. push すると develop の先端が main に載るので、リリース PR は自動で merged 扱いになる。
+  - **Squash / Rebase / マージコミットは使わない。** FF は SHA を書き換えないため main と
+    develop が同一 SHA で揃い、履歴分岐（過去に発生）もマージノードの先行も起きない。
+  - main は FF リリースにより直線履歴を保つ（`required_linear_history` は任意で再有効化可）。
 
 ## 10. やってはいけないこと
 
-- `main` / `develop` への直 push（PR を通す）。
+- `main` / `develop` への直 push（PR を通す）。**例外はリリースの FF（§9）のみで、これは PL が実施する。**
 - メンバーが PL の承認なしにマージすること。CI・AIレビューをスキップしてのマージ。
 - 秘密情報のコミット。誤ってコミットしたら履歴から除去し、トークンをローテーションする。
 - 1 PR に無関係な変更を混ぜる。Issue 単位に分ける。
@@ -179,4 +188,9 @@ gh pr checks --watch
 # 7. AIレビュー（例: /code-review）→ 指摘対応
 # 8. レビュー（PL 以外は @shiyow5 の approve 必須 / PL は AIレビューのみで可）＋ 会話解決
 # 9. Squash merge（feature→develop）
+
+# --- リリース（develop → main）: fast-forward + タグ。Merge ボタンは使わない ---
+gh pr create --base main --head develop --title "release: vX.Y.Z"   # CI/AIレビュー用
+git switch main && git pull && git merge --ff-only develop
+git tag -a vX.Y.Z -m "release vX.Y.Z" && git push origin main --tags
 ```
