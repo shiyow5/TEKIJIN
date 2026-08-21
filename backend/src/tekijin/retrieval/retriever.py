@@ -47,6 +47,10 @@ class HybridRetriever:
         top_k: int = 10,
         rrf_k: int = 60,
     ) -> None:
+        if top_k <= 0:
+            raise ValueError(f"top_k must be positive, got {top_k}")
+        if rrf_k <= 0:
+            raise ValueError(f"rrf_k must be positive, got {rrf_k}")
         self._embedder = embedder
         self._session = session
         self._repo = Repository(session)

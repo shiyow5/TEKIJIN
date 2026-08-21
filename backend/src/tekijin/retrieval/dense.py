@@ -1,12 +1,14 @@
 """Dense (vector) retrieval over pgvector.
 
-Runs an approximate-nearest-neighbour search against the ``embedding`` columns
-using pgvector's cosine distance operator. Rows whose embedding is ``NULL`` (not
-yet indexed) are excluded. Distance is converted to a cosine *similarity*
+Runs an exact (brute-force) nearest-neighbour scan against the ``embedding``
+columns using pgvector's cosine distance operator — no ANN index (ivfflat/hnsw)
+exists yet, so there is no recall loss. Rows whose embedding is ``NULL`` (not yet
+indexed) are excluded. Distance is converted to a cosine *similarity*
 (``1 - distance``) so higher is better, matching the BM25 and RRF conventions.
 
 Only the ordering feeds RRF downstream; the similarity is returned for
-diagnostics and thresholding.
+diagnostics and thresholding. An ivfflat/hnsw index is the future scaling lever
+once row counts grow past the current demo corpus.
 """
 
 from __future__ import annotations

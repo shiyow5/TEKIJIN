@@ -56,6 +56,9 @@ def embed_corpus(
         Number of rows embedded, per logical group.
     """
 
+    if batch_size <= 0:
+        raise ValueError(f"batch_size must be positive, got {batch_size}")
+
     counts: dict[str, int] = {}
     for name, model, extract in _SPECS:
         stmt = select(model)

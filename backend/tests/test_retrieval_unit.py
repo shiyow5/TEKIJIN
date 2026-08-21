@@ -169,3 +169,26 @@ def test_embedder_rejects_unknown_kind() -> None:
 def test_sentence_transformer_embedder_is_an_embedder() -> None:
     # Structural typing: it satisfies the Embedder protocol.
     assert isinstance(SentenceTransformerEmbedder(model=_FakeModel()), Embedder)
+
+
+# --- boundary validation (DB-free: raised before any DB access) ------------- #
+
+
+@pytest.mark.parametrize(("top_k", "rrf_k"), [(0, 60), (-1, 60), (10, 0), (10, -5)])
+def test_hybrid_retriever_rejects_nonpositive_params(top_k: int, rrf_k: int) -> None:
+    from tekijin.retrieval.retriever import HybridRetriever
+
+    embedder = SentenceTransformerEmbedder(model=_FakeModel())
+    with pytest.raises(ValueError, match="must be positive"):
+        # session is never touched: validation runs first in __init__.
+        HybridRetriever(embedder, session=None, top_k=top_k, rrf_k=rrf_k)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("batch_size", [0, -1])
+def test_embed_corpus_rejects_nonpositive_batch_size(batch_size: int) -> None:
+    from tekijin.retrieval.indexing import embed_corpus
+
+    embedder = SentenceTransformerEmbedder(model=_FakeModel())
+    with pytest.raises(ValueError, match="batch_size must be positive"):
+        # session is never touched: validation runs before any query.
+        embed_corpus(None, embedder, batch_size=batch_size)  # type: ignore[arg-type]
