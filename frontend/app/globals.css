@@ -10,8 +10,8 @@
   :root {
     /* Noto Sans JP first, with Japanese-capable system fallbacks. No build-time
        webfont fetch, so the build stays network-independent. */
-    --font-noto: "Noto Sans JP", "Hiragino Sans", "Hiragino Kaku Gothic ProN",
-      "Yu Gothic", Meiryo, sans-serif;
+    --font-noto: "Noto Sans JP", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", Meiryo,
+      sans-serif;
   }
 
   html {
