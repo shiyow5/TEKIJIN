@@ -48,6 +48,11 @@ class Settings(BaseSettings):
     # Embedding model used by the retrieval component (later).
     embedding_model: str = "intfloat/multilingual-e5-large"
 
+    # Dimensionality of the embedding vectors produced by ``embedding_model``.
+    # ``intfloat/multilingual-e5-large`` emits 1024-d vectors; this drives the
+    # width of every ``pgvector`` column so the schema and the model agree.
+    embedding_dim: int = 1024
+
     # Directory holding synthetic fixtures used for development/testing.
     fixtures_dir: Path = _DEFAULT_FIXTURES_DIR
 
