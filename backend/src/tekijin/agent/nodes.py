@@ -89,6 +89,7 @@ class AgentNodes:
             "situation": None,
             "question_type": _QUESTION_TYPE_DEFAULT,
             "intent_confidence": 0.0,
+            "intent_unresolved": False,
             "missing": [],
             "followup_question": None,
             "retrieval": empty_retrieval(),
@@ -130,11 +131,18 @@ class AgentNodes:
         result = self._sufficiency.check(state["question"], intent, followup_count)
         # Graph-level termination guarantee: never ask more than MAX_FOLLOWUPS,
         # whatever the (possibly future vLLM) model returns.
-        sufficient = result.sufficient or followup_count >= MAX_FOLLOWUPS
+        capped = followup_count >= MAX_FOLLOWUPS
+        sufficient = result.sufficient or capped
+        # If we have already asked once (capped) and STILL have no topic, the
+        # intent is unresolved. Rather than silently search on nothing and land in
+        # no_candidate, flag it so the graph routes to an explicit "couldn't
+        # identify the request" terminal (see _after_c2 / unresolved_intent).
+        intent_unresolved = capped and not (state.get("topics") or [])
         return {
             "sufficient": sufficient,
             "missing": result.missing,
             "followup_question": result.followup_question,
+            "intent_unresolved": intent_unresolved,
         }
 
     # -- clarification: pause and ask the user one question ---------------
@@ -194,18 +202,25 @@ class AgentNodes:
         retrieval = state.get("retrieval") or empty_retrieval()
         declined = state.get("declined_ids") or []
         pinned = state.get("pinned_responder_id")
-        # prior_answer hands off to the pinned past responder — UNTIL they decline.
-        # Once the pinned person is in declined_ids, drop the pin and fall back to
-        # the general candidate pool (never dead-end on a single decline).
-        if state.get("route") == PRIOR_ANSWER and pinned is not None and pinned not in declined:
-            pool: list[int] = [pinned]
+        asker = state.get("asker")
+        asker_id = asker.get("id") if asker else None
+        # prior_answer hands off to the pinned past responder — UNTIL they decline,
+        # and never if the pin IS the asker (they cannot answer their own question).
+        # In either case drop the pin and fall back to the general candidate pool
+        # (never dead-end on a single decline or a self-referential pin).
+        pool: list[int]
+        if (
+            state.get("route") == PRIOR_ANSWER
+            and pinned is not None
+            and pinned not in declined
+            and pinned != asker_id
+        ):
+            pool = [pinned]
         else:
             pool = retrieval.get("candidate_people") or []
         candidates = [p for p in pool if p not in declined]
         if not topics or not candidates:
             return {"recommendations": []}
-        asker = state.get("asker")
-        asker_id = asker.get("id") if asker else None
         # All topics feed the scorer (aggregated topic_fit), not just topics[0].
         result = self._scorer.rank(topics, candidates, asker_id, state["now"], top_k=3)
         return {"recommendations": result["recommendations"]}
@@ -258,4 +273,12 @@ class AgentNodes:
     def no_candidate(self, state: AgentState) -> AgentState:
         return {
             "answer": "現時点で適任者が見つかりませんでした。条件を変えて、もう一度お試しください。"
+        }
+
+    def unresolved_intent(self, state: AgentState) -> AgentState:
+        # Reached when even after one clarification we could not identify a topic.
+        # Fail gracefully instead of silently returning "no expert found".
+        return {
+            "answer": "ご相談内容を特定できませんでした。恐れ入りますが、"
+            "具体的なご相談内容をお知らせいただくか、社内の担当窓口にご確認ください。"
         }

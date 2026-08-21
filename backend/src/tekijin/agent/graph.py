@@ -37,6 +37,10 @@ def _after_c1(state: AgentState) -> str:
 
 
 def _after_c2(state: AgentState) -> str:
+    # Capped but still no topic -> graceful "couldn't identify the request"
+    # terminal (never silently search on an empty intent and hit no_candidate).
+    if state.get("intent_unresolved"):
+        return "unresolved_intent"
     return "c3_embed" if state.get("sufficient") else "ask"
 
 
@@ -115,6 +119,7 @@ def build_agent(
     graph.add_node("off_topic", nodes.out_of_scope)
     graph.add_node("document", nodes.document)
     graph.add_node("no_candidate", nodes.no_candidate)
+    graph.add_node("unresolved_intent", nodes.unresolved_intent)
 
     # START -> reset -> C1. ``reset`` clears per-question control fields on a fresh
     # invoke; ``resume`` bypasses START, so mid-flow interrupts keep their state.
@@ -125,7 +130,11 @@ def build_agent(
         _after_c1,
         {"off_topic": "off_topic", "c2_sufficiency": "c2_sufficiency"},
     )
-    graph.add_conditional_edges("c2_sufficiency", _after_c2, {"c3_embed": "c3_embed", "ask": "ask"})
+    graph.add_conditional_edges(
+        "c2_sufficiency",
+        _after_c2,
+        {"c3_embed": "c3_embed", "ask": "ask", "unresolved_intent": "unresolved_intent"},
+    )
     graph.add_edge("ask", "c1_intent")  # re-understand the enriched question
     graph.add_edge("c3_embed", "c4_retrieve")
     graph.add_edge("c4_retrieve", "c5_route")
@@ -149,5 +158,6 @@ def build_agent(
     graph.add_edge("off_topic", END)
     graph.add_edge("document", END)
     graph.add_edge("no_candidate", END)
+    graph.add_edge("unresolved_intent", END)
 
     return graph.compile(checkpointer=checkpointer or MemorySaver())

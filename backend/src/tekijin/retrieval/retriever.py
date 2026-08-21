@@ -172,8 +172,13 @@ class HybridRetriever:
         people_hits = self._dense_hits(query_vec, "employee_profiles")
 
         # Absolute per-channel confidence for C5 (top cosine similarity). The
-        # answer channel is the closest of a matching past *answer* or *question*.
-        answer_confidence = self._top_similarity(answer_hits, question_hits)
+        # answer channel is the closest of a matching past *answer* or a *question
+        # that actually has at least one answer* — a near-duplicate question with
+        # NO answer must not raise answer_confidence (nobody to hand off to).
+        answered_question_hits = [
+            (qid, sim) for qid, sim in question_hits if answers_by_question.get(qid)
+        ]
+        answer_confidence = self._top_similarity(answer_hits, answered_question_hits)
         document_confidence = self._top_similarity(document_hits)
         people_confidence = self._top_similarity(people_hits)
 

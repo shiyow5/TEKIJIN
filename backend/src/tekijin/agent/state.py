@@ -88,6 +88,7 @@ class AgentState(TypedDict, total=False):
     missing: list[str]
     followup_question: str | None
     followup_count: int  # how many times we have asked back (cap = 1)
+    intent_unresolved: bool  # capped but still no topic -> graceful terminal
 
     # -- C3 embedding ------------------------------------------------------
     query_vector: list[float]

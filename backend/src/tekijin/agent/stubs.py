@@ -9,6 +9,7 @@ is a pure function of its inputs, so runs are reproducible.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from tekijin.agent.protocols import IntentResult, SufficiencyResult
@@ -83,19 +84,38 @@ _REQUIRED_SLOTS: dict[str, tuple[str, ...]] = {
 }
 
 
+# Short pure-ASCII abbreviations (≤ this many chars) must match on a word
+# boundary, so "ec"/"pr"/"bi" do not fire inside "security"/"project"/"ability".
+# Longer keys and Japanese keys keep plain substring matching.
+_SHORT_ABBR_MAX = 3
+
+
+def _keyword_matches(keyword: str, text: str) -> bool:
+    """True if ``keyword`` occurs in ``text`` (case-insensitive).
+
+    A short pure-ASCII alphanumeric abbreviation matches only at ASCII word
+    boundaries (``re.ASCII`` so Japanese chars count as boundaries), so it never
+    fires inside a longer English word. Everything else is substring matching.
+    """
+
+    k = keyword.lower()
+    lowered = text.lower()
+    if len(k) <= _SHORT_ABBR_MAX and k.isascii() and k.isalnum():
+        return re.search(rf"\b{re.escape(k)}\b", lowered, re.ASCII) is not None
+    return k in lowered
+
+
 def _contains_any(text: str, keywords: tuple[str, ...]) -> bool:
-    return any(k in text for k in keywords)
+    return any(_keyword_matches(k, text) for k in keywords)
 
 
 class KeywordIntentModel:
     """C1 stub: extract topics/products and classify by keyword tables."""
 
     def analyze(self, question: str, asker: dict[str, Any] | None) -> IntentResult:
-        lowered = question.lower()
-
         out_of_scope = _contains_any(question, OUT_OF_SCOPE_KEYWORDS)
-        topics = [t for t, kws in TOPIC_KEYWORDS.items() if _contains_any(lowered, kws)]
-        products = [p for p in PRODUCT_KEYWORDS if p.lower() in lowered]
+        topics = [t for t, kws in TOPIC_KEYWORDS.items() if _contains_any(question, kws)]
+        products = [p for p in PRODUCT_KEYWORDS if _keyword_matches(p, question)]
         question_type = self._classify(question, topics, products, out_of_scope)
 
         if out_of_scope:
@@ -127,10 +147,13 @@ class KeywordIntentModel:
             return "見積"
         if _contains_any(question, _ADMIN_KEYWORDS):
             return "事務手続き"
-        if _contains_any(question, _CHITCHAT_KEYWORDS):
-            return "雑談"
+        # Substantive intent (a topic or product) wins over a greeting: a message
+        # like "こんにちは、ネットワークの技術相談です" is a technical consult, not
+        # chitchat. Only classify 雑談 when nothing actionable was extracted.
         if topics or products:
             return "技術相談"
+        if _contains_any(question, _CHITCHAT_KEYWORDS):
+            return "雑談"
         return "製品QA"
 
 
@@ -164,10 +187,13 @@ class RuleSufficiencyModel:
 
     @staticmethod
     def _slot_present(slot: str, question: str, intent: IntentResult) -> bool:
+        # A slot is satisfied only by an actual VALUE, not a bare label: "現行環境"
+        # or "拠点間" mention the topic without answering "which product?" / "how
+        # many sites?", so they must still prompt a clarification.
         if slot == "現行製品":
-            return bool(intent.products) or _contains_any(question, ("現行", "既存", "今使"))
+            return bool(intent.products)  # a concrete, known product name
         if slot == "対象拠点数":  # pragma: no branch - only two slots defined
-            return "拠点" in question
+            return re.search(r"\d+\s*(?:拠点|箇所|店舗|事業所)", question) is not None
         return True  # pragma: no cover - defensive; unknown slots count as present
 
 

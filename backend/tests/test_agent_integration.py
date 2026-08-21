@@ -421,6 +421,43 @@ def test_prior_answer_falls_back_when_pinned_declines(seed_counts, session, fake
     assert "取り次ぎました" in final["answer"]
 
 
+def test_prior_answer_pin_that_is_the_asker_falls_back(seed_counts, session, fake_embedder) -> None:
+    # Fix 3: the top past answer's responder IS the asker -> the pin is invalid
+    # (they cannot answer their own question); fall back to candidate_people.
+    for emp in (1, 2):
+        _seed_skill(session, f"sk_pinself_{emp}", emp)
+    retriever = _FakeRetriever(
+        answers=[{"qa_id": "a", "score": 0.05, "responder_id": 5}],  # responder == asker
+        answer_confidence=0.9,
+        people=[1, 2],  # fallback pool
+    )
+    agent = build_agent(fake_embedder, session, retriever=retriever)
+    state = agent.invoke(_init(asker={"id": 5}), _cfg("pinself"))
+    assert state["route"] == PRIOR_ANSWER
+    assert state["pinned_responder_id"] == 5
+    person_ids = [r["person_id"] for r in state["recommendations"]]
+    assert 5 not in person_ids  # asker never recommended to themselves
+    assert set(person_ids) <= {1, 2}
+
+
+# --------------------------------------------------------------------------- #
+# fix 5: unresolved intent (still no topic after one clarification) terminal
+# --------------------------------------------------------------------------- #
+def test_unresolved_intent_terminal(seed_counts, session, fake_embedder) -> None:
+    agent = build_agent(fake_embedder, session, retriever=_FakeRetriever(people=[1]))
+    cfg = _cfg("unresolved")
+    # No topic extractable -> C2 asks to clarify (interrupt at ask).
+    agent.invoke(_init("これについて教えて"), cfg)
+    assert agent.get_state(cfg).next == ("ask",)
+    # The reply STILL carries no topic -> capped + unresolved intent -> graceful
+    # terminal, NOT a silent no_candidate.
+    final = agent.invoke(Command(resume="よくわからないのですが"), cfg)
+    assert not agent.get_state(cfg).next  # terminated
+    assert final["intent_unresolved"] is True
+    assert "特定できませんでした" in final["answer"]
+    assert not final.get("recommendations")
+
+
 # --------------------------------------------------------------------------- #
 # fix I: a non-string resume is not interpolated into the question
 # --------------------------------------------------------------------------- #

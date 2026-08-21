@@ -28,10 +28,14 @@ from tekijin.agent.stubs import (
 )
 
 
-def _retrieval(*, answer=0.0, document=0.0, people_sim=0.0, people=()) -> dict:
+def _retrieval(*, answer=0.0, document=0.0, people_sim=0.0, people=(), past_answers=None) -> dict:
     # C5 routes on the absolute cosine similarities (*_confidence), not RRF scores.
+    # ``past_answers`` defaults to one entry whenever answer confidence is set, so
+    # the prior_answer gate (needs actual past answers) is satisfied by default.
+    if past_answers is None:
+        past_answers = [{"qa_id": "a", "score": 0.01, "responder_id": 7}] if answer else []
     return {
-        "past_answers": [],
+        "past_answers": list(past_answers),
         "documents": [],
         "candidate_people": list(people),
         "answer_confidence": answer,
@@ -56,6 +60,13 @@ def test_route_prior_answer_at_exact_threshold() -> None:
     assert decide_route(_retrieval(answer=PRIOR_ANSWER_SIM, people=[1])).route == PRIOR_ANSWER
     just_below = _retrieval(answer=PRIOR_ANSWER_SIM - 0.001, people=[1])
     assert decide_route(just_below).route == PERSON
+
+
+def test_route_no_prior_answer_without_past_answers() -> None:
+    # Fix 2: a near-duplicate *question* with NO past answers must NOT route to
+    # prior_answer (nobody to hand off to) — falls back to person.
+    r = _retrieval(answer=0.95, people=[1], past_answers=[])
+    assert decide_route(r).route == PERSON
 
 
 def test_route_document_when_person_signal_weak() -> None:
@@ -244,6 +255,32 @@ def test_intent_classifies_quote_admin_chitchat() -> None:
     assert model.analyze("これについて教えて", None).question_type == "製品QA"
 
 
+def test_intent_short_abbrev_matches_on_word_boundary() -> None:
+    # Fix 1: short ASCII abbreviations must not fire inside English words.
+    model = KeywordIntentModel()
+    for false_positive in (
+        "security",  # would wrongly match "ec"
+        "please review this project",  # "pr" / "ec"
+        "how do I connect the cable",  # "ec"
+        "improve the process",  # "pr"
+        "ability check",  # "bi"
+    ):
+        result = model.analyze(false_positive, None)
+        assert result.topics == []
+        assert result.products == []
+    # But a genuine EC question still hits (boundary via the Japanese char).
+    assert "ECサイト構築" in model.analyze("ECサイトを構築したい", None).topics
+    assert "EC" in model.analyze("現行のECで相談", None).products
+
+
+def test_greeting_with_topic_is_technical_consult() -> None:
+    # Fix 4: a concrete topic overrides the greeting classification, so the
+    # substantive request is not skipped as chitchat.
+    result = KeywordIntentModel().analyze("こんにちは、ネットワークの技術相談です", None)
+    assert result.question_type == "技術相談"
+    assert "ネットワーク・VPN" in result.topics
+
+
 # --------------------------------------------------------------------------- #
 # C2 sufficiency stub
 # --------------------------------------------------------------------------- #
@@ -290,6 +327,23 @@ def test_sufficiency_keeps_unresolved_slots_after_cap() -> None:
     result = RuleSufficiencyModel().check(q, intent, MAX_FOLLOWUPS)
     assert result.sufficient is True
     assert set(result.missing) == {"現行製品", "対象拠点数"}
+
+
+def test_sufficiency_requires_slot_values_not_labels() -> None:
+    # Fix 6: bare labels ("現行環境", "拠点間") without a product value or a site
+    # COUNT do not satisfy the slots -> still asks for clarification.
+    q = "現行環境と拠点間ネットワークの技術相談です"
+    intent = KeywordIntentModel().analyze(q, None)
+    assert intent.products == []  # no known product value mentioned
+    result = RuleSufficiencyModel().check(q, intent, followup_count=0)
+    assert result.sufficient is False
+    assert set(result.missing) == {"現行製品", "対象拠点数"}
+
+
+def test_sufficiency_site_count_needs_a_number() -> None:
+    # "拠点" without a number is not a count; "3拠点" is.
+    assert RuleSufficiencyModel._slot_present("対象拠点数", "拠点間の相談", None) is False
+    assert RuleSufficiencyModel._slot_present("対象拠点数", "対象は5拠点です", None) is True
 
 
 # --------------------------------------------------------------------------- #
