@@ -1,0 +1,762 @@
+[
+  {
+    "id": 1,
+    "name": "田中 太郎",
+    "email": "tanaka.taro@sample-tekijin.co.jp",
+    "department": "営業部",
+    "section": "営業部 第1課",
+    "position": "部長",
+    "branch": "大阪",
+    "role": "営業",
+    "hire_date": "2011-04-01",
+    "department_history": [
+      {
+        "department": "営業部",
+        "start_date": "2011-04-01",
+        "end_date": null
+      }
+    ]
+  },
+  {
+    "id": 2,
+    "name": "佐藤 花子",
+    "email": "sato.hanako@sample-tekijin.co.jp",
+    "department": "営業部",
+    "section": "営業部 第1課",
+    "position": "課長",
+    "branch": "本社",
+    "role": "営業",
+    "hire_date": "2016-04-01",
+    "department_history": [
+      {
+        "department": "マーケティング部",
+        "start_date": "2016-04-01",
+        "end_date": "2020-03-31"
+      },
+      {
+        "department": "営業部",
+        "start_date": "2020-04-01",
+        "end_date": null
+      }
+    ]
+  },
+  {
+    "id": 3,
+    "name": "鈴木 一郎",
+    "email": "suzuki.ichiro@sample-tekijin.co.jp",
+    "department": "営業部",
+    "section": "営業部 第2課",
+    "position": "主任",
+    "branch": "本社",
+    "role": "営業",
+    "hire_date": "2019-04-01",
+    "department_history": [
+      {
+        "department": "営業部",
+        "start_date": "2019-04-01",
+        "end_date": null
+      }
+    ]
+  },
+  {
+    "id": 4,
+    "name": "高橋 美咲",
+    "email": "takahashi.misaki@sample-tekijin.co.jp",
+    "department": "マーケティング部",
+    "section": "マーケティング部 第1課",
+    "position": "部長",
+    "branch": "本社",
+    "role": "営業",
+    "hire_date": "2012-04-01",
+    "department_history": [
+      {
+        "department": "マーケティング部",
+        "start_date": "2012-04-01",
+        "end_date": null
+      }
+    ]
+  },
+  {
+    "id": 5,
+    "name": "伊藤 健太",
+    "email": "ito.kenta@sample-tekijin.co.jp",
+    "department": "マーケティング部",
+    "section": "マーケティング部 第1課",
+    "position": "課長",
+    "branch": "大阪",
+    "role": "営業",
+    "hire_date": "2017-04-01",
+    "department_history": [
+      {
+        "department": "マーケティング部",
+        "start_date": "2017-04-01",
+        "end_date": null
+      }
+    ]
+  },
+  {
+    "id": 6,
+    "name": "渡辺 直子",
+    "email": "watanabe.naoko@sample-tekijin.co.jp",
+    "department": "情報システム部",
+    "section": "情報システム部 第1課",
+    "position": "部長",
+    "branch": "大阪",
+    "role": "技術",
+    "hire_date": "2010-10-01",
+    "department_history": [
+      {
+        "department": "情報システム部",
+        "start_date": "2010-10-01",
+        "end_date": null
+      }
+    ]
+  },
+  {
+    "id": 7,
+    "name": "山本 修",
+    "email": "yamamoto.osamu@sample-tekijin.co.jp",
+    "department": "情報システム部",
+    "section": "情報システム部 第1課",
+    "position": "課長",
+    "branch": "名古屋",
+    "role": "技術",
+    "hire_date": "2015-10-01",
+    "department_history": [
+      {
+        "department": "情報システム部",
+        "start_date": "2015-10-01",
+        "end_date": null
+      }
+    ]
+  },
+  {
+    "id": 8,
+    "name": "中村 由美",
+    "email": "nakamura.yumi@sample-tekijin.co.jp",
+    "department": "人事部",
+    "section": "人事部 第1課",
+    "position": "部長",
+    "branch": "本社",
+    "role": "スタッフ",
+    "hire_date": "2013-04-01",
+    "department_history": [
+      {
+        "department": "人事部",
+        "start_date": "2013-04-01",
+        "end_date": null
+      }
+    ]
+  },
+  {
+    "id": 9,
+    "name": "小林 大輔",
+    "email": "kobayashi.daisuke@sample-tekijin.co.jp",
+    "department": "人事部",
+    "section": "人事部 第1課",
+    "position": "課長",
+    "branch": "東京",
+    "role": "スタッフ",
+    "hire_date": "2018-04-01",
+    "department_history": [
+      {
+        "department": "経理部",
+        "start_date": "2018-04-01",
+        "end_date": "2019-03-31"
+      },
+      {
+        "department": "人事部",
+        "start_date": "2019-04-01",
+        "end_date": null
+      }
+    ]
+  },
+  {
+    "id": 10,
+    "name": "加藤 あゆみ",
+    "email": "kato.ayumi@sample-tekijin.co.jp",
+    "department": "経理部",
+    "section": "経理部 第1課",
+    "position": "課長",
+    "branch": "本社",
+    "role": "スタッフ",
+    "hire_date": "2016-04-01",
+    "department_history": [
+      {
+        "department": "経理部",
+        "start_date": "2016-04-01",
+        "end_date": null
+      }
+    ]
+  },
+  {
+    "id": 11,
+    "name": "吉田 亮",
+    "email": "yoshida.ryo@sample-tekijin.co.jp",
+    "department": "経理部",
+    "section": "経理部 第1課",
+    "position": "部長",
+    "branch": "本社",
+    "role": "スタッフ",
+    "hire_date": "2012-04-01",
+    "department_history": [
+      {
+        "department": "経理部",
+        "start_date": "2012-04-01",
+        "end_date": null
+      }
+    ]
+  },
+  {
+    "id": 12,
+    "name": "山田 さくら",
+    "email": "yamada.sakura@sample-tekijin.co.jp",
+    "department": "総務部",
+    "section": "総務部 第1課",
+    "position": "部長",
+    "branch": "東京",
+    "role": "スタッフ",
+    "hire_date": "2011-04-01",
+    "department_history": [
+      {
+        "department": "総務部",
+        "start_date": "2011-04-01",
+        "end_date": null
+      }
+    ]
+  },
+  {
+    "id": 13,
+    "name": "佐々木 隆",
+    "email": "sasaki.takashi@sample-tekijin.co.jp",
+    "department": "開発部",
+    "section": "開発部 第1課",
+    "position": "部長",
+    "branch": "本社",
+    "role": "技術",
+    "hire_date": "2014-04-01",
+    "department_history": [
+      {
+        "department": "開発部",
+        "start_date": "2014-04-01",
+        "end_date": null
+      }
+    ]
+  },
+  {
+    "id": 14,
+    "name": "松本 真理",
+    "email": "matsumoto.mari@sample-tekijin.co.jp",
+    "department": "開発部",
+    "section": "開発部 第1課",
+    "position": "課長",
+    "branch": "本社",
+    "role": "技術",
+    "hire_date": "2015-04-01",
+    "department_history": [
+      {
+        "department": "カスタマーサポート部",
+        "start_date": "2015-04-01",
+        "end_date": "2018-03-31"
+      },
+      {
+        "department": "開発部",
+        "start_date": "2018-04-01",
+        "end_date": null
+      }
+    ]
+  },
+  {
+    "id": 15,
+    "name": "井上 拓也",
+    "email": "inoue.takuya@sample-tekijin.co.jp",
+    "department": "開発部",
+    "section": "開発部 第2課",
+    "position": "主任",
+    "branch": "大阪",
+    "role": "技術",
+    "hire_date": "2021-10-01",
+    "department_history": [
+      {
+        "department": "開発部",
+        "start_date": "2021-10-01",
+        "end_date": null
+      }
+    ]
+  },
+  {
+    "id": 16,
+    "name": "木村 麻衣",
+    "email": "kimura.mai@sample-tekijin.co.jp",
+    "department": "開発部",
+    "section": "開発部 第2課",
+    "position": "一般社員",
+    "branch": "東京",
+    "role": "技術",
+    "hire_date": "2023-04-01",
+    "department_history": [
+      {
+        "department": "開発部",
+        "start_date": "2023-04-01",
+        "end_date": null
+      }
+    ]
+  },
+  {
+    "id": 17,
+    "name": "林 秀樹",
+    "email": "hayashi.hideki@sample-tekijin.co.jp",
+    "department": "カスタマーサポート部",
+    "section": "カスタマーサポート部 第1課",
+    "position": "部長",
+    "branch": "本社",
+    "role": "技術",
+    "hire_date": "2012-10-01",
+    "department_history": [
+      {
+        "department": "カスタマーサポート部",
+        "start_date": "2012-10-01",
+        "end_date": null
+      }
+    ]
+  },
+  {
+    "id": 18,
+    "name": "清水 奈々",
+    "email": "shimizu.nana@sample-tekijin.co.jp",
+    "department": "カスタマーサポート部",
+    "section": "カスタマーサポート部 第1課",
+    "position": "課長",
+    "branch": "大阪",
+    "role": "技術",
+    "hire_date": "2018-04-01",
+    "department_history": [
+      {
+        "department": "総務部",
+        "start_date": "2018-04-01",
+        "end_date": "2021-03-31"
+      },
+      {
+        "department": "カスタマーサポート部",
+        "start_date": "2021-04-01",
+        "end_date": null
+      }
+    ]
+  },
+  {
+    "id": 19,
+    "name": "斎藤 浩二",
+    "email": "saito.koji@sample-tekijin.co.jp",
+    "department": "購買部",
+    "section": "購買部 第1課",
+    "position": "部長",
+    "branch": "名古屋",
+    "role": "スタッフ",
+    "hire_date": "2013-04-01",
+    "department_history": [
+      {
+        "department": "購買部",
+        "start_date": "2013-04-01",
+        "end_date": null
+      }
+    ]
+  },
+  {
+    "id": 20,
+    "name": "森田 恵",
+    "email": "morita.megumi@sample-tekijin.co.jp",
+    "department": "広報部",
+    "section": "広報部 第1課",
+    "position": "部長",
+    "branch": "本社",
+    "role": "営業",
+    "hire_date": "2011-04-01",
+    "department_history": [
+      {
+        "department": "広報部",
+        "start_date": "2011-04-01",
+        "end_date": null
+      }
+    ]
+  },
+  {
+    "id": 21,
+    "name": "岡田 拓海",
+    "email": "okada.takumi@sample-tekijin.co.jp",
+    "department": "営業部",
+    "section": "営業部 第2課",
+    "position": "一般社員",
+    "branch": "名古屋",
+    "role": "営業",
+    "hire_date": "2023-04-01",
+    "department_history": [
+      {
+        "department": "営業部",
+        "start_date": "2023-04-01",
+        "end_date": null
+      }
+    ]
+  },
+  {
+    "id": 22,
+    "name": "石川 陽菜",
+    "email": "ishikawa.hina@sample-tekijin.co.jp",
+    "department": "マーケティング部",
+    "section": "マーケティング部 第2課",
+    "position": "主任",
+    "branch": "大阪",
+    "role": "営業",
+    "hire_date": "2020-04-01",
+    "department_history": [
+      {
+        "department": "マーケティング部",
+        "start_date": "2020-04-01",
+        "end_date": null
+      }
+    ]
+  },
+  {
+    "id": 23,
+    "name": "藤田 翔太",
+    "email": "fujita.shota@sample-tekijin.co.jp",
+    "department": "マーケティング部",
+    "section": "マーケティング部 第2課",
+    "position": "一般社員",
+    "branch": "東京",
+    "role": "営業",
+    "hire_date": "2022-04-01",
+    "department_history": [
+      {
+        "department": "マーケティング部",
+        "start_date": "2022-04-01",
+        "end_date": null
+      }
+    ]
+  },
+  {
+    "id": 24,
+    "name": "中島 健一",
+    "email": "nakajima.kenichi@sample-tekijin.co.jp",
+    "department": "情報システム部",
+    "section": "情報システム部 第2課",
+    "position": "主任",
+    "branch": "本社",
+    "role": "技術",
+    "hire_date": "2019-10-01",
+    "department_history": [
+      {
+        "department": "開発部",
+        "start_date": "2019-10-01",
+        "end_date": "2023-03-31"
+      },
+      {
+        "department": "情報システム部",
+        "start_date": "2023-04-01",
+        "end_date": null
+      }
+    ]
+  },
+  {
+    "id": 25,
+    "name": "前田 里奈",
+    "email": "maeda.rina@sample-tekijin.co.jp",
+    "department": "情報システム部",
+    "section": "情報システム部 第2課",
+    "position": "一般社員",
+    "branch": "福岡",
+    "role": "技術",
+    "hire_date": "2024-04-01",
+    "department_history": [
+      {
+        "department": "情報システム部",
+        "start_date": "2024-04-01",
+        "end_date": null
+      }
+    ]
+  },
+  {
+    "id": 26,
+    "name": "遠藤 美穂",
+    "email": "endo.miho@sample-tekijin.co.jp",
+    "department": "人事部",
+    "section": "人事部 第2課",
+    "position": "主任",
+    "branch": "本社",
+    "role": "スタッフ",
+    "hire_date": "2021-04-01",
+    "department_history": [
+      {
+        "department": "人事部",
+        "start_date": "2021-04-01",
+        "end_date": null
+      }
+    ]
+  },
+  {
+    "id": 27,
+    "name": "橋本 大樹",
+    "email": "hashimoto.daiki@sample-tekijin.co.jp",
+    "department": "人事部",
+    "section": "人事部 第2課",
+    "position": "一般社員",
+    "branch": "本社",
+    "role": "スタッフ",
+    "hire_date": "2023-10-01",
+    "department_history": [
+      {
+        "department": "人事部",
+        "start_date": "2023-10-01",
+        "end_date": null
+      }
+    ]
+  },
+  {
+    "id": 28,
+    "name": "村上 智子",
+    "email": "murakami.tomoko@sample-tekijin.co.jp",
+    "department": "経理部",
+    "section": "経理部 第2課",
+    "position": "主任",
+    "branch": "本社",
+    "role": "スタッフ",
+    "hire_date": "2020-04-01",
+    "department_history": [
+      {
+        "department": "営業部",
+        "start_date": "2020-04-01",
+        "end_date": "2022-03-31"
+      },
+      {
+        "department": "経理部",
+        "start_date": "2022-04-01",
+        "end_date": null
+      }
+    ]
+  },
+  {
+    "id": 29,
+    "name": "石井 隆一",
+    "email": "ishii.ryuichi@sample-tekijin.co.jp",
+    "department": "経理部",
+    "section": "経理部 第2課",
+    "position": "一般社員",
+    "branch": "名古屋",
+    "role": "スタッフ",
+    "hire_date": "2022-10-01",
+    "department_history": [
+      {
+        "department": "経理部",
+        "start_date": "2022-10-01",
+        "end_date": null
+      }
+    ]
+  },
+  {
+    "id": 30,
+    "name": "近藤 由紀",
+    "email": "kondo.yuki@sample-tekijin.co.jp",
+    "department": "総務部",
+    "section": "総務部 第1課",
+    "position": "課長",
+    "branch": "大阪",
+    "role": "スタッフ",
+    "hire_date": "2017-10-01",
+    "department_history": [
+      {
+        "department": "総務部",
+        "start_date": "2017-10-01",
+        "end_date": null
+      }
+    ]
+  },
+  {
+    "id": 31,
+    "name": "坂本 誠",
+    "email": "sakamoto.makoto@sample-tekijin.co.jp",
+    "department": "総務部",
+    "section": "総務部 第2課",
+    "position": "主任",
+    "branch": "名古屋",
+    "role": "スタッフ",
+    "hire_date": "2019-04-01",
+    "department_history": [
+      {
+        "department": "総務部",
+        "start_date": "2019-04-01",
+        "end_date": null
+      }
+    ]
+  },
+  {
+    "id": 32,
+    "name": "青木 玲子",
+    "email": "aoki.reiko@sample-tekijin.co.jp",
+    "department": "総務部",
+    "section": "総務部 第2課",
+    "position": "一般社員",
+    "branch": "大阪",
+    "role": "スタッフ",
+    "hire_date": "2024-04-01",
+    "department_history": [
+      {
+        "department": "総務部",
+        "start_date": "2024-04-01",
+        "end_date": null
+      }
+    ]
+  },
+  {
+    "id": 33,
+    "name": "西村 亮太",
+    "email": "nishimura.ryota@sample-tekijin.co.jp",
+    "department": "カスタマーサポート部",
+    "section": "カスタマーサポート部 第2課",
+    "position": "主任",
+    "branch": "東京",
+    "role": "技術",
+    "hire_date": "2020-04-01",
+    "department_history": [
+      {
+        "department": "購買部",
+        "start_date": "2020-04-01",
+        "end_date": "2023-09-30"
+      },
+      {
+        "department": "カスタマーサポート部",
+        "start_date": "2023-10-01",
+        "end_date": null
+      }
+    ]
+  },
+  {
+    "id": 34,
+    "name": "福田 香織",
+    "email": "fukuda.kaori@sample-tekijin.co.jp",
+    "department": "カスタマーサポート部",
+    "section": "カスタマーサポート部 第2課",
+    "position": "一般社員",
+    "branch": "福岡",
+    "role": "技術",
+    "hire_date": "2022-04-01",
+    "department_history": [
+      {
+        "department": "カスタマーサポート部",
+        "start_date": "2022-04-01",
+        "end_date": null
+      }
+    ]
+  },
+  {
+    "id": 35,
+    "name": "三浦 健二",
+    "email": "miura.kenji@sample-tekijin.co.jp",
+    "department": "購買部",
+    "section": "購買部 第1課",
+    "position": "課長",
+    "branch": "東京",
+    "role": "スタッフ",
+    "hire_date": "2016-10-01",
+    "department_history": [
+      {
+        "department": "購買部",
+        "start_date": "2016-10-01",
+        "end_date": null
+      }
+    ]
+  },
+  {
+    "id": 36,
+    "name": "岡本 千尋",
+    "email": "okamoto.chihiro@sample-tekijin.co.jp",
+    "department": "購買部",
+    "section": "購買部 第2課",
+    "position": "主任",
+    "branch": "東京",
+    "role": "スタッフ",
+    "hire_date": "2019-10-01",
+    "department_history": [
+      {
+        "department": "広報部",
+        "start_date": "2019-10-01",
+        "end_date": "2022-09-30"
+      },
+      {
+        "department": "購買部",
+        "start_date": "2022-10-01",
+        "end_date": null
+      }
+    ]
+  },
+  {
+    "id": 37,
+    "name": "長谷川 誠",
+    "email": "hasegawa.makoto@sample-tekijin.co.jp",
+    "department": "購買部",
+    "section": "購買部 第2課",
+    "position": "一般社員",
+    "branch": "名古屋",
+    "role": "スタッフ",
+    "hire_date": "2024-10-01",
+    "department_history": [
+      {
+        "department": "購買部",
+        "start_date": "2024-10-01",
+        "end_date": null
+      }
+    ]
+  },
+  {
+    "id": 38,
+    "name": "河野 真央",
+    "email": "kono.mao@sample-tekijin.co.jp",
+    "department": "広報部",
+    "section": "広報部 第1課",
+    "position": "課長",
+    "branch": "大阪",
+    "role": "営業",
+    "hire_date": "2017-04-01",
+    "department_history": [
+      {
+        "department": "広報部",
+        "start_date": "2017-04-01",
+        "end_date": null
+      }
+    ]
+  },
+  {
+    "id": 39,
+    "name": "谷口 大輔",
+    "email": "taniguchi.daisuke@sample-tekijin.co.jp",
+    "department": "広報部",
+    "section": "広報部 第2課",
+    "position": "主任",
+    "branch": "名古屋",
+    "role": "営業",
+    "hire_date": "2021-04-01",
+    "department_history": [
+      {
+        "department": "広報部",
+        "start_date": "2021-04-01",
+        "end_date": null
+      }
+    ]
+  },
+  {
+    "id": 40,
+    "name": "内田 舞",
+    "email": "uchida.mai@sample-tekijin.co.jp",
+    "department": "広報部",
+    "section": "広報部 第2課",
+    "position": "一般社員",
+    "branch": "東京",
+    "role": "営業",
+    "hire_date": "2023-04-01",
+    "department_history": [
+      {
+        "department": "広報部",
+        "start_date": "2023-04-01",
+        "end_date": null
+      }
+    ]
+  }
+]
