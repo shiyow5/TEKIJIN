@@ -77,8 +77,8 @@ version 0.1 / 2026-08-21 / Aチーム（3名）
 
 ┌──────────────────────────────────────────────┐
 │  LLM 接続 = LangChain（統一インターフェース）                │
-│   主: init_chat_model("ollama:<model>")  … DGX Spark ローカル │
-│        （余力で vLLM。OpenAI互換なので接続先だけ差し替え）    │
+│   主: init_chat_model("openai:<model>", base_url=vLLM) … DGX  │
+│        （vLLM が OpenAI互換 /v1。DGX Spark 上・Tailscale 経由）│
 │   副: ChatAnthropic（Claude, フォールバック / 品質比較）      │
 │   構造化: model.with_structured_output(PydanticSchema)（C1/C2）│
 │  Embedding: langchain-huggingface（日本語埋め込み・ローカル） │
@@ -175,11 +175,11 @@ cloud = ChatAnthropic(model="claude-...", temperature=0.1)
 
 | 段階 | 採用 | 根拠 |
 | --- | --- | --- |
-| DAY3〜5 | **Ollama** | セットアップが最短。モデルの入れ替えが容易。まず動かすことを優先 |
-| DAY6〜7 | **vLLM へ載せ替え（余力があれば）** | 連続バッチングでスループットとp95が改善する。**載せ替え前後のレイテンシ比較が、そのまま「推論高速化」の実測データになる** |
+| 既定 | **vLLM（OpenAI 互換 /v1）** | DGX Spark の配布環境が既に vLLM でモデルを配信（`internship-dgx1`、Tailscale 経由）。OpenAI 互換なので LangChain の `init_chat_model("openai:…", base_url=…)` で接続でき、載せ替え工程が不要 |
+| 代替 | Ollama / Claude API | vLLM が使えない場合のフォールバック。Ollama はローカル起動が最短、Claude は品質比較・環境不調時に使用 |
 
 > MAC資料 p.11 に「NVIDIA GPU × 1 / Team」「モデルの動作や**推論高速化**まで理解する」と明記がある。
-> Ollama → vLLM の比較は、この要求への直接の回答になる。**やる価値が高い。**
+> vLLM（連続バッチング）でのスループット / p95 の実測が、この「推論高速化」要求への直接の回答になる。**やる価値が高い。**
 
 **モデル選定**: DGX Spark の実機スペックを 確認し、載る範囲で最大のものを選ぶ。
 20B〜30B級のオープンモデルが目安。**確認するまで確定させない。**

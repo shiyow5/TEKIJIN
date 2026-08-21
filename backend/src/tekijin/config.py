@@ -27,7 +27,9 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="TEKIJIN_",
-        env_file=".env",
+        # Absolute path to the repository-root .env (the one .env.example targets),
+        # so it is read consistently regardless of the process working directory.
+        env_file=str(_REPO_ROOT / ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
         frozen=True,  # immutable singleton: mutation must not leak across requests

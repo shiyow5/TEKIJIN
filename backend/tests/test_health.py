@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-
 from fastapi.testclient import TestClient
 
 from tekijin import __version__
@@ -11,13 +9,10 @@ from tekijin.app import create_app
 from tekijin.config import get_settings
 
 
-def test_health_returns_ok(monkeypatch, tmp_path) -> None:
-    # Isolate from ambient TEKIJIN_* env and a developer's backend/.env so the
-    # default-env assertion is deterministic (mirrors test_config isolation).
-    for key in list(os.environ):
-        if key.startswith("TEKIJIN_"):
-            monkeypatch.delenv(key, raising=False)
-    monkeypatch.chdir(tmp_path)
+def test_health_returns_ok(monkeypatch) -> None:
+    # Env vars take precedence over any .env file, so set the expected value
+    # explicitly to make this deterministic regardless of a developer's .env.
+    monkeypatch.setenv("TEKIJIN_APP_ENV", "development")
     get_settings.cache_clear()
 
     client = TestClient(create_app())

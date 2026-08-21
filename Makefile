@@ -7,10 +7,12 @@
         typecheck-frontend check clean
 
 # ============================================================
-# Load .env if it exists
+# .env handling
 # ============================================================
--include .env
-export
+# .env is intentionally NOT parsed by Make: dotenv values can contain Make
+# metacharacters and secrets, and Make-parsing them is fragile/unsafe. The
+# backend reads <repo>/.env directly via pydantic-settings; docker-compose and
+# Next.js read their own env. Export vars in your shell if a target needs them.
 
 # ============================================================
 # Variables
