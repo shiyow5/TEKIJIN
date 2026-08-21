@@ -16,9 +16,9 @@
 
 | パス | 役割 | 現状 |
 |---|---|---|
-| `backend/` | サーバー側。Python 3.12 | ツール設定＋パッケージ雛形のみ |
-| `backend/src/tekijin/` | アプリのパッケージ | `__init__.py`（version のみ） |
-| `backend/tests/` | テスト | scaffold のみ |
+| `backend/` | サーバー側。Python 3.12 | FastAPI 基盤（`app`/`config`/`api.health`）+ 各コンポーネントの雛形 |
+| `backend/src/tekijin/` | アプリのパッケージ | `app.py`/`config.py`/`main.py`/`api/health.py` + `agent`/`retrieval`/`scorer`/`models`/`llm`/`data` 雛形 |
+| `backend/tests/` | テスト | health/config の単体テスト（カバレッジ≥90%） |
 | `frontend/` | クライアント側。TypeScript | ツール設定のみ |
 | `frontend/src/` | アプリのソース | 空 |
 | `frontend/tests/` | テスト | scaffold のみ |

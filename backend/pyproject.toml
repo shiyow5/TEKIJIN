@@ -1,6 +1,5 @@
-# TEKIJIN backend — tooling config only.
-# Application code is NOT implemented yet (spec is still being decided).
-# This file configures the formatter (ruff), linter (ruff), and test runner (pytest).
+# TEKIJIN backend — tooling config.
+# Configures the formatter (ruff), linter (ruff), and test runner (pytest + coverage).
 
 [tool.ruff]
 target-version = "py312"
@@ -22,4 +21,18 @@ quote-style = "double"
 minversion = "8.0"
 testpaths = ["tests"]
 pythonpath = ["src"]
-addopts = "-ra"
+addopts = "-ra --cov=tekijin --cov-report=term-missing --cov-fail-under=90"
+
+[tool.coverage.run]
+source = ["tekijin"]
+omit = [
+    # uvicorn entry point — instantiation is covered, no runtime branch to test.
+    "src/tekijin/main.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]

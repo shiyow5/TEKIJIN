@@ -82,6 +82,9 @@ Thumbs.db
 # Local data / models (never commit datasets or model weights)
 # ============================================================
 data/
+# ...but the backend source package `tekijin.data` is real code, not a dataset.
+!backend/src/tekijin/data/
+!backend/src/tekijin/data/**
 *.sqlite
 *.duckdb
 *.bin

@@ -1,0 +1,10 @@
+# TEKIJIN backend — runtime dependencies (foundation PR only).
+#
+# Scope: Web framework, settings, and health only. Heavy ML/DB deps
+# (sqlalchemy, pgvector, langchain, langgraph, sentence-transformers,
+# sudachipy, torch, ...) are intentionally NOT listed here — they are added
+# by later components (retrieval / agent / LLM) so this base PR keeps CI light.
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+pydantic-settings==2.7.1
