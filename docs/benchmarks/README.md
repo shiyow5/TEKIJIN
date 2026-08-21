@@ -75,6 +75,11 @@ Apache-2.0 と 1024次元の扱いやすさを優先するなら Qwen3-Embedding
 uv venv .venv
 uv pip install --python .venv/bin/python "sentence-transformers>=3" torch "huggingface_hub[cli]"
 
+# 【重要】共有機なので、重い処理は1つずつ nohup で流す。
+# vLLM(35B, GMU=0.60) の起動と埋め込み3本のエンコードを1つの ssh セッションで同時に投げたら、
+# ping は通るのに ssh が10分以上返らなくなり、セッションごと落ちた（2026-08-22）。
+#   nohup <cmd> > run.log 2>&1 &    … として、ログを見に行く
+
 # Triton の JIT が Python.h を要求する。システムに python3-dev が無いので uv 管理 CPython のヘッダを見せる
 export CPATH=$HOME/.local/share/uv/python/cpython-3.12.14-linux-aarch64-gnu/include/python3.12
 
