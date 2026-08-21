@@ -21,10 +21,14 @@ def build_default_service(settings: Settings | None = None) -> AgentService:
     settings = settings or get_settings()
     session_factory = get_sessionmaker(get_engine(settings.database_url))
     intent_model, sufficiency_model, draft_model = make_llm_nodes(settings)
+    embedder = SentenceTransformerEmbedder(
+        settings.embedding_model,
+        use_e5_prefix=settings.embedding_use_e5_prefix,  # settings-driven, not hard-coded
+    )
     return AgentService(
         session_factory=session_factory,
         checkpointer=make_checkpointer(settings),
-        embedder=SentenceTransformerEmbedder(),
+        embedder=embedder,
         intent_model=intent_model,
         sufficiency_model=sufficiency_model,
         draft_model=draft_model,

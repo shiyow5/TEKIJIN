@@ -42,3 +42,5 @@ langgraph-checkpoint-postgres==2.0.21
 langchain==0.3.27
 langchain-openai==0.2.14
 sse-starlette==2.2.1
+# Pinned: the PostgresSaver checkpointer uses a psycopg connection pool.
+psycopg-pool==3.3.1

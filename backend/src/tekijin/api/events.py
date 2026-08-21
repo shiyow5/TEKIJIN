@@ -84,6 +84,27 @@ def node_event(node: str, update: dict[str, Any]) -> ServerSentEvent | None:
     return None  # internal node: no event
 
 
+def reconnect_event(next_node: str, values: dict[str, Any]) -> ServerSentEvent | None:
+    """Re-emit the pending interrupt event when a client reconnects to /events.
+
+    A session paused at ``ask`` re-sends the ``followup`` (from the saved state);
+    one paused at ``send`` re-sends the ``draft`` so the client can re-show it and
+    submit an outcome. Any other pending node yields nothing.
+    """
+
+    if next_node == "ask":
+        return _sse(
+            "followup",
+            schemas.FollowupData(
+                question=values.get("followup_question") or "",
+                missing=values.get("missing", []),
+            ),
+        )
+    if next_node == "send":
+        return _sse("draft", schemas.DraftData(draft=values.get("draft") or ""))
+    return None
+
+
 def interrupt_event(payload: dict[str, Any]) -> ServerSentEvent | None:
     """Map an ``interrupt`` payload to an SSE event.
 

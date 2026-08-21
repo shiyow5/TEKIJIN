@@ -10,7 +10,7 @@ from __future__ import annotations
 import datetime as dt
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 Outcome = Literal["accepted", "declined"]
 
@@ -24,6 +24,16 @@ class AskRequest(BaseModel):
     asker_id: int
     question: str = Field(min_length=1)
     session_id: str = Field(min_length=1)
+
+    @field_validator("question")
+    @classmethod
+    def _trim_nonempty(cls, value: str) -> str:
+        # Trim and reject whitespace-only questions at the boundary (422), so the
+        # empty query never reaches C3 and surfaces as an SSE error.
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("question must not be blank")
+        return trimmed
 
 
 class ResumeRequest(BaseModel):

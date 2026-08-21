@@ -29,12 +29,23 @@ def _settings(**overrides) -> Settings:
 # request / resume schemas
 # --------------------------------------------------------------------------- #
 def test_ask_request_requires_nonempty_fields() -> None:
-    ok = schemas.AskRequest(asker_id=1, question="q", session_id="s")
-    assert ok.asker_id == 1
+    ok = schemas.AskRequest(asker_id=1, question="  q  ", session_id="s")
+    assert ok.asker_id == 1 and ok.question == "q"  # trimmed
     with pytest.raises(ValueError):
         schemas.AskRequest(asker_id=1, question="", session_id="s")
     with pytest.raises(ValueError):
+        schemas.AskRequest(asker_id=1, question="   ", session_id="s")  # whitespace-only
+    with pytest.raises(ValueError):
         schemas.AskRequest(asker_id=1, question="q", session_id="")
+
+
+def test_sufficiency_schema_requires_followup_when_insufficient() -> None:
+    SufficiencySchema(sufficient=True)  # ok, no followup needed
+    SufficiencySchema(sufficient=False, followup_question="製品は?")  # ok
+    with pytest.raises(ValueError):
+        SufficiencySchema(sufficient=False)  # missing followup
+    with pytest.raises(ValueError):
+        SufficiencySchema(sufficient=False, followup_question="   ")  # blank followup
 
 
 def test_resume_request_exactly_one_of_outcome_or_reply() -> None:
@@ -154,6 +165,21 @@ def test_interrupt_event_followup_and_send() -> None:
     # A send interrupt (draft/responder payload) emits nothing.
     assert events.interrupt_event({"draft": "d", "responder": {"person_id": 1}}) is None
     assert events.interrupt_event({}) is None
+
+
+def test_reconnect_event_by_pause_node() -> None:
+    ask = _ev(events.reconnect_event("ask", {"followup_question": "?", "missing": ["現行製品"]}))
+    assert ask.event == "followup" and _data(ask)["question"] == "?"
+    send = _ev(events.reconnect_event("send", {"draft": "文面"}))
+    assert send.event == "draft" and _data(send)["draft"] == "文面"
+    assert events.reconnect_event("c5_route", {}) is None  # not a pause node
+
+
+def test_config_rejects_invalid_backends() -> None:
+    with pytest.raises(ValueError):
+        _settings(llm_backend="gpt5")
+    with pytest.raises(ValueError):
+        _settings(checkpointer_backend="sqlite")
 
 
 # --------------------------------------------------------------------------- #
@@ -282,3 +308,126 @@ def test_vllm_draft_adapter_reads_content_or_str() -> None:
     assert VllmDraftModel(model=_ChatStr()).draft("q", {"name": "高梨"}, None, []) == (
         "プレーンテキスト下書き"
     )
+
+
+# --------------------------------------------------------------------------- #
+# AgentService internals (no DB): close, TTL sweep, stream error handling
+# --------------------------------------------------------------------------- #
+import datetime as dt  # noqa: E402
+
+from tekijin.agent.stubs import RuleSufficiencyModel, TemplateDraftModel  # noqa: E402
+from tekijin.api.service import (  # noqa: E402
+    SESSION_TTL_SECONDS,
+    AgentService,
+    _SessionCtx,
+)
+
+_NOW = dt.datetime(2026, 9, 15, 12, 0, 0)
+_GOOD_Q = "現行のVPN機器で3拠点の拠点間接続について相談したいです"
+
+
+class _FakeEmb:
+    def encode(self, texts, *, kind="passage"):
+        return [[0.1, 0.2, 0.3] for _ in texts]
+
+
+class _FakeRetriever:
+    def search(self, query, *, query_vector=None):
+        return {
+            "past_answers": [],
+            "documents": [],
+            "candidate_people": [1],
+            "answer_confidence": 0.0,
+            "document_confidence": 0.0,
+            "people_confidence": 0.2,
+        }
+
+
+class _FakeScorer:
+    def rank(self, topics, candidates, asker_id, now, *, top_k=3):
+        return {"recommendations": []}
+
+
+class _FakeSession:
+    def close(self):
+        pass
+
+
+class _FakeSF:
+    kw: dict = {}
+
+    def __call__(self):
+        return _FakeSession()
+
+
+def _service(*, intent=None, checkpointer=None, session_factory=None) -> AgentService:
+    from langgraph.checkpoint.memory import MemorySaver
+
+    return AgentService(
+        session_factory=session_factory or _FakeSF(),  # type: ignore[arg-type]
+        checkpointer=checkpointer or MemorySaver(),
+        embedder=_FakeEmb(),
+        intent_model=intent or KeywordIntentModel(),
+        sufficiency_model=RuleSufficiencyModel(),
+        draft_model=TemplateDraftModel(),
+        retriever=_FakeRetriever(),
+        scorer=_FakeScorer(),
+        now_factory=lambda: _NOW,
+    )
+
+
+def test_service_sweep_evicts_stale_sessions() -> None:
+    import time
+
+    svc = _service()
+    svc._registry["old"] = _SessionCtx(touched_at=time.monotonic() - SESSION_TTL_SECONDS - 1)
+    svc._registry["fresh"] = _SessionCtx()
+    svc._sweep()
+    assert "old" not in svc._registry and "fresh" in svc._registry
+
+
+def test_service_close_releases_pool_and_engine() -> None:
+    closed: list[bool] = []
+    disposed: list[bool] = []
+
+    class _Pool:
+        def close(self):
+            closed.append(True)
+
+    class _PgCheckpointer:
+        conn = _Pool()
+
+    class _Engine:
+        def dispose(self):
+            disposed.append(True)
+
+    class _SF:
+        kw = {"bind": _Engine()}
+
+        def __call__(self):
+            return _FakeSession()
+
+    _service(checkpointer=_PgCheckpointer(), session_factory=_SF()).close()
+    assert closed == [True] and disposed == [True]
+    # MemorySaver has no pool (no .conn) -> the pool-close branch is skipped safely.
+    _service(session_factory=_SF()).close()
+    assert disposed == [True, True]
+
+
+def test_stream_error_yields_generic_event_and_hides_details() -> None:
+    class _Raising:
+        def analyze(self, question, asker):
+            raise RuntimeError("secret sql detail at 10.0.0.1")
+
+    svc = _service(intent=_Raising())
+    svc._registry["e1"] = _SessionCtx(
+        pending={"question": _GOOD_Q, "asker": {"id": 1}, "now": _NOW},
+        question_id="qx",
+        now=_NOW,
+    )
+    sse = list(svc.stream_events("e1"))
+    assert sse[-1].event == "error"
+    payload = sse[-1].data
+    assert payload is not None
+    assert "内部エラー" in payload
+    assert "secret sql" not in payload  # no internal detail leaked

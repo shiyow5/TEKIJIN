@@ -109,6 +109,24 @@ def _events(client: TestClient, session_id: str) -> list[tuple[str, dict]]:
     return _parse_sse(resp.text)
 
 
+@pytest.fixture(autouse=True)
+def _cleanup_api_rows(engine):
+    # The API COMMITS questions/recommendations (id prefix "api_"). Remove them
+    # after each test so the committed seed / other tests stay isolated.
+    from sqlalchemy import text
+
+    yield
+    session = get_sessionmaker(engine)()
+    try:
+        session.execute(
+            text(r"DELETE FROM recommendations WHERE question_id LIKE 'api\_%' ESCAPE '\'")
+        )
+        session.execute(text(r"DELETE FROM questions WHERE id LIKE 'api\_%' ESCAPE '\'"))
+        session.commit()
+    finally:
+        session.close()
+
+
 # --------------------------------------------------------------------------- #
 # happy path: understood -> route -> recommend -> draft -> (resume) -> done
 # --------------------------------------------------------------------------- #
@@ -188,6 +206,124 @@ def test_decline_reroutes_then_accept(seed_counts, engine, fake_embedder) -> Non
 
 
 # --------------------------------------------------------------------------- #
+# dispatch guards: 409 on busy/paused, 422 on wrong resume kind
+# --------------------------------------------------------------------------- #
+def test_second_ask_while_queued_conflicts(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine, fake_embedder, retriever=_FakeRetriever(people=[1]), scorer=_FakeScorer(_recs(1))
+    )
+    assert (
+        client.post(
+            "/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "c1"}
+        ).status_code
+        == 200
+    )
+    # A run is already queued (not yet streamed) -> 409, does not overwrite.
+    assert (
+        client.post(
+            "/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "c1"}
+        ).status_code
+        == 409
+    )
+
+
+def test_ask_while_paused_conflicts(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine, fake_embedder, retriever=_FakeRetriever(people=[1]), scorer=_FakeScorer(_recs(1))
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "c2"})
+    _events(client, "c2")  # runs to the send interrupt (paused)
+    # Session is awaiting a resume -> a new /ask is rejected.
+    assert (
+        client.post(
+            "/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "c2"}
+        ).status_code
+        == 409
+    )
+
+
+def test_answer_wrong_kind_is_422(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine, fake_embedder, retriever=_FakeRetriever(people=[1]), scorer=_FakeScorer(_recs(1))
+    )
+    # Paused at send (expects an outcome) — sending a 'reply' is the wrong kind.
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "c3"})
+    _events(client, "c3")
+    assert client.post("/answer", json={"session_id": "c3", "reply": "x"}).status_code == 422
+
+    # Paused at ask (expects a reply) — sending an 'outcome' is the wrong kind.
+    client.post(
+        "/ask", json={"asker_id": 10, "question": "ネットワークの技術相談です", "session_id": "c4"}
+    )
+    _events(client, "c4")
+    assert (
+        client.post("/answer", json={"session_id": "c4", "outcome": "accepted"}).status_code == 422
+    )
+
+
+def test_answer_without_interrupt_conflicts(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine, fake_embedder, retriever=_FakeRetriever(people=[1]), scorer=_FakeScorer(_recs(1))
+    )
+    # Never asked / not paused -> 409.
+    assert (
+        client.post("/answer", json={"session_id": "never", "outcome": "accepted"}).status_code
+        == 409
+    )
+
+
+# --------------------------------------------------------------------------- #
+# reconnect: /events again on a paused session re-emits the pending interrupt
+# --------------------------------------------------------------------------- #
+def test_reconnect_resends_pending_interrupt(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine, fake_embedder, retriever=_FakeRetriever(people=[1]), scorer=_FakeScorer(_recs(1))
+    )
+    # send interrupt -> reconnect re-sends the draft.
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "r1"})
+    _events(client, "r1")
+    again = _events(client, "r1")  # no /answer: reconnect
+    assert [e for e, _ in again] == ["draft"]
+
+    # ask interrupt -> reconnect re-sends the followup.
+    client.post(
+        "/ask", json={"asker_id": 10, "question": "ネットワークの技術相談です", "session_id": "r2"}
+    )
+    _events(client, "r2")
+    again2 = _events(client, "r2")
+    assert [e for e, _ in again2] == ["followup"]
+
+
+# --------------------------------------------------------------------------- #
+# persistence: /ask writes a Question, C6 a Recommendation, /answer the outcome
+# --------------------------------------------------------------------------- #
+def test_flow_persists_question_and_recommendation(seed_counts, engine, fake_embedder) -> None:
+    from tekijin.models.tables import Question
+
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2]),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    client.post("/ask", json={"asker_id": 7, "question": GOOD_Q, "session_id": "p1"})
+    _events(client, "p1")
+    client.post("/answer", json={"session_id": "p1", "outcome": "accepted"})
+    _events(client, "p1")
+
+    check = get_sessionmaker(engine)()
+    try:
+        q = check.get(Question, "api_p1_1")
+        assert q is not None and q.asker_id == 7 and q.body == GOOD_Q
+        assert q.topics == ["ネットワーク・VPN"]  # C1 topics backfilled
+        recs = check.query(Recommendation).filter(Recommendation.question_id == "api_p1_1").all()
+        assert recs and recs[0].employee_id == 1
+        assert recs[0].outcome == "accepted"  # /answer recorded the outcome
+    finally:
+        check.close()
+
+
+# --------------------------------------------------------------------------- #
 # validation / errors
 # --------------------------------------------------------------------------- #
 def test_ask_validation_422(seed_counts, engine, fake_embedder) -> None:
@@ -216,6 +352,24 @@ def test_cors_headers_present(seed_counts, engine, fake_embedder) -> None:
     client = _client(engine, fake_embedder, retriever=_FakeRetriever(), scorer=_FakeScorer([]))
     resp = client.get("/health", headers={"Origin": "http://localhost:3000"})
     assert resp.headers.get("access-control-allow-origin") == "http://localhost:3000"
+
+
+def test_lifespan_startup_and_shutdown(seed_counts, engine, fake_embedder) -> None:
+    # ``with TestClient`` triggers the FastAPI lifespan: startup log, then shutdown
+    # calls service.close() (engine.dispose is safe — the engine re-pools on demand).
+    service = AgentService(
+        session_factory=get_sessionmaker(engine),
+        checkpointer=MemorySaver(),
+        embedder=fake_embedder,
+        intent_model=KeywordIntentModel(),
+        sufficiency_model=RuleSufficiencyModel(),
+        draft_model=TemplateDraftModel(),
+        retriever=_FakeRetriever(),
+        scorer=_FakeScorer([]),
+        now_factory=lambda: NOW,
+    )
+    with TestClient(create_app(agent_service=service)) as client:
+        assert client.get("/health").status_code == 200
 
 
 # --------------------------------------------------------------------------- #
@@ -263,31 +417,56 @@ def test_real_agent_smoke(seed_counts, engine, fake_embedder) -> None:
 # --------------------------------------------------------------------------- #
 # PostgresSaver smoke (persistence across graph instances) — pgserver/CI
 # --------------------------------------------------------------------------- #
-def test_postgres_checkpointer_persists(seed_counts, engine, fake_embedder, database_url) -> None:
-    from tekijin.api.checkpointer import make_postgres_checkpointer
+def test_postgres_checkpointer_persists(
+    seed_counts, engine, fake_embedder, database_url, test_schema
+) -> None:
+    # Build a PostgresSaver whose connections use the run's ISOLATED schema, so
+    # its checkpoint tables land there (dropped at teardown) rather than public.
+    # The ``database_url`` fixture already skips when no DB is available; when a DB
+    # IS present, a setup failure must fail the test (not be swallowed into skip).
+    from langgraph.checkpoint.postgres import PostgresSaver
+    from psycopg.rows import dict_row
+    from psycopg_pool import ConnectionPool
 
+    from tekijin.api.checkpointer import _postgres_conn_string
+
+    def _use_schema(conn) -> None:
+        conn.execute(f"SET search_path TO {test_schema}, public")
+
+    pool = ConnectionPool(
+        _postgres_conn_string(database_url),
+        min_size=1,
+        max_size=2,
+        timeout=5.0,
+        open=True,
+        configure=_use_schema,
+        kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row},
+    )
     try:
-        checkpointer = make_postgres_checkpointer(database_url)
-    except Exception as exc:  # pragma: no cover - environment without a usable DB
-        pytest.skip(f"PostgresSaver unavailable: {exc}")
+        checkpointer = PostgresSaver(pool)
+        checkpointer.setup()
 
-    client = _client(
-        engine,
-        fake_embedder,
-        retriever=_FakeRetriever(people=[1], people_confidence=0.2),
-        scorer=_FakeScorer(_recs(1)),
-        checkpointer=checkpointer,
-    )
-    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "pg1"})
-    assert [e for e, _ in _events(client, "pg1")] == ["understood", "route", "recommend", "draft"]
-    # A brand-new client (fresh graph) sharing the SAME postgres checkpointer resumes.
-    client2 = _client(
-        engine,
-        fake_embedder,
-        retriever=_FakeRetriever(people=[1], people_confidence=0.2),
-        scorer=_FakeScorer(_recs(1)),
-        checkpointer=checkpointer,
-    )
-    client2.post("/answer", json={"session_id": "pg1", "outcome": "accepted"})
-    done = _events(client2, "pg1")
-    assert done[0][0] == "done"
+        client = _client(
+            engine,
+            fake_embedder,
+            retriever=_FakeRetriever(people=[1], people_confidence=0.2),
+            scorer=_FakeScorer(_recs(1)),
+            checkpointer=checkpointer,
+        )
+        client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "pg1"})
+        first = [e for e, _ in _events(client, "pg1")]
+        assert first == ["understood", "route", "recommend", "draft"]
+
+        # A brand-new client (fresh graph) sharing the SAME postgres checkpointer
+        # resumes the paused run from durable state.
+        client2 = _client(
+            engine,
+            fake_embedder,
+            retriever=_FakeRetriever(people=[1], people_confidence=0.2),
+            scorer=_FakeScorer(_recs(1)),
+            checkpointer=checkpointer,
+        )
+        client2.post("/answer", json={"session_id": "pg1", "outcome": "accepted"})
+        assert _events(client2, "pg1")[0][0] == "done"
+    finally:
+        pool.close()

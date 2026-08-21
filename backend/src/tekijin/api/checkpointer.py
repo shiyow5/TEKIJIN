@@ -40,6 +40,7 @@ def make_postgres_checkpointer(database_url: str) -> Any:  # pragma: no cover - 
         min_size=1,
         max_size=4,
         timeout=5.0,
+        open=True,  # open the pool eagerly so setup() fails fast if the DB is down
         kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row},
     )
     # ``row_factory=dict_row`` (set via kwargs above) makes this a dict-row pool at

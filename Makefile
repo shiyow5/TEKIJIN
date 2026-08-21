@@ -1,4 +1,4 @@
-.PHONY: help setup setup-backend setup-frontend \
+.PHONY: help setup setup-backend setup-ml setup-frontend \
         fmt fmt-backend fmt-frontend \
         fmt-check fmt-check-backend fmt-check-frontend \
         lint lint-backend lint-frontend \
@@ -33,8 +33,13 @@ help: ## Show this help
 # ============================================================
 setup: setup-backend setup-frontend ## Install all dev dependencies
 
-setup-backend: ## Install backend runtime + dev dependencies
+setup-backend: ## Install backend runtime + dev deps (CI-light; NO real embedder)
 	cd $(BACKEND_DIR) && $(PY) -m pip install -r requirements.txt -r requirements-dev.txt
+
+setup-ml: ## Install the heavy ML deps (sentence-transformers/torch) for the real embedder
+	# Required to RUN the API/agent with the default SentenceTransformer embedder
+	# (tests use a FakeEmbedder and do NOT need this). See requirements-ml.txt.
+	cd $(BACKEND_DIR) && $(PY) -m pip install -r requirements-ml.txt
 
 setup-frontend: ## Install frontend dev tooling (biome, vitest)
 	cd $(FRONTEND_DIR) && npm install
@@ -90,13 +95,15 @@ run-backend: ## Run the backend dev server (uvicorn, auto-reload; stub LLM, Memo
 	cd $(BACKEND_DIR) && $(PY) -m uvicorn tekijin.main:app --reload --app-dir src
 
 serve: ## Run the backend against real vLLM + PostgresSaver (production-like)
-	# Wire the real LLM and persistent sessions. Point TEKIJIN_LLM_BASE_URL at your
-	# vLLM /v1 endpoint and TEKIJIN_DATABASE_URL at Postgres before running:
+	# Needs the ML deps (make setup-ml) for the embedder. Point TEKIJIN_LLM_BASE_URL
+	# at your vLLM /v1 endpoint and TEKIJIN_DATABASE_URL at Postgres, then:
 	#   TEKIJIN_LLM_BACKEND=vllm TEKIJIN_CHECKPOINTER_BACKEND=postgres make serve
+	# SINGLE WORKER ONLY: the session dispatch registry is in-process, so do NOT
+	# add --workers (a durable/sticky multi-worker queue is a separate issue).
 	cd $(BACKEND_DIR) && \
 		TEKIJIN_LLM_BACKEND=$${TEKIJIN_LLM_BACKEND:-vllm} \
 		TEKIJIN_CHECKPOINTER_BACKEND=$${TEKIJIN_CHECKPOINTER_BACKEND:-postgres} \
-		$(PY) -m uvicorn tekijin.main:app --host 0.0.0.0 --port 8000 --app-dir src
+		$(PY) -m uvicorn tekijin.main:app --host 0.0.0.0 --port 8000 --workers 1 --app-dir src
 
 # ============================================================
 # Database

@@ -65,8 +65,15 @@ class SentenceTransformerEmbedder:
 
     def _get_model(self) -> Any:  # pragma: no cover - requires heavy model download
         if self._model is None:
-            from sentence_transformers import SentenceTransformer
-
+            try:
+                from sentence_transformers import SentenceTransformer
+            except ImportError as exc:  # guide the operator to the ML extras
+                raise RuntimeError(
+                    "sentence-transformers is not installed. The default embedder "
+                    "needs the ML dependencies — run `make setup-ml` (installs "
+                    "backend/requirements-ml.txt), or run the API with an injected "
+                    "embedder for tests."
+                ) from exc
             self._model = SentenceTransformer(self._model_name)
         return self._model
 

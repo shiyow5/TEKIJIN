@@ -7,7 +7,7 @@ The vLLM adapters convert an instance of these back into the protocol dataclasse
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class IntentSchema(BaseModel):
@@ -31,3 +31,11 @@ class SufficiencySchema(BaseModel):
     followup_question: str | None = Field(
         default=None, description="不足時に返すまとめて1つの逆質問"
     )
+
+    @model_validator(mode="after")
+    def _followup_required_when_insufficient(self) -> SufficiencySchema:
+        # An insufficient result MUST carry a non-empty follow-up, or the graph
+        # would pause on an empty clarification (the LLM must not omit it).
+        if not self.sufficient and not (self.followup_question or "").strip():
+            raise ValueError("followup_question is required when sufficient is false")
+        return self
