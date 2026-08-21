@@ -11,10 +11,12 @@ selector (#30) and the agent (#31):
       "candidate_people": [employee_id, ...],
     }
 
-``candidate_people`` is seeded from the responders of the fused past answers
-(the people who have actually answered similar questions), then extended with
-people whose self-introduction matches — dense and sparse (BM25) profile hits
-fused with RRF — de-duplicated in order.
+``candidate_people`` is built by round-robin interleaving (responder-first) the
+responders of the fused past answers with the profile-match ranking — dense and
+sparse (BM25) self-introduction hits fused with RRF — then de-duplicated. The
+interleave (rather than "all responders, then profiles") keeps an exact profile
+match from being crowded out of ``top_k`` by many answer responders; see
+:meth:`_aggregate_people`.
 """
 
 from __future__ import annotations
