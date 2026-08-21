@@ -45,12 +45,14 @@ from tekijin.data.seed import _format_counts
 from tekijin.models import tables as t
 
 # Expected fixture row counts (from the synthetic dataset).
+# NOTE: #51/#52 で合成データにトピック差・部署横断メンバーを入れた際、
+# skills だけ 58 -> 61 に変わった（他は不変）。fixtures を再生成したらここも更新すること。
 EXPECTED_COUNTS = {
     "employees": 40,
     "projects": 120,
     "profiles": 40,
     "certifications": 98,
-    "skills": 58,
+    "skills": 61,
     "project_members": 237,
     "employee_chat": 2000,
     "daily_reports": 3070,

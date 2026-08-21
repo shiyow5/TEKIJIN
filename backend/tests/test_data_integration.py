@@ -100,7 +100,8 @@ def test_seed_counts(seed_counts) -> None:
     assert seed_counts["projects"] == 120
     assert seed_counts["project_members"] == 237
     assert seed_counts["daily_reports"] == 3070
-    assert sum(seed_counts.values()) == 5993
+    # #51/#52 で skills が 58 -> 61 になった分、合計が 5993 -> 5996
+    assert sum(seed_counts.values()) == 5996
 
 
 def test_seed_leaves_embeddings_null(seed_counts, session) -> None:
