@@ -15,11 +15,11 @@ from fastapi.testclient import TestClient
 from langgraph.checkpoint.memory import MemorySaver
 
 from tekijin.agent.stubs import KeywordIntentModel, RuleSufficiencyModel, TemplateDraftModel
-from tekijin.api.service import AgentService
+from tekijin.api.service import AgentService, SessionConflict, _SessionCtx
 from tekijin.app import create_app
 from tekijin.data.dashboard import dashboard_summary
 from tekijin.data.db import get_sessionmaker
-from tekijin.models.tables import Recommendation
+from tekijin.models.tables import Question, Recommendation
 
 NOW = dt.datetime(2026, 9, 15, 12, 0, 0)
 GOOD_Q = "現行のVPN機器で3拠点の拠点間接続について相談したいです"
@@ -298,8 +298,6 @@ def test_reconnect_resends_pending_interrupt(seed_counts, engine, fake_embedder)
 # persistence: /ask writes a Question, C6 a Recommendation, /answer the outcome
 # --------------------------------------------------------------------------- #
 def test_flow_persists_question_and_recommendation(seed_counts, engine, fake_embedder) -> None:
-    from tekijin.models.tables import Question
-
     client = _client(
         engine,
         fake_embedder,
@@ -313,12 +311,27 @@ def test_flow_persists_question_and_recommendation(seed_counts, engine, fake_emb
 
     check = get_sessionmaker(engine)()
     try:
-        q = check.get(Question, "api_p1_1")
-        assert q is not None and q.asker_id == 7 and q.body == GOOD_Q
+        q = (
+            check.query(Question)
+            .filter(Question.asker_id == 7, Question.body == GOOD_Q)
+            .order_by(Question.created_at.desc())
+            .first()
+        )
+        assert q is not None and q.id.startswith("api_")  # uuid-based, collision-free
         assert q.topics == ["ネットワーク・VPN"]  # C1 topics backfilled
-        recs = check.query(Recommendation).filter(Recommendation.question_id == "api_p1_1").all()
-        assert recs and recs[0].employee_id == 1
-        assert recs[0].outcome == "accepted"  # /answer recorded the outcome
+        recs = (
+            check.query(Recommendation)
+            .filter(Recommendation.question_id == q.id)
+            .order_by(Recommendation.rank)
+            .all()
+        )
+        # Every shown recommendation (rank 1..2) is persisted (codex#4).
+        assert [r.rank for r in recs] == [1, 2]
+        assert [r.employee_id for r in recs] == [1, 2]
+        # Only the primary (rank 1, handed off) carries the outcome; the rest are
+        # "shown" rows with outcome=NULL.
+        assert recs[0].outcome == "accepted"
+        assert recs[1].outcome is None
     finally:
         check.close()
 
@@ -470,3 +483,293 @@ def test_postgres_checkpointer_persists(
         assert _events(client2, "pg1")[0][0] == "done"
     finally:
         pool.close()
+
+
+# --------------------------------------------------------------------------- #
+# service-level helper for durability / concurrency tests (no TestClient/SSE)
+# --------------------------------------------------------------------------- #
+def _svc(engine, embedder, *, retriever=None, scorer=None) -> AgentService:
+    return AgentService(
+        session_factory=get_sessionmaker(engine),
+        checkpointer=MemorySaver(),
+        embedder=embedder,
+        intent_model=KeywordIntentModel(),
+        sufficiency_model=RuleSufficiencyModel(),
+        draft_model=TemplateDraftModel(),
+        retriever=retriever,
+        scorer=scorer,
+        now_factory=lambda: NOW,
+    )
+
+
+def _latest_question(engine) -> Question:
+    check = get_sessionmaker(engine)()
+    try:
+        q = (
+            check.query(Question)
+            .filter(Question.body == GOOD_Q)
+            .order_by(Question.created_at.desc())
+            .first()
+        )
+        assert q is not None
+        return q
+    finally:
+        check.close()
+
+
+def _recs_for(engine, question_id: str) -> list[Recommendation]:
+    check = get_sessionmaker(engine)()
+    try:
+        return (
+            check.query(Recommendation)
+            .filter(Recommendation.question_id == question_id)
+            .order_by(Recommendation.rank)
+            .all()
+        )
+    finally:
+        check.close()
+
+
+# --------------------------------------------------------------------------- #
+# asker validation (404) / boundary coercion / path-safety
+# --------------------------------------------------------------------------- #
+def test_ask_unknown_asker_is_404(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine, fake_embedder, retriever=_FakeRetriever(people=[1]), scorer=_FakeScorer(_recs(1))
+    )
+    resp = client.post("/ask", json={"asker_id": 999999, "question": GOOD_Q, "session_id": "u404"})
+    assert resp.status_code == 404  # clean boundary error, not a mid-flush FK 500
+
+
+def test_ask_accepts_e_prefixed_asker_and_stores_int(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine, fake_embedder, retriever=_FakeRetriever(people=[1]), scorer=_FakeScorer(_recs(1))
+    )
+    resp = client.post("/ask", json={"asker_id": "E10", "question": GOOD_Q, "session_id": "ep"})
+    assert resp.status_code == 200
+    assert _latest_question(engine).asker_id == 10  # "E10" normalised to int 10
+
+
+def test_session_id_must_be_path_safe(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine, fake_embedder, retriever=_FakeRetriever(people=[1]), scorer=_FakeScorer(_recs(1))
+    )
+    # A '/' would make GET /events/{session_id} unroutable — reject at the boundary.
+    assert (
+        client.post(
+            "/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "a/b"}
+        ).status_code
+        == 422
+    )
+    assert (
+        client.post("/answer", json={"session_id": "a b", "outcome": "accepted"}).status_code == 422
+    )
+
+
+# --------------------------------------------------------------------------- #
+# route-level exception guards: unexpected errors become a generic 500
+# --------------------------------------------------------------------------- #
+def test_ask_unexpected_error_is_generic_500(seed_counts, engine, fake_embedder) -> None:
+    service = _svc(engine, fake_embedder, retriever=_FakeRetriever(), scorer=_FakeScorer([]))
+
+    def _boom(*_a, **_k):
+        raise RuntimeError("secret internal detail at 10.0.0.1")
+
+    service.start_question = _boom  # type: ignore[method-assign]
+    client = TestClient(create_app(agent_service=service))
+    resp = client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "b"})
+    assert resp.status_code == 500
+    assert "内部エラー" in resp.text
+    assert "secret internal" not in resp.text  # detail logged, never leaked
+
+
+def test_answer_unexpected_error_is_generic_500(seed_counts, engine, fake_embedder) -> None:
+    service = _svc(engine, fake_embedder, retriever=_FakeRetriever(), scorer=_FakeScorer([]))
+
+    def _boom(*_a, **_k):
+        raise RuntimeError("secret internal detail at 10.0.0.1")
+
+    service.submit_resume = _boom  # type: ignore[method-assign]
+    client = TestClient(create_app(agent_service=service))
+    resp = client.post("/answer", json={"session_id": "b", "outcome": "accepted"})
+    assert resp.status_code == 500
+    assert "secret internal" not in resp.text
+
+
+# --------------------------------------------------------------------------- #
+# durability: outcome recorded from the DURABLE state (registry-independent)
+# --------------------------------------------------------------------------- #
+def test_outcome_recorded_after_registry_cleared(seed_counts, engine, fake_embedder) -> None:
+    # Simulates a restart / eviction: the volatile registry is gone, but /answer
+    # still records the outcome by reading primary_recommendation_id from the
+    # durable checkpoint state.
+    svc = _svc(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2]),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    svc.start_question("dur", 10, GOOD_Q)
+    list(svc.stream_events("dur"))  # runs to the send interrupt; primary id in state
+    svc._registry.clear()  # <- registry no longer knows anything about "dur"
+    svc.submit_resume("dur", outcome="accepted")
+    recs = _recs_for(engine, _latest_question(engine).id)
+    assert recs[0].rank == 1 and recs[0].outcome == "accepted"  # primary recorded
+    assert recs[1].outcome is None
+
+
+def test_disconnect_after_recommend_then_continue_and_outcome(
+    seed_counts, engine, fake_embedder
+) -> None:
+    # Client disconnects right after C6 (recs persisted, but update_state — which
+    # writes the primary id into the state — never ran). Reconnect CONTINUES the
+    # parked run to the send interrupt (codex#6), and /answer still records the
+    # outcome via the DB fallback (latest rank-1 for the question).
+    svc = _svc(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2]),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    svc.start_question("mid", 10, GOOD_Q)
+    gen = svc.stream_events("mid")
+    seen: list[str | None] = []
+    for ev in gen:
+        seen.append(ev.event)
+        if ev.event == "recommend":
+            break
+    gen.close()  # type: ignore[attr-defined]  # disconnect mid-run (parked node)
+    assert "recommend" in seen
+
+    rest = [ev.event for ev in svc.stream_events("mid")]  # continue to completion
+    assert "draft" in rest
+
+    svc.submit_resume("mid", outcome="accepted")
+    recs = _recs_for(engine, _latest_question(engine).id)
+    assert [r.rank for r in recs] == [1, 2]  # NOT double-inserted on continuation
+    assert recs[0].outcome == "accepted"  # recorded via durable DB fallback
+
+
+# --------------------------------------------------------------------------- #
+# eviction never drops a paused (mid-interrupt) session
+# --------------------------------------------------------------------------- #
+def test_sweep_protects_paused_and_evicts_idle(seed_counts, engine, fake_embedder) -> None:
+    svc = _svc(
+        engine, fake_embedder, retriever=_FakeRetriever(people=[1]), scorer=_FakeScorer(_recs(1))
+    )
+    svc.start_question("keep", 10, GOOD_Q)
+    list(svc.stream_events("keep"))  # paused at send
+    svc._registry["keep"].touched_at = 0.0  # make the paused session look stale
+    svc._registry["idle"] = _SessionCtx(pending=None, touched_at=0.0)  # stale, no run
+    svc._sweep()
+    assert "keep" in svc._registry  # protected: a human is being waited on
+    assert "idle" not in svc._registry  # evicted: stale and not mid-interrupt
+
+
+# --------------------------------------------------------------------------- #
+# concurrency: the per-session lock serialises accept / resume / stream
+# --------------------------------------------------------------------------- #
+def test_concurrent_ask_single_winner(seed_counts, engine, fake_embedder) -> None:
+    import concurrent.futures as cf
+
+    svc = _svc(
+        engine, fake_embedder, retriever=_FakeRetriever(people=[1]), scorer=_FakeScorer(_recs(1))
+    )
+
+    def _fire() -> int:
+        try:
+            svc.start_question("cc", 10, GOOD_Q)
+            return 200
+        except SessionConflict:
+            return 409
+
+    with cf.ThreadPoolExecutor(max_workers=2) as ex:
+        results = sorted(f.result() for f in [ex.submit(_fire), ex.submit(_fire)])
+    assert results == [200, 409]  # exactly one accepted
+    check = get_sessionmaker(engine)()
+    try:
+        assert check.query(Question).filter(Question.body == GOOD_Q).count() == 1
+    finally:
+        check.close()
+
+
+def test_concurrent_events_no_double_insert(seed_counts, engine, fake_embedder) -> None:
+    import concurrent.futures as cf
+
+    svc = _svc(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2]),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    svc.start_question("ce", 10, GOOD_Q)
+
+    def _drain() -> tuple[str | None, ...]:
+        return tuple(ev.event for ev in svc.stream_events("ce"))
+
+    with cf.ThreadPoolExecutor(max_workers=2) as ex:
+        a = ex.submit(_drain)
+        b = ex.submit(_drain)
+        streams = {a.result(), b.result()}
+    full = ("understood", "route", "recommend", "draft")
+    # one streamed the whole run; the other blocked on the lock, then reconnected.
+    assert streams == {full, ("draft",)}
+    assert len(_recs_for(engine, _latest_question(engine).id)) == 2  # inserted once
+
+
+def test_concurrent_answer_single_winner(seed_counts, engine, fake_embedder) -> None:
+    import concurrent.futures as cf
+
+    svc = _svc(
+        engine, fake_embedder, retriever=_FakeRetriever(people=[1]), scorer=_FakeScorer(_recs(1))
+    )
+    svc.start_question("ca", 10, GOOD_Q)
+    list(svc.stream_events("ca"))  # pause at send
+
+    def _fire() -> str:
+        try:
+            svc.submit_resume("ca", outcome="accepted")
+            return "ok"
+        except SessionConflict:
+            return "conflict"
+
+    with cf.ThreadPoolExecutor(max_workers=2) as ex:
+        results = sorted(f.result() for f in [ex.submit(_fire), ex.submit(_fire)])
+    assert results == ["conflict", "ok"]  # second resume rejected (no double-queue)
+    recs = _recs_for(engine, _latest_question(engine).id)
+    assert len([r for r in recs if r.outcome == "accepted"]) == 1  # recorded once
+
+
+def test_no_candidate_persists_no_recommendation(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1], people_confidence=0.2),
+        scorer=_FakeScorer([]),  # C6 runs but yields nothing -> no_candidate
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "nc"})
+    names = [e for e, _ in _events(client, "nc")]
+    assert "message" in names  # no_candidate terminal
+    assert _recs_for(engine, _latest_question(engine).id) == []  # nothing persisted
+
+
+def test_double_queued_resume_conflicts(seed_counts, engine, fake_embedder) -> None:
+    svc = _svc(
+        engine, fake_embedder, retriever=_FakeRetriever(people=[1]), scorer=_FakeScorer(_recs(1))
+    )
+    svc.start_question("dq", 10, GOOD_Q)
+    list(svc.stream_events("dq"))  # pause at send
+    svc.submit_resume("dq", outcome="accepted")  # queues a resume (not yet streamed)
+    with pytest.raises(SessionConflict):
+        svc.submit_resume("dq", outcome="declined")  # second while queued -> 409
+
+
+def test_record_outcome_warns_when_no_target(seed_counts, engine, fake_embedder, caplog) -> None:
+    # Defensive branch: an outcome with no recommendation to attach it to (no id in
+    # state and none in the DB) logs a warning instead of silently dropping data.
+    import logging
+
+    svc = _svc(engine, fake_embedder, retriever=_FakeRetriever(), scorer=_FakeScorer([]))
+    with caplog.at_level(logging.WARNING):
+        svc._record_outcome("orphan", {}, "accepted")
+    assert "no recommendation to record outcome" in caplog.text

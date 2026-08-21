@@ -48,6 +48,26 @@ def test_sufficiency_schema_requires_followup_when_insufficient() -> None:
         SufficiencySchema(sufficient=False, followup_question="   ")  # blank followup
 
 
+def test_ask_request_accepts_int_and_e_prefixed_asker() -> None:
+    assert schemas.AskRequest(asker_id=200, question="q", session_id="s").asker_id == 200
+    # spec form "E200" (and plain "200") normalise to the DB int form. The string
+    # input is a deliberate boundary feature; mypy sees the declared int type.
+    assert schemas.AskRequest(asker_id="E200", question="q", session_id="s").asker_id == 200  # type: ignore[arg-type]
+    assert schemas.AskRequest(asker_id="e42", question="q", session_id="s").asker_id == 42  # type: ignore[arg-type]
+    assert schemas.AskRequest(asker_id="7", question="q", session_id="s").asker_id == 7  # type: ignore[arg-type]
+    with pytest.raises(ValueError):
+        schemas.AskRequest(asker_id="abc", question="q", session_id="s")  # type: ignore[arg-type]
+    with pytest.raises(ValueError):
+        schemas.AskRequest(asker_id=True, question="q", session_id="s")  # bool rejected
+
+
+def test_ask_request_rejects_unsafe_session_id() -> None:
+    schemas.AskRequest(asker_id=1, question="q", session_id="ok_id-9")  # ok
+    for bad in ("a/b", "a b", "", "emoji😀"):
+        with pytest.raises(ValueError):
+            schemas.AskRequest(asker_id=1, question="q", session_id=bad)
+
+
 def test_resume_request_exactly_one_of_outcome_or_reply() -> None:
     assert schemas.ResumeRequest(session_id="s", outcome="accepted").resume_value == "accepted"
     assert schemas.ResumeRequest(session_id="s", reply="現行はVPN").resume_value == "現行はVPN"
@@ -386,6 +406,14 @@ def test_service_sweep_evicts_stale_sessions() -> None:
     assert "old" not in svc._registry and "fresh" in svc._registry
 
 
+def test_stream_events_empty_when_nothing_queued_or_paused() -> None:
+    # ctx exists (its pending was already consumed) and the checkpoint has no
+    # parked state: the stream yields nothing (the route 404s before this anyway).
+    svc = _service()
+    svc._registry["done"] = _SessionCtx(pending=None)
+    assert list(svc.stream_events("done")) == []
+
+
 def test_service_close_releases_pool_and_engine() -> None:
     closed: list[bool] = []
     disposed: list[bool] = []
@@ -421,9 +449,7 @@ def test_stream_error_yields_generic_event_and_hides_details() -> None:
 
     svc = _service(intent=_Raising())
     svc._registry["e1"] = _SessionCtx(
-        pending={"question": _GOOD_Q, "asker": {"id": 1}, "now": _NOW},
-        question_id="qx",
-        now=_NOW,
+        pending={"question": _GOOD_Q, "asker": {"id": 1}, "now": _NOW, "question_id": "qx"},
     )
     sse = list(svc.stream_events("e1"))
     assert sse[-1].event == "error"

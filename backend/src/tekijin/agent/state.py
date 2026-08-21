@@ -75,6 +75,14 @@ class AgentState(TypedDict, total=False):
     asker: dict[str, Any] | None
     now: dt.datetime  # naive; the scorer requires it
 
+    # -- durable persistence identity (set by the API layer) ---------------
+    # These live in the checkpoint so that outcome recording survives a
+    # process restart / eviction and does not depend on the volatile
+    # in-memory session registry.
+    question_id: str | None  # uuid4 assigned at POST /ask
+    recommendation_ids: list[int]  # DB ids of every *shown* recommendation
+    primary_recommendation_id: int | None  # the one actually handed off
+
     # -- C1 intent ---------------------------------------------------------
     topics: list[str]
     products: list[str]

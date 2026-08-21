@@ -14,6 +14,32 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 Outcome = Literal["accepted", "declined"]
 
+# session_id doubles as the ``/events/{session_id}`` path segment and the graph
+# ``thread_id``; constrain it to path-safe characters (no ``/``) so a created
+# session is always reachable over GET /events.
+_SESSION_ID_PATTERN = r"^[A-Za-z0-9_-]+$"
+
+
+def _coerce_asker_id(value: object) -> int:
+    """Accept an int employee id or the spec's ``"E###"`` string form.
+
+    The DB stores ``asker_id`` as an int; the product spec writes employee ids as
+    ``"E200"``. We accept both at the boundary and normalise to int (the DB form),
+    stripping an optional leading ``E``/``e``.
+    """
+
+    if isinstance(value, bool):  # bool is an int subclass — reject explicitly
+        raise ValueError("asker_id must be an integer or 'E###' string")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        if text[:1] in ("E", "e"):
+            text = text[1:]
+        if text.isdigit():
+            return int(text)
+    raise ValueError("asker_id must be an integer or 'E###' string")
+
 
 # --------------------------------------------------------------------------- #
 # requests
@@ -23,7 +49,13 @@ class AskRequest(BaseModel):
 
     asker_id: int
     question: str = Field(min_length=1)
-    session_id: str = Field(min_length=1)
+    session_id: str = Field(pattern=_SESSION_ID_PATTERN)
+
+    @field_validator("asker_id", mode="before")
+    @classmethod
+    def _accept_e_prefixed_id(cls, value: object) -> int:
+        # DB is int; ``"E200"`` (spec form) is accepted and converted here.
+        return _coerce_asker_id(value)
 
     @field_validator("question")
     @classmethod
@@ -43,7 +75,7 @@ class ResumeRequest(BaseModel):
     interrupt (accept/decline), ``reply`` answers a ``followup`` interrupt.
     """
 
-    session_id: str = Field(min_length=1)
+    session_id: str = Field(pattern=_SESSION_ID_PATTERN)
     outcome: Outcome | None = None
     reply: str | None = None
 

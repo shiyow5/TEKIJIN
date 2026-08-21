@@ -10,12 +10,21 @@ to a clarification.
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, HTTPException, Request
 from sse_starlette import EventSourceResponse
 
 from tekijin.api import schemas
-from tekijin.api.service import AgentService, SessionConflict, SessionInvalid
+from tekijin.api.service import (
+    AgentService,
+    AskerNotFound,
+    SessionConflict,
+    SessionInvalid,
+)
 from tekijin.data.dashboard import dashboard_summary
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -32,6 +41,11 @@ def ask(req: schemas.AskRequest, request: Request) -> schemas.AckResponse:
         _service(request).start_question(req.session_id, req.asker_id, req.question)
     except SessionConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except AskerNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:  # unexpected: log detail, return a generic 500
+        logger.exception("POST /ask failed for session %s", req.session_id)
+        raise HTTPException(status_code=500, detail="内部エラーが発生しました") from exc
     return schemas.AckResponse(session_id=req.session_id, status="accepted")
 
 
@@ -45,6 +59,9 @@ def answer(req: schemas.ResumeRequest, request: Request) -> schemas.AckResponse:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except SessionInvalid as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:  # unexpected: log detail, return a generic 500
+        logger.exception("POST /answer failed for session %s", req.session_id)
+        raise HTTPException(status_code=500, detail="内部エラーが発生しました") from exc
     return schemas.AckResponse(session_id=req.session_id, status="resumed")
 
 
