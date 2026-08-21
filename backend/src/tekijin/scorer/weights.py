@@ -47,6 +47,11 @@ BASE_SCORE_SKILL = 0.3
 # much toward ``recency`` (technical-spec §5: 半減期6か月の時間減衰).
 RECENCY_HALF_LIFE_DAYS = 182.5
 
+# Evidence source_types that decay with time and so feed ``recency``. A
+# certification does not become less true as it ages, so it is deliberately
+# excluded (technical-spec §5 ties recency to projects/answers).
+RECENCY_SOURCE_TYPES = ("project", "answer")
+
 # ``load`` saturates: this many recent items (recommendations + answers in the
 # window) map to a 0.5 penalty; more approaches, but never reaches, 1.0.
 LOAD_HALF_SATURATION = 5.0

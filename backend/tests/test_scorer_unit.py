@@ -35,8 +35,8 @@ def _cert(name: str, acquired: dt.date | None = None) -> CertificationDTO:
     return CertificationDTO(id="c", employee_id=1, name=name, acquired_at=acquired)
 
 
-def _skill(topic: str, level: str | None = "中級") -> SkillDTO:
-    return SkillDTO(id="s", employee_id=1, topic=topic, level=level, source="self")
+def _skill(topic: str, level: str | None = "中級", source: str | None = "self") -> SkillDTO:
+    return SkillDTO(id="s", employee_id=1, topic=topic, level=level, source=source)
 
 
 def _membership(product: str, role: str, end: dt.date | None = None) -> ProjectMembershipDTO:
@@ -103,6 +103,18 @@ def test_collect_topic_evidence_assigns_base_scores() -> None:
     assert sum(1 for e in evidence if e.source_type == "cert") == 1
     assert sum(1 for e in evidence if e.source_type == "self") == 1
     assert sum(1 for e in evidence if e.source_type == "project") == 0
+
+
+def test_collect_topic_evidence_skill_provenance() -> None:
+    # Inferred skills keep provenance ("inferred"); self-declared and null-source
+    # skills both default to "self". base_score is 0.3 either way.
+    inferred = collect_topic_evidence(TOPIC, [], [_skill(TOPIC, source="inferred")], [], [])
+    declared = collect_topic_evidence(TOPIC, [], [_skill(TOPIC, source="self")], [], [])
+    unknown = collect_topic_evidence(TOPIC, [], [_skill(TOPIC, source=None)], [], [])
+    assert inferred[0].source_type == "inferred"
+    assert declared[0].source_type == "self"
+    assert unknown[0].source_type == "self"  # null source defaults to self-declared
+    assert inferred[0].base_score == declared[0].base_score == BASE_SCORE_SKILL
 
 
 def test_collect_topic_evidence_project_role_base_scores() -> None:
@@ -221,8 +233,20 @@ def test_recency_moments_excludes_certifications() -> None:
         Evidence("answer", 0.7, NOW, "fresh answer"),
         Evidence("self", 0.3, None, "skill"),
     ]
-    moments = ExpertiseScorer._recency_moments(evidence)
+    moments = ExpertiseScorer._recency_moments(evidence, NOW)
     assert moments == [NOW]  # only the answer's timestamp
+
+
+def test_recency_moments_ongoing_project_uses_now() -> None:
+    # A finished project uses its end_date; an ongoing one (timestamp None) is
+    # treated as current work -> ``now``, so it stays fresh.
+    ended = Evidence("project", 0.8, dt.date(2026, 1, 1), "ended")
+    ongoing = Evidence("project", 0.8, None, "ongoing")
+    assert ExpertiseScorer._recency_moments([ongoing], NOW) == [NOW]
+    moments = ExpertiseScorer._recency_moments([ended, ongoing], NOW)
+    assert moments == [dt.date(2026, 1, 1), NOW]
+    # An ongoing project scores as fresh as an answer submitted right now.
+    assert features.recency(NOW, ExpertiseScorer._recency_moments([ongoing], NOW)) == 1.0
 
 
 # --------------------------------------------------------------------------- #
@@ -242,5 +266,5 @@ def test_rank_rejects_aware_now() -> None:
 
     scorer = ExpertiseScorer(Repository(None))  # type: ignore[arg-type]
     aware = dt.datetime(2026, 8, 21, 12, 0, 0, tzinfo=dt.timezone(dt.timedelta(hours=9)))
-    with pytest.raises(AssertionError, match="now must be naive"):
+    with pytest.raises(ValueError, match="now must be naive"):
         scorer.rank(TOPIC, [1], asker_id=None, now=aware, top_k=3)

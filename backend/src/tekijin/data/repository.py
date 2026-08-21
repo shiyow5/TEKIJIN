@@ -141,16 +141,19 @@ class Repository:
 
     # -- load (recency windows) ------------------------------------------ #
     def recent_recommendation_counts(
-        self, since: dt.datetime, employee_ids: Sequence[int]
+        self, since: dt.datetime, until: dt.datetime, employee_ids: Sequence[int]
     ) -> dict[int, int]:
-        """Per-employee count of recommendations created at/after ``since``.
+        """Per-employee recommendation count within ``[since, until]`` (inclusive).
 
         Feeds the scorer's ``load`` penalty (technical-spec §5: "直近7日の推薦件数",
         which is outcome-independent). ``declined`` recommendations ARE counted:
         a decline lowers only availability (余裕度), never expertise — the spec
         keeps declines out of the expertise evidence, not out of the load window.
-        Scoped to ``employee_ids`` (the candidates being scored); an empty list
-        yields ``{}`` without a query.
+
+        The upper bound ``until`` (the scorer's ``now``) is required so that
+        offline evaluation replaying a historical ``now`` (#33) never lets rows
+        created *after* that moment leak into the window. Both ends are inclusive.
+        Scoped to ``employee_ids``; an empty list yields ``{}`` without a query.
         """
 
         if not employee_ids:
@@ -158,17 +161,20 @@ class Repository:
         stmt = (
             select(Recommendation.employee_id, func.count())
             .where(Recommendation.created_at >= since)
+            .where(Recommendation.created_at <= until)
             .where(Recommendation.employee_id.in_(employee_ids))
             .group_by(Recommendation.employee_id)
         )
         return {employee_id: count for employee_id, count in self._session.execute(stmt)}
 
     def recent_answer_counts(
-        self, since: dt.datetime, responder_ids: Sequence[int]
+        self, since: dt.datetime, until: dt.datetime, responder_ids: Sequence[int]
     ) -> dict[int, int]:
-        """Per-responder count of answers created at/after ``since`` (load).
+        """Per-responder answer count within ``[since, until]`` (inclusive; load).
 
-        Scoped to ``responder_ids``; an empty list yields ``{}`` without a query.
+        ``until`` (the scorer's ``now``) bounds the window on the top end so a
+        replayed historical ``now`` never counts later answers. Scoped to
+        ``responder_ids``; an empty list yields ``{}`` without a query.
         """
 
         if not responder_ids:
@@ -176,6 +182,7 @@ class Repository:
         stmt = (
             select(Answer.responder_id, func.count())
             .where(Answer.created_at >= since)
+            .where(Answer.created_at <= until)
             .where(Answer.responder_id.in_(responder_ids))
             .group_by(Answer.responder_id)
         )

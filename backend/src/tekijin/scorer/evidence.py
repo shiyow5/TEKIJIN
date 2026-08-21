@@ -29,9 +29,16 @@ from tekijin.scorer.weights import (
 
 @dataclass(frozen=True, slots=True)
 class Evidence:
-    """One piece of evidence that a person knows a topic."""
+    """One piece of evidence that a person knows a topic.
 
-    source_type: str  # cert | self | project | answer
+    ``source_type`` distinguishes provenance for the explanation: a self-declared
+    skill (``self``) and an inferred one (``inferred``) share the same base_score
+    but must not be described identically. A project's ``timestamp`` is its
+    ``end_date`` — ``None`` while the project is still running (the scorer treats
+    an ongoing project as current work for recency; see ``_recency_moments``).
+    """
+
+    source_type: str  # cert | self | inferred | project | answer
     base_score: float
     timestamp: dt.date | dt.datetime | None
     detail: str
@@ -46,9 +53,11 @@ def collect_topic_evidence(
 ) -> list[Evidence]:
     """Assemble every piece of evidence a person has for ``topic``.
 
-    ``on_topic_answers`` must already be this person's answers on the topic (the
-    topic join lives in the repository); certifications/skills/projects are
-    matched here. Ordering is deterministic: certs, skills, projects, answers.
+    ``on_topic_answers`` must already be this person's answers on the topic: the
+    topic *join* lives in the repository (``answers_by_topic``) and the strict
+    subtopic *filter* in the scorer (``_topic_answers``). Certifications, skills,
+    and projects are matched here. Ordering is deterministic: certs, skills,
+    projects, answers.
     """
 
     evidence: list[Evidence] = []
@@ -59,16 +68,27 @@ def collect_topic_evidence(
 
     for skill in skills:
         if skill.topic == topic:
-            detail = f"自己申告スキル（{skill.level}）" if skill.level else "自己申告スキル"
-            evidence.append(Evidence("self", BASE_SCORE_SKILL, None, detail))
+            # Preserve provenance: an inferred skill must not be called
+            # "self-declared". A null source defaults to self-declared.
+            if skill.source == "inferred":
+                evidence.append(
+                    Evidence("inferred", BASE_SCORE_SKILL, None, f"推定スキル: {topic}")
+                )
+            else:
+                evidence.append(
+                    Evidence("self", BASE_SCORE_SKILL, None, f"自己申告スキル: {topic}")
+                )
 
     for member in memberships:
         if product_matches_topic(member.product, topic):
             is_lead = member.role == "lead"
             base = BASE_SCORE_PROJECT_LEAD if is_lead else BASE_SCORE_PROJECT_MEMBER
-            when = member.end_date or member.start_date
+            # end_date is None while the project is ongoing; the scorer maps that
+            # to "now" for recency. base_score / topic_fit are unaffected.
             role_label = "リード" if is_lead else "メンバー"
-            evidence.append(Evidence("project", base, when, f"{role_label}: {member.product}"))
+            evidence.append(
+                Evidence("project", base, member.end_date, f"{role_label}: {member.product}")
+            )
 
     for answer in on_topic_answers:
         helpful = answer.was_helpful is True

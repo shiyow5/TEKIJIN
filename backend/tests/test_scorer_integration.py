@@ -436,3 +436,74 @@ def test_load_window_boundary_is_inclusive(seed_counts, session) -> None:
     scores = _scores_by_person(scorer.rank(TOPIC, [1, 2], asker_id=None, now=NOW, top_k=3))
     # Only emp 1's boundary rec is inside the window, so emp 1 carries the load.
     assert scores[1] < scores[2]
+
+
+# --------------------------------------------------------------------------- #
+# fix 1: rows created AFTER now (upper bound) are not counted — offline eval
+# --------------------------------------------------------------------------- #
+def test_future_recommendations_not_counted_as_load(seed_counts, session) -> None:
+    _add_question(session, "q_future")
+    for emp in (1, 2):
+        _add_skill(session, f"sk_fut_{emp}", emp)
+    # emp 1 has 8 recs dated AFTER now — a replayed historical ``now`` must not
+    # let them into the [now-7d, now] window.
+    for _ in range(8):
+        _add_recommendation(
+            session, 1, created=NOW + dt.timedelta(days=1), outcome="accepted", qid="q_future"
+        )
+
+    scorer = ExpertiseScorer(Repository(session))
+    scores = _scores_by_person(scorer.rank(TOPIC, [1, 2], asker_id=None, now=NOW, top_k=3))
+    assert scores[1] == scores[2]  # future rows excluded by the upper bound
+
+
+# --------------------------------------------------------------------------- #
+# fix 2: an ongoing project stays fresh (recency uses now, not start_date)
+# --------------------------------------------------------------------------- #
+def test_ongoing_project_stays_fresh(seed_counts, session) -> None:
+    real_topic = "CRM・営業支援"
+    emp = 8
+    long_ago = (NOW - dt.timedelta(days=700)).date()
+    # A long-running project (started 700d ago), still ongoing (end_date NULL).
+    session.add(
+        Project(id=990010, subject="s", product="CRM導入支援", start_date=long_ago, end_date=None)
+    )
+    session.flush()
+    session.add(ProjectMember(project_id=990010, employee_id=emp, role="member"))
+    session.flush()
+
+    scorer = ExpertiseScorer(Repository(session))
+    ongoing_score = scorer.rank(real_topic, [emp], asker_id=None, now=NOW)["recommendations"][0][
+        "score"
+    ]
+
+    # Same project, but now marked as having ended 700 days ago. Only the recency
+    # input changes; all seed confounders are identical across the two runs.
+    proj = session.get(Project, 990010)
+    proj.end_date = long_ago
+    session.flush()
+    ended_score = scorer.rank(real_topic, [emp], asker_id=None, now=NOW)["recommendations"][0][
+        "score"
+    ]
+
+    assert ongoing_score > ended_score  # ongoing == current work, stays fresh
+
+
+# --------------------------------------------------------------------------- #
+# fix 3: an inferred skill is described as estimated, not self-declared
+# --------------------------------------------------------------------------- #
+def test_inferred_skill_reason_is_estimated(seed_counts, session) -> None:
+    session.add(
+        Skill(id="sk_inferred", employee_id=6, topic=TOPIC, level="上級", source="inferred")
+    )
+    session.flush()
+
+    scorer = ExpertiseScorer(Repository(session))
+    rec = scorer.rank(TOPIC, [6], asker_id=None, now=NOW)["recommendations"][0]
+
+    reason_types = {r["type"] for r in rec["reasons"]}
+    assert "skill" in reason_types  # inferred skill surfaces as a "skill" reason
+    assert "self" not in reason_types  # never mislabelled as self-declared
+    skill_reason = next(r for r in rec["reasons"] if r["type"] == "skill")
+    assert "推定" in skill_reason["detail"]
+    assert "自己申告" not in skill_reason["detail"]

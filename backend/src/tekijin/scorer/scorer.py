@@ -30,24 +30,22 @@ from tekijin.scorer.weights import (
     DAYS_PER_MONTH,
     DEFAULT_WEIGHTS,
     LOAD_WINDOW_DAYS,
+    RECENCY_SOURCE_TYPES,
     REGION_OF_BRANCH,
     Weights,
 )
 
-# Evidence types that decay with time. Certifications are excluded: a
-# qualification does not become less true as it ages, so it must not drag the
-# recency term down (technical-spec §5 ties recency to projects/answers).
-_RECENCY_SOURCE_TYPES = ("project", "answer")
-
-# Fixed order to break reason-contribution ties deterministically.
+# Fixed order to break reason-contribution ties deterministically. ``self`` is a
+# self-declared skill, ``skill`` an inferred one (distinct provenance wording).
 _REASON_TYPE_ORDER = {
     "cert": 0,
     "self": 1,
-    "answers": 2,
-    "project": 3,
-    "recency": 4,
-    "proximity": 5,
-    "load": 6,
+    "skill": 2,
+    "answers": 3,
+    "project": 4,
+    "recency": 5,
+    "proximity": 6,
+    "load": 7,
 }
 
 
@@ -79,16 +77,21 @@ class ExpertiseScorer:
 
         if top_k <= 0:
             raise ValueError(f"top_k must be positive, got {top_k}")
-        assert now.tzinfo is None, "now must be naive (matches stored timestamps)"
+        # A ValueError (not assert): fail fast even under python -O, and match the
+        # top_k check above.
+        if now.tzinfo is not None:
+            raise ValueError("now must be naive (matches stored timestamps)")
 
         # De-dupe (keep first order), then drop the asker (only when known).
         candidates = [
             pid for pid in dict.fromkeys(candidate_ids) if asker_id is None or pid != asker_id
         ]
 
+        # Load window is [now - 7d, now], both ends inclusive: the upper bound
+        # keeps offline eval's replayed ``now`` from counting future rows.
         since = now - dt.timedelta(days=LOAD_WINDOW_DAYS)
-        rec_counts = self._repo.recent_recommendation_counts(since, candidates)
-        ans_counts = self._repo.recent_answer_counts(since, candidates)
+        rec_counts = self._repo.recent_recommendation_counts(since, now, candidates)
+        ans_counts = self._repo.recent_answer_counts(since, now, candidates)
         answers_by_person = self._group_answers_by_person(self._topic_answers(topic))
         asker_branch = self._asker_branch(asker_id)
 
@@ -154,7 +157,7 @@ class ExpertiseScorer:
         weights = self._weights
 
         topic_fit = edge_weight(evidence)
-        recency_score = recency(now, self._recency_moments(evidence))
+        recency_score = recency(now, self._recency_moments(evidence, now))
         helpful_count = sum(1 for a in answers if a.was_helpful is True)
         reuse_total = sum(a.reuse_count or 0 for a in answers)
         quality = answer_quality(helpful_count, reuse_total, len(answers))
@@ -230,13 +233,21 @@ class ExpertiseScorer:
                 (topic_fit_share(("cert",)), {"type": "cert", "detail": "、".join(cert_names)})
             )
 
-        # Self-declared skill: surface it so cold-start candidates (chosen on a
-        # skill alone) are explained by their expertise signal, not just load.
+        # Skill evidence: surface it so cold-start candidates (chosen on a skill
+        # alone) are explained by their expertise signal, not just load — and
+        # word it by provenance so an inferred skill is never called "declared".
         if any(e.source_type == "self" for e in evidence):
             entries.append(
                 (
                     topic_fit_share(("self",)),
                     {"type": "self", "detail": f"自己申告スキル: {topic}"},
+                )
+            )
+        if any(e.source_type == "inferred" for e in evidence):
+            entries.append(
+                (
+                    topic_fit_share(("inferred",)),
+                    {"type": "skill", "detail": f"推定スキル: {topic}"},
                 )
             )
 
@@ -283,22 +294,31 @@ class ExpertiseScorer:
         return [reason for _, reason in entries]
 
     @staticmethod
-    def _recency_moments(evidence: Sequence[Evidence]) -> list[dt.date | dt.datetime]:
+    def _recency_moments(
+        evidence: Sequence[Evidence], now: dt.datetime
+    ) -> list[dt.date | dt.datetime]:
         """Timestamps of the time-decaying evidence (projects/answers).
 
-        Certifications are omitted on purpose — a qualification does not fade
-        with age, so it must not feed the recency term (see _RECENCY_SOURCE_TYPES).
+        Certifications are omitted on purpose — a qualification does not fade with
+        age, so it must not feed the recency term (RECENCY_SOURCE_TYPES). An
+        ongoing project (``timestamp is None``, i.e. no end_date) is treated as
+        current work: its moment is ``now``, so live engagements stay fresh rather
+        than decaying from their start date.
         """
 
-        return [
-            e.timestamp
-            for e in evidence
-            if e.timestamp is not None and e.source_type in _RECENCY_SOURCE_TYPES
-        ]
+        moments: list[dt.date | dt.datetime] = []
+        for e in evidence:
+            if e.source_type not in RECENCY_SOURCE_TYPES:
+                continue
+            if e.source_type == "project" and e.timestamp is None:
+                moments.append(now)  # ongoing project = current
+            elif e.timestamp is not None:
+                moments.append(e.timestamp)
+        return moments
 
     @classmethod
     def _recency_detail(cls, evidence: Sequence[Evidence], now: dt.datetime) -> str:
-        moments = cls._recency_moments(evidence)
+        moments = cls._recency_moments(evidence, now)
         if not moments:
             return ""
         newest = max(
