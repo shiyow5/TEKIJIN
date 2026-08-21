@@ -19,5 +19,7 @@ describe("formatConfidence", () => {
 
   it("returns a dash for non-finite input", () => {
     expect(formatConfidence(Number.NaN)).toBe("—");
+    expect(formatConfidence(Number.POSITIVE_INFINITY)).toBe("—");
+    expect(formatConfidence(Number.NEGATIVE_INFINITY)).toBe("—");
   });
 });

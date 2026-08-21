@@ -10,7 +10,9 @@
  * connection when a terminal event (done / message / error) arrives.
  *
  * The `EventSource` constructor is injectable via `options.eventSourceFactory`
- * so tests can drive a fake — jsdom has no `EventSource`.
+ * so tests can drive a fake — jsdom has no `EventSource`. `eventSourceFactory`
+ * and `baseUrl` are effect dependencies: pass reference-stable values (module
+ * constants or memoized) so the subscription is not torn down every render.
  */
 
 import type {
@@ -74,9 +76,13 @@ const EVENT_NAMES: readonly SseEventName[] = [
   "error",
 ] as const;
 
-const PARSE_ERROR = "ストリームの解析に失敗しました。";
 const STREAM_ERROR = "処理中にエラーが発生しました。";
 const CONNECTION_ERROR = "接続に問題が発生しました。";
+
+// WHATWG EventSource.readyState values (0 CONNECTING, 1 OPEN, 2 CLOSED). Kept as
+// a literal so the hook does not depend on a global `EventSource` (absent in
+// jsdom / SSR).
+const READY_STATE_CLOSED = 2;
 
 const INITIAL_STATE: EventStreamState = { events: [], terminal: false };
 
@@ -133,12 +139,19 @@ export function useEventStream(
     };
 
     const onEvent = (event: MessageEvent) => {
+      // A native transport `error` also dispatches to the "error" listener but
+      // carries no string `data`; let it fall through to `onerror` instead of
+      // trying to parse `undefined`.
+      if (typeof event.data !== "string") {
+        return;
+      }
       const name = event.type as SseEventName;
       let data: unknown;
       try {
         data = JSON.parse(event.data);
       } catch {
-        setState((prev) => ({ ...prev, error: PARSE_ERROR }));
+        // Malformed payload for a single event: skip it. Do not latch an error
+        // banner or close — a later well-formed event still renders.
         return;
       }
       setState((prev) => reduceEvent(prev, name, data));
@@ -152,12 +165,20 @@ export function useEventStream(
     }
 
     source.onerror = () => {
-      // A native connection error. Ignore it after a normal terminal close (the
-      // browser fires onerror when the server ends the stream) or if an error is
-      // already shown; the browser retries transient failures on its own.
-      setState((prev) =>
-        prev.terminal || prev.error ? prev : { ...prev, error: CONNECTION_ERROR },
-      );
+      // Native connection error. The browser auto-reconnects transient failures
+      // (readyState CONNECTING) — the backend legitimately closes the HTTP
+      // segment at a followup/send interrupt and the stream resumes on /answer,
+      // so that is NOT fatal. Only a genuinely CLOSED stream is surfaced. Ignore
+      // once terminal, or when an error is already shown.
+      setState((prev) => {
+        if (prev.terminal || prev.error) {
+          return prev;
+        }
+        if (source.readyState === READY_STATE_CLOSED) {
+          return { ...prev, error: CONNECTION_ERROR };
+        }
+        return prev; // CONNECTING: transient reconnect, not fatal
+      });
     };
 
     return () => {

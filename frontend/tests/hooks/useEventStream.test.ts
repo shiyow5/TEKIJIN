@@ -2,12 +2,23 @@ import { useEventStream } from "@/hooks/useEventStream";
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-/** Minimal fake EventSource — jsdom has none. */
+/**
+ * Minimal fake EventSource — jsdom has none. Models the real behaviour the hook
+ * relies on: named server events carry string `data`; a native transport error
+ * carries NO data and is dispatched to both `onerror` and any `"error"`
+ * listener; `readyState` tracks CONNECTING(0)/OPEN(1)/CLOSED(2); `close()`
+ * moves it to CLOSED.
+ */
 class FakeEventSource {
+  static readonly CONNECTING = 0;
+  static readonly OPEN = 1;
+  static readonly CLOSED = 2;
+
   url: string;
+  readyState = FakeEventSource.OPEN;
   closed = false;
   onerror: ((ev: Event) => void) | null = null;
-  private listeners: Record<string, ((ev: MessageEvent) => void)[]> = {};
+  private listeners: Record<string, ((ev: Event) => void)[]> = {};
 
   constructor(url: string) {
     this.url = url;
@@ -15,20 +26,22 @@ class FakeEventSource {
 
   addEventListener(type: string, cb: EventListener) {
     const bucket = this.listeners[type] ?? [];
-    bucket.push(cb as unknown as (ev: MessageEvent) => void);
+    bucket.push(cb as unknown as (ev: Event) => void);
     this.listeners[type] = bucket;
   }
 
   removeEventListener(type: string, cb: EventListener) {
     this.listeners[type] = (this.listeners[type] ?? []).filter(
-      (fn) => fn !== (cb as unknown as (ev: MessageEvent) => void),
+      (fn) => fn !== (cb as unknown as (ev: Event) => void),
     );
   }
 
   close() {
     this.closed = true;
+    this.readyState = FakeEventSource.CLOSED;
   }
 
+  /** Dispatch a named server event with JSON string data. */
   emit(type: string, data: unknown) {
     const event = { type, data: JSON.stringify(data) } as MessageEvent;
     for (const cb of this.listeners[type] ?? []) {
@@ -36,6 +49,7 @@ class FakeEventSource {
     }
   }
 
+  /** Dispatch a named server event with an arbitrary (possibly invalid) body. */
   emitRaw(type: string, raw: string) {
     const event = { type, data: raw } as MessageEvent;
     for (const cb of this.listeners[type] ?? []) {
@@ -43,8 +57,18 @@ class FakeEventSource {
     }
   }
 
-  triggerError() {
-    this.onerror?.(new Event("error"));
+  /**
+   * Dispatch a native transport error: a plain Event (no `data`) delivered to
+   * `onerror` and the `"error"` listener, with `readyState` set to CONNECTING
+   * (browser is retrying) or CLOSED (stream is really dead).
+   */
+  nativeError(readyState: number) {
+    this.readyState = readyState;
+    const event = new Event("error");
+    this.onerror?.(event);
+    for (const cb of this.listeners.error ?? []) {
+      cb(event);
+    }
   }
 }
 
@@ -132,7 +156,7 @@ describe("useEventStream", () => {
     expect(source().closed).toBe(false);
   });
 
-  it("surfaces a generic error and closes on an error event", () => {
+  it("surfaces a generic error and closes on a server error event (has data)", () => {
     const { view, source } = setup();
     act(() => source().emit("error", { error: "boom" }));
 
@@ -141,25 +165,33 @@ describe("useEventStream", () => {
     expect(source().closed).toBe(true);
   });
 
-  it("surfaces a parse error when event data is not JSON", () => {
+  it("ignores a malformed event without latching an error or closing", () => {
     const { view, source } = setup();
     act(() => source().emitRaw("understood", "not-json"));
 
-    expect(view.result.current.error).toBeTruthy();
+    expect(view.result.current.error).toBeUndefined();
     expect(view.result.current.understood).toBeUndefined();
+    expect(view.result.current.terminal).toBe(false);
+    expect(source().closed).toBe(false);
   });
 
-  it("sets a connection error on onerror before any terminal", () => {
+  it("does not error on a native transport error while reconnecting (CONNECTING)", () => {
     const { view, source } = setup();
-    act(() => source().triggerError());
+    act(() => source().nativeError(FakeEventSource.CONNECTING));
+    expect(view.result.current.error).toBeUndefined();
+  });
+
+  it("sets a connection error when a native error leaves the stream CLOSED", () => {
+    const { view, source } = setup();
+    act(() => source().nativeError(FakeEventSource.CLOSED));
     expect(view.result.current.error).toBeTruthy();
   });
 
-  it("ignores onerror after a terminal event (normal server close)", () => {
+  it("ignores a native error after a terminal event (normal server close)", () => {
     const { view, source } = setup();
     act(() => source().emit("done", { status: "sent" }));
-    act(() => source().triggerError());
-    // terminal stays, no error overwrite
+    act(() => source().nativeError(FakeEventSource.CLOSED));
+
     expect(view.result.current.terminal).toBe(true);
     expect(view.result.current.error).toBeUndefined();
   });

@@ -1,5 +1,6 @@
 import { ProcessingScreen } from "@/components/ProcessingScreen";
-import type { EventStreamState } from "@/hooks/useEventStream";
+import { ApiError } from "@/lib/api-client";
+import type { EventStreamState, StreamEvent } from "@/hooks/useEventStream";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -11,6 +12,15 @@ vi.mock("next/navigation", () => ({
 const postAnswerMock = vi.fn();
 vi.mock("@/lib/api-client", () => ({
   postAnswer: (...args: unknown[]) => postAnswerMock(...args),
+  // Real-shaped ApiError so `err instanceof ApiError` + `.status` work.
+  ApiError: class ApiError extends Error {
+    status: number;
+    constructor(status: number, message?: string) {
+      super(message);
+      this.name = "ApiError";
+      this.status = status;
+    }
+  },
 }));
 
 function state(partial: Partial<EventStreamState>): EventStreamState {
@@ -118,22 +128,77 @@ describe("ProcessingScreen", () => {
     expect(screen.queryByTestId("active-step")).not.toBeInTheDocument();
   });
 
-  it("renders the draft step and an empty recommend result", () => {
-    renderScreen(
-      state({
-        recommend: { recommendations: [] },
-        draft: { draft: "以下の依頼文でいかがでしょうか。" },
-      }),
-    );
-    expect(screen.getByText("候補を0名見つけました")).toBeInTheDocument();
-    expect(screen.getByText("該当者が見つかりませんでした")).toBeInTheDocument();
+  it("suppresses the recommend step and result CTA for an empty recommendation set", () => {
+    renderScreen(state({ recommend: { recommendations: [] } }));
+    expect(screen.queryByText(/候補を/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "結果を見る" })).not.toBeInTheDocument();
+  });
+
+  it("renders the draft step when a draft has content", () => {
+    renderScreen(state({ draft: { draft: "以下の依頼文でいかがでしょうか。" } }));
     expect(screen.getByText("依頼文を作成しました")).toBeInTheDocument();
     expect(screen.getByText("以下の依頼文でいかがでしょうか。")).toBeInTheDocument();
+  });
+
+  it("suppresses the draft step when the draft is empty", () => {
+    renderScreen(state({ draft: { draft: "" } }));
+    expect(screen.queryByText("依頼文を作成しました")).not.toBeInTheDocument();
+  });
+
+  it("hides the followup form once the stream advances past it (ack-loss recovery)", () => {
+    const events: StreamEvent[] = [
+      { event: "followup", data: { question: "製品名を教えてください", missing: [] } },
+      { event: "route", data: { route: "person", reason: "詳しい人がいます", confidence: 0.7 } },
+    ];
+    renderScreen(
+      state({
+        events,
+        followup: { question: "製品名を教えてください", missing: [] },
+        route: { route: "person", reason: "詳しい人がいます", confidence: 0.7 },
+      }),
+    );
+    expect(screen.queryByLabelText("補足の回答")).not.toBeInTheDocument();
+    expect(screen.getByText("回答の経路を判断しました")).toBeInTheDocument();
+  });
+
+  it("treats a 409 from postAnswer as success and closes the form", async () => {
+    postAnswerMock.mockRejectedValueOnce(new ApiError(409, "conflict"));
+    renderScreen(state({ followup: { question: "詳細を教えてください", missing: [] } }));
+
+    fireEvent.change(screen.getByLabelText("補足の回答"), { target: { value: "詳細です" } });
+    fireEvent.click(screen.getByRole("button", { name: "回答する" }));
+
+    await waitFor(() => expect(postAnswerMock).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByText("詳細を教えてください")).not.toBeInTheDocument());
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("stops showing the in-progress step once the run is done", () => {
     renderScreen(state({ terminal: true, done: { status: "sent" } }));
     expect(screen.queryByTestId("active-step")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "結果を見る" })).toBeInTheDocument();
+  });
+
+  it("opens a single EventSource via the live junction when no streamState is injected", () => {
+    const urls: string[] = [];
+    const factory = (url: string) => {
+      urls.push(url);
+      return {
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        close: () => {},
+        onerror: null,
+        readyState: 1,
+      } as unknown as EventSource;
+    };
+    render(
+      <ProcessingScreen
+        sessionId="abc-123"
+        baseUrl="http://api.test"
+        eventSourceFactory={factory}
+      />,
+    );
+    expect(urls).toEqual(["http://api.test/events/abc-123"]);
+    expect(screen.getByText("最適な回答者を探しています…")).toBeInTheDocument();
   });
 });

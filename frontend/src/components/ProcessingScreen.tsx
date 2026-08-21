@@ -12,7 +12,7 @@
  */
 
 import { FollowupForm } from "@/components/FollowupForm";
-import { postAnswer } from "@/lib/api-client";
+import { ApiError, postAnswer } from "@/lib/api-client";
 import { formatConfidence } from "@/lib/format";
 import { type EventStreamState, useEventStream } from "@/hooks/useEventStream";
 import { useRouter } from "next/navigation";
@@ -22,6 +22,10 @@ export interface ProcessingScreenProps {
   sessionId: string;
   /** Test seam: inject a pre-built stream state instead of subscribing. */
   streamState?: EventStreamState;
+  /** Test seam: inject the EventSource constructor for the live subscription. */
+  eventSourceFactory?: (url: string) => EventSource;
+  /** Test seam: override the API base URL for the live subscription. */
+  baseUrl?: string;
 }
 
 interface Step {
@@ -68,30 +72,56 @@ function buildSteps(stream: EventStreamState): Step[] {
     });
   }
 
-  if (stream.recommend) {
+  // Only surface the recommend step when there is at least one candidate. The
+  // backend emits an empty `recommend` before a terminal `no_candidate` message;
+  // an empty result is left to that terminal message, not shown as a step/CTA.
+  if (stream.recommend && stream.recommend.recommendations.length > 0) {
     const recs = stream.recommend.recommendations;
     steps.push({
       id: "recommend",
       title: `候補を${recs.length}名見つけました`,
-      details:
-        recs.length > 0 ? [recs.map((r) => r.name).join("、")] : ["該当者が見つかりませんでした"],
+      details: [recs.map((r) => r.name).join("、")],
     });
   }
 
-  if (stream.draft) {
+  // Suppress an empty draft step (no content yet).
+  if (stream.draft?.draft) {
     steps.push({
       id: "draft",
       title: "依頼文を作成しました",
-      details: stream.draft.draft ? [stream.draft.draft] : [],
+      details: [stream.draft.draft],
     });
   }
 
   return steps;
 }
 
-export function ProcessingScreen({ sessionId, streamState }: ProcessingScreenProps) {
+/**
+ * True once the stream has moved past the most recent `followup` (a later event
+ * arrived). Treated as a success signal so the reply box closes even if the
+ * /answer ack was lost — the run has demonstrably resumed.
+ */
+function isFollowupSuperseded(stream: EventStreamState): boolean {
+  const names = stream.events.map((e) => e.event);
+  const lastFollowup = names.lastIndexOf("followup");
+  if (lastFollowup === -1) {
+    return false;
+  }
+  return names.length - 1 > lastFollowup;
+}
+
+export function ProcessingScreen({
+  sessionId,
+  streamState,
+  eventSourceFactory,
+  baseUrl,
+}: ProcessingScreenProps) {
   const router = useRouter();
-  const liveStream = useEventStream(sessionId, { enabled: streamState === undefined });
+  const liveStream = useEventStream(sessionId, {
+    enabled: streamState === undefined,
+    eventSourceFactory,
+    baseUrl,
+  });
   const stream = streamState ?? liveStream;
 
   const [answered, setAnswered] = useState(false);
@@ -106,8 +136,12 @@ export function ProcessingScreen({ sessionId, streamState }: ProcessingScreenPro
   }, [stream.followup]);
 
   const steps = buildSteps(stream);
-  const showFollowup = Boolean(stream.followup) && !answered && !stream.terminal;
-  const hasResult = Boolean(stream.recommend) || Boolean(stream.done);
+  const hasRecommendations = (stream.recommend?.recommendations.length ?? 0) > 0;
+  const hasResult = hasRecommendations || Boolean(stream.done);
+  // Hide the reply box once answered, once the run terminates, or once the
+  // stream has advanced past the followup (ack-loss recovery).
+  const showFollowup =
+    Boolean(stream.followup) && !answered && !stream.terminal && !isFollowupSuperseded(stream);
   const showActiveStep = !stream.terminal && !stream.error && !showFollowup;
 
   async function handleReply(reply: string) {
@@ -116,8 +150,14 @@ export function ProcessingScreen({ sessionId, streamState }: ProcessingScreenPro
     try {
       await postAnswer({ session_id: sessionId, reply });
       setAnswered(true);
-    } catch {
-      setFollowupError(FOLLOWUP_ERROR);
+    } catch (err) {
+      // 409 = the run was already resumed (a lost/duplicate ack); treat as
+      // success and close the form rather than showing an error.
+      if (err instanceof ApiError && err.status === 409) {
+        setAnswered(true);
+      } else {
+        setFollowupError(FOLLOWUP_ERROR);
+      }
     } finally {
       setFollowupSubmitting(false);
     }
@@ -152,7 +192,12 @@ export function ProcessingScreen({ sessionId, streamState }: ProcessingScreenPro
         </p>
       </header>
 
-      <section aria-label="AIの思考プロセス" className="flex flex-col gap-md">
+      <section
+        aria-label="AIの思考プロセス"
+        aria-live="polite"
+        aria-atomic="false"
+        className="flex flex-col gap-md"
+      >
         <ol className="flex flex-col gap-sm">
           {steps.map((step) => (
             <li
