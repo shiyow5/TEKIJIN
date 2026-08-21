@@ -1,70 +1,112 @@
-# eval/ — 評価セット（eval_queries）
+# eval/ — 評価セット v2
 
-推薦精度と経路判定精度を計測するための正解ラベル付きクエリ集。
+推薦精度・検索精度・異常系対応を計測するための正解ラベル付きクエリ集。
 `docs/specs/technical-spec.md` §7「評価計画」に対応する。
 
-生成: [`scripts/build_eval.py`](../../../scripts/build_eval.py)（`random.seed(42)` で再現可能）。
-`fixtures/synthetic/` の合成データ（#23 で生成）を入力に再作成する。
+**設計の背景と限界は [`fixtures/synthetic/README.md`](../README.md) の「評価セット（v2 / Issue #43）」節に集約してある。**
+ここではファイルの構成と使い方だけを書く。
 
 ```bash
-python3 scripts/build_eval.py
+python3 scripts/build_eval_v2.py      # 評価セットを生成（random.seed(42) で再現可能）
+python3 scripts/eval_baselines.py     # ベースライン4本を測る
+python3 scripts/eval_label_agreement.py  # 自動 gold と人手ラベルの一致度を測る
 ```
 
 ---
 
-## `eval_queries.json` のスキーマ（40件・JSON配列）
+## ファイル
+
+| ファイル | 件数 | 中身 | 生成 |
+|---|---|---|---|
+| `eval_person.json` | 50 | **主指標**。質問 → 正しい専門家 | `scripts/build_eval_v2.py` |
+| `eval_retrieval.json` | 45 | 層1。質問 → 正しい根拠チャンク。**埋め込みモデルの横並び比較用** | 同上 |
+| `eval_robustness.json` | 20 | 異常系。**全件 abstain（答えない・聞き返す）が正解** | 同上 |
+| `topic_experts_human.json` | 67トピック | **人手ラベル**。topic → 専門家(`employee_id`) | `scripts/import_human_labels.py` |
+| `eval_queries.json` | 40 | **非推奨**（#26）。比較のため残置 | `scripts/build_eval.py` |
+
+---
+
+## `eval_person.json` のスキーマ
 
 | フィールド | 型 | 説明 |
 |---|---|---|
-| `id` | int | 連番（1〜40） |
-| `query` | string | 自然文の質問（トピックに関する現実的な相談文）。実在の固有名詞は含まない |
-| `topics` | string[] | 質問トピック（実在の22トピック語彙内、各1件） |
-| `correct_experts` | int[] | そのトピックの専門家 `employee_id`（2〜4名） |
-| `route` | string | 正解経路ラベル: `person`（主線）/ `prior_answer`（補助）/ `document`（格下げ） |
+| `id` | int | 連番（1〜50） |
+| `query` | string | 自然文の質問。**L2以上はトピック語を含まない**（症状で書く） |
+| `difficulty` | string | `L1`（易・トピック語明示）/ `L2`（症状のみ）/ `L3`（複数トピック横断・商材名のみ）/ `L4`（専門家不在） |
+| `gold_topics` | string[] | 正解トピック（22トピック語彙）。**クエリには書かれていない**。C1 の評価に使う。体系外の項目は空 |
+| `gold_experts` | int[] | 正解の専門家 `employee_id`。順不同。**層2の主指標 Recall@3 はこれで測る** |
+| `gold_route` | string | `person`（主線）/ `prior_answer`（補助）/ `document`（格下げ）/ `none`（答えない） |
+| `expect_abstain` | bool | `true` なら「わかりません＋人へエスカレーション」が正解 |
+| `constraint` | object\|null | 拠点などの制約（例 `{"branch": "大阪"}`）。無視すると外れる |
+| `source_topic` | string\|null | 人手ラベル由来の項目における PR #46 側のトピック名 |
+| `label_source` | string | `auto:project_daily` / `authored` / `human:pr46` |
+| `note` | string | その項目の意図 |
+
+難易度の内訳: L1 10件 / **L2 25件**（自動15＋人手10）/ L3 10件 / L4 5件。
+
+`eval_retrieval.json` は `eval_person.json` の L1〜L3 と `id` で1対1に対応する
+（`gold_chunks` は `doc:` / `proj:` / `profile:` のプレフィックス付き）。
+人を外したとき、検索が悪いのかスコアリングが悪いのかを切り分けるために使う。
+
+`eval_robustness.json` の `category` は
+`out_of_scope`(5) / `pii`(4) / `insufficient`(5) / `no_expert`(3) / `adversarial`(3)。
 
 ---
 
-## `correct_experts` の導出方法
+## `gold_experts` の導出方法（**v2 で変わった。重要**）
 
-**`answers/answers.json` を `topic` でグルーピングし、そのトピックの `responder_id` 集合を専門家とする。**
-過去に実際にそのトピックへ回答した人＝行動裏付けのある専門性、という考え方。
+**`projects`（lead=1.0 / member=0.6）と `daily_reports`（0.15）からのみ導出する。
+`answers` は使わない。**
 
-1. answers を topic ごとに集計し、responder_id を「回答実績の多い順 → id 昇順」で並べる。
-2. 上位最大4名を `correct_experts` とする（各トピックの実 responder は2〜4名に収まる）。
+### なぜ answers を使わないか
 
-> #23 の過去QA生成時、`answers.responder_id` は各トピックの上位専門家（projects/daily の
-> 行動データから推定）から選ばれている。そのため answers→topic→responder の復元が、
-> そのまま「行動データに裏打ちされた correct_experts」になる。
+旧 `eval_queries.json`（#26）は `answers` を `topic` で集計して `responder_id` を正解にしていた。
+ところが専門性推定（`analysis/15_専門性推定とグラフ成長.md`）も**同じ answers を最重量の証拠**
+（有用回答1.0 / 過去回答0.7）に使う。つまり**正解と入力が同じ源から出ていた**。
 
----
+結果、旧セットでは「**answers を topic で数えるだけ**」の20行の実装が
+`correct_experts` と **40/40（100%）一致**した。スコアラーの良し悪しを一切測れていない。
 
-## route ラベルの設計（経路判定精度用）
+v2 では導出経路を分けたので、同じベースラインの Recall@3 は **0.437** まで落ちる。
 
-| route | 意味 | 件数 | クエリの性質 |
-|---|---|---|---|
-| `person` | 主線: 人に取り次ぐのが適切 | 24 | 現場判断が要る相談。既定のフォールバック先 |
-| `prior_answer` | 補助: 過去回答の提示で足りる | 10 | そのトピックに近い過去回答が明確に存在する相談 |
-| `document` | 格下げ: 文書の場所を指す | 6 | 手順書・FAQ（`documents/documents.json`）に記載がある種類の質問 |
+### 人手ラベルによる外部検証
 
-主線（person）を多めにしている（`technical-spec.md` §6「人への取次ぎが常にフォールバック」）。
-`document` ラベルは `documents/documents.json` が実際に扱うトピックにのみ付与している。
+自動導出だけでは「合成データの中の別ルール」でしかない。
+PR #46 で別メンバーが案件・日報・チャットを**人手で読んで**付けたラベルと突き合わせている。
 
----
+```
+平均 Jaccard: 0.71 / 自動 gold が人手 gold に含まれる率（被覆）: 0.80 / 完全一致 10/22
+```
 
-## 想定指標（technical-spec §7）
-
-| 指標 | 目標 | 対象 |
-|---|---|---|
-| Top-1 Accuracy | 70% | `correct_experts` の1位一致 |
-| Recall@3 | 90% | 上位3名に `correct_experts` が含まれる割合 |
-| MRR | 0.75 | 正解の順位の質 |
-| 経路判定精度 | 80% | `route`（person/prior_answer/document）の一致率 |
+このラベルは `topic_experts_human.json` に収録し、うち10トピックは `eval_person.json` の L2 に採用している
+（`label_source: "human:pr46"`）。
 
 ---
 
-## 注意
+## ベースライン（`python3 scripts/eval_baselines.py`）
 
-- **合成データのみ。** 実在の社員・顧客・案件・固有名詞は含まない。実データは受領しない前提。
-- `correct_experts` は `employee_id`（`people/employees.json` の `id`）で表現し、実名ラベルは持たない。
-- クエリ本文はトピック主題＋経路別の言い回しで生成したテンプレートベース。表現の多様性は限定的で、
-  ロジック検証を主目的とする（自然言語の頑健性評価には別途より自然な文面が要る）。
+**本システムの数字は、この表との差分でしか意味を持たない。モデル比較の前にまずここを測る。**
+
+| baseline | L1 | L2 | L3 | 全体 | 意味 |
+|---|---|---|---|---|---|
+| random | 0.100 | 0.113 | 0.150 | 0.119 | 下限 |
+| **answers_count** | 0.900 | **0.287** | 0.350 | **0.437** | **リークの残量**（旧セットでは 1.000） |
+| lexical_profile | 0.567 | 0.047 | 0.067 | 0.167 | 語彙一致のみ。埋め込みはこれを超えないと採用理由が無い |
+| lexical_answers | 0.400 | 0.220 | 0.100 | 0.233 | 強めの語彙ベースライン。実質的な打倒目標 |
+
+*(Recall@3。L4 は abstain 判定なので Recall の対象外)*
+
+**必ず層別に出す。** 総合 0.8 でも L2 が 0.5 なら実力は 0.5。
+
+---
+
+## 変更するときの注意
+
+`backend/tests/test_eval_quality.py` が、このセットが「自分に甘いテスト」に戻っていないことを検証している。
+
+- L2/L3 のクエリにトピック語が混入していない
+- 表層キーワードによる route 的中率が、多数クラスのベースライン+10pt を超えない
+- 「answers を数えるだけ」ベースラインの Recall@3 < 0.6
+- 独立サンプル数 >= 25
+
+**クエリを足すときは、トピック語をクエリに書かないこと。** そこを崩すと評価が飽和して差が出なくなる。
