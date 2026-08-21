@@ -1,0 +1,903 @@
+[
+  {
+    "id": 1,
+    "query": "購買・仕入れの件でご相談です。取引先との値段交渉が担当者任せで、条件がバラバラだそうです。整理の仕方を相談したいです。",
+    "difficulty": "L1",
+    "gold_topics": [
+      "購買・仕入れ"
+    ],
+    "gold_chunks": [
+      "doc:doc_021",
+      "profile:19",
+      "profile:35",
+      "profile:36",
+      "profile:37"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 2,
+    "query": "サーバー・インフラ運用について詳しい方を探しています。お客様の機材が古く、止まったときに誰も直せない状態だそうです。負担を下げる打ち手を相談したいです。",
+    "difficulty": "L1",
+    "gold_topics": [
+      "サーバー・インフラ運用"
+    ],
+    "gold_chunks": [
+      "doc:doc_004",
+      "doc:doc_026",
+      "profile:14",
+      "profile:15",
+      "profile:18",
+      "profile:33",
+      "proj:15",
+      "proj:16",
+      "proj:22",
+      "proj:27",
+      "proj:9"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 3,
+    "query": "SNS運用まわりで相談先を知りたいです。会社のアカウントを続けているのに反応が伸びないそうです。立て直しを相談できる方を探しています。",
+    "difficulty": "L1",
+    "gold_topics": [
+      "SNS運用"
+    ],
+    "gold_chunks": [
+      "doc:doc_016",
+      "profile:22",
+      "profile:23",
+      "profile:4",
+      "profile:5",
+      "proj:11",
+      "proj:61",
+      "proj:63",
+      "proj:72",
+      "proj:78"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 4,
+    "query": "契約管理の相談に乗ってもらえる方はいますか。取引先との書面の期限を誰も把握しておらず、自動更新に気づかなかったそうです。どう整えますか。",
+    "difficulty": "L1",
+    "gold_topics": [
+      "契約管理"
+    ],
+    "gold_chunks": [
+      "doc:doc_013",
+      "profile:1",
+      "profile:2",
+      "profile:21",
+      "profile:3",
+      "proj:14",
+      "proj:25",
+      "proj:30",
+      "proj:31",
+      "proj:35"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 5,
+    "query": "ネットワーク・VPNの件でご相談です。在宅の社員だけ、夕方になると社内の仕組みに入れなくなります。どこから切り分ければよいでしょうか。",
+    "difficulty": "L1",
+    "gold_topics": [
+      "ネットワーク・VPN"
+    ],
+    "gold_chunks": [
+      "doc:doc_001",
+      "doc:doc_023",
+      "profile:21",
+      "profile:24",
+      "profile:3",
+      "profile:6",
+      "proj:10",
+      "proj:24",
+      "proj:32",
+      "proj:62",
+      "proj:75"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 6,
+    "query": "人事・採用について詳しい方を探しています。人が採れず、入っても評価の基準が曖昧で辞めてしまうそうです。制度から見直したいです。",
+    "difficulty": "L1",
+    "gold_topics": [
+      "人事・採用"
+    ],
+    "gold_chunks": [
+      "doc:doc_019",
+      "profile:26",
+      "profile:27",
+      "profile:8",
+      "profile:9"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 7,
+    "query": "広報・PRまわりで相談先を知りたいです。新製品を出すのに、社外への発信の段取りが決まっていません。どう進めればよいでしょうか。",
+    "difficulty": "L1",
+    "gold_topics": [
+      "広報・PR"
+    ],
+    "gold_chunks": [
+      "doc:doc_022",
+      "profile:20",
+      "profile:38",
+      "profile:39",
+      "profile:40"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 8,
+    "query": "経理・決算の相談に乗ってもらえる方はいますか。月末の締め作業が毎回深夜までかかっているそうです。効率化の相談をしたいです。",
+    "difficulty": "L1",
+    "gold_topics": [
+      "経理・決算"
+    ],
+    "gold_chunks": [
+      "doc:doc_018",
+      "profile:10",
+      "profile:11",
+      "profile:28",
+      "profile:29"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 9,
+    "query": "システム開発・APIの件でご相談です。他社の仕組みとデータをやり取りする設計で迷っています。方針を相談したいです。",
+    "difficulty": "L1",
+    "gold_topics": [
+      "システム開発・API"
+    ],
+    "gold_chunks": [
+      "doc:doc_008",
+      "doc:doc_030",
+      "profile:13",
+      "profile:14",
+      "profile:15",
+      "profile:16"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 10,
+    "query": "問い合わせ・ヘルプデスク運用について詳しい方を探しています。お客様からの連絡が方々に届いて取りこぼしが出ています。窓口の整理を提案したいです。",
+    "difficulty": "L1",
+    "gold_topics": [
+      "問い合わせ・ヘルプデスク運用"
+    ],
+    "gold_chunks": [
+      "doc:doc_017",
+      "profile:17",
+      "profile:18",
+      "profile:33",
+      "profile:34",
+      "proj:23",
+      "proj:26",
+      "proj:5",
+      "proj:7",
+      "proj:74"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 11,
+    "query": "入社してくる人の端末と権限の準備が毎回バタバタします。標準の段取りを知りたいです。できれば大阪の拠点で動ける方だと助かります。",
+    "difficulty": "L2",
+    "gold_topics": [
+      "社内IT・ヘルプデスク"
+    ],
+    "gold_chunks": [
+      "doc:doc_003",
+      "doc:doc_025",
+      "profile:18",
+      "profile:6",
+      "proj:100",
+      "proj:23",
+      "proj:26",
+      "proj:74",
+      "proj:84"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 12,
+    "query": "業務の中心で動いている仕組みが古く、入れ替えを提案したいのですが、どこから切り出せばよいでしょうか。できれば本社の拠点で動ける方だと助かります。",
+    "difficulty": "L2",
+    "gold_topics": [
+      "基幹システム"
+    ],
+    "gold_chunks": [
+      "doc:doc_006",
+      "doc:doc_028",
+      "profile:2",
+      "profile:3",
+      "proj:105",
+      "proj:107",
+      "proj:42",
+      "proj:47",
+      "proj:98"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 13,
+    "query": "利用が集中する時間帯だけ画面がなかなか返ってきません。どこから調べるべきでしょうか。できれば本社の拠点で動ける方だと助かります。",
+    "difficulty": "L2",
+    "gold_topics": [
+      "パフォーマンスチューニング"
+    ],
+    "gold_chunks": [
+      "doc:doc_009",
+      "profile:13",
+      "profile:14",
+      "proj:59",
+      "proj:66",
+      "proj:73",
+      "proj:79",
+      "proj:92"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 14,
+    "query": "通販の画面でカゴ落ちが多いと言われました。支払い方法の選択肢が原因なのでしょうか。できれば本社の拠点で動ける方だと助かります。",
+    "difficulty": "L2",
+    "gold_topics": [
+      "ECサイト構築"
+    ],
+    "gold_chunks": [
+      "doc:doc_011",
+      "profile:13",
+      "profile:14",
+      "proj:12",
+      "proj:24",
+      "proj:57",
+      "proj:64",
+      "proj:71"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 15,
+    "query": "スマホ向けに作ったものが現場でほとんど使われていません。改善の当たりを知りたいです。できれば本社の拠点で動ける方だと助かります。",
+    "difficulty": "L2",
+    "gold_topics": [
+      "モバイルアプリ開発"
+    ],
+    "gold_chunks": [
+      "doc:doc_010",
+      "profile:13",
+      "profile:14",
+      "proj:17",
+      "proj:19",
+      "proj:33",
+      "proj:52",
+      "proj:6"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 16,
+    "query": "自社の設備で動かしている仕組みを、外部の基盤へ段階的に移したいというご相談です。進め方を教えてください。",
+    "difficulty": "L2",
+    "gold_topics": [
+      "クラウド移行"
+    ],
+    "gold_chunks": [
+      "doc:doc_005",
+      "doc:doc_027",
+      "profile:13",
+      "profile:14",
+      "profile:15",
+      "profile:16",
+      "proj:16",
+      "proj:43",
+      "proj:69",
+      "proj:9",
+      "proj:99"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 17,
+    "query": "毎月の集計を担当者が手で作っていて、その人が休むと止まるそうです。改善提案の切り口を知りたいです。",
+    "difficulty": "L2",
+    "gold_topics": [
+      "業務効率化コンサル"
+    ],
+    "gold_chunks": [
+      "doc:doc_014",
+      "profile:1",
+      "profile:2",
+      "profile:21",
+      "profile:3",
+      "proj:2",
+      "proj:21",
+      "proj:28",
+      "proj:29",
+      "proj:8"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 18,
+    "query": "お客様から「今の防御機器のサポートが来年で切れる」と言われました。何をどう提案すべきか分かりません。",
+    "difficulty": "L2",
+    "gold_topics": [
+      "セキュリティ"
+    ],
+    "gold_chunks": [
+      "doc:doc_002",
+      "doc:doc_024",
+      "profile:25",
+      "profile:33",
+      "profile:6",
+      "profile:7",
+      "proj:101",
+      "proj:15"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 19,
+    "query": "部署ごとに数字の持ち方がバラバラで、全社で集計できないと相談されました。何から手を付けますか。",
+    "difficulty": "L2",
+    "gold_topics": [
+      "データ基盤・分析"
+    ],
+    "gold_chunks": [
+      "doc:doc_007",
+      "doc:doc_029",
+      "profile:13",
+      "profile:14",
+      "profile:15",
+      "profile:16",
+      "proj:3",
+      "proj:38",
+      "proj:4",
+      "proj:51",
+      "proj:60"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 20,
+    "query": "お客様の担当者情報が個人のExcelに散らばっていて引き継げないそうです。提案の型を教えてください。",
+    "difficulty": "L2",
+    "gold_topics": [
+      "CRM・営業支援"
+    ],
+    "gold_chunks": [
+      "doc:doc_012",
+      "profile:1",
+      "profile:2",
+      "profile:21",
+      "profile:3",
+      "proj:10",
+      "proj:13",
+      "proj:20",
+      "proj:33",
+      "proj:36"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 21,
+    "query": "出稿にお金をかけているのに問い合わせが増えないと言われました。何を見直せばよいでしょうか。",
+    "difficulty": "L2",
+    "gold_topics": [
+      "Webマーケティング・広告"
+    ],
+    "gold_chunks": [
+      "doc:doc_015",
+      "profile:22",
+      "profile:23",
+      "profile:4",
+      "profile:5",
+      "proj:1",
+      "proj:18",
+      "proj:37",
+      "proj:39",
+      "proj:40"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 22,
+    "query": "取引先から送られてきた文面を法務の目で見てほしいのですが、社内の決まりも古いままだそうです。",
+    "difficulty": "L2",
+    "gold_topics": [
+      "総務・法務"
+    ],
+    "gold_chunks": [
+      "doc:doc_020",
+      "profile:12",
+      "profile:30",
+      "profile:31",
+      "profile:32"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 23,
+    "query": "取引先との値段交渉が担当者任せで、条件がバラバラだそうです。整理の仕方を相談したいです。",
+    "difficulty": "L2",
+    "gold_topics": [
+      "購買・仕入れ"
+    ],
+    "gold_chunks": [
+      "doc:doc_021",
+      "profile:19",
+      "profile:35",
+      "profile:36",
+      "profile:37"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 24,
+    "query": "お客様の機材が古く、止まったときに誰も直せない状態だそうです。負担を下げる打ち手を相談したいです。",
+    "difficulty": "L2",
+    "gold_topics": [
+      "サーバー・インフラ運用"
+    ],
+    "gold_chunks": [
+      "doc:doc_004",
+      "doc:doc_026",
+      "profile:14",
+      "profile:15",
+      "profile:18",
+      "profile:33",
+      "proj:15",
+      "proj:16",
+      "proj:22",
+      "proj:27",
+      "proj:9"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 25,
+    "query": "会社のアカウントを続けているのに反応が伸びないそうです。立て直しを相談できる方を探しています。",
+    "difficulty": "L2",
+    "gold_topics": [
+      "SNS運用"
+    ],
+    "gold_chunks": [
+      "doc:doc_016",
+      "profile:22",
+      "profile:23",
+      "profile:4",
+      "profile:5",
+      "proj:11",
+      "proj:61",
+      "proj:63",
+      "proj:72",
+      "proj:78"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 26,
+    "query": "お客様が自社で通販を始めたいそうです。立ち上げをやり切った経験のある方に相談したいです。",
+    "difficulty": "L2",
+    "gold_topics": [
+      "ECサイト構築"
+    ],
+    "gold_chunks": [
+      "doc:doc_011",
+      "profile:15",
+      "proj:12",
+      "proj:24",
+      "proj:57",
+      "proj:64",
+      "proj:71"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 27,
+    "query": "スマホ向けの画面を新規に作る案件です。設計から入れる方を探しています。",
+    "difficulty": "L2",
+    "gold_topics": [
+      "モバイルアプリ開発"
+    ],
+    "gold_chunks": [
+      "doc:doc_010",
+      "profile:16",
+      "proj:17",
+      "proj:19",
+      "proj:33",
+      "proj:52",
+      "proj:6"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 28,
+    "query": "外部の基盤へ移したあとの費用が読めないと言われました。試算をやったことのある方はいますか。",
+    "difficulty": "L2",
+    "gold_topics": [
+      "クラウド移行"
+    ],
+    "gold_chunks": [
+      "doc:doc_005",
+      "doc:doc_027",
+      "profile:14",
+      "profile:15",
+      "proj:16",
+      "proj:43",
+      "proj:69",
+      "proj:9",
+      "proj:99"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 29,
+    "query": "業務の中心の仕組みを新しく入れる案件で、稼働まで見届けた経験のある方に相談したいです。",
+    "difficulty": "L2",
+    "gold_topics": [
+      "基幹システム"
+    ],
+    "gold_chunks": [
+      "doc:doc_006",
+      "doc:doc_028",
+      "profile:2",
+      "profile:3",
+      "proj:105",
+      "proj:107",
+      "proj:42",
+      "proj:47",
+      "proj:98"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 30,
+    "query": "取引先との書面を一元管理する仕組みを入れたいそうです。導入をやったことのある方を探しています。",
+    "difficulty": "L2",
+    "gold_topics": [
+      "契約管理"
+    ],
+    "gold_chunks": [
+      "doc:doc_013",
+      "profile:1",
+      "profile:21",
+      "profile:3",
+      "proj:14",
+      "proj:25",
+      "proj:30",
+      "proj:31",
+      "proj:35"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 31,
+    "query": "導入後の面倒を継続して見てほしいと言われました。引き受けた経験のある方に相談したいです。",
+    "difficulty": "L2",
+    "gold_topics": [
+      "サーバー・インフラ運用"
+    ],
+    "gold_chunks": [
+      "doc:doc_004",
+      "doc:doc_026",
+      "profile:18",
+      "profile:33",
+      "proj:15",
+      "proj:16",
+      "proj:22",
+      "proj:27",
+      "proj:9"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 32,
+    "query": "お客様に出す金額の書面を作るとき、どこまで細かく出すべきか毎回迷います。慣れている方に聞きたいです。",
+    "difficulty": "L2",
+    "gold_topics": [],
+    "gold_chunks": [
+      "profile:1",
+      "profile:2",
+      "profile:21",
+      "profile:3"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 33,
+    "query": "お客様からの強い申し出を受けてしまい、どこまで自分で対応してどこから上に上げるか判断がつきません。",
+    "difficulty": "L2",
+    "gold_topics": [],
+    "gold_chunks": [
+      "profile:17",
+      "profile:18",
+      "profile:33",
+      "profile:34"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 34,
+    "query": "泊まりの移動が絡む費用の申請で、どの区分で出せばよいのか分かりません。詳しい方に聞きたいです。",
+    "difficulty": "L2",
+    "gold_topics": [],
+    "gold_chunks": [
+      "profile:10",
+      "profile:11",
+      "profile:28",
+      "profile:29"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 35,
+    "query": "来期に催事へ出るかを検討しています。準備の段取りを分かっている方に相談したいです。",
+    "difficulty": "L2",
+    "gold_topics": [],
+    "gold_chunks": [
+      "profile:22",
+      "profile:23",
+      "profile:4",
+      "profile:5"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 36,
+    "query": "新しく建てる拠点で、業務の中心の仕組みと現場の端末をまとめて面倒みてほしいと言われました。誰に相談すべきでしょうか。",
+    "difficulty": "L3",
+    "gold_topics": [
+      "基幹システム",
+      "社内IT・ヘルプデスク"
+    ],
+    "gold_chunks": [
+      "doc:doc_003",
+      "doc:doc_006",
+      "doc:doc_025",
+      "doc:doc_028",
+      "profile:2",
+      "profile:25",
+      "profile:3",
+      "profile:6",
+      "proj:100",
+      "proj:105",
+      "proj:107",
+      "proj:23",
+      "proj:26",
+      "proj:42",
+      "proj:47",
+      "proj:74",
+      "proj:84",
+      "proj:98"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 37,
+    "query": "たのめーるの注文を社内の仕組みと繋いで自動化したいというご相談をいただきました。",
+    "difficulty": "L3",
+    "gold_topics": [
+      "購買・仕入れ",
+      "システム開発・API"
+    ],
+    "gold_chunks": [
+      "doc:doc_008",
+      "doc:doc_021",
+      "doc:doc_030",
+      "profile:13",
+      "profile:16",
+      "profile:19",
+      "profile:35"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 38,
+    "query": "複合機の記録から、誰がいつ何を出力したか後から追えるようにしたいそうです。",
+    "difficulty": "L3",
+    "gold_topics": [
+      "セキュリティ",
+      "社内IT・ヘルプデスク"
+    ],
+    "gold_chunks": [
+      "doc:doc_002",
+      "doc:doc_003",
+      "doc:doc_024",
+      "doc:doc_025",
+      "profile:25",
+      "profile:6",
+      "proj:100",
+      "proj:101",
+      "proj:15",
+      "proj:23",
+      "proj:26",
+      "proj:74",
+      "proj:84"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 39,
+    "query": "締めを早めたいのですが、数字が各部署に散らばっているのが原因のようです。",
+    "difficulty": "L3",
+    "gold_topics": [
+      "経理・決算",
+      "データ基盤・分析"
+    ],
+    "gold_chunks": [
+      "doc:doc_007",
+      "doc:doc_018",
+      "doc:doc_029",
+      "profile:10",
+      "profile:15",
+      "profile:16",
+      "profile:28",
+      "proj:3",
+      "proj:38",
+      "proj:4",
+      "proj:51",
+      "proj:60"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 40,
+    "query": "自社の設備から外部の基盤へ移したあと、止まったときに誰が面倒を見るのかが決まっていません。",
+    "difficulty": "L3",
+    "gold_topics": [
+      "クラウド移行",
+      "サーバー・インフラ運用"
+    ],
+    "gold_chunks": [
+      "doc:doc_004",
+      "doc:doc_005",
+      "doc:doc_026",
+      "doc:doc_027",
+      "profile:14",
+      "profile:15",
+      "profile:33",
+      "proj:15",
+      "proj:16",
+      "proj:22",
+      "proj:27",
+      "proj:43",
+      "proj:69",
+      "proj:9",
+      "proj:99"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 41,
+    "query": "求人の反応が悪く、会社の見え方から作り直したいと言われました。",
+    "difficulty": "L3",
+    "gold_topics": [
+      "人事・採用",
+      "広報・PR"
+    ],
+    "gold_chunks": [
+      "doc:doc_019",
+      "doc:doc_022",
+      "profile:26",
+      "profile:27",
+      "profile:39",
+      "profile:40"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 42,
+    "query": "通販を始めたいそうですが、書面や規約まわりも整っていないとのことです。",
+    "difficulty": "L3",
+    "gold_topics": [
+      "ECサイト構築",
+      "総務・法務"
+    ],
+    "gold_chunks": [
+      "doc:doc_011",
+      "doc:doc_020",
+      "profile:12",
+      "profile:14",
+      "profile:15",
+      "profile:31",
+      "proj:12",
+      "proj:24",
+      "proj:57",
+      "proj:64",
+      "proj:71"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 43,
+    "query": "お客様の担当者情報を営業が持ち歩いているのが心配だと言われました。",
+    "difficulty": "L3",
+    "gold_topics": [
+      "CRM・営業支援",
+      "セキュリティ"
+    ],
+    "gold_chunks": [
+      "doc:doc_002",
+      "doc:doc_012",
+      "doc:doc_024",
+      "profile:1",
+      "profile:21",
+      "profile:25",
+      "profile:6",
+      "proj:10",
+      "proj:101",
+      "proj:13",
+      "proj:15",
+      "proj:20",
+      "proj:33",
+      "proj:36"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 44,
+    "query": "窓口に来る連絡を分類して、よくあるものは自動で返したいそうです。",
+    "difficulty": "L3",
+    "gold_topics": [
+      "問い合わせ・ヘルプデスク運用",
+      "データ基盤・分析"
+    ],
+    "gold_chunks": [
+      "doc:doc_007",
+      "doc:doc_017",
+      "doc:doc_029",
+      "profile:15",
+      "profile:16",
+      "profile:17",
+      "profile:33",
+      "proj:23",
+      "proj:26",
+      "proj:3",
+      "proj:38",
+      "proj:4",
+      "proj:5",
+      "proj:51",
+      "proj:60",
+      "proj:7",
+      "proj:74"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 45,
+    "query": "スマホから使えるようにしたら重くて使い物にならないと言われました。",
+    "difficulty": "L3",
+    "gold_topics": [
+      "モバイルアプリ開発",
+      "パフォーマンスチューニング"
+    ],
+    "gold_chunks": [
+      "doc:doc_009",
+      "doc:doc_010",
+      "profile:13",
+      "profile:16",
+      "proj:17",
+      "proj:19",
+      "proj:33",
+      "proj:52",
+      "proj:59",
+      "proj:6",
+      "proj:66",
+      "proj:73",
+      "proj:79",
+      "proj:92"
+    ],
+    "label_source": "auto:document_project_profile"
+  }
+]
