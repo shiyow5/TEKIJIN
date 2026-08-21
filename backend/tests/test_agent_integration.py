@@ -28,14 +28,28 @@ GOOD_Q = "現行のVPN機器で3拠点の拠点間接続について相談した
 class _FakeRetriever:
     """C4 stand-in returning a fixed retrieval dict (controls the C5 route)."""
 
-    def __init__(self, *, answers=(), documents=(), people=()) -> None:
+    def __init__(
+        self,
+        *,
+        answers=(),
+        documents=(),
+        people=(),
+        answer_confidence=0.0,
+        document_confidence=0.0,
+        people_confidence=0.0,
+    ) -> None:
         self._payload = {
             "past_answers": list(answers),
             "documents": list(documents),
             "candidate_people": list(people),
+            "answer_confidence": answer_confidence,
+            "document_confidence": document_confidence,
+            "people_confidence": people_confidence,
         }
+        self.calls: list[tuple[str, bool]] = []  # (query, got_query_vector)
 
-    def search(self, query: str) -> dict:
+    def search(self, query: str, *, query_vector=None) -> dict:
+        self.calls.append((query, query_vector is not None))
         return self._payload
 
 
@@ -129,7 +143,8 @@ def test_insufficient_triggers_interrupt_then_resumes(seed_counts, session, fake
 def test_prior_answer_route(seed_counts, session, fake_embedder) -> None:
     _seed_skill(session, "sk_pa_1", 1)
     retriever = _FakeRetriever(
-        answers=[{"qa_id": "a", "score": 0.05, "responder_id": 1}],  # clears threshold
+        answers=[{"qa_id": "a", "score": 0.05, "responder_id": 1}],
+        answer_confidence=0.9,  # near-duplicate past QA (absolute cosine)
         people=[1],
     )
     agent = build_agent(fake_embedder, session, retriever=retriever)
@@ -144,7 +159,9 @@ def test_prior_answer_route(seed_counts, session, fake_embedder) -> None:
 def test_document_route_is_terminal(seed_counts, session, fake_embedder) -> None:
     retriever = _FakeRetriever(
         documents=[{"doc_id": "doc_0007", "score": 0.05}],
-        people=[],  # weak person signal -> demotion
+        document_confidence=0.8,  # strongly on-topic document
+        people_confidence=0.2,  # weak person signal
+        people=[1, 2, 3],  # candidates present, but weak -> document still wins
     )
     agent = build_agent(fake_embedder, session, retriever=retriever)
     cfg = _cfg("doc")
@@ -246,7 +263,33 @@ def test_real_retriever_end_to_end(seed_counts, session, fake_embedder) -> None:
     state = agent.invoke(_init(), cfg)
     # The real retrieval drove a valid route and the run did not error.
     assert state["route"] in {PERSON, PRIOR_ANSWER, DOCUMENT}
-    assert isinstance(state["retrieval"]["candidate_people"], list)
+    retrieval = state["retrieval"]
+    assert isinstance(retrieval["candidate_people"], list)
+    # C4 emits the absolute cosine confidences C5 routes on, in [0, 1].
+    for key in ("answer_confidence", "document_confidence", "people_confidence"):
+        assert 0.0 <= retrieval[key] <= 1.0
+
+
+def test_newly_covered_topic_reaches_recommendation(seed_counts, session, fake_embedder) -> None:
+    # Fix 2: an EC question (previously uncoverable by the stub) now extracts the
+    # ECサイト構築 topic, so a candidate with that skill can be recommended.
+    _seed_skill(session, "sk_ec_1", 1, topic="ECサイト構築")
+    agent = build_agent(fake_embedder, session, retriever=_FakeRetriever(people=[1]))
+    q = "ECサイト構築について、現行のECサイトで3拠点向けに相談したいです"
+    state = agent.invoke(_init(q), _cfg("ec"))
+    assert "ECサイト構築" in state["topics"]
+    assert [r["person_id"] for r in state["recommendations"]] == [1]
+
+
+def test_c4_reuses_c3_query_vector(seed_counts, session, fake_embedder) -> None:
+    # Fix 4: the C3 embedding is passed to C4.search so the dense channels do not
+    # re-embed (one encode per query, not two).
+    retriever = _FakeRetriever(people=[1])
+    _seed_skill(session, "sk_reuse", 1)
+    agent = build_agent(fake_embedder, session, retriever=retriever)
+    agent.invoke(_init(), _cfg("reuse"))
+    assert retriever.calls  # C4 was called
+    assert all(got_vector for _, got_vector in retriever.calls)  # always with a vector
 
 
 # --------------------------------------------------------------------------- #
@@ -341,7 +384,8 @@ def test_prior_answer_pins_the_responder(seed_counts, session, fake_embedder) ->
     for emp in (1, 2, 3):
         _seed_skill(session, f"sk_pin_{emp}", emp)  # strong candidates
     retriever = _FakeRetriever(
-        answers=[{"qa_id": "a", "score": 0.05, "responder_id": 5}],  # clears threshold
+        answers=[{"qa_id": "a", "score": 0.05, "responder_id": 5}],
+        answer_confidence=0.9,  # near-duplicate past QA
         people=[1, 2, 3],
     )
     agent = build_agent(fake_embedder, session, retriever=retriever)
@@ -350,6 +394,31 @@ def test_prior_answer_pins_the_responder(seed_counts, session, fake_embedder) ->
     assert state["route"] == PRIOR_ANSWER
     assert state["pinned_responder_id"] == 5
     assert [r["person_id"] for r in state["recommendations"]] == [5]  # pinned
+
+
+def test_prior_answer_falls_back_when_pinned_declines(seed_counts, session, fake_embedder) -> None:
+    # Fix 3: the pinned past responder declines -> drop the pin and fall back to
+    # the candidate_people pool (never dead-end on a single decline).
+    for emp in (1, 2):
+        _seed_skill(session, f"sk_pinfb_{emp}", emp)
+    retriever = _FakeRetriever(
+        answers=[{"qa_id": "a", "score": 0.05, "responder_id": 1}],
+        answer_confidence=0.9,
+        people=[1, 2],  # fallback pool
+    )
+    agent = build_agent(fake_embedder, session, retriever=retriever)
+    cfg = _cfg("pinfb")
+    state = agent.invoke(_init(), cfg)
+    assert state["route"] == PRIOR_ANSWER
+    assert [r["person_id"] for r in state["recommendations"]] == [1]  # pinned
+
+    # Pinned responder 1 declines -> un-pin, recommend the next candidate (2).
+    agent.invoke(Command(resume="declined"), cfg)
+    rerouted = agent.get_state(cfg).values
+    assert 1 in rerouted["declined_ids"]
+    assert [r["person_id"] for r in rerouted["recommendations"]] == [2]
+    final = agent.invoke(Command(resume="accepted"), cfg)
+    assert "取り次ぎました" in final["answer"]
 
 
 # --------------------------------------------------------------------------- #

@@ -13,11 +13,11 @@ from tekijin.agent import graph as graph_mod
 from tekijin.agent.nodes import AgentNodes, _top_by_score
 from tekijin.agent.route import (
     DOCUMENT,
-    DOCUMENT_THRESHOLD,
+    DOCUMENT_SIM,
     PERSON,
-    PERSON_STRONG_THRESHOLD,
+    PERSON_WEAK_SIM,
     PRIOR_ANSWER,
-    PRIOR_ANSWER_THRESHOLD,
+    PRIOR_ANSWER_SIM,
     decide_route,
 )
 from tekijin.agent.stubs import (
@@ -28,52 +28,62 @@ from tekijin.agent.stubs import (
 )
 
 
-def _retrieval(*, answers=(), documents=(), people=()) -> dict:
+def _retrieval(*, answer=0.0, document=0.0, people_sim=0.0, people=()) -> dict:
+    # C5 routes on the absolute cosine similarities (*_confidence), not RRF scores.
     return {
-        "past_answers": list(answers),
-        "documents": list(documents),
+        "past_answers": [],
+        "documents": [],
         "candidate_people": list(people),
+        "answer_confidence": answer,
+        "document_confidence": document,
+        "people_confidence": people_sim,
     }
 
 
 # --------------------------------------------------------------------------- #
-# C5 route decision
+# C5 route decision (on absolute cosine similarity)
 # --------------------------------------------------------------------------- #
-def test_route_person_when_answer_signal_is_decent() -> None:
-    # A decent (>= PERSON_STRONG_THRESHOLD) but not prior_answer-level answer keeps
-    # the person route even with a document present; confidence is the top answer
-    # score on the RRF scale (no cross-scale constant).
-    top = PERSON_STRONG_THRESHOLD + 0.005
-    r = _retrieval(
-        answers=[{"qa_id": "a", "score": top, "responder_id": 7}],
-        documents=[{"doc_id": "d", "score": DOCUMENT_THRESHOLD + 0.05}],
-        people=[1, 2, 3],
-    )
-    decision = decide_route(r)
-    assert decision.route == PERSON
-    assert decision.confidence == pytest.approx(top)
-    assert "主線" in decision.reason
-
-
-def test_route_prior_answer_when_top_answer_clears_threshold() -> None:
-    r = _retrieval(
-        answers=[{"qa_id": "a", "score": PRIOR_ANSWER_THRESHOLD + 0.01, "responder_id": 7}],
-        people=[1, 2],
-    )
+def test_route_prior_answer_when_answer_is_near_duplicate() -> None:
+    r = _retrieval(answer=0.90, people_sim=0.95, people=[1, 2])
     decision = decide_route(r)
     assert decision.route == PRIOR_ANSWER
-    assert decision.confidence == PRIOR_ANSWER_THRESHOLD + 0.01
+    assert decision.confidence == pytest.approx(0.90)
+    assert "過去QA" in decision.reason
 
 
-def test_route_document_when_no_people_and_doc_clears_threshold() -> None:
-    r = _retrieval(
-        answers=[{"qa_id": "a", "score": 0.001, "responder_id": 7}],
-        documents=[{"doc_id": "d", "score": DOCUMENT_THRESHOLD + 0.01}],
-        people=[],  # weak person signal -> demotion allowed
-    )
+def test_route_prior_answer_at_exact_threshold() -> None:
+    # Boundary: exactly at the bar counts (>=).
+    assert decide_route(_retrieval(answer=PRIOR_ANSWER_SIM, people=[1])).route == PRIOR_ANSWER
+    just_below = _retrieval(answer=PRIOR_ANSWER_SIM - 0.001, people=[1])
+    assert decide_route(just_below).route == PERSON
+
+
+def test_route_document_when_person_signal_weak() -> None:
+    # No near-duplicate answer, weak profile match, strong document -> document,
+    # even though candidate people are present (Fix A: was dead before).
+    r = _retrieval(answer=0.10, document=0.75, people_sim=0.30, people=[1, 2, 3])
     decision = decide_route(r)
     assert decision.route == DOCUMENT
+    assert decision.confidence == pytest.approx(0.75)
     assert "文書" in decision.reason
+
+
+def test_route_document_at_exact_thresholds() -> None:
+    # document_confidence == DOCUMENT_SIM and people_confidence just below the weak
+    # bar -> document; people_confidence == PERSON_WEAK_SIM (not weak) -> person.
+    at_bar = _retrieval(document=DOCUMENT_SIM, people_sim=PERSON_WEAK_SIM - 0.001, people=[1])
+    assert decide_route(at_bar).route == DOCUMENT
+    people_ok = _retrieval(document=DOCUMENT_SIM, people_sim=PERSON_WEAK_SIM, people=[1])
+    assert decide_route(people_ok).route == PERSON
+
+
+def test_route_person_when_profile_match_is_strong() -> None:
+    # A strong profile match keeps the person route even with a strong document.
+    r = _retrieval(answer=0.10, document=0.85, people_sim=0.80, people=[1, 2, 3])
+    decision = decide_route(r)
+    assert decision.route == PERSON
+    assert decision.confidence == pytest.approx(0.80)  # max(people, answer)
+    assert "主線" in decision.reason
 
 
 def test_route_person_fallback_when_nothing() -> None:
@@ -82,44 +92,15 @@ def test_route_person_fallback_when_nothing() -> None:
     assert decision.confidence == 0.0
 
 
-def test_route_document_reachable_with_weak_candidates() -> None:
-    # Fix A: candidate people exist but the person signal is WEAK (no strong prior
-    # answer), and a document clears its bar and out-scores the answer -> document
-    # is genuinely reachable (it was dead before, hidden behind people=[]).
-    r = _retrieval(
-        answers=[{"qa_id": "a", "score": 0.005, "responder_id": 7}],  # weak
-        documents=[{"doc_id": "d", "score": DOCUMENT_THRESHOLD + 0.05}],
-        people=[1, 2, 3],  # present, but weak
-    )
-    decision = decide_route(r)
-    assert decision.route == DOCUMENT
-    assert decision.confidence == pytest.approx(DOCUMENT_THRESHOLD + 0.05)
-
-
-def test_route_strong_answer_beats_document() -> None:
-    # When the answer signal is strong enough, a document does not demote it.
-    r = _retrieval(
-        answers=[{"qa_id": "a", "score": PERSON_STRONG_THRESHOLD, "responder_id": 7}],
-        documents=[{"doc_id": "d", "score": DOCUMENT_THRESHOLD + 0.1}],
-        people=[1, 2, 3],
-    )
-    assert decide_route(r).route == PERSON
-
-
 def test_route_thresholds_are_tunable() -> None:
-    r = _retrieval(answers=[{"qa_id": "a", "score": 0.03, "responder_id": 1}], people=[1])
-    # Raise the bar above the score -> falls back to person.
-    assert decide_route(r, prior_answer_threshold=0.5).route == PERSON
+    r = _retrieval(answer=0.82, people=[1])
+    # Raise the prior_answer bar above the confidence -> falls back to person.
+    assert decide_route(r, prior_answer_sim=0.95).route == PERSON
 
 
-def test_route_is_order_independent() -> None:
-    a = [
-        {"qa_id": "x", "score": 0.01, "responder_id": 1},
-        {"qa_id": "y", "score": 0.03, "responder_id": 2},
-    ]
-    forward = decide_route(_retrieval(answers=a, people=[1]))
-    backward = decide_route(_retrieval(answers=list(reversed(a)), people=[1]))
-    assert forward == backward  # top score picked regardless of list order
+def test_route_missing_confidence_keys_default_to_zero() -> None:
+    # A retriever that omits the confidence fields -> all-zero -> person.
+    assert decide_route({"candidate_people": [1]}).route == PERSON
 
 
 # --------------------------------------------------------------------------- #
@@ -220,11 +201,38 @@ def test_intent_extracts_topics_products_and_type() -> None:
     assert 0.0 < result.confidence <= 1.0
 
 
+def test_intent_covers_all_22_canonical_topics() -> None:
+    from tekijin.agent.stubs import TOPIC_KEYWORDS
+
+    # Fix 2: the stub can extract every one of the 22 canonical topics — and the
+    # keys match the scorer's exact-topic join (skills.topic) verbatim.
+    assert len(TOPIC_KEYWORDS) == 22
+    model = KeywordIntentModel()
+    # Spot-check topics that were missing before (EC / SNS / mobile / 基幹 …).
+    assert "ECサイト構築" in model.analyze("ECサイトの構築を相談したい", None).topics
+    assert "SNS運用" in model.analyze("SNSの運用代行について", None).topics
+    assert "モバイルアプリ開発" in model.analyze("スマホアプリの開発の件", None).topics
+    assert "基幹システム" in model.analyze("基幹システムのERP刷新", None).topics
+    assert "購買・仕入れ" in model.analyze("調達と仕入れの相談です", None).topics
+    assert "総務・法務" in model.analyze("契約審査など法務の相談", None).topics
+
+
 def test_intent_flags_out_of_scope() -> None:
     result = KeywordIntentModel().analyze("今日の天気を教えて", None)
     assert result.out_of_scope is True
     assert result.question_type == "業務外"
     assert result.confidence == 0.9
+
+
+def test_chitchat_is_clarified_not_deflected() -> None:
+    # Design decision (Fix 7): a bare greeting is low-signal but in-scope for a
+    # work helpdesk, so C1 does NOT mark it out_of_scope, and C2 asks to clarify
+    # (rather than deflecting like genuine off-topic input).
+    intent = KeywordIntentModel().analyze("こんにちは", None)
+    assert intent.out_of_scope is False
+    result = RuleSufficiencyModel().check("こんにちは", intent, 0)
+    assert result.sufficient is False
+    assert "具体的" in (result.followup_question or "")
 
 
 def test_intent_classifies_quote_admin_chitchat() -> None:

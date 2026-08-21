@@ -40,7 +40,8 @@ exclude_lines = [
 [tool.mypy]
 python_version = "3.12"
 
-# pgvector ships no type stubs; don't fail type-checking on its imports.
+# These third-party libs ship no type stubs / py.typed marker; don't fail
+# type-checking on their imports (they are lazily imported anyway).
 [[tool.mypy.overrides]]
-module = "pgvector.*"
+module = ["pgvector.*", "sudachipy.*", "rank_bm25.*", "sentence_transformers.*", "langgraph.*"]
 ignore_missing_imports = true

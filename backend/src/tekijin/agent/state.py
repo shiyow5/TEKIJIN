@@ -26,7 +26,7 @@ class PastAnswer(TypedDict):
 
     qa_id: str
     score: float
-    responder_id: int
+    responder_id: int | None  # None if the answer's responder is unknown
 
 
 class DocumentHit(TypedDict):
@@ -37,11 +37,34 @@ class DocumentHit(TypedDict):
 
 
 class RetrievalResult(TypedDict):
-    """The C4 (HybridRetriever) output shape shared by C5/C6."""
+    """The C4 (HybridRetriever) output shape shared by C5/C6.
+
+    The ``*_score`` values inside ``past_answers`` / ``documents`` are RRF fusion
+    scores — good for *ranking* within a channel, but they carry no absolute
+    meaning across queries. So each channel also reports its top absolute dense
+    cosine similarity (``*_confidence``, in ``[0, 1]``, ``0.0`` when the channel is
+    empty); C5 routes on those, not on the RRF scores.
+    """
 
     past_answers: list[PastAnswer]
     documents: list[DocumentHit]
     candidate_people: list[int]
+    answer_confidence: float
+    document_confidence: float
+    people_confidence: float
+
+
+def empty_retrieval() -> RetrievalResult:
+    """A fresh, empty :class:`RetrievalResult` (the default before C4 runs)."""
+
+    return {
+        "past_answers": [],
+        "documents": [],
+        "candidate_people": [],
+        "answer_confidence": 0.0,
+        "document_confidence": 0.0,
+        "people_confidence": 0.0,
+    }
 
 
 class AgentState(TypedDict, total=False):

@@ -153,6 +153,45 @@ def test_answers_by_topic(seed_counts, session) -> None:
         assert a.topic == topic or topic in q_topics.get(a.question_id, ())
 
 
+def test_answers_by_topics_single_query(seed_counts, session) -> None:
+    repo = Repository(session)
+    topics = ["ネットワーク・VPN", "セキュリティ"]
+    answers = repo.answers_by_topics(topics)
+    assert answers
+    q_topics = {q.id: q.topics for q in repo.list_questions()}
+    for a in answers:
+        # Strict rule: own topic is one of `topics`, OR own topic is NULL and the
+        # question's topics overlap `topics`.
+        if a.topic is not None:
+            assert a.topic in topics
+        else:
+            assert set(q_topics.get(a.question_id, ())) & set(topics)
+    # Ordered by id (deterministic) and de-duplicated.
+    ids = [a.id for a in answers]
+    assert ids == sorted(ids)
+    assert len(ids) == len(set(ids))
+    # Empty topics -> empty, no query.
+    assert repo.answers_by_topics([]) == []
+
+
+def test_answers_by_topics_excludes_other_subtopic(seed_counts, session) -> None:
+    # An answer tagged for a DIFFERENT subtopic than requested is excluded, even
+    # if its question's topics array overlaps the requested set.
+    session.add(
+        Answer(
+            id="ans_other_subtopic",
+            question_id="q_0001",  # its questions.topics contains ネットワーク・VPN
+            responder_id=3,
+            body="tagged for a different subtopic",
+            topic="セキュリティ",  # own topic is NOT the requested one
+        )
+    )
+    session.flush()
+    repo = Repository(session)
+    found = {a.id for a in repo.answers_by_topics(["ネットワーク・VPN"])}
+    assert "ans_other_subtopic" not in found  # excluded (own topic != requested)
+
+
 def test_answers_by_topic_matches_via_question_topics(seed_counts, session) -> None:
     # A runtime-style answer has topic=NULL; its topic lives on the question.
     topic = "ネットワーク・VPN"

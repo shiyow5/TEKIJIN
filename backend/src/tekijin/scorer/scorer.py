@@ -97,7 +97,7 @@ class ExpertiseScorer:
         since = now - dt.timedelta(days=LOAD_WINDOW_DAYS)
         rec_counts = self._repo.recent_recommendation_counts(since, now, candidates)
         ans_counts = self._repo.recent_answer_counts(since, now, candidates)
-        answers_by_person = self._group_answers_by_person(self._union_topic_answers(topic_list))
+        answers_by_person = self._group_answers_by_person(self._repo.answers_by_topics(topic_list))
         asker_branch = self._asker_branch(asker_id)
 
         scored: list[tuple[float, int, dict[str, Any]]] = []
@@ -121,37 +121,6 @@ class ExpertiseScorer:
         # Descending score, then ascending person_id for a stable tiebreak.
         scored.sort(key=lambda item: (-item[0], item[1]))
         return {"recommendations": [record for _, _, record in scored[:top_k]]}
-
-    def _topic_answers(self, topic: str) -> list[AnswerDTO]:
-        """Answers that are genuine evidence for ``topic``.
-
-        ``answers_by_topic`` also returns answers matched only via their
-        question's ``topics`` array. An answer that carries its OWN ``topic`` for
-        a *different* subtopic must not count as this topic's evidence, so keep an
-        answer only when ``answer.topic == topic`` or ``answer.topic`` is unset
-        (in which case the question-topics fallback is the intended signal).
-        """
-
-        return [
-            a for a in self._repo.answers_by_topic(topic) if a.topic == topic or a.topic is None
-        ]
-
-    def _union_topic_answers(self, topic_list: Sequence[str]) -> list[AnswerDTO]:
-        """Answers that are evidence for ANY topic, de-duplicated by answer id.
-
-        A ``topic=None`` answer can surface under several topics; keeping the
-        first occurrence keeps it single-counted. Deterministic: topic order then
-        answer order.
-        """
-
-        seen: set[str] = set()
-        union: list[AnswerDTO] = []
-        for topic in topic_list:
-            for answer in self._topic_answers(topic):
-                if answer.id not in seen:
-                    seen.add(answer.id)
-                    union.append(answer)
-        return union
 
     # ------------------------------------------------------------------ #
     # per-person scoring

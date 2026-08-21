@@ -11,6 +11,7 @@ each must satisfy.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -65,6 +66,12 @@ class DraftModel(Protocol):
 
 
 class Retriever(Protocol):
-    """C4: hybrid search returning the :class:`RetrievalResult` shape."""
+    """C4: hybrid search returning the :class:`RetrievalResult` shape.
 
-    def search(self, query: str) -> RetrievalResult: ...
+    ``query_vector`` is the optional C3 embedding of ``query`` (reused by the
+    dense channels to avoid a second embedding call).
+    """
+
+    def search(
+        self, query: str, *, query_vector: Sequence[float] | None = None
+    ) -> RetrievalResult: ...

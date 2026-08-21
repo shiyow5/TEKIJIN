@@ -27,7 +27,8 @@ def _document_text(row: Document) -> str:
 
 
 # (logical name, model, text extractor). Order is irrelevant; each is independent.
-_SPECS: tuple[tuple[str, type, Callable[[Any], str | None]], ...] = (
+# ``Any`` for the model so mypy allows the pgvector ``.embedding`` column access.
+_SPECS: tuple[tuple[str, Any, Callable[[Any], str | None]], ...] = (
     ("employee_profiles", EmployeeProfile, lambda r: r.description),
     ("questions", Question, lambda r: r.body),
     ("answers", Answer, lambda r: r.body),

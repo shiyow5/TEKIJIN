@@ -10,6 +10,7 @@ LangGraph ``interrupt`` and resume via ``Command(resume=...)``.
 from __future__ import annotations
 
 import datetime as dt
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from langgraph.types import interrupt
@@ -22,7 +23,7 @@ from tekijin.agent.protocols import (
     SufficiencyModel,
 )
 from tekijin.agent.route import PRIOR_ANSWER, decide_route
-from tekijin.agent.state import AgentState
+from tekijin.agent.state import AgentState, empty_retrieval
 from tekijin.agent.stubs import MAX_FOLLOWUPS
 from tekijin.retrieval.embedding import QUERY, Embedder
 from tekijin.scorer.scorer import ExpertiseScorer
@@ -30,7 +31,7 @@ from tekijin.scorer.scorer import ExpertiseScorer
 _QUESTION_TYPE_DEFAULT = "製品QA"
 
 
-def _top_by_score(items: list[dict[str, Any]]) -> dict[str, Any] | None:
+def _top_by_score(items: Sequence[Mapping[str, Any]]) -> Mapping[str, Any] | None:
     """The item with the highest ``score`` (deterministic, order-independent)."""
 
     if not items:
@@ -90,7 +91,7 @@ class AgentNodes:
             "intent_confidence": 0.0,
             "missing": [],
             "followup_question": None,
-            "retrieval": {"past_answers": [], "documents": [], "candidate_people": []},
+            "retrieval": empty_retrieval(),
             "route": "person",
             "route_reason": "",
             "route_confidence": 0.0,
@@ -157,11 +158,16 @@ class AgentNodes:
 
     # -- C4: hybrid retrieval ---------------------------------------------
     def c4_retrieve(self, state: AgentState) -> AgentState:
-        return {"retrieval": self._retriever.search(state["question"])}
+        # Reuse the C3 embedding so the dense channels do not re-embed the query
+        # (halves embedding calls under a real vLLM; BM25 still uses raw text).
+        retrieval = self._retriever.search(
+            state["question"], query_vector=state.get("query_vector")
+        )
+        return {"retrieval": retrieval}
 
     # -- C5: route decision (deterministic) -------------------------------
     def c5_route(self, state: AgentState) -> AgentState:
-        decision = decide_route(state.get("retrieval") or {})
+        decision = decide_route(state.get("retrieval") or empty_retrieval())
         return {
             "route": decision.route,
             "route_reason": decision.reason,
@@ -170,7 +176,7 @@ class AgentNodes:
 
     # -- prior_answer (補助): pin the past responder, then hand off --------
     def prior_answer(self, state: AgentState) -> AgentState:
-        past = (state.get("retrieval") or {}).get("past_answers") or []
+        past = (state.get("retrieval") or empty_retrieval())["past_answers"]
         top = _top_by_score(past)
         responder_id = top.get("responder_id") if top else None
         note = (
@@ -185,10 +191,13 @@ class AgentNodes:
     # -- C6: expertise scorer (deterministic) -----------------------------
     def c6_score(self, state: AgentState) -> AgentState:
         topics = state.get("topics") or []
-        retrieval = state.get("retrieval") or {}
+        retrieval = state.get("retrieval") or empty_retrieval()
         declined = state.get("declined_ids") or []
         pinned = state.get("pinned_responder_id")
-        if state.get("route") == PRIOR_ANSWER and pinned is not None:
+        # prior_answer hands off to the pinned past responder — UNTIL they decline.
+        # Once the pinned person is in declined_ids, drop the pin and fall back to
+        # the general candidate pool (never dead-end on a single decline).
+        if state.get("route") == PRIOR_ANSWER and pinned is not None and pinned not in declined:
             pool: list[int] = [pinned]
         else:
             pool = retrieval.get("candidate_people") or []
@@ -241,7 +250,7 @@ class AgentNodes:
         }
 
     def document(self, state: AgentState) -> AgentState:
-        docs = (state.get("retrieval") or {}).get("documents") or []
+        docs = (state.get("retrieval") or empty_retrieval())["documents"]
         top = _top_by_score(docs)
         where = f"（文書ID: {top['doc_id']}）" if top else ""
         return {"answer": f"社内文書に該当がありそうです{where}。該当箇所をご確認ください。"}

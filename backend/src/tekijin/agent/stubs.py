@@ -21,21 +21,38 @@ MAX_FOLLOWUPS = 1
 # "confidence<閾値 → C2 の逆質問へ").
 INTENT_CONFIDENCE_THRESHOLD = 0.5
 
-# Question keyword -> canonical topic (matched case-insensitively). Extend freely;
-# this is data, not logic.
+# Question keyword -> canonical topic (matched case-insensitively). Keys are the
+# 22 canonical topics and MUST match ``skills.topic`` verbatim (the scorer joins on
+# exact topic equality). Extend freely; this is data, not logic.
 TOPIC_KEYWORDS: dict[str, tuple[str, ...]] = {
-    "ネットワーク・VPN": ("vpn", "ネットワーク", "回線", "拠点間"),
+    "CRM・営業支援": ("crm", "営業支援", "顧客管理", "sfa"),
+    "ECサイト構築": ("ec", "ecサイト", "ネットショップ", "通販サイト", "カート"),
+    "SNS運用": ("sns", "インスタ", "twitter", "x運用", "tiktok"),
+    "Webマーケティング・広告": ("広告", "webマーケ", "seo", "リスティング", "集客"),
+    "クラウド移行": ("クラウド", "aws", "azure", "gcp", "オンプレ", "移行"),
+    "サーバー・インフラ運用": ("サーバー", "インフラ", "linux", "運用監視", "オンプレミス"),
+    "システム開発・API": ("api", "システム開発", "連携", "スクラッチ開発"),
     "セキュリティ": ("セキュリティ", "utm", "ファイアウォール", "脆弱性", "不正アクセス"),
-    "クラウド移行": ("クラウド", "aws", "オンプレ", "移行"),
-    "サーバー・インフラ運用": ("サーバー", "インフラ", "linux", "運用監視"),
-    "システム開発・API": ("api", "システム開発", "連携"),
-    "データ基盤・分析": ("データ基盤", "分析", "bi", "データ活用"),
-    "CRM・営業支援": ("crm", "営業支援", "顧客管理"),
-    "Webマーケティング・広告": ("広告", "webマーケ", "seo"),
-    "人事・採用": ("採用", "人事", "労務"),
-    "経理・決算": ("経理", "決算", "簿記", "仕訳"),
-    "契約管理": ("契約",),
-    "問い合わせ・ヘルプデスク運用": ("ヘルプデスク", "問い合わせ対応"),
+    "データ基盤・分析": ("データ基盤", "分析", "bi", "データ活用", "dwh", "etl"),
+    "ネットワーク・VPN": ("vpn", "ネットワーク", "回線", "拠点間"),
+    "パフォーマンスチューニング": (
+        "パフォーマンス",
+        "チューニング",
+        "遅い",
+        "高速化",
+        "レスポンス改善",
+    ),
+    "モバイルアプリ開発": ("モバイルアプリ", "アプリ開発", "ios", "android", "スマホアプリ"),
+    "人事・採用": ("採用", "人事", "労務", "求人", "面接"),
+    "問い合わせ・ヘルプデスク運用": ("問い合わせ対応", "コールセンター", "faq", "チケット"),
+    "基幹システム": ("基幹システム", "erp", "在庫管理", "受発注"),
+    "契約管理": ("契約", "契約書", "電子契約"),
+    "広報・PR": ("広報", "pr", "プレスリリース", "ブランディング"),
+    "業務効率化コンサル": ("業務効率化", "業務改善", "rpa", "自動化", "コンサル"),
+    "社内IT・ヘルプデスク": ("社内it", "社内ヘルプデスク", "pcトラブル", "情シス", "キッティング"),
+    "経理・決算": ("経理", "決算", "簿記", "仕訳", "請求書"),
+    "総務・法務": ("総務", "法務", "コンプライアンス", "規程", "契約審査"),
+    "購買・仕入れ": ("購買", "仕入れ", "調達", "発注", "サプライヤー"),
 }
 
 # Product-like tokens to surface verbatim when present (case-insensitive match).
@@ -129,7 +146,11 @@ class RuleSufficiencyModel:
         if followup_count >= MAX_FOLLOWUPS:
             return SufficiencyResult(sufficient=True, missing=missing, followup_question=None)
 
-        # Intent itself too weak to search on -> ask to clarify the intent.
+        # Intent itself too weak to search on -> ask to clarify the intent. This
+        # deliberately routes low-signal chitchat ("こんにちは") through a friendly
+        # clarification rather than off_topic: a greeting is in-scope for a work
+        # helpdesk, so we ask what they need instead of deflecting. Genuinely
+        # off-topic input (天気/ランチ …) is caught earlier by C1's out_of_scope.
         if intent.confidence < INTENT_CONFIDENCE_THRESHOLD or not intent.topics:
             return SufficiencyResult(
                 sufficient=False,

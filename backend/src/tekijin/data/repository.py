@@ -12,7 +12,7 @@ from __future__ import annotations
 import datetime as dt
 from collections.abc import Sequence
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from tekijin.data.dto import (
@@ -99,7 +99,35 @@ class Repository:
         stmt = (
             select(Answer)
             .join(Question, Answer.question_id == Question.id)
-            .where(or_(Answer.topic == topic, Question.topics.any(topic)))
+            .where(or_(Answer.topic == topic, Question.topics.any(topic)))  # type: ignore[arg-type]
+            .order_by(Answer.id)
+        )
+        return [AnswerDTO.from_row(r) for r in self._session.scalars(stmt)]
+
+    def answers_by_topics(self, topics: Sequence[str]) -> list[AnswerDTO]:
+        """Answers that are genuine evidence for ANY of ``topics``, in one query.
+
+        The strict subtopic rule (see the scorer): an answer counts when its OWN
+        ``topic`` is one of ``topics``, OR its ``topic`` is NULL and its question's
+        ``topics`` array overlaps ``topics`` (the intended question-topics
+        fallback). An answer tagged for a *different* subtopic is excluded. This
+        replaces the per-topic ``answers_by_topic`` fan-out (N+1) with a single
+        ``IN`` / array-overlap query. Ordered by ``id`` (deterministic); an empty
+        ``topics`` yields ``[]`` without a query.
+        """
+
+        topic_list = list(topics)
+        if not topic_list:
+            return []
+        stmt = (
+            select(Answer)
+            .join(Question, Answer.question_id == Question.id)
+            .where(
+                or_(
+                    Answer.topic.in_(topic_list),
+                    and_(Answer.topic.is_(None), Question.topics.overlap(topic_list)),
+                )
+            )
             .order_by(Answer.id)
         )
         return [AnswerDTO.from_row(r) for r in self._session.scalars(stmt)]

@@ -1,101 +1,94 @@
 """C5: deterministic route decision (確信度 × 閾値).
 
-Chooses how to resolve the question from the C4 retrieval scores alone — no LLM,
-no randomness. The default landing spot is always ``person`` (主線): handing the
-question to a real expert is the product's guarantee, and every other route is
-only taken when it clears its threshold. Thresholds are module constants tuned on
-the eval set later; they are on the RRF score scale the retriever emits (small
-sums of ``1/(k+rank)``), NOT the 0-1 similarity in the illustrative spec JSON.
+Chooses how to resolve the question — no LLM, no randomness. Crucially it routes
+on **absolute cosine similarity** (each channel's top dense ``1 - distance``,
+supplied by C4 as ``*_confidence``), NOT on RRF fusion scores: an RRF score is a
+sum of ``1/(k+rank)`` and has no absolute meaning across queries, so a fixed
+threshold against it is meaningless. Cosine similarity is comparable, so the
+thresholds below are real "how close is it?" gates. This also resolves the
+dense-similarity floor deferred from #29.
+
+Threshold rationale (cosine, good sentence embedding): a near-duplicate is
+~0.85-0.95, strongly related ~0.75-0.85, topically related ~0.6-0.75, weak <0.5.
 
 Routes:
-* ``prior_answer`` — a past answer scores highly: present who answered before,
-  then still hand off to that responder (flowchart PA → C6).
-* ``document`` — no strong person signal, but a document clears its bar: point at
-  where it lives (答えは作らない).
-* ``person`` — the main line and the fallback for everything below threshold.
+* ``prior_answer`` — a past QA is *very* close (near-duplicate): present who
+  answered before, then hand off to that responder (flowchart PA → C6).
+* ``document`` — the person signal is weak but a document is strongly on-topic:
+  point at where it lives (答えは作らない).
+* ``person`` — the main line and the default/fallback.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING
 
-# All three thresholds live on the SAME RRF score scale the retriever emits
-# (small sums of 1/(k+rank), ~0.01-0.05), so they are directly comparable — no
-# cross-scale constant is ever compared against a score. Tuned on the eval set
-# later.
-#
-# Minimum top past-answer score to route to ``prior_answer`` (strong prior QA).
-PRIOR_ANSWER_THRESHOLD = 0.025
-# Minimum top document score for the ``document`` demotion to be eligible.
-DOCUMENT_THRESHOLD = 0.020
-# At/above this top past-answer score the person signal is "strong enough" that a
-# document must not demote it; below it the person signal is weak and a
-# qualifying document may take over.
-PERSON_STRONG_THRESHOLD = 0.015
+from tekijin.agent.state import Route
 
-PERSON = "person"
-PRIOR_ANSWER = "prior_answer"
-DOCUMENT = "document"
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from tekijin.agent.state import RetrievalResult
+
+# A past QA must be a near-duplicate to short-circuit to prior_answer.
+PRIOR_ANSWER_SIM = 0.80
+# A document must be strongly on-topic to be the demotion target.
+DOCUMENT_SIM = 0.70
+# Below this profile similarity the person signal counts as weak (a document may
+# then take over). All three are cosine-similarity constants, tunable on eval.
+PERSON_WEAK_SIM = 0.50
+
+PERSON: Route = "person"
+PRIOR_ANSWER: Route = "prior_answer"
+DOCUMENT: Route = "document"
 
 
 @dataclass(frozen=True, slots=True)
 class RouteDecision:
-    route: str
+    route: Route
     reason: str
     confidence: float
 
 
-def _top_score(items: list[dict[str, Any]], key: str = "score") -> float:
-    return max((float(item.get(key, 0.0)) for item in items), default=0.0)
-
-
 def decide_route(
-    retrieval: dict[str, Any],
+    retrieval: RetrievalResult,
     *,
-    prior_answer_threshold: float = PRIOR_ANSWER_THRESHOLD,
-    document_threshold: float = DOCUMENT_THRESHOLD,
-    person_strong_threshold: float = PERSON_STRONG_THRESHOLD,
+    prior_answer_sim: float = PRIOR_ANSWER_SIM,
+    document_sim: float = DOCUMENT_SIM,
+    person_weak_sim: float = PERSON_WEAK_SIM,
 ) -> RouteDecision:
-    """Pick ``person`` / ``prior_answer`` / ``document`` from retrieval scores.
+    """Pick ``person`` / ``prior_answer`` / ``document`` from channel confidences.
 
-    Deterministic: depends only on the top scores and whether candidate people
-    exist, never on iteration order. The default landing spot is always
-    ``person``; the person signal is measured on the RRF scale by the best prior
-    answer (``top_answer``), so ``document`` can genuinely win when the person
-    signal is weak and a document out-scores it above its own bar.
+    Deterministic: depends only on the three absolute similarities and whether
+    candidate people exist — never on iteration order. The default landing spot
+    is always ``person``.
     """
 
-    past_answers = retrieval.get("past_answers") or []
-    documents = retrieval.get("documents") or []
+    answer_conf = float(retrieval.get("answer_confidence", 0.0))
+    document_conf = float(retrieval.get("document_confidence", 0.0))
+    people_conf = float(retrieval.get("people_confidence", 0.0))
     candidate_people = retrieval.get("candidate_people") or []
 
-    top_answer = _top_score(past_answers)
-    top_document = _top_score(documents)
-
-    if top_answer >= prior_answer_threshold:
+    if answer_conf >= prior_answer_sim:
         return RouteDecision(
             PRIOR_ANSWER,
-            f"類似の過去回答が高スコア（{top_answer:.3f}）。回答者を主線として提示します。",
-            top_answer,
+            f"類似の過去QAが非常に近い（類似度 {answer_conf:.2f}）。回答者を主線として提示します。",
+            answer_conf,
         )
-    # Demote to document only when the person signal is weak (no strong prior
-    # answer) AND a document clears its bar AND out-scores that person signal.
+    # Demote to document only when the person signal is weak (no near-duplicate
+    # answer AND weak profile match) and a document is strongly on-topic. Reachable
+    # even with candidate people present, when their profile match is weak.
     if (
-        top_answer < person_strong_threshold
-        and top_document >= document_threshold
-        and top_document >= top_answer
+        document_conf >= document_sim
+        and people_conf < person_weak_sim
+        and answer_conf < prior_answer_sim
     ):
-        return RouteDecision(
-            DOCUMENT,
-            f"人の手がかりが弱く、社内文書が該当（{top_document:.3f}）。文書の場所を示します。",
-            top_document,
-        )
+        reason = f"社内文書が強く該当（類似度 {document_conf:.2f}）。文書の場所を示します。"
+        return RouteDecision(DOCUMENT, reason, document_conf)
     if candidate_people:
         return RouteDecision(
             PERSON,
             "候補となる担当者が見つかりました。主線（人）で取り次ぎます。",
-            top_answer,
+            max(people_conf, answer_conf),
         )
     return RouteDecision(
         PERSON,

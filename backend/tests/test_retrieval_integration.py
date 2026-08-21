@@ -130,7 +130,19 @@ def test_hybrid_retriever_end_to_end(seed_counts, session, fake_embedder) -> Non
     retriever = HybridRetriever(fake_embedder, session, top_k=5)
     result = retriever.search("UNIQZ4242 singular marker phrase")
 
-    assert set(result) == {"past_answers", "documents", "candidate_people"}
+    assert set(result) == {
+        "past_answers",
+        "documents",
+        "candidate_people",
+        "answer_confidence",
+        "document_confidence",
+        "people_confidence",
+    }
+    # Confidences are absolute cosine similarities in [0, 1].
+    for key in ("answer_confidence", "document_confidence", "people_confidence"):
+        assert 0.0 <= result[key] <= 1.0
+    # Exact-body query -> the answer channel confidence is ~1.0 (identical vector).
+    assert result["answer_confidence"] == pytest.approx(1.0, abs=1e-6)
 
     past = result["past_answers"]
     assert past, "expected at least one fused past answer"

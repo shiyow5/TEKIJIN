@@ -21,8 +21,9 @@ match from being crowded out of ``top_k`` by many answer responders; see
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from itertools import zip_longest
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy.orm import Session
 
@@ -31,6 +32,9 @@ from tekijin.retrieval import dense
 from tekijin.retrieval.embedding import QUERY, Embedder
 from tekijin.retrieval.fusion import rrf
 from tekijin.retrieval.sparse import BM25Index
+
+if TYPE_CHECKING:  # pragma: no cover - typing only (avoids agent<-retrieval cycle)
+    from tekijin.agent.state import DocumentHit, PastAnswer, RetrievalResult
 
 # How many candidates each channel (dense / sparse) retrieves *before* fusion.
 # RRF is applied to these pools and only then truncated to ``top_k``: cutting
@@ -76,29 +80,37 @@ class HybridRetriever:
     def _fused_ids(self, *rankings: list[Any]) -> list[Any]:
         return [id_ for id_, _ in self._fuse(*rankings)]
 
-    def _dense_ids(self, query_vec: list[float], target: str) -> list[Any]:
-        return [id_ for id_, _ in dense.search(self._session, query_vec, target, self._pool)]
+    def _dense_hits(self, query_vec: Sequence[float], target: str) -> list[tuple[Any, float]]:
+        """``(id, cosine_similarity)`` for ``target``, best-first."""
 
+        return dense.search(self._session, query_vec, target, self._pool)
+
+    @staticmethod
+    def _top_similarity(*hit_lists: list[tuple[Any, float]]) -> float:
+        """Highest cosine similarity across the given dense hit lists (``0.0`` if
+        all empty). This is the channel's absolute confidence for C5."""
+
+        return max((sim for hits in hit_lists for _, sim in hits), default=0.0)
+
+    @staticmethod
     def _question_mapped_answer_ids(
-        self,
-        query_vec: list[float],
+        question_hits: list[tuple[Any, float]],
         answers_by_question: dict[str, list[str]],
     ) -> list[Any]:
         """Answer ids ranked by DENSE similarity of their *question*.
 
         A user often paraphrases the question rather than the answer, so a dense
         search over answer bodies alone (which are frequently generic procedures)
-        can miss the right answer. This searches the ``questions`` target and
-        expands each question hit to its answers, preserving the question ranking
-        (first occurrence wins on duplicates). It is fed to RRF as an independent
-        ranking — NOT appended behind the direct-answer pool — so an answer whose
-        question matches strongly ranks near the top of its own list and gains a
-        large RRF contribution, instead of drowning at rank ``pool + n``.
+        can miss the right answer. This expands each question hit to its answers,
+        preserving the question ranking (first occurrence wins on duplicates). It
+        is fed to RRF as an independent ranking — NOT appended behind the
+        direct-answer pool — so an answer whose question matches strongly ranks
+        near the top of its own list and gains a large RRF contribution.
         """
 
         ranked: list[Any] = []
         seen: set[Any] = set()
-        for question_id in self._dense_ids(query_vec, "questions"):
+        for question_id, _sim in question_hits:
             for answer_id in answers_by_question.get(question_id, ()):
                 if answer_id not in seen:
                     seen.add(answer_id)
@@ -121,10 +133,19 @@ class HybridRetriever:
             return f"{question_body} {answer_body}".strip()
         return answer_body
 
-    def search(self, query: str) -> dict[str, Any]:
-        """Retrieve fused past answers, documents, and candidate people."""
+    def search(self, query: str, *, query_vector: Sequence[float] | None = None) -> RetrievalResult:
+        """Retrieve fused past answers, documents, and candidate people.
 
-        query_vec = self._embedder.encode([query], kind=QUERY)[0]
+        ``query_vector`` is the C3 embedding of ``query``; pass it to avoid a
+        second embedding call (the dense channels reuse it, BM25 uses the raw
+        ``query``). When omitted, the query is embedded here.
+        """
+
+        query_vec = (
+            query_vector
+            if query_vector is not None
+            else self._embedder.encode([query], kind=QUERY)[0]
+        )
 
         answers = self._repo.list_answers()
         questions = self._repo.list_questions()
@@ -144,28 +165,39 @@ class HybridRetriever:
         )
         profile_index = BM25Index.build((p.employee_id, p.description or "") for p in profiles)
 
+        # Dense searches (each returns (id, cosine_similarity), best-first).
+        answer_hits = self._dense_hits(query_vec, "answers")
+        question_hits = self._dense_hits(query_vec, "questions")
+        document_hits = self._dense_hits(query_vec, "documents")
+        people_hits = self._dense_hits(query_vec, "employee_profiles")
+
+        # Absolute per-channel confidence for C5 (top cosine similarity). The
+        # answer channel is the closest of a matching past *answer* or *question*.
+        answer_confidence = self._top_similarity(answer_hits, question_hits)
+        document_confidence = self._top_similarity(document_hits)
+        people_confidence = self._top_similarity(people_hits)
+
         # --- past answers -------------------------------------------------- #
-        # Three independent rankings fused by RRF: dense over answer bodies,
-        # dense over question bodies (mapped to their answers), and sparse BM25.
-        # Keeping the question channel separate (rather than concatenated behind
-        # the direct-answer pool) lets a strongly-matching question lift its
-        # answer into top_k on its own ranking's merit.
+        # Three independent rankings fused by RRF: dense over answer bodies, dense
+        # over question bodies (mapped to their answers), and sparse BM25.
         sparse_answers = [id_ for id_, _ in answer_index.search(query, self._pool)]
-        dense_answers = self._dense_ids(query_vec, "answers")
-        question_answers = self._question_mapped_answer_ids(query_vec, answers_by_question)
+        dense_answers = [id_ for id_, _ in answer_hits]
+        question_answers = self._question_mapped_answer_ids(question_hits, answers_by_question)
         fused_answers = self._fuse(dense_answers, question_answers, sparse_answers)
-        past_answers = [
+        past_answers: list[PastAnswer] = [
             {"qa_id": id_, "score": score, "responder_id": responder_of.get(id_)}
             for id_, score in fused_answers
         ]
 
         # --- documents ----------------------------------------------------- #
         sparse_docs = [id_ for id_, _ in document_index.search(query, self._pool)]
-        fused_docs = self._fuse(self._dense_ids(query_vec, "documents"), sparse_docs)
-        documents_out = [{"doc_id": id_, "score": score} for id_, score in fused_docs]
+        fused_docs = self._fuse([id_ for id_, _ in document_hits], sparse_docs)
+        documents_out: list[DocumentHit] = [
+            {"doc_id": id_, "score": score} for id_, score in fused_docs
+        ]
 
         # --- candidate people ---------------------------------------------- #
-        dense_people = self._dense_ids(query_vec, "employee_profiles")
+        dense_people = [id_ for id_, _ in people_hits]
         sparse_people = [id_ for id_, _ in profile_index.search(query, self._pool)]
         fused_people = self._fused_ids(dense_people, sparse_people)
         candidate_people = self._aggregate_people(past_answers, fused_people)
@@ -174,11 +206,14 @@ class HybridRetriever:
             "past_answers": past_answers,
             "documents": documents_out,
             "candidate_people": candidate_people,
+            "answer_confidence": answer_confidence,
+            "document_confidence": document_confidence,
+            "people_confidence": people_confidence,
         }
 
     def _aggregate_people(
         self,
-        past_answers: list[dict[str, Any]],
+        past_answers: Sequence[PastAnswer],
         profile_people: list[Any],
     ) -> list[Any]:
         """Merge responders and profile matches, then de-duplicate and cap.

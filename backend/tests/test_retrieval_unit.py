@@ -258,21 +258,14 @@ def _retriever_without_db(top_k: int = 10) -> HybridRetriever:
     return HybridRetriever(embedder, session=None, top_k=top_k)  # type: ignore[arg-type]
 
 
-def test_question_mapped_answer_ids_ranks_by_question_similarity(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from tekijin.retrieval import retriever as retriever_mod
+def test_question_mapped_answer_ids_ranks_by_question_similarity() -> None:
+    from tekijin.retrieval.retriever import HybridRetriever
 
-    def fake_dense(_session, _vec, target, _top_k):
-        # Only the question channel is exercised by this helper.
-        assert target == "questions"
-        return [("q1", 1.0), ("q2", 0.9)]
-
-    monkeypatch.setattr(retriever_mod.dense, "search", fake_dense)
-    retriever = _retriever_without_db()
+    # Question dense hits (id, similarity), best-first.
+    question_hits = [("q1", 1.0), ("q2", 0.9)]
     # q1 -> a2, a3 ; q2 -> a2 (duplicate: first occurrence via q1 wins).
     answers_by_question = {"q1": ["a2", "a3"], "q2": ["a2"]}
-    ranked = retriever._question_mapped_answer_ids([0.0], answers_by_question)
+    ranked = HybridRetriever._question_mapped_answer_ids(question_hits, answers_by_question)
     # Ranked by the question order, de-duplicated — an independent ranking, NOT
     # appended behind any direct-answer pool.
     assert ranked == ["a2", "a3"]
