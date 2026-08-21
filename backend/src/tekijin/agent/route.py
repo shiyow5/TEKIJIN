@@ -20,13 +20,19 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-# Minimum top past-answer RRF score to route to ``prior_answer``.
+# All three thresholds live on the SAME RRF score scale the retriever emits
+# (small sums of 1/(k+rank), ~0.01-0.05), so they are directly comparable — no
+# cross-scale constant is ever compared against a score. Tuned on the eval set
+# later.
+#
+# Minimum top past-answer score to route to ``prior_answer`` (strong prior QA).
 PRIOR_ANSWER_THRESHOLD = 0.025
-# Minimum top document RRF score for the ``document`` demotion to be eligible.
+# Minimum top document score for the ``document`` demotion to be eligible.
 DOCUMENT_THRESHOLD = 0.020
-# Confidence credited to the person route just for having candidate people; a
-# document only wins when it beats this (i.e. the person signal is weak).
-PERSON_BASE_CONFIDENCE = 0.5
+# At/above this top past-answer score the person signal is "strong enough" that a
+# document must not demote it; below it the person signal is weak and a
+# qualifying document may take over.
+PERSON_STRONG_THRESHOLD = 0.015
 
 PERSON = "person"
 PRIOR_ANSWER = "prior_answer"
@@ -49,11 +55,15 @@ def decide_route(
     *,
     prior_answer_threshold: float = PRIOR_ANSWER_THRESHOLD,
     document_threshold: float = DOCUMENT_THRESHOLD,
+    person_strong_threshold: float = PERSON_STRONG_THRESHOLD,
 ) -> RouteDecision:
     """Pick ``person`` / ``prior_answer`` / ``document`` from retrieval scores.
 
     Deterministic: depends only on the top scores and whether candidate people
-    exist, never on iteration order.
+    exist, never on iteration order. The default landing spot is always
+    ``person``; the person signal is measured on the RRF scale by the best prior
+    answer (``top_answer``), so ``document`` can genuinely win when the person
+    signal is weak and a document out-scores it above its own bar.
     """
 
     past_answers = retrieval.get("past_answers") or []
@@ -62,9 +72,6 @@ def decide_route(
 
     top_answer = _top_score(past_answers)
     top_document = _top_score(documents)
-    # The person signal: strong when we have both candidates and a good prior
-    # answer; a bare candidate list is still a moderate signal.
-    person_confidence = max(top_answer, PERSON_BASE_CONFIDENCE) if candidate_people else 0.0
 
     if top_answer >= prior_answer_threshold:
         return RouteDecision(
@@ -72,7 +79,13 @@ def decide_route(
             f"類似の過去回答が高スコア（{top_answer:.3f}）。回答者を主線として提示します。",
             top_answer,
         )
-    if top_document >= document_threshold and top_document > person_confidence:
+    # Demote to document only when the person signal is weak (no strong prior
+    # answer) AND a document clears its bar AND out-scores that person signal.
+    if (
+        top_answer < person_strong_threshold
+        and top_document >= document_threshold
+        and top_document >= top_answer
+    ):
         return RouteDecision(
             DOCUMENT,
             f"人の手がかりが弱く、社内文書が該当（{top_document:.3f}）。文書の場所を示します。",
@@ -82,7 +95,7 @@ def decide_route(
         return RouteDecision(
             PERSON,
             "候補となる担当者が見つかりました。主線（人）で取り次ぎます。",
-            person_confidence,
+            top_answer,
         )
     return RouteDecision(
         PERSON,

@@ -13,7 +13,35 @@ so the whole run is reproducible.
 from __future__ import annotations
 
 import datetime as dt
-from typing import Any, TypedDict
+from typing import Any, Literal, TypedDict
+
+# C5 route labels and responder outcomes, as closed sets so a typo is a type
+# error and the graph routers can validate against them.
+Route = Literal["person", "prior_answer", "document"]
+Outcome = Literal["accepted", "declined"]
+
+
+class PastAnswer(TypedDict):
+    """One past-answer hit from C4."""
+
+    qa_id: str
+    score: float
+    responder_id: int
+
+
+class DocumentHit(TypedDict):
+    """One document hit from C4."""
+
+    doc_id: str
+    score: float
+
+
+class RetrievalResult(TypedDict):
+    """The C4 (HybridRetriever) output shape shared by C5/C6."""
+
+    past_answers: list[PastAnswer]
+    documents: list[DocumentHit]
+    candidate_people: list[int]
 
 
 class AgentState(TypedDict, total=False):
@@ -42,13 +70,14 @@ class AgentState(TypedDict, total=False):
     query_vector: list[float]
 
     # -- C4 retrieval ------------------------------------------------------
-    retrieval: dict[str, Any]
+    retrieval: RetrievalResult
 
     # -- C5 route ----------------------------------------------------------
-    route: str  # person | prior_answer | document
+    route: Route
     route_reason: str
     route_confidence: float
     prior_answer_note: str | None  # set on the prior_answer (補助) route
+    pinned_responder_id: int | None  # prior_answer: hand off to THIS person
 
     # -- C6 scoring --------------------------------------------------------
     recommendations: list[dict[str, Any]]
@@ -57,7 +86,7 @@ class AgentState(TypedDict, total=False):
     draft: str | None
 
     # -- decline loop / C8 -------------------------------------------------
-    outcome: str | None  # accepted | declined (from the responder)
+    outcome: Outcome | None  # from the responder (validated at the send router)
     declined_ids: list[int]
 
     # -- terminal output ---------------------------------------------------

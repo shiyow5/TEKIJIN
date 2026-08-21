@@ -16,6 +16,11 @@ from tekijin.agent.protocols import IntentResult, SufficiencyResult
 # At most one clarifying round (model-definition C2: "逆質問はまとめて1回").
 MAX_FOLLOWUPS = 1
 
+# Below this C1 confidence — or with no topic extracted at all — the intent is
+# too unclear to search on, so C2 asks the user to clarify (model-definition C1:
+# "confidence<閾値 → C2 の逆質問へ").
+INTENT_CONFIDENCE_THRESHOLD = 0.5
+
 # Question keyword -> canonical topic (matched case-insensitively). Extend freely;
 # this is data, not logic.
 TOPIC_KEYWORDS: dict[str, tuple[str, ...]] = {
@@ -116,12 +121,21 @@ class RuleSufficiencyModel:
     """C2 stub: flag missing required slots; ask back at most once."""
 
     def check(self, question: str, intent: IntentResult, followup_count: int) -> SufficiencyResult:
-        # Already asked our one clarification -> proceed regardless.
-        if followup_count >= MAX_FOLLOWUPS:
-            return SufficiencyResult(sufficient=True, missing=[], followup_question=None)
-
         required = _REQUIRED_SLOTS.get(intent.question_type, ())
         missing = [slot for slot in required if not self._slot_present(slot, question, intent)]
+
+        # Already asked our one clarification -> proceed regardless, but KEEP any
+        # still-unresolved slots so C7 can flag them (do not silently clear them).
+        if followup_count >= MAX_FOLLOWUPS:
+            return SufficiencyResult(sufficient=True, missing=missing, followup_question=None)
+
+        # Intent itself too weak to search on -> ask to clarify the intent.
+        if intent.confidence < INTENT_CONFIDENCE_THRESHOLD or not intent.topics:
+            return SufficiencyResult(
+                sufficient=False,
+                missing=["相談内容"],
+                followup_question="ご相談の内容やトピックを、もう少し具体的に教えてください。",
+            )
         if not missing:
             return SufficiencyResult(sufficient=True, missing=[], followup_question=None)
         followup = "次の点を教えてください: " + "、".join(missing)

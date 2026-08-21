@@ -223,8 +223,9 @@ def test_stream_yields_node_updates(seed_counts, session, fake_embedder) -> None
     nodes = []
     for update in agent.stream(_init(), _cfg("stream"), stream_mode="updates"):
         nodes.extend(update.keys())
-    # The deterministic node sequence up to the send interrupt.
-    assert nodes[:6] == [
+    # The deterministic node sequence up to the send interrupt (reset runs first).
+    assert nodes[:7] == [
+        "reset",
         "c1_intent",
         "c2_sufficiency",
         "c3_embed",
@@ -246,3 +247,125 @@ def test_real_retriever_end_to_end(seed_counts, session, fake_embedder) -> None:
     # The real retrieval drove a valid route and the run did not error.
     assert state["route"] in {PERSON, PRIOR_ANSWER, DOCUMENT}
     assert isinstance(state["retrieval"]["candidate_people"], list)
+
+
+# --------------------------------------------------------------------------- #
+# fix B: an unexpected outcome never reaches the success terminal
+# --------------------------------------------------------------------------- #
+def test_unexpected_outcome_does_not_reach_c8(seed_counts, session, fake_embedder) -> None:
+    for emp in (1, 2):
+        _seed_skill(session, f"sk_bad_{emp}", emp)
+    agent = build_agent(fake_embedder, session, retriever=_FakeRetriever(people=[1, 2]))
+    cfg = _cfg("badout")
+
+    agent.invoke(_init(), cfg)
+    assert agent.get_state(cfg).next == ("send",)
+    # A garbage outcome loops back to send (re-confirm) — never c8_update.
+    agent.invoke(Command(resume="maybe?"), cfg)
+    assert agent.get_state(cfg).next == ("send",)
+    assert agent.get_state(cfg).values.get("answer") is None
+    # A valid outcome then completes.
+    final = agent.invoke(Command(resume="accepted"), cfg)
+    assert "取り次ぎました" in final["answer"]
+
+
+# --------------------------------------------------------------------------- #
+# fix D: a 2nd question on the same thread resets per-question control
+# --------------------------------------------------------------------------- #
+def test_second_question_resets_control_fields(seed_counts, session, fake_embedder) -> None:
+    for emp in (1, 2):
+        _seed_skill(session, f"sk_reset_{emp}", emp)
+    agent = build_agent(fake_embedder, session, retriever=_FakeRetriever(people=[1, 2]))
+    cfg = _cfg("twoq")  # SAME thread for both questions
+
+    # Q1: decline the first pick so declined_ids gets populated.
+    q1 = agent.invoke(_init(), cfg)
+    first_pick = q1["recommendations"][0]["person_id"]
+    agent.invoke(Command(resume="declined"), cfg)
+    agent.invoke(Command(resume="accepted"), cfg)  # Q1 ends
+    assert first_pick in agent.get_state(cfg).values["declined_ids"]
+
+    # Q2: a brand-new question on the SAME thread -> reset clears the carry-over.
+    agent.invoke(_init(), cfg)
+    q2_state = agent.get_state(cfg).values
+    assert q2_state["declined_ids"] == []  # not inherited from Q1
+    assert q2_state["followup_count"] == 0
+    # The person declined in Q1 is eligible again in Q2.
+    assert first_pick in [r["person_id"] for r in q2_state["recommendations"]]
+
+
+def test_resume_does_not_reset_followup_loop(seed_counts, session, fake_embedder) -> None:
+    for emp in (1, 2):
+        _seed_skill(session, f"sk_noreset_{emp}", emp)
+    agent = build_agent(fake_embedder, session, retriever=_FakeRetriever(people=[1, 2]))
+    cfg = _cfg("noreset")
+    agent.invoke(_init("ネットワークの技術相談です"), cfg)  # insufficient -> ask
+    assert agent.get_state(cfg).next == ("ask",)
+    # Resume (NOT a new question) must keep the followup_count it accrued.
+    agent.invoke(Command(resume="現行はVPN、3拠点です"), cfg)
+    assert agent.get_state(cfg).values["followup_count"] == 1
+
+
+# --------------------------------------------------------------------------- #
+# fix E: the follow-up cap is enforced by the node, not just the stub
+# --------------------------------------------------------------------------- #
+def test_node_enforces_followup_cap(seed_counts, session, fake_embedder) -> None:
+    from tekijin.agent.protocols import SufficiencyResult
+
+    class _NeverSufficient:
+        def check(self, question, intent, followup_count):  # ignores the cap
+            return SufficiencyResult(sufficient=False, missing=["x"], followup_question="もっと？")
+
+    for emp in (1, 2):
+        _seed_skill(session, f"sk_cap_{emp}", emp)
+    agent = build_agent(
+        fake_embedder,
+        session,
+        sufficiency_model=_NeverSufficient(),
+        retriever=_FakeRetriever(people=[1, 2]),
+    )
+    cfg = _cfg("cap")
+    agent.invoke(_init(), cfg)  # model says insufficient -> ask
+    assert agent.get_state(cfg).next == ("ask",)
+    # After one clarification the NODE forces sufficiency -> proceeds (no loop).
+    agent.invoke(Command(resume="追加情報です"), cfg)
+    assert agent.get_state(cfg).next == ("send",)  # reached the hand-off, not ask
+
+
+# --------------------------------------------------------------------------- #
+# fix G: prior_answer hands off to the past responder, not a higher scorer
+# --------------------------------------------------------------------------- #
+def test_prior_answer_pins_the_responder(seed_counts, session, fake_embedder) -> None:
+    # Retrieval lists candidate_people [1, 2, 3] but the strong past answer is by
+    # employee 5; prior_answer must hand off to 5, not to a higher-scoring 1/2/3.
+    for emp in (1, 2, 3):
+        _seed_skill(session, f"sk_pin_{emp}", emp)  # strong candidates
+    retriever = _FakeRetriever(
+        answers=[{"qa_id": "a", "score": 0.05, "responder_id": 5}],  # clears threshold
+        people=[1, 2, 3],
+    )
+    agent = build_agent(fake_embedder, session, retriever=retriever)
+    cfg = _cfg("pin")
+    state = agent.invoke(_init(), cfg)
+    assert state["route"] == PRIOR_ANSWER
+    assert state["pinned_responder_id"] == 5
+    assert [r["person_id"] for r in state["recommendations"]] == [5]  # pinned
+
+
+# --------------------------------------------------------------------------- #
+# fix I: a non-string resume is not interpolated into the question
+# --------------------------------------------------------------------------- #
+def test_ask_ignores_non_string_resume(seed_counts, session, fake_embedder) -> None:
+    for emp in (1, 2):
+        _seed_skill(session, f"sk_badreply_{emp}", emp)
+    agent = build_agent(fake_embedder, session, retriever=_FakeRetriever(people=[1, 2]))
+    cfg = _cfg("badreply")
+    original = "ネットワークの技術相談です"
+    agent.invoke(_init(original), cfg)
+    assert agent.get_state(cfg).next == ("ask",)
+    # A non-string resume payload is safely ignored (not appended); the cap then
+    # lets the run proceed rather than corrupting the question.
+    agent.invoke(Command(resume={"unexpected": "payload"}), cfg)
+    values = agent.get_state(cfg).values
+    assert values["question"] == original  # not corrupted with the dict
+    assert agent.get_state(cfg).next == ("send",)

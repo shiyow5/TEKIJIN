@@ -19,7 +19,7 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
 from tekijin.agent.nodes import AgentNodes
-from tekijin.agent.protocols import DraftModel, IntentModel, SufficiencyModel
+from tekijin.agent.protocols import DraftModel, IntentModel, Retriever, SufficiencyModel
 from tekijin.agent.route import DOCUMENT, PERSON, PRIOR_ANSWER
 from tekijin.agent.state import AgentState
 from tekijin.agent.stubs import KeywordIntentModel, RuleSufficiencyModel, TemplateDraftModel
@@ -31,25 +31,34 @@ from tekijin.scorer.weights import DEFAULT_WEIGHTS, Weights
 
 
 # -- conditional-edge routers (pure) -------------------------------------
-def _after_c1(state: dict[str, Any]) -> str:
+def _after_c1(state: AgentState) -> str:
     # Node id differs from the "out_of_scope" state key (LangGraph forbids reuse).
     return "off_topic" if state.get("out_of_scope") else "c2_sufficiency"
 
 
-def _after_c2(state: dict[str, Any]) -> str:
+def _after_c2(state: AgentState) -> str:
     return "c3_embed" if state.get("sufficient") else "ask"
 
 
-def _after_c5(state: dict[str, Any]) -> str:
+def _after_c5(state: AgentState) -> str:
     return state.get("route", PERSON)
 
 
-def _after_c6(state: dict[str, Any]) -> str:
+def _after_c6(state: AgentState) -> str:
     return "c7_draft" if state.get("recommendations") else "no_candidate"
 
 
-def _after_send(state: dict[str, Any]) -> str:
-    return "reroute" if state.get("outcome") == "declined" else "c8_update"
+def _after_send(state: AgentState) -> str:
+    # The outcome is external input (Command(resume=...)); validate it. Only the
+    # two known values proceed — anything else (None, a typo, a payload) loops
+    # back to ``send`` to re-confirm, so a bad value never silently reaches the
+    # success terminal (c8_update).
+    outcome = state.get("outcome")
+    if outcome == "declined":
+        return "reroute"
+    if outcome == "accepted":
+        return "c8_update"
+    return "send"
 
 
 def build_agent(
@@ -59,7 +68,7 @@ def build_agent(
     intent_model: IntentModel | None = None,
     sufficiency_model: SufficiencyModel | None = None,
     draft_model: DraftModel | None = None,
-    retriever: Any | None = None,
+    retriever: Retriever | None = None,
     scorer: ExpertiseScorer | None = None,
     weights: Weights = DEFAULT_WEIGHTS,
     checkpointer: Any | None = None,
@@ -90,6 +99,7 @@ def build_agent(
     )
 
     graph = StateGraph(AgentState)
+    graph.add_node("reset", nodes.reset)
     graph.add_node("c1_intent", nodes.c1_intent)
     graph.add_node("c2_sufficiency", nodes.c2_sufficiency)
     graph.add_node("ask", nodes.ask)
@@ -106,7 +116,10 @@ def build_agent(
     graph.add_node("document", nodes.document)
     graph.add_node("no_candidate", nodes.no_candidate)
 
-    graph.add_edge(START, "c1_intent")
+    # START -> reset -> C1. ``reset`` clears per-question control fields on a fresh
+    # invoke; ``resume`` bypasses START, so mid-flow interrupts keep their state.
+    graph.add_edge(START, "reset")
+    graph.add_edge("reset", "c1_intent")
     graph.add_conditional_edges(
         "c1_intent",
         _after_c1,
@@ -127,7 +140,9 @@ def build_agent(
     )
     graph.add_edge("c7_draft", "send")
     graph.add_conditional_edges(
-        "send", _after_send, {"reroute": "reroute", "c8_update": "c8_update"}
+        "send",
+        _after_send,
+        {"reroute": "reroute", "c8_update": "c8_update", "send": "send"},
     )
     graph.add_edge("reroute", "c6_score")
     graph.add_edge("c8_update", END)

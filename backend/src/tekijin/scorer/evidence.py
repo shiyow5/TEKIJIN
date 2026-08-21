@@ -45,42 +45,41 @@ class Evidence:
 
 
 def collect_topic_evidence(
-    topic: str,
+    topics: str | Sequence[str],
     certifications: Sequence[CertificationDTO],
     skills: Sequence[SkillDTO],
     memberships: Sequence[ProjectMembershipDTO],
     on_topic_answers: Sequence[AnswerDTO],
 ) -> list[Evidence]:
-    """Assemble every piece of evidence a person has for ``topic``.
+    """Assemble every piece of evidence a person has for ``topics``.
 
-    ``on_topic_answers`` must already be this person's answers on the topic: the
-    topic *join* lives in the repository (``answers_by_topic``) and the strict
-    subtopic *filter* in the scorer (``_topic_answers``). Certifications, skills,
-    and projects are matched here. Ordering is deterministic: certs, skills,
-    projects, answers.
+    ``topics`` may be a single topic (back-compatible) or several — for a
+    multi-topic question the person's expertise across all of them is unioned.
+    Each certification / skill / project contributes at most once even if it
+    matches several topics (matched against the topic *set*), so nothing is
+    double-counted. ``on_topic_answers`` must already be this person's answers for
+    the topic set, de-duplicated by the caller (the topic *join* lives in the
+    repository; the strict subtopic *filter* in the scorer). Ordering is
+    deterministic: certs, skills, projects, answers, in input order.
     """
 
+    topic_set = {topics} if isinstance(topics, str) else set(topics)
     evidence: list[Evidence] = []
 
     for cert in certifications:
-        if cert_matches_topic(cert.name, topic):
+        if any(cert_matches_topic(cert.name, t) for t in topic_set):
             evidence.append(Evidence("cert", BASE_SCORE_CERTIFICATION, cert.acquired_at, cert.name))
 
     for skill in skills:
-        if skill.topic == topic:
+        if skill.topic in topic_set:
             # Preserve provenance: an inferred skill must not be called
-            # "self-declared". A null source defaults to self-declared.
-            if skill.source == "inferred":
-                evidence.append(
-                    Evidence("inferred", BASE_SCORE_SKILL, None, f"推定スキル: {topic}")
-                )
-            else:
-                evidence.append(
-                    Evidence("self", BASE_SCORE_SKILL, None, f"自己申告スキル: {topic}")
-                )
+            # "self-declared". A null source defaults to self-declared. The detail
+            # carries the skill's OWN topic (accurate multi-topic reasons).
+            source_type = "inferred" if skill.source == "inferred" else "self"
+            evidence.append(Evidence(source_type, BASE_SCORE_SKILL, None, skill.topic))
 
     for member in memberships:
-        if product_matches_topic(member.product, topic):
+        if any(product_matches_topic(member.product, t) for t in topic_set):
             is_lead = member.role == "lead"
             base = BASE_SCORE_PROJECT_LEAD if is_lead else BASE_SCORE_PROJECT_MEMBER
             # end_date is None while the project is ongoing; the scorer maps that

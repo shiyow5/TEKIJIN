@@ -507,3 +507,37 @@ def test_inferred_skill_reason_is_estimated(seed_counts, session) -> None:
     skill_reason = next(r for r in rec["reasons"] if r["type"] == "skill")
     assert "推定" in skill_reason["detail"]
     assert "自己申告" not in skill_reason["detail"]
+
+
+# --------------------------------------------------------------------------- #
+# fix C: multiple topics are aggregated (not just topics[0])
+# --------------------------------------------------------------------------- #
+def test_multi_topic_aggregates_expertise(seed_counts, session) -> None:
+    topic_a = "__MT_TOPIC_A__"
+    topic_b = "__MT_TOPIC_B__"
+    # emp 3: skill on A only. emp 4: skill on A AND B.
+    session.add(Skill(id="mt_a3", employee_id=3, topic=topic_a, level="中級", source="self"))
+    session.add(Skill(id="mt_a4", employee_id=4, topic=topic_a, level="中級", source="self"))
+    session.add(Skill(id="mt_b4", employee_id=4, topic=topic_b, level="中級", source="self"))
+    session.flush()
+
+    scorer = ExpertiseScorer(Repository(session))
+
+    # Both topics: emp 4's extra B-skill lifts it above emp 3.
+    both = scorer.rank([topic_a, topic_b], [3, 4], asker_id=None, now=NOW, top_k=3)
+    both_scores = _scores_by_person(both)
+    assert both["recommendations"][0]["person_id"] == 4
+    assert both_scores[4] > both_scores[3]
+
+    # Single topic A only: the B-skill is ignored, so they tie.
+    only_a = scorer.rank(topic_a, [3, 4], asker_id=None, now=NOW, top_k=3)
+    only_scores = _scores_by_person(only_a)
+    assert only_scores[3] == only_scores[4]
+
+
+def test_rank_accepts_single_topic_string(seed_counts, session) -> None:
+    # Back-compat: a single topic string still works as before.
+    _add_skill(session, "mt_single", 5)
+    scorer = ExpertiseScorer(Repository(session))
+    result = scorer.rank(TOPIC, [5], asker_id=None, now=NOW, top_k=3)
+    assert result["recommendations"][0]["person_id"] == 5

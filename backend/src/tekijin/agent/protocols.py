@@ -14,6 +14,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from tekijin.agent.state import RetrievalResult
+
 
 @dataclass(frozen=True, slots=True)
 class IntentResult:
@@ -60,3 +62,9 @@ class DraftModel(Protocol):
         asker: dict[str, Any] | None,
         missing: list[str],
     ) -> str: ...
+
+
+class Retriever(Protocol):
+    """C4: hybrid search returning the :class:`RetrievalResult` shape."""
+
+    def search(self, query: str) -> RetrievalResult: ...

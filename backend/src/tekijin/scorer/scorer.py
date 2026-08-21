@@ -58,7 +58,7 @@ class ExpertiseScorer:
 
     def rank(
         self,
-        topic: str,
+        topics: str | Sequence[str],
         candidate_ids: Sequence[int],
         asker_id: int | None,
         now: dt.datetime,
@@ -67,9 +67,12 @@ class ExpertiseScorer:
     ) -> dict[str, Any]:
         """Return ``{"recommendations": [...]}`` — the top-``top_k`` candidates.
 
-        Only ids in ``candidate_ids`` that resolve to a real employee are scored;
-        unknown ids are dropped (never fabricated). The asker (``asker_id``) is
-        removed from the candidates — never recommend a person to themselves.
+        ``topics`` may be a single topic or several — for a multi-topic question
+        the topic_fit / recency / answer_quality evidence is aggregated across all
+        of them (load / proximity are topic-independent). Only ids in
+        ``candidate_ids`` that resolve to a real employee are scored; unknown ids
+        are dropped. The asker (``asker_id``) is removed — never recommend a
+        person to themselves.
 
         ``now`` must be timezone-naive: stored ``created_at`` values are naive, so
         an aware ``now`` would raise on comparison/subtraction.
@@ -82,6 +85,8 @@ class ExpertiseScorer:
         if now.tzinfo is not None:
             raise ValueError("now must be naive (matches stored timestamps)")
 
+        topic_list = [topics] if isinstance(topics, str) else list(dict.fromkeys(topics))
+
         # De-dupe (keep first order), then drop the asker (only when known).
         candidates = [
             pid for pid in dict.fromkeys(candidate_ids) if asker_id is None or pid != asker_id
@@ -92,7 +97,7 @@ class ExpertiseScorer:
         since = now - dt.timedelta(days=LOAD_WINDOW_DAYS)
         rec_counts = self._repo.recent_recommendation_counts(since, now, candidates)
         ans_counts = self._repo.recent_answer_counts(since, now, candidates)
-        answers_by_person = self._group_answers_by_person(self._topic_answers(topic))
+        answers_by_person = self._group_answers_by_person(self._union_topic_answers(topic_list))
         asker_branch = self._asker_branch(asker_id)
 
         scored: list[tuple[float, int, dict[str, Any]]] = []
@@ -101,7 +106,7 @@ class ExpertiseScorer:
             if employee is None:
                 continue
             record, score = self._score_person(
-                topic=topic,
+                topics=topic_list,
                 employee_id=person_id,
                 employee_name=employee.name,
                 employee_dept=employee.department,
@@ -131,13 +136,30 @@ class ExpertiseScorer:
             a for a in self._repo.answers_by_topic(topic) if a.topic == topic or a.topic is None
         ]
 
+    def _union_topic_answers(self, topic_list: Sequence[str]) -> list[AnswerDTO]:
+        """Answers that are evidence for ANY topic, de-duplicated by answer id.
+
+        A ``topic=None`` answer can surface under several topics; keeping the
+        first occurrence keeps it single-counted. Deterministic: topic order then
+        answer order.
+        """
+
+        seen: set[str] = set()
+        union: list[AnswerDTO] = []
+        for topic in topic_list:
+            for answer in self._topic_answers(topic):
+                if answer.id not in seen:
+                    seen.add(answer.id)
+                    union.append(answer)
+        return union
+
     # ------------------------------------------------------------------ #
     # per-person scoring
     # ------------------------------------------------------------------ #
     def _score_person(
         self,
         *,
-        topic: str,
+        topics: Sequence[str],
         employee_id: int,
         employee_name: str,
         employee_dept: str | None,
@@ -148,7 +170,7 @@ class ExpertiseScorer:
         now: dt.datetime,
     ) -> tuple[dict[str, Any], float]:
         evidence = collect_topic_evidence(
-            topic,
+            topics,
             self._repo.certifications_for(employee_id),
             self._repo.skills_for(employee_id),
             self._repo.project_memberships_for(employee_id),
@@ -173,7 +195,6 @@ class ExpertiseScorer:
         )
 
         reasons = self._build_reasons(
-            topic=topic,
             evidence=evidence,
             topic_fit=topic_fit,
             recency_score=recency_score,
@@ -203,7 +224,6 @@ class ExpertiseScorer:
     def _build_reasons(
         self,
         *,
-        topic: str,
         evidence: Sequence[Evidence],
         topic_fit: float,
         recency_score: float,
@@ -234,20 +254,23 @@ class ExpertiseScorer:
             )
 
         # Skill evidence: surface it so cold-start candidates (chosen on a skill
-        # alone) are explained by their expertise signal, not just load — and
-        # word it by provenance so an inferred skill is never called "declared".
-        if any(e.source_type == "self" for e in evidence):
+        # alone) are explained by their expertise signal, not just load — worded
+        # by provenance (an inferred skill is never called "declared") and naming
+        # the actual skill topics (multi-topic accurate; e.detail is the topic).
+        self_topics = [e.detail for e in evidence if e.source_type == "self"]
+        if self_topics:
             entries.append(
                 (
                     topic_fit_share(("self",)),
-                    {"type": "self", "detail": f"自己申告スキル: {topic}"},
+                    {"type": "self", "detail": "自己申告スキル: " + "、".join(self_topics)},
                 )
             )
-        if any(e.source_type == "inferred" for e in evidence):
+        inferred_topics = [e.detail for e in evidence if e.source_type == "inferred"]
+        if inferred_topics:
             entries.append(
                 (
                     topic_fit_share(("inferred",)),
-                    {"type": "skill", "detail": f"推定スキル: {topic}"},
+                    {"type": "skill", "detail": "推定スキル: " + "、".join(inferred_topics)},
                 )
             )
 
