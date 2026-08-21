@@ -1,0 +1,18 @@
+# TEKIJIN backend — heavy ML dependencies for dense embeddings (Issue #29).
+#
+# These are DELIBERATELY kept out of requirements.txt so CI stays light and
+# fast: sentence-transformers pulls in torch and downloads model weights on
+# first use. The retrieval code imports them lazily (function-local imports),
+# so nothing here is needed to run the test suite — tests inject a deterministic
+# fake embedder instead.
+#
+# Install locally / on the DGX box when you need real embeddings:
+#     pip install -r requirements.txt -r requirements-ml.txt
+# then compute and store vectors with:
+#     make embed        (see scripts/embed_fixtures.py)
+sentence-transformers>=3.0,<4.0
+
+# torch is a transitive dependency of sentence-transformers; pin the major line
+# to keep resolution predictable. Install the CUDA/CPU build appropriate for the
+# host from https://pytorch.org if the default wheel does not match your setup.
+torch>=2.2

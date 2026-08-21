@@ -13,3 +13,11 @@ pydantic-settings==2.7.1
 sqlalchemy>=2.0,<2.1
 psycopg[binary]>=3.2,<4
 pgvector>=0.3,<0.4
+
+# Retrieval layer (Issue #29): sparse (BM25) + fusion. These are CPU-light and
+# safe for CI. The heavy dense-embedding deps (sentence-transformers / torch)
+# live in requirements-ml.txt and are imported lazily so CI never pulls them.
+sudachipy>=0.6,<0.7
+sudachidict-core>=20240000
+rank-bm25>=0.2,<0.3
+numpy>=1.26

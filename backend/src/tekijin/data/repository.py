@@ -92,6 +92,12 @@ class Repository:
         stmt = select(Answer).where(Answer.question_id == question_id).order_by(Answer.id)
         return [AnswerDTO.from_row(r) for r in self._session.scalars(stmt)]
 
+    def list_answers(self) -> list[AnswerDTO]:
+        """Every answer, ordered by id. Used to build the BM25 answer corpus."""
+
+        rows = self._session.scalars(select(Answer).order_by(Answer.id)).all()
+        return [AnswerDTO.from_row(r) for r in rows]
+
     # -- documents -------------------------------------------------------- #
     def list_documents(self) -> list[DocumentDTO]:
         rows = self._session.scalars(select(Document).order_by(Document.id)).all()

@@ -20,12 +20,14 @@ run the full suite unchanged.
 
 from __future__ import annotations
 
+import hashlib
+import math
 import os
 import re
 import shutil
 import tempfile
 import uuid
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 
 import pytest
 from sqlalchemy import event, text
@@ -48,6 +50,50 @@ from tekijin.data.seed import run_seed
 # uuid4 hex string — never from external input — and validated below.
 TEST_SCHEMA = f"tekijin_test_{uuid.uuid4().hex}"
 assert re.fullmatch(r"tekijin_test_[0-9a-f]{32}", TEST_SCHEMA), TEST_SCHEMA
+
+
+def fake_vector(text: str, dim: int) -> list[float]:
+    """Deterministic, L2-normalised bag-of-tokens embedding for tests.
+
+    Each whitespace token lights up one dimension (chosen by hashing the token),
+    so identical text yields an identical vector — a query embeds to exactly the
+    same vector as a passage with the same words, giving cosine similarity 1.0 —
+    and texts that share tokens are closer than texts that do not. No model or
+    download required. This mirrors the contract real embedders satisfy well
+    enough to exercise dense search and RRF fusion deterministically.
+    """
+
+    vec = [0.0] * dim
+    for token in (text or "").split():
+        digest = hashlib.md5(token.encode("utf-8")).hexdigest()  # noqa: S324 - not security
+        vec[int(digest, 16) % dim] += 1.0
+    norm = math.sqrt(sum(x * x for x in vec))
+    if norm == 0.0:
+        # No tokens: return a fixed unit vector so pgvector cosine is defined.
+        vec[0] = 1.0
+        return vec
+    return [x / norm for x in vec]
+
+
+class FakeEmbedder:
+    """In-memory :class:`~tekijin.retrieval.embedding.Embedder` for tests.
+
+    Ignores ``kind`` on purpose: a query and a passage with the same text must
+    map to the same vector so exact-match relevance is predictable.
+    """
+
+    def __init__(self, dim: int) -> None:
+        self.dim = dim
+
+    def encode(self, texts: Sequence[str], *, kind: str = "passage") -> list[list[float]]:
+        return [fake_vector(t, self.dim) for t in texts]
+
+
+@pytest.fixture
+def fake_embedder() -> FakeEmbedder:
+    """A :class:`FakeEmbedder` sized to the configured embedding dimension."""
+
+    return FakeEmbedder(get_settings().embedding_dim)
 
 
 @pytest.fixture(scope="session")

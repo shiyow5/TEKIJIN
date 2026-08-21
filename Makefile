@@ -3,7 +3,7 @@
         fmt-check fmt-check-backend fmt-check-frontend \
         lint lint-backend lint-frontend \
         test test-backend test-frontend \
-        run-backend db-up db-down seed \
+        run-backend db-up db-down seed embed \
         typecheck-frontend check clean
 
 # ============================================================
@@ -100,6 +100,9 @@ db-down: ## Stop the local PostgreSQL container
 
 seed: ## Seed the database from the synthetic fixtures
 	cd $(BACKEND_DIR) && PYTHONPATH=src $(PY) -m tekijin.data.seed
+
+embed: ## Compute + store dense embeddings (needs requirements-ml.txt + a real model)
+	PYTHONPATH=$(BACKEND_DIR)/src $(PY) scripts/embed_fixtures.py
 
 # ============================================================
 # Aggregate
