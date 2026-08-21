@@ -8,11 +8,17 @@ ingestion time). ``build_all`` assembles every table's rows in FK-safe order.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy.orm import DeclarativeBase
+
 from tekijin.data.loaders import load_fixture, parse_date, parse_datetime
 from tekijin.models import tables as t
+
+# A mapper turns one raw fixture record into an unsaved ORM instance.
+Mapper = Callable[[dict[str, Any]], DeclarativeBase]
 
 
 def map_employee(r: dict[str, Any]) -> t.Employee:
@@ -143,7 +149,7 @@ def map_document(r: dict[str, Any]) -> t.Document:
 
 
 # Ordered so that parents are inserted before their FK dependants.
-_PLAN: tuple[tuple[str, str, Any], ...] = (
+_PLAN: tuple[tuple[str, str, Mapper], ...] = (
     ("employees", "employees", map_employee),
     ("projects", "projects", map_project),
     ("profiles", "profiles", map_profile),
@@ -158,14 +164,14 @@ _PLAN: tuple[tuple[str, str, Any], ...] = (
 )
 
 
-def build_all(fixtures_dir: Path) -> list[tuple[str, list[Any]]]:
+def build_all(fixtures_dir: Path) -> list[tuple[str, list[DeclarativeBase]]]:
     """Load every fixture and map it to ORM rows, in FK-safe insert order.
 
     Returns a list of ``(logical_name, orm_rows)`` pairs so the seed can insert
     each group in order and report per-table counts.
     """
 
-    result: list[tuple[str, list[Any]]] = []
+    result: list[tuple[str, list[DeclarativeBase]]] = []
     for logical_name, fixture_name, mapper in _PLAN:
         rows = [mapper(rec) for rec in load_fixture(fixtures_dir, fixture_name)]
         result.append((logical_name, rows))

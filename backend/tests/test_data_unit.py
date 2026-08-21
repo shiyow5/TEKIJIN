@@ -237,7 +237,21 @@ def test_main_prints_counts(monkeypatch, capsys) -> None:
     import tekijin.data.seed as seed_mod
 
     monkeypatch.setattr(seed_mod, "run_seed", lambda: {"employees": 40})
-    rc = seed_mod.main([])
+    rc = seed_mod.main()
     out = capsys.readouterr().out
     assert rc == 0
     assert "Seeded TEKIJIN fixtures" in out and "employees" in out
+
+
+def test_main_raises_when_no_tables_registered(monkeypatch) -> None:
+    from sqlalchemy import MetaData
+    from sqlalchemy.orm import DeclarativeBase
+
+    import tekijin.data.seed as seed_mod
+
+    class _EmptyBase(DeclarativeBase):
+        metadata = MetaData()  # no tables registered
+
+    monkeypatch.setattr(seed_mod, "Base", _EmptyBase)
+    with pytest.raises(RuntimeError, match="no tables registered"):
+        seed_mod.main()

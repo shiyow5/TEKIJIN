@@ -31,6 +31,11 @@ from tekijin.data.mappers import build_all
 
 # Order in which to TRUNCATE — children before parents. CASCADE makes the exact
 # order forgiving, but listing children first keeps intent clear.
+#
+# SECURITY: this tuple is the ONLY source of table names interpolated into the
+# TRUNCATE statement. It is a hard-coded allow-list — never build it from user
+# input, request data, or any external source, since the names are spliced into
+# raw SQL (identifiers cannot be passed as bind parameters).
 _TRUNCATE_ORDER: tuple[str, ...] = (
     "evidence",
     "person_topic_edges",
@@ -99,12 +104,14 @@ def _format_counts(counts: dict[str, int]) -> str:
     return "\n".join(lines)
 
 
-def main(argv: list[str] | None = None) -> int:
+def main() -> int:
     """CLI entry point. Seeds the configured database and prints counts."""
 
     # ``Base`` is referenced so the metadata is registered even if models were
-    # not imported elsewhere in this process.
-    assert Base.metadata.tables, "no tables registered"
+    # not imported elsewhere in this process. Use an explicit raise (not
+    # ``assert``) so the guard survives ``python -O``.
+    if not Base.metadata.tables:
+        raise RuntimeError("no tables registered on Base.metadata")
     counts = run_seed()
     print("Seeded TEKIJIN fixtures:")
     print(_format_counts(counts))

@@ -36,3 +36,11 @@ exclude_lines = [
     "if __name__ == .__main__.:",
     "if TYPE_CHECKING:",
 ]
+
+[tool.mypy]
+python_version = "3.12"
+
+# pgvector ships no type stubs; don't fail type-checking on its imports.
+[[tool.mypy.overrides]]
+module = "pgvector.*"
+ignore_missing_imports = true

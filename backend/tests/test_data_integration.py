@@ -14,7 +14,13 @@ from tekijin.config import get_settings
 from tekijin.data.db import get_sessionmaker, session_scope
 from tekijin.data.repository import Repository
 from tekijin.data.seed import run_seed
-from tekijin.models.tables import Answer, Employee, EmployeeProfile, Question
+from tekijin.models.tables import (
+    Answer,
+    Employee,
+    EmployeeProfile,
+    ProjectMember,
+    Question,
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -28,6 +34,47 @@ def test_pgvector_extension_and_schema(engine) -> None:
         for table in ("employees", "answers", "person_topic_edges"):
             exists = conn.execute(text("SELECT to_regclass(:t)"), {"t": table}).scalar()
             assert exists is not None
+
+
+def test_indexes_exist_on_filtered_columns(engine) -> None:
+    # Columns the repository filters on must be indexed.
+    expected = {
+        ("certifications", "employee_id"),
+        ("skills", "employee_id"),
+        ("answers", "topic"),
+        ("answers", "question_id"),
+        ("answers", "responder_id"),
+        ("questions", "asker_id"),
+        ("project_members", "employee_id"),
+        ("daily_reports", "employee_id"),
+        ("employee_profiles", "employee_id"),
+        ("evidence", "person_id"),
+        ("person_topic_edges", "person_id"),
+    }
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text(
+                "SELECT t.relname AS table_name, a.attname AS column_name "
+                "FROM pg_index i "
+                "JOIN pg_class t ON t.oid = i.indrelid "
+                "JOIN pg_attribute a "
+                "  ON a.attrelid = t.oid AND a.attnum = ANY(i.indkey) "
+                "WHERE t.relnamespace = 'public'::regnamespace"
+            )
+        ).all()
+    indexed = {(r.table_name, r.column_name) for r in rows}
+    missing = expected - indexed
+    assert not missing, f"missing indexes: {missing}"
+
+
+def test_project_members_role_check_constraint(engine, seed_counts) -> None:
+    # The CHECK constraint must reject roles outside {lead, member}.
+    factory = get_sessionmaker(engine)
+    with (
+        pytest.raises(Exception),  # noqa: B017 - IntegrityError from CHECK
+        session_scope(factory) as sess,
+    ):
+        sess.add(ProjectMember(project_id=1, employee_id=1, role="observer"))
 
 
 # --------------------------------------------------------------------------- #

@@ -24,6 +24,7 @@ import datetime as dt
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Date,
     DateTime,
     Float,
@@ -53,7 +54,7 @@ class Employee(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(255))
-    email: Mapped[str] = mapped_column(String(255))
+    email: Mapped[str] = mapped_column(String(255), unique=True)
     department: Mapped[str | None] = mapped_column(String(255))
     section: Mapped[str | None] = mapped_column(String(255))
     position: Mapped[str | None] = mapped_column(String(255))
@@ -68,7 +69,9 @@ class EmployeeProfile(Base):
 
     __tablename__ = "employee_profiles"
 
-    employee_id: Mapped[int] = mapped_column(ForeignKey("employees.id"), primary_key=True)
+    employee_id: Mapped[int] = mapped_column(
+        ForeignKey("employees.id"), primary_key=True, index=True
+    )
     description: Mapped[str | None] = mapped_column(Text)
     embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM))
     updated_at: Mapped[dt.datetime | None] = mapped_column(DateTime)
@@ -105,7 +108,7 @@ class DailyReport(Base):
     __tablename__ = "daily_reports"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    employee_id: Mapped[int] = mapped_column(ForeignKey("employees.id"))
+    employee_id: Mapped[int] = mapped_column(ForeignKey("employees.id"), index=True)
     report_date: Mapped[dt.date | None] = mapped_column(Date)
     content: Mapped[str | None] = mapped_column(Text)
     issue: Mapped[str | None] = mapped_column(Text)
@@ -144,7 +147,7 @@ class Certification(Base):
     __tablename__ = "certifications"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    employee_id: Mapped[int] = mapped_column(ForeignKey("employees.id"))
+    employee_id: Mapped[int] = mapped_column(ForeignKey("employees.id"), index=True)
     name: Mapped[str] = mapped_column(String(255))
     acquired_at: Mapped[dt.date | None] = mapped_column(Date)
 
@@ -155,7 +158,7 @@ class Skill(Base):
     __tablename__ = "skills"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    employee_id: Mapped[int] = mapped_column(ForeignKey("employees.id"))
+    employee_id: Mapped[int] = mapped_column(ForeignKey("employees.id"), index=True)
     topic: Mapped[str] = mapped_column(String(255))
     level: Mapped[str | None] = mapped_column(String(64))
     source: Mapped[str | None] = mapped_column(String(64))
@@ -167,7 +170,7 @@ class Question(Base):
     __tablename__ = "questions"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    asker_id: Mapped[int] = mapped_column(ForeignKey("employees.id"))
+    asker_id: Mapped[int] = mapped_column(ForeignKey("employees.id"), index=True)
     body: Mapped[str | None] = mapped_column(Text)
     topics: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
     status: Mapped[str | None] = mapped_column(String(64))
@@ -181,15 +184,15 @@ class Answer(Base):
     __tablename__ = "answers"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
-    question_id: Mapped[str] = mapped_column(ForeignKey("questions.id"))
-    responder_id: Mapped[int] = mapped_column(ForeignKey("employees.id"))
+    question_id: Mapped[str] = mapped_column(ForeignKey("questions.id"), index=True)
+    responder_id: Mapped[int] = mapped_column(ForeignKey("employees.id"), index=True)
     body: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[dt.datetime | None] = mapped_column(DateTime)
     embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM))
     reuse_count: Mapped[int | None] = mapped_column(Integer)
     was_helpful: Mapped[bool | None] = mapped_column(Boolean)
     # Not in the base ER but present in fixtures; drives ``answers_by_topic``.
-    topic: Mapped[str | None] = mapped_column(String(255))
+    topic: Mapped[str | None] = mapped_column(String(255), index=True)
 
 
 class Recommendation(Base):
@@ -220,13 +223,24 @@ class Event(Base):
 
 
 class ProjectMember(Base):
-    """Project membership with role (lead 0.8 / member 0.5)."""
+    """Project membership with role (lead 0.8 / member 0.5).
+
+    PK is ``(project_id, employee_id)`` — an employee holds exactly one role per
+    project, so ``role`` is a plain column, not part of the key. Keeping ``role``
+    out of the PK prevents the same person being both lead and member on one
+    project (which would double-count evidence in the C-layer graph).
+    """
 
     __tablename__ = "project_members"
+    __table_args__ = (
+        CheckConstraint("role IN ('lead', 'member')", name="ck_project_members_role"),
+    )
 
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), primary_key=True)
-    employee_id: Mapped[int] = mapped_column(ForeignKey("employees.id"), primary_key=True)
-    role: Mapped[str] = mapped_column(String(32), primary_key=True)
+    employee_id: Mapped[int] = mapped_column(
+        ForeignKey("employees.id"), primary_key=True, index=True
+    )
+    role: Mapped[str] = mapped_column(String(32))
 
     project: Mapped[Project] = relationship(back_populates="members")
 
@@ -252,7 +266,7 @@ class PersonTopicEdge(Base):
 
     __tablename__ = "person_topic_edges"
 
-    person_id: Mapped[int] = mapped_column(ForeignKey("employees.id"), primary_key=True)
+    person_id: Mapped[int] = mapped_column(ForeignKey("employees.id"), primary_key=True, index=True)
     topic_id: Mapped[str] = mapped_column(String(255), primary_key=True)
     weight: Mapped[float | None] = mapped_column(Float)
     confidence: Mapped[float | None] = mapped_column(Float)
@@ -266,7 +280,7 @@ class Evidence(Base):
     __tablename__ = "evidence"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    person_id: Mapped[int] = mapped_column(ForeignKey("employees.id"))
+    person_id: Mapped[int] = mapped_column(ForeignKey("employees.id"), index=True)
     topic_id: Mapped[str] = mapped_column(String(255))
     source_type: Mapped[str | None] = mapped_column(String(32))
     base_score: Mapped[float | None] = mapped_column(Float)

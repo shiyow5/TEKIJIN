@@ -9,6 +9,8 @@ TEKIJIN のデータベース設計。**3層**で構成する。
 他テーブルはすべて `EMPLOYEES` の「誰」を FK で指す。永続化は PostgreSQL 16 + pgvector 1本（LangGraph の checkpoints は PostgresSaver が自動管理し、本図には含めない）。
 
 > 整合状況（2026-08-21 監査）: A層は PR #18 の ER に忠実。**B層・C層は技術仕様 §4 / doc15 が要求するが ER 未登場**のため本ドキュメントで補完した。A層にも proximity 用の `branch`(拠点) 等が不足（末尾「A層の補足」参照）。実データ(PR #19)を A層スキーマへ寄せる方針は #18/#19 のレビューで追跡。
+>
+> 実装補足（#28）: PK 型は本 ER 図の `uuid` 表記ではなく**フィクスチャ実体に準拠**する。`employees`・`projects` は `int`、`cert_` / `q_` / `ans_` / `doc_` / `skill_` 接頭辞を持つエンティティ（certifications・questions・answers・documents・skills）は `string`。`project_members` の PK は `(project_id, employee_id)` とし、`role` は `CHECK(role IN ('lead','member'))` 付きの通常カラム（同一ペアで lead/member が二重登録されないため）。
 
 ## A. 入力データ層（合成データ層）— ER図
 
