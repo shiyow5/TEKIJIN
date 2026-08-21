@@ -21,7 +21,7 @@ import time
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import research_corpus as rc  # noqa: E402
+import research_corpus as rc
 
 # prefix はモデルごとに作法が違う（索引時と検索時で一致させること）。bench_embeddings.py と同じ。
 PREFIX = {
@@ -66,7 +66,7 @@ def main():
     chunks, _ = rc.build_chunks(fx, include_daily=not args.skip_daily)
     persons = rc.build_person_docs(fx)
     person_full = rc.build_person_docs(fx, include_daily=True)
-    person_ids, retrieval = rc.load_eval()
+    person_ids, _retrieval = rc.load_eval()
     queries = [q["query"] for q in person_ids]
 
     extra = []

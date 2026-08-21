@@ -23,7 +23,7 @@ import time
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import research_corpus as rc  # noqa: E402
+import research_corpus as rc
 
 QWEN_INSTRUCT = (
     "Given a user's internal help request, judge whether the document is evidence "
@@ -35,7 +35,9 @@ def score_bge(path, pairs, device, batch_size=32):
     from sentence_transformers import CrossEncoder
 
     model = CrossEncoder(path, device=device, trust_remote_code=True, max_length=512)
-    return np.asarray(model.predict(pairs, batch_size=batch_size, show_progress_bar=False))
+    return np.asarray(
+        model.predict(pairs, batch_size=batch_size, show_progress_bar=False)
+    )
 
 
 def score_qwen(path, pairs, device, batch_size=16):
@@ -44,7 +46,11 @@ def score_qwen(path, pairs, device, batch_size=16):
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     tok = AutoTokenizer.from_pretrained(path, padding_side="left")
-    model = AutoModelForCausalLM.from_pretrained(path, dtype=torch.float16).to(device).eval()
+    model = (
+        AutoModelForCausalLM.from_pretrained(path, dtype=torch.float16)
+        .to(device)
+        .eval()
+    )
     yes_id, no_id = tok.convert_tokens_to_ids("yes"), tok.convert_tokens_to_ids("no")
     prefix = (
         "<|im_start|>system\nJudge whether the Document meets the requirements based on the "
@@ -59,7 +65,9 @@ def score_qwen(path, pairs, device, batch_size=16):
             f"{prefix}<Instruct>: {QWEN_INSTRUCT}\n<Query>: {q}\n<Document>: {d[:1500]}{suffix}"
             for q, d in pairs[i : i + batch_size]
         ]
-        enc = tok(batch, return_tensors="pt", padding=True, truncation=True, max_length=2048).to(device)
+        enc = tok(
+            batch, return_tensors="pt", padding=True, truncation=True, max_length=2048
+        ).to(device)
         with torch.no_grad():
             logits = model(**enc).logits[:, -1, :]
         out.extend((logits[:, yes_id] - logits[:, no_id]).float().cpu().numpy())
@@ -71,7 +79,9 @@ def main():
     ap.add_argument("--emb", required=True)
     ap.add_argument("--reranker", required=True)
     ap.add_argument("--kind", choices=["bge", "qwen"], required=True)
-    ap.add_argument("--depth", type=int, default=50, help="bi-encoder の上位いくつを並べ替えるか")
+    ap.add_argument(
+        "--depth", type=int, default=50, help="bi-encoder の上位いくつを並べ替えるか"
+    )
     ap.add_argument("--include-daily", action="store_true")
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--out", required=True)
@@ -89,7 +99,7 @@ def main():
     z = np.load(args.emb)
     sims = z["queries"] @ z["chunks"][:n].T
 
-    person, _ = rc.load_eval()
+    person, _retrieval = rc.load_eval()
     items = rc.scored_person_items(person)
     qid_pos = {qid: i for i, qid in enumerate(meta["query_ids"])}
 
@@ -126,7 +136,9 @@ def main():
             f,
             ensure_ascii=False,
         )
-    print(f"wrote {args.out}  {elapsed:.1f}s ({elapsed / len(items) * 1000:.0f}ms/query)")
+    print(
+        f"wrote {args.out}  {elapsed:.1f}s ({elapsed / len(items) * 1000:.0f}ms/query)"
+    )
 
 
 if __name__ == "__main__":

@@ -56,7 +56,9 @@ class BM25:
             for i, counts in enumerate(self.tf):
                 f = counts.get(t, 0)
                 if f:
-                    denom = f + self.k1 * (1 - self.b + self.b * self.len[i] / self.avgdl)
+                    denom = f + self.k1 * (
+                        1 - self.b + self.b * self.len[i] / self.avgdl
+                    )
                     out[i] += idf * f * (self.k1 + 1) / denom
         return out
 
@@ -163,7 +165,7 @@ def build_person_graph(fx, employee_ids):
     idx = {e: i for i, e in enumerate(employee_ids)}
     n = len(employee_ids)
     adj = np.zeros((n, n), dtype=np.float32)
-    for pid, members in fx["members"].items():
+    for members in fx["members"].values():
         ids = [m["employee_id"] for m in members if m["employee_id"] in idx]
         for a in ids:
             for b in ids:

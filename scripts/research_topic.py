@@ -23,9 +23,9 @@ sys.path.insert(
     0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "backend", "src")
 )
 
-import research_rank as rr  # noqa: E402
-from build_eval_v2 import TOPICS  # noqa: E402  トピック→キーワード（gold と同じ語彙）
-from tekijin.scorer.topics import (  # noqa: E402
+import research_rank as rr
+from build_eval_v2 import TOPICS
+from tekijin.scorer.topics import (
     PRODUCT_TOPIC_MAP,
     cert_matches_topic,
 )
@@ -105,7 +105,9 @@ def expert_scores_for_topic(fx, topic, use_projects=True, use_answers=True):
             if PRODUCT_TOPIC_MAP.get(p["product"]) == topic:
                 for m in fx["members"][p["id"]]:
                     score[m["employee_id"]] += (
-                        BASE["proj_lead"] if m["role"] == "lead" else BASE["proj_member"]
+                        BASE["proj_lead"]
+                        if m["role"] == "lead"
+                        else BASE["proj_member"]
                     )
     if use_answers:
         for a in fx["answers"]:

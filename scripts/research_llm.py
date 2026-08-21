@@ -23,17 +23,34 @@ import time
 import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import research_corpus as rc  # noqa: E402
+import research_corpus as rc
 
 BASE_URL = os.environ.get("TEKIJIN_LLM_BASE_URL", "http://localhost:8080/v1")
 MODEL = os.environ.get("TEKIJIN_LLM_MODEL", "qwen36-35b")
 
 TOPIC_LIST = [
-    "CRM・営業支援", "ECサイト構築", "SNS運用", "Webマーケティング・広告", "クラウド移行",
-    "サーバー・インフラ運用", "システム開発・API", "セキュリティ", "データ基盤・分析",
-    "ネットワーク・VPN", "パフォーマンスチューニング", "モバイルアプリ開発", "人事・採用",
-    "問い合わせ・ヘルプデスク運用", "基幹システム", "契約管理", "広報・PR", "業務効率化コンサル",
-    "社内IT・ヘルプデスク", "経理・決算", "総務・法務", "購買・仕入れ",
+    "CRM・営業支援",
+    "ECサイト構築",
+    "SNS運用",
+    "Webマーケティング・広告",
+    "クラウド移行",
+    "サーバー・インフラ運用",
+    "システム開発・API",
+    "セキュリティ",
+    "データ基盤・分析",
+    "ネットワーク・VPN",
+    "パフォーマンスチューニング",
+    "モバイルアプリ開発",
+    "人事・採用",
+    "問い合わせ・ヘルプデスク運用",
+    "基幹システム",
+    "契約管理",
+    "広報・PR",
+    "業務効率化コンサル",
+    "社内IT・ヘルプデスク",
+    "経理・決算",
+    "総務・法務",
+    "購買・仕入れ",
 ]
 
 NONE_LABEL = "該当なし"
@@ -134,25 +151,37 @@ def run_query_task(items, task):
             r = call(
                 [
                     {"role": "system", "content": TOPIC_SYS},
-                    {"role": "user", "content": f"相談文: {q}\n候補: {' / '.join(TOPIC_LIST)}"},
+                    {
+                        "role": "user",
+                        "content": f"相談文: {q}\n候補: {' / '.join(TOPIC_LIST)}",
+                    },
                 ],
                 schema=TOPIC_SCHEMA,
                 max_tokens=256,
             )
         elif task == "hyde":
             r = call(
-                [{"role": "system", "content": HYDE_SYS}, {"role": "user", "content": q}],
+                [
+                    {"role": "system", "content": HYDE_SYS},
+                    {"role": "user", "content": q},
+                ],
                 max_tokens=400,
             )
         elif task == "q2d":
             r = call(
-                [{"role": "system", "content": Q2D_SYS}, {"role": "user", "content": q}],
+                [
+                    {"role": "system", "content": Q2D_SYS},
+                    {"role": "user", "content": q},
+                ],
                 max_tokens=200,
             )
         else:
             raise ValueError(task)
         out.append({"id": item["id"], "query": q, **r})
-        print(f"[{i + 1}/{len(items)}] {r['latency']:.2f}s {r['content'][:60]!r}", flush=True)
+        print(
+            f"[{i + 1}/{len(items)}] {r['latency']:.2f}s {r['content'][:60]!r}",
+            flush=True,
+        )
     return out
 
 
@@ -172,14 +201,20 @@ def run_rerank(payload):
                 {"role": "system", "content": RANK_SYS},
                 {
                     "role": "user",
-                    "content": "相談文: " + case["query"] + "\n\n候補者:\n" + "\n".join(lines),
+                    "content": "相談文: "
+                    + case["query"]
+                    + "\n\n候補者:\n"
+                    + "\n".join(lines),
                 },
             ],
             schema=RANK_SCHEMA,
             max_tokens=256,
         )
         out.append({"id": case["id"], **r})
-        print(f"[{i + 1}/{len(payload)}] {r['latency']:.2f}s {r['content'][:70]}", flush=True)
+        print(
+            f"[{i + 1}/{len(payload)}] {r['latency']:.2f}s {r['content'][:70]}",
+            flush=True,
+        )
     return out
 
 
@@ -190,7 +225,8 @@ TOPIC_CTX_SYS = (
 )
 
 TOPIC_ABSTAIN_SYS = (
-    TOPIC_CTX_SYS + "どの分野にも当てはまらない相談（社外の話・雑談・自社が扱わない領域）なら"
+    TOPIC_CTX_SYS
+    + "どの分野にも当てはまらない相談（社外の話・雑談・自社が扱わない領域）なら"
     "「該当なし」を1位に選びます。無理に当てはめないこと。"
 )
 
@@ -205,7 +241,10 @@ def run_topic_ctx(payload, abstain=False, samples=1, temperature=0.0):
             draws.append(
                 call(
                     [
-                        {"role": "system", "content": TOPIC_ABSTAIN_SYS if abstain else TOPIC_CTX_SYS},
+                        {
+                            "role": "system",
+                            "content": TOPIC_ABSTAIN_SYS if abstain else TOPIC_CTX_SYS,
+                        },
                         {
                             "role": "user",
                             "content": (
@@ -222,7 +261,10 @@ def run_topic_ctx(payload, abstain=False, samples=1, temperature=0.0):
         r = {**draws[0], "draws": [d["content"] for d in draws]}
         _unused = (
             [
-                {"role": "system", "content": TOPIC_ABSTAIN_SYS if abstain else TOPIC_CTX_SYS},
+                {
+                    "role": "system",
+                    "content": TOPIC_ABSTAIN_SYS if abstain else TOPIC_CTX_SYS,
+                },
                 {
                     "role": "user",
                     "content": (
@@ -233,7 +275,10 @@ def run_topic_ctx(payload, abstain=False, samples=1, temperature=0.0):
             ],
         )
         out.append({"id": case["id"], **r})
-        print(f"[{i + 1}/{len(payload)}] {r['latency']:.2f}s {r['content'][:60]!r}", flush=True)
+        print(
+            f"[{i + 1}/{len(payload)}] {r['latency']:.2f}s {r['content'][:60]!r}",
+            flush=True,
+        )
     return out
 
 
@@ -272,21 +317,37 @@ def run_abstain_check(payload):
                 {"role": "system", "content": ABSTAIN_SYS},
                 {
                     "role": "user",
-                    "content": "相談文: " + case["query"] + "\n\n候補者の実績:\n" + "\n".join(lines),
+                    "content": "相談文: "
+                    + case["query"]
+                    + "\n\n候補者の実績:\n"
+                    + "\n".join(lines),
                 },
             ],
             schema=ABSTAIN_SCHEMA,
             max_tokens=128,
         )
         out.append({"id": case["id"], **r})
-        print(f"[{i + 1}/{len(payload)}] {r['latency']:.2f}s {r['content'][:70]}", flush=True)
+        print(
+            f"[{i + 1}/{len(payload)}] {r['latency']:.2f}s {r['content'][:70]}",
+            flush=True,
+        )
     return out
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument(
-        "--task", required=True, choices=["topic", "hyde", "q2d", "rerank", "topic_ctx", "topic_abstain", "abstain_check"]
+        "--task",
+        required=True,
+        choices=[
+            "topic",
+            "hyde",
+            "q2d",
+            "rerank",
+            "topic_ctx",
+            "topic_abstain",
+            "abstain_check",
+        ],
     )
     ap.add_argument("--out", required=True)
     ap.add_argument("--payload", default=None, help="rerank 用の候補者 JSON")

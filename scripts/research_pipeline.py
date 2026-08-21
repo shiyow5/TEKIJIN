@@ -24,10 +24,10 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import research_ablation as A  # noqa: E402
-import research_corpus as rc  # noqa: E402
-import research_rank as rr  # noqa: E402
-import research_topic as rt  # noqa: E402
+import research_ablation as A
+import research_corpus as rc
+import research_rank as rr
+import research_topic as rt
 
 NONE_LABEL = "該当なし"
 
@@ -37,9 +37,13 @@ def load_topics(path):
     if not os.path.exists(path):
         return {}
     out = {}
-    for d in json.load(open(path, encoding="utf-8")):
+    with open(path, encoding="utf-8") as f:
+        records = json.load(f)
+    for d in records:
         try:
-            out[d["id"]] = [t for t in json.loads(d["content"])["topics"] if t != NONE_LABEL]
+            out[d["id"]] = [
+                t for t in json.loads(d["content"])["topics"] if t != NONE_LABEL
+            ]
         except (ValueError, KeyError):
             continue
     return out
@@ -50,7 +54,9 @@ def load_votes(path):
     if not os.path.exists(path):
         return {}
     out = {}
-    for d in json.load(open(path, encoding="utf-8")):
+    with open(path, encoding="utf-8") as f:
+        records = json.load(f)
+    for d in records:
         counter = collections.Counter()
         for draw in d.get("draws", []):
             try:
@@ -67,9 +73,12 @@ def load_order(rank_path, payload_path):
     """listwise リランクの出力 → {query_id: (並べ替え後, 元の並び)}"""
     if not (os.path.exists(rank_path) and os.path.exists(payload_path)):
         return {}
-    payload = {c["id"]: c for c in json.load(open(payload_path, encoding="utf-8"))}
+    with open(payload_path, encoding="utf-8") as f:
+        payload = {c["id"]: c for c in json.load(f)}
+    with open(rank_path, encoding="utf-8") as f:
+        records = json.load(f)
     out = {}
-    for d in json.load(open(rank_path, encoding="utf-8")):
+    for d in records:
         try:
             order = json.loads(d["content"])["order"]
         except (ValueError, KeyError):
@@ -91,12 +100,17 @@ def load_order(rank_path, payload_path):
 def topic_accuracy(items, predict):
     a1 = np.mean(
         [
-            1.0 if (p := predict(it))[:1] and p[0] in set(it["gold_topics"] or []) else 0.0
+            1.0
+            if (p := predict(it))[:1] and p[0] in set(it["gold_topics"] or [])
+            else 0.0
             for it in items
         ]
     )
     a3 = np.mean(
-        [1.0 if set(predict(it)[:3]) & set(it["gold_topics"] or []) else 0.0 for it in items]
+        [
+            1.0 if set(predict(it)[:3]) & set(it["gold_topics"] or []) else 0.0
+            for it in items
+        ]
     )
     return float(a1), float(a3)
 
@@ -120,15 +134,23 @@ def main():
     llm_ctx = load_topics(os.path.join(d, "llm_topic_ctx.json"))
     llm_ab = load_topics(os.path.join(d, "llm_topic_abstain.json"))
     llm_sc = load_votes(os.path.join(d, "llm_topic_sc.json"))
-    rerank2 = load_order(os.path.join(d, "llm_rerank2.json"), os.path.join(d, "payload_rerank2.json"))
+    rerank2 = load_order(
+        os.path.join(d, "llm_rerank2.json"), os.path.join(d, "payload_rerank2.json")
+    )
 
-    extra = np.load(args.extra_emb) if args.extra_emb and os.path.exists(args.extra_emb) else None
+    extra = (
+        np.load(args.extra_emb)
+        if args.extra_emb and os.path.exists(args.extra_emb)
+        else None
+    )
     row = {it["id"]: i for i, it in enumerate(items)}
     chunk_emb = ctx["models"][model]["chunks"][: ctx["n_base"]]
 
     def retrieval_topic(item, key="query", top_n=20):
         if key == "query":
-            ranked, _ = A.dense_chunk_rank(ctx, model, ctx["qid_pos"][item["id"]], False, 64)
+            ranked, _ = A.dense_chunk_rank(
+                ctx, model, ctx["qid_pos"][item["id"]], False, 64
+            )
         else:
             sims = extra[key][row[item["id"]]] @ chunk_emb.T
             ranked = [ctx["chunk_ids"][j] for j in np.argsort(-sims)[:64]]
@@ -148,7 +170,9 @@ def main():
         predictors["LLM(文脈つき)+検索由来(専門語)"] = lambda it: rr.rrf_fuse(
             [llm_ctx.get(it["id"], []), retrieval_topic(it, "q_q2d__q")]
         )
-        predictors["検索由来(クエリ+HyDE)"] = lambda it: retrieval_topic(it, "q_hyde__q")
+        predictors["検索由来(クエリ+HyDE)"] = lambda it: retrieval_topic(
+            it, "q_hyde__q"
+        )
 
     print(f"採点対象 {len(items)} 件\n== 段A: query → topic ==")
     acc_rows = []
@@ -160,7 +184,9 @@ def main():
     base = A.evaluate(ctx, A.make_system(model=model))
     print(f"\n== 段C: 層2 Recall@3（基準 dense集約 = {base['R@3']:.3f}）==")
     systems = {
-        f"{name} → 構造化": (lambda c, it, qi, fn=fn: rt.rank_experts_for_topics(fx, fn(it)[:1]))
+        f"{name} → 構造化": (
+            lambda c, it, qi, fn=fn: rt.rank_experts_for_topics(fx, fn(it)[:1])
+        )
         for name, fn in predictors.items()
     }
     if rerank2:
@@ -204,7 +230,12 @@ def main():
     if args.out:
         with open(args.out, "w", encoding="utf-8") as f:
             json.dump(
-                {"stageA": acc_rows, "stageC": rows, "holdout": hold, "abstention": abst},
+                {
+                    "stageA": acc_rows,
+                    "stageC": rows,
+                    "holdout": hold,
+                    "abstention": abst,
+                },
                 f,
                 ensure_ascii=False,
                 indent=2,
@@ -236,10 +267,12 @@ def holdout_check(ctx, base, systems, reps=200, seed=42):
 def abstention_table(path, items):
     if not os.path.exists(path):
         return []
-    person, _ = rc.load_eval()
+    person, _retrieval = rc.load_eval()
     l4 = {q["id"] for q in person if q["difficulty"] == "L4"}
     conf = {}
-    for d in json.load(open(path, encoding="utf-8")):
+    with open(path, encoding="utf-8") as f:
+        records = json.load(f)
+    for d in records:
         try:
             conf[d["id"]] = json.loads(d["content"])["confidence"]
         except (ValueError, KeyError):

@@ -22,8 +22,8 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import research_corpus as rc  # noqa: E402
-import research_rank as rr  # noqa: E402
+import research_corpus as rc
+import research_rank as rr
 
 K_PERSON = 3
 N_BOOT = 4000
@@ -37,7 +37,7 @@ def build_context(emb_paths, include_daily_default=False):
     fx = rc.load_all()
     chunks_all, owners = rc.build_chunks(fx, include_daily=True)
     n_base = len(rc.build_chunks(fx, include_daily=False)[0])
-    person, retrieval = rc.load_eval()
+    person, _retrieval = rc.load_eval()
     items = rc.scored_person_items(person)
 
     models = {}
@@ -148,7 +148,11 @@ def paired_bootstrap(base_hits, new_hits, n=N_BOOT, seed=SEED):
     d = new_hits - base_hits
     idx = rng.integers(0, len(d), size=(n, len(d)))
     boots = d[idx].mean(axis=1)
-    return float(np.percentile(boots, 2.5)), float(np.percentile(boots, 97.5)), float((boots > 0).mean())
+    return (
+        float(np.percentile(boots, 2.5)),
+        float(np.percentile(boots, 97.5)),
+        float((boots > 0).mean()),
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -231,10 +235,22 @@ def experiments(model):
     exps = [
         ("基準", "base(dense+rank_sum,top20)", make_system(model=model)),
         # --- A. 表現・索引 ---
-        ("A索引", "＋日報をコーパスに入れる", make_system(model=model, include_daily=True)),
+        (
+            "A索引",
+            "＋日報をコーパスに入れる",
+            make_system(model=model, include_daily=True),
+        ),
         ("A索引", "BM25のみ", make_system(model=model, retrieval="bm25")),
-        ("A索引", "Dense+BM25 RRF(ハイブリッド)", make_system(model=model, retrieval="hybrid")),
-        ("A索引", "埋め込み2本のRRF(Nemotron+Qwen3)", make_system(model=model, retrieval="ensemble")),
+        (
+            "A索引",
+            "Dense+BM25 RRF(ハイブリッド)",
+            make_system(model=model, retrieval="hybrid"),
+        ),
+        (
+            "A索引",
+            "埋め込み2本のRRF(Nemotron+Qwen3)",
+            make_system(model=model, retrieval="ensemble"),
+        ),
         ("A索引", "人物中心のみ(Model 1)", person_only_system(model)),
         ("A索引", "人物中心のみ(日報込み)", person_only_system(model, full=True)),
         ("A索引", "Model2+Model1 混合 w=0.5", make_system(model=model, person_mix=0.5)),
@@ -245,7 +261,11 @@ def experiments(model):
         ("B集約", "top_n=50", make_system(model=model, top_n=50)),
         ("B集約", "pooling=max", make_system(model=model, pooling="max")),
         ("B集約", "pooling=top3_sum", make_system(model=model, pooling="top3_sum")),
-        ("B集約", "pooling=score_sum(cos)", make_system(model=model, pooling="score_sum")),
+        (
+            "B集約",
+            "pooling=score_sum(cos)",
+            make_system(model=model, pooling="score_sum"),
+        ),
         ("B集約", "件数正規化 0.5", make_system(model=model, count_norm=0.5)),
         ("B集約", "件数正規化 1.0(平均)", make_system(model=model, count_norm=1.0)),
         # --- C. グラフ伝播 ---
@@ -264,7 +284,9 @@ def main():
     args = ap.parse_args()
 
     ctx = build_context(args.emb)
-    print(f"採点対象 {len(ctx['items'])} 件 / コーパス {ctx['n_base']}(+日報 {len(ctx['chunk_ids']) - ctx['n_base']})")
+    print(
+        f"採点対象 {len(ctx['items'])} 件 / コーパス {ctx['n_base']}(+日報 {len(ctx['chunk_ids']) - ctx['n_base']})"
+    )
     print(f"埋め込み: {list(ctx['models'])}\n")
 
     exps = experiments(args.model)
