@@ -19,6 +19,7 @@ fused with RRF — de-duplicated in order.
 
 from __future__ import annotations
 
+from itertools import zip_longest
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -76,6 +77,30 @@ class HybridRetriever:
     def _dense_ids(self, query_vec: list[float], target: str) -> list[Any]:
         return [id_ for id_, _ in dense.search(self._session, query_vec, target, self._pool)]
 
+    def _dense_answer_ids(
+        self,
+        query_vec: list[float],
+        answers_by_question: dict[str, list[str]],
+    ) -> list[Any]:
+        """Dense answer candidates from BOTH the answer and question vectors.
+
+        A user often paraphrases the question rather than the answer, so a dense
+        search over answer bodies alone (which are frequently generic procedures)
+        can miss the right answer. Searching the ``questions`` target too and
+        expanding each question hit to its answers recovers those cases. Direct
+        answer hits come first; question-derived answers are appended, keeping
+        the first occurrence of each id. RRF and the sparse channel re-rank.
+        """
+
+        merged = self._dense_ids(query_vec, "answers")
+        seen = set(merged)
+        for question_id in self._dense_ids(query_vec, "questions"):
+            for answer_id in answers_by_question.get(question_id, ()):
+                if answer_id not in seen:
+                    seen.add(answer_id)
+                    merged.append(answer_id)
+        return merged
+
     @staticmethod
     def _answer_text(answer: Any, question_body_by_id: dict[str, str | None]) -> str:
         """BM25 index text for an answer: its question's body plus its own.
@@ -103,6 +128,9 @@ class HybridRetriever:
         profiles = self._repo.list_profiles()
         responder_of = {a.id: a.responder_id for a in answers}
         question_body_by_id = {q.id: q.body for q in questions}
+        answers_by_question: dict[str, list[str]] = {}
+        for a in answers:
+            answers_by_question.setdefault(a.question_id, []).append(a.id)
 
         answer_index = BM25Index.build(
             (a.id, self._answer_text(a, question_body_by_id)) for a in answers
@@ -114,7 +142,8 @@ class HybridRetriever:
 
         # --- past answers -------------------------------------------------- #
         sparse_answers = [id_ for id_, _ in answer_index.search(query, self._pool)]
-        fused_answers = self._fuse(self._dense_ids(query_vec, "answers"), sparse_answers)
+        dense_answers = self._dense_answer_ids(query_vec, answers_by_question)
+        fused_answers = self._fuse(dense_answers, sparse_answers)
         past_answers = [
             {"qa_id": id_, "score": score, "responder_id": responder_of.get(id_)}
             for id_, score in fused_answers
@@ -142,14 +171,27 @@ class HybridRetriever:
         past_answers: list[dict[str, Any]],
         profile_people: list[Any],
     ) -> list[Any]:
-        """Order people by past-answer relevance first, then profile matches."""
+        """Merge responders and profile matches, then de-duplicate and cap.
 
-        people: list[Any] = []
+        Responders (people who answered similar questions) are the stronger
+        signal, but concatenating *all* of them ahead of profile matches lets a
+        long responder list push every profile hit past ``top_k`` — so an exact
+        profile match could vanish from the result. Instead the two ranked lists
+        are round-robin interleaved, responder-first (responder, profile,
+        responder, profile, …). Responders keep a slight edge (they lead and take
+        the even slots) while a top profile match always lands at position 1,
+        safely inside ``top_k``.
+        """
+
+        responders: list[Any] = []
         for answer in past_answers:
             responder_id = answer["responder_id"]
-            if responder_id is not None and responder_id not in people:
-                people.append(responder_id)
-        for employee_id in profile_people:
-            if employee_id not in people:
-                people.append(employee_id)
+            if responder_id is not None and responder_id not in responders:
+                responders.append(responder_id)
+
+        people: list[Any] = []
+        for responder_id, employee_id in zip_longest(responders, profile_people):
+            for candidate in (responder_id, employee_id):
+                if candidate is not None and candidate not in people:
+                    people.append(candidate)
         return people[: self._top_k]

@@ -250,6 +250,62 @@ def test_answer_text_falls_back_to_answer_when_no_question_body() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# fix A: dense answer candidates also come from dense question matches
+# --------------------------------------------------------------------------- #
+def _retriever_without_db(top_k: int = 10) -> HybridRetriever:
+    # session is stored but never touched by the helpers under test here.
+    embedder = SentenceTransformerEmbedder(model=_FakeModel())
+    return HybridRetriever(embedder, session=None, top_k=top_k)  # type: ignore[arg-type]
+
+
+def test_dense_answer_ids_merges_question_hits(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tekijin.retrieval import retriever as retriever_mod
+
+    def fake_dense(_session, _vec, target, _top_k):
+        if target == "answers":
+            return [("a1", 1.0)]
+        if target == "questions":
+            return [("q1", 1.0), ("q2", 0.9)]
+        return []
+
+    monkeypatch.setattr(retriever_mod.dense, "search", fake_dense)
+    retriever = _retriever_without_db()
+    # q1 -> a2, a3 ; q2 -> a1 (already present via the direct answer channel).
+    answers_by_question = {"q1": ["a2", "a3"], "q2": ["a1"]}
+    merged = retriever._dense_answer_ids([0.0], answers_by_question)
+    # Direct answer hit first, then question-derived answers, de-duplicated.
+    assert merged == ["a1", "a2", "a3"]
+
+
+# --------------------------------------------------------------------------- #
+# fix B: responders and profile matches are round-robin interleaved
+# --------------------------------------------------------------------------- #
+def test_aggregate_people_interleaves_responder_first() -> None:
+    retriever = _retriever_without_db(top_k=6)
+    past = [{"responder_id": 1}, {"responder_id": 2}, {"responder_id": 1}]  # distinct: 1, 2
+    people = retriever._aggregate_people(past, [30, 31, 32])
+    # responder, profile, responder, profile, profile
+    assert people == [1, 30, 2, 31, 32]
+
+
+def test_aggregate_people_profile_survives_many_responders() -> None:
+    # 10 responders, default-ish small top_k: the profile hit must still appear.
+    retriever = _retriever_without_db(top_k=3)
+    past = [{"responder_id": i} for i in range(1, 11)]
+    people = retriever._aggregate_people(past, [99])
+    assert people == [1, 99, 2]  # profile hit lands at position 1, inside top_k
+    assert 99 in people
+
+
+def test_aggregate_people_skips_none_responders() -> None:
+    retriever = _retriever_without_db(top_k=5)
+    past = [{"responder_id": None}, {"responder_id": 7}]
+    people = retriever._aggregate_people(past, [7, 8])
+    # None dropped; 7 de-duplicated across the two channels.
+    assert people == [7, 8]
+
+
+# --------------------------------------------------------------------------- #
 # fix 3: e5 prefix toggle is a setting (default true, env-overridable)
 # --------------------------------------------------------------------------- #
 def test_embedding_use_e5_prefix_default(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -312,11 +368,18 @@ def test_embed_cli_main_wires_prefix(
     monkeypatch: pytest.MonkeyPatch, argv: list[str], expected_prefix: bool
 ) -> None:
     mod = _load_embed_script()
+    from tekijin.config import get_settings
+
+    dim = get_settings().embedding_dim
     captured: dict[str, bool] = {}
 
     class _CapturingEmbedder:
         def __init__(self, *, use_e5_prefix: bool) -> None:
             captured["prefix"] = use_e5_prefix
+
+        def encode(self, texts, *, kind="passage"):
+            # Probe (fix C): return a correct-width vector so the check passes.
+            return [[0.0] * dim for _ in texts]
 
     @contextlib.contextmanager
     def _fake_scope(_factory):
@@ -336,3 +399,40 @@ def test_embed_cli_main_wires_prefix(
     assert rc == 0
     # Default (no flag) follows settings, whose default is True.
     assert captured["prefix"] is expected_prefix
+
+
+def test_embed_cli_verify_embedding_width_ok() -> None:
+    mod = _load_embed_script()
+    # Matching widths -> no error.
+    assert mod.verify_embedding_width(1024, 1024) is None
+
+
+def test_embed_cli_verify_embedding_width_mismatch() -> None:
+    mod = _load_embed_script()
+    with pytest.raises(ValueError, match="requires rebuilding the pgvector schema"):
+        mod.verify_embedding_width(768, 1024)
+
+
+def test_embed_cli_main_rejects_dimension_mismatch(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A model whose width differs from embedding_dim must fail BEFORE any DB call.
+    mod = _load_embed_script()
+    from tekijin.config import get_settings
+
+    wrong_dim = get_settings().embedding_dim - 1
+
+    class _WrongWidthEmbedder:
+        def __init__(self, *, use_e5_prefix: bool) -> None:
+            pass
+
+        def encode(self, texts, *, kind="passage"):
+            return [[0.0] * wrong_dim for _ in texts]
+
+    def _boom(*_args, **_kwargs):  # pragma: no cover - must never be reached
+        raise AssertionError("DB must not be touched on a dimension mismatch")
+
+    monkeypatch.setattr(mod, "SentenceTransformerEmbedder", _WrongWidthEmbedder)
+    monkeypatch.setattr(mod, "get_engine", _boom)
+    monkeypatch.setattr(mod, "get_sessionmaker", _boom)
+
+    with pytest.raises(ValueError, match="Changing the vector dimension"):
+        mod.main([])

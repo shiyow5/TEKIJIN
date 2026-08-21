@@ -118,13 +118,17 @@ def test_embed_corpus_reembeds_when_not_only_missing(seed_counts, session, fake_
 # HybridRetriever end-to-end
 # --------------------------------------------------------------------------- #
 def test_hybrid_retriever_end_to_end(seed_counts, session, fake_embedder) -> None:
+    # Give one answer a UNIQUE body so it is the unambiguous top hit — no
+    # dependence on how Postgres orders rows that share a (reused) body.
+    target = session.scalars(
+        select(Answer).where(Answer.body.isnot(None)).order_by(Answer.id)
+    ).first()
+    target.body = "UNIQZ4242 singular marker phrase"
+    session.flush()
     embed_corpus(session, fake_embedder)  # populate dense vectors for every row
 
-    target = session.scalars(select(Answer).where(Answer.body.isnot(None))).first()
-    query = target.body  # dense: exact vector match; sparse: shares tokens
-
     retriever = HybridRetriever(fake_embedder, session, top_k=5)
-    result = retriever.search(query)
+    result = retriever.search("UNIQZ4242 singular marker phrase")
 
     assert set(result) == {"past_answers", "documents", "candidate_people"}
 
@@ -134,9 +138,8 @@ def test_hybrid_retriever_end_to_end(seed_counts, session, fake_embedder) -> Non
     assert set(top) == {"qa_id", "score", "responder_id"}
     assert top["score"] > 0
     assert isinstance(top["responder_id"], int)
-    # The exact-match answer is retrieved (fixtures reuse answer bodies, so
-    # several rows can tie on an exact query; assert membership, not rank 0).
-    assert target.id in {p["qa_id"] for p in past}
+    # Unique body -> the exact-match answer is the unambiguous rank-0 hit.
+    assert top["qa_id"] == target.id
 
     # documents section is well-formed (may be empty for this query)
     assert isinstance(result["documents"], list)
@@ -211,9 +214,10 @@ def test_hybrid_retriever_profile_sparse_channel(seed_counts, session, fake_embe
     session.flush()
     embed_corpus(session, fake_embedder)
 
-    # top_k >= 40 (the whole workforce) so dense-answer responders cannot crowd
-    # the profile hit out of the (untruncated) people list.
-    retriever = HybridRetriever(fake_embedder, session, top_k=40)
+    # DEFAULT top_k=10: round-robin interleaving (fix B) must keep the exact
+    # profile match inside the result even though many answer responders precede
+    # it — no reliance on an inflated top_k to avoid the crowd-out.
+    retriever = HybridRetriever(fake_embedder, session, top_k=10)
     result = retriever.search("WQZ7777rareterm")
 
     assert prof.employee_id in result["candidate_people"]  # via profile BM25 (fix 2)

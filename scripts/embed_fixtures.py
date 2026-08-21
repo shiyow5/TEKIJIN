@@ -38,6 +38,23 @@ def positive_int(value: str) -> int:
     return parsed
 
 
+def verify_embedding_width(actual: int, expected: int) -> None:
+    """Ensure the model's vector width matches the pgvector column width.
+
+    The schema pins every ``embedding`` column to ``settings.embedding_dim``
+    (1024). Swapping ``TEKIJIN_EMBEDDING_MODEL`` for a model of a different width
+    would otherwise fail deep inside the first pgvector flush; probing here fails
+    fast, before any DB connection, with an actionable message.
+    """
+
+    if actual != expected:
+        raise ValueError(
+            f"embedding model produced width {actual}, but embedding_dim is {expected}. "
+            "Changing the vector dimension requires rebuilding the pgvector schema "
+            "(a migration); update TEKIJIN_EMBEDDING_DIM and the schema to match."
+        )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -65,6 +82,13 @@ def main(argv: list[str] | None = None) -> int:
     use_e5_prefix = False if args.no_e5_prefix else settings.embedding_use_e5_prefix
 
     embedder = SentenceTransformerEmbedder(use_e5_prefix=use_e5_prefix)
+
+    # Probe the model's output width BEFORE opening any DB connection, so a
+    # dimension mismatch fails fast with a clear message instead of blowing up
+    # on the first pgvector flush.
+    probe = embedder.encode(["テスト"], kind="passage")[0]
+    verify_embedding_width(len(probe), settings.embedding_dim)
+
     factory = get_sessionmaker(get_engine())
     with session_scope(factory) as session:
         counts = embed_corpus(

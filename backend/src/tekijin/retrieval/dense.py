@@ -56,9 +56,17 @@ def search(
     except KeyError:
         raise ValueError(f"unknown target {target!r}; expected one of {TARGETS}") from None
 
+    pk_column = getattr(model, id_attr)
     distance = model.embedding.cosine_distance(query_vec).label("distance")
     stmt = (
-        select(model, distance).where(model.embedding.isnot(None)).order_by(distance).limit(top_k)
+        select(model, distance)
+        .where(model.embedding.isnot(None))
+        # Break distance ties on the primary key so equal/identical embeddings
+        # (duplicate texts produce identical vectors) return in a stable order.
+        # Without this second key Postgres may order tied rows arbitrarily,
+        # making the C4 output — and any test asserting on it — non-deterministic.
+        .order_by(distance, pk_column)
+        .limit(top_k)
     )
     rows = session.execute(stmt).all()
     return [(getattr(obj, id_attr), 1.0 - float(dist)) for obj, dist in rows]
