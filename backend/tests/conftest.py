@@ -8,20 +8,23 @@ Database strategy:
   DB-backed tests are skipped rather than failing.
 
 Isolation / safety: every destructive operation (``CREATE``/``DROP`` tables,
-``TRUNCATE``) is confined to a dedicated, throwaway schema (``tekijin_test``).
-Even when ``TEKIJIN_DATABASE_URL`` points at a shared or persistent database,
-the suite only ever creates and drops that one schema — it never touches the
-developer's real tables, which may share our table names (``employees`` …). The
-schema is created fresh at session start and dropped (``CASCADE``) at teardown.
-CI's disposable service and the local ``pgserver`` instance both run the full
-suite unchanged.
+``TRUNCATE``) is confined to a dedicated, throwaway schema whose name is unique
+per test run (``tekijin_test_<uuid4 hex>``). Even when ``TEKIJIN_DATABASE_URL``
+points at a shared or persistent database, the suite only ever creates and drops
+that one schema — it never touches the developer's real tables, which may share
+our table names (``employees`` …), and two runs against the same database cannot
+collide. The schema is created fresh at session start and dropped (``CASCADE``)
+at teardown. CI's disposable service and the local ``pgserver`` instance both
+run the full suite unchanged.
 """
 
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import tempfile
+import uuid
 from collections.abc import Iterator
 
 import pytest
@@ -39,15 +42,27 @@ from tekijin.data.db import (
 )
 from tekijin.data.seed import run_seed
 
-# Hard-coded, test-only schema name. It is spliced into DDL as an identifier
-# (schema names cannot be bind parameters), so it must remain a literal constant
-# and never derive from external input.
-TEST_SCHEMA = "tekijin_test"
+# Test-only schema name, unique per run so concurrent runs against the same
+# database never collide. It is spliced into DDL as an identifier (schema names
+# cannot be bind parameters), so it is built ONLY from a fixed prefix plus a
+# uuid4 hex string — never from external input — and validated below.
+TEST_SCHEMA = f"tekijin_test_{uuid.uuid4().hex}"
+assert re.fullmatch(r"tekijin_test_[0-9a-f]{32}", TEST_SCHEMA), TEST_SCHEMA
 
 
 @pytest.fixture(scope="session")
 def database_url() -> Iterator[str]:
-    """Yield a SQLAlchemy URL for a live PostgreSQL+pgvector database."""
+    """Yield a SQLAlchemy URL for a live PostgreSQL+pgvector database.
+
+    Order of preference:
+
+    1. ``TEKIJIN_DATABASE_URL`` (CI provides a pgvector service).
+    2. An ephemeral ``pgserver`` instance (local dev without Docker).
+
+    If neither is available — e.g. Windows, where the ``pgserver`` wheel is not
+    installed, and no database URL was provided — the DB-backed tests are
+    skipped rather than failing.
+    """
 
     env_url = os.environ.get("TEKIJIN_DATABASE_URL")
     if env_url:
@@ -55,7 +70,9 @@ def database_url() -> Iterator[str]:
         return
 
     pgserver = pytest.importorskip(
-        "pgserver", reason="no TEKIJIN_DATABASE_URL and pgserver not installed"
+        "pgserver",
+        reason="no TEKIJIN_DATABASE_URL set and pgserver is unavailable "
+        "(e.g. on Windows); set TEKIJIN_DATABASE_URL to run the DB tests",
     )
     tmp_dir = tempfile.mkdtemp(prefix="tekijin_pg_")
     server = pgserver.get_server(tmp_dir)
@@ -79,7 +96,7 @@ def _drop_test_schema(database_url: str) -> None:
 
 @pytest.fixture(scope="session")
 def engine(database_url: str):
-    """Session-scoped engine whose work is confined to ``tekijin_test``.
+    """Session-scoped engine whose work is confined to ``TEST_SCHEMA``.
 
     The extension lives at the database level (``public``); only the schema and
     its tables are created/dropped here, so the target database's own tables are

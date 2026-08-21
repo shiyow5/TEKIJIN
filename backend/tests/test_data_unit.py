@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import os
 
 import pytest
 import sqlalchemy
 from sqlalchemy.orm import sessionmaker
 
-from tekijin.config import get_settings
+from tekijin.config import Settings, get_settings
 from tekijin.data import db as dbmod
 from tekijin.data.dto import (
     AnswerDTO,
@@ -62,8 +63,19 @@ EXPECTED_COUNTS = {
 # --------------------------------------------------------------------------- #
 # config
 # --------------------------------------------------------------------------- #
-def test_embedding_dim_default() -> None:
-    assert get_settings().embedding_dim == 1024
+def test_embedding_dim_default(monkeypatch) -> None:
+    # Isolate from ambient TEKIJIN_* env and any local .env so this asserts the
+    # real code default (1024), not the developer's TEKIJIN_EMBEDDING_DIM.
+    for key in list(os.environ):
+        if key.startswith("TEKIJIN_"):
+            monkeypatch.delenv(key, raising=False)
+    settings = Settings(_env_file=None)
+    assert settings.embedding_dim == 1024
+
+
+def test_embedding_dim_wired_into_tables() -> None:
+    # The pgvector column width is derived from settings, so the module constant
+    # must track whatever value was in effect at import time.
     assert get_settings().embedding_dim == t.EMBEDDING_DIM
 
 

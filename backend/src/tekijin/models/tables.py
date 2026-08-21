@@ -29,6 +29,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -169,6 +170,9 @@ class Question(Base):
     """A question asked by an employee (the "asking" side)."""
 
     __tablename__ = "questions"
+    # GIN index on the topics array: ``answers_by_topic`` filters with
+    # ``topic = ANY(questions.topics)``, which a GIN index accelerates.
+    __table_args__ = (Index("ix_questions_topics", "topics", postgresql_using="gin"),)
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     asker_id: Mapped[int] = mapped_column(ForeignKey("employees.id"), index=True)
@@ -188,7 +192,9 @@ class Answer(Base):
     question_id: Mapped[str] = mapped_column(ForeignKey("questions.id"), index=True)
     responder_id: Mapped[int] = mapped_column(ForeignKey("employees.id"), index=True)
     body: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[dt.datetime | None] = mapped_column(DateTime)
+    # Fixtures set this explicitly; runtime answers may omit it, so the DB stamps
+    # the insert time (mirrors ``recommendations.created_at``).
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now())
     embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM))
     reuse_count: Mapped[int | None] = mapped_column(Integer)
     was_helpful: Mapped[bool | None] = mapped_column(Boolean)

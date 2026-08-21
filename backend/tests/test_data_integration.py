@@ -52,9 +52,10 @@ def test_indexes_exist_on_filtered_columns(engine) -> None:
         ("evidence", "person_id"),
         ("person_topic_edges", "person_id"),
         ("recommendations", "created_at"),  # scorer's 7-day `load` recency window
+        ("questions", "topics"),  # GIN index for topic = ANY(questions.topics)
     }
     with engine.connect() as conn:
-        # Scope to the current schema (the tests run inside `tekijin_test`).
+        # Scope to the current schema (the tests run inside the unique test schema).
         rows = conn.execute(
             text(
                 "SELECT t.relname AS table_name, a.attname AS column_name "
@@ -163,6 +164,9 @@ def test_answers_by_topic_matches_via_question_topics(seed_counts, session) -> N
     )
     session.add(runtime)
     session.flush()  # visible in-session; not committed (rolled back on close)
+    session.refresh(runtime)
+    # created_at was omitted above; the DB server_default must stamp it.
+    assert runtime.created_at is not None
 
     repo = Repository(session)
     found = {a.id for a in repo.answers_by_topic(topic)}
