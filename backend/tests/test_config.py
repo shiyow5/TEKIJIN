@@ -22,7 +22,7 @@ def test_defaults(monkeypatch) -> None:
     assert settings.llm_model == "Qwen3.6-35B-A3B-NVFP4"
     assert settings.llm_api_key == "dummy"
     assert settings.embedding_model == "intfloat/multilingual-e5-large"
-    assert settings.cors_origins == ["http://localhost:3000"]
+    assert settings.cors_origins == ("http://localhost:3000",)
     assert isinstance(settings.fixtures_dir, Path)
     assert settings.fixtures_dir.name == "synthetic"
     assert settings.fixtures_dir.parent.name == "fixtures"

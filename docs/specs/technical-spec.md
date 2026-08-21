@@ -104,12 +104,12 @@ version 0.1 / 2026-08-21 / Aチーム（3名）
 | 言語 | **Python 3.12** | 埋め込み・検索・評価・LangChain/LangGraph のライブラリが全てPython側にある |
 | フレームワーク | **FastAPI** | 型定義から自動でスキーマ検証。SSEは `StreamingResponse` で標準実装できる |
 | エージェント | **LangGraph** | StateGraph でノード/分岐/ストリーミング/永続化/human-in-the-loop（§3.7） |
-| LLM 接続 | **LangChain**（`langchain`, `langchain-anthropic`） | `init_chat_model` で接続先を1行で差し替え。`with_structured_output` |
+| LLM 接続 | **LangChain**（`langchain`, `langchain-openai`, `langchain-anthropic`） | `init_chat_model("openai:…", base_url=vLLM)` で vLLM(OpenAI互換)に接続。接続先を1行で差し替え。`with_structured_output` |
 | 検証 | **Pydantic v2** | 入力を境界で検証。LangChain の構造化出力スキーマも Pydantic で共通化 |
 | 非同期 | **asyncio** | LLM呼び出しと検索を並行実行してレイテンシを削る |
 
 **主な追加依存（requirements）**: `langgraph`, `langgraph-checkpoint-postgres`,
-`langchain`, `langchain-anthropic`, `langchain-huggingface`（埋め込み）。
+`langchain`, `langchain-openai`（vLLM/OpenAI互換）, `langchain-anthropic`, `langchain-huggingface`（埋め込み）。
 **バージョンは固定**する（LangGraph/LangChain はAPI変化が速いため。§10 リスク）。
 
 ### 3.3 データベース
@@ -157,8 +157,10 @@ version 0.1 / 2026-08-21 / Aチーム（3名）
 
 ```python
 from langchain.chat_models import init_chat_model
-local = init_chat_model("ollama:<model>", temperature=0.1)   # DGX Spark ローカル
-llm_c1 = local.with_structured_output(IntentSchema)          # C1 は JSON 固定
+# vLLM は OpenAI 互換 /v1。base_url を DGX Spark の vLLM に向ける（Tailscale 経由）
+llm = init_chat_model("openai:<model>", base_url="http://internship-dgx1:8080/v1",
+                      api_key="dummy", temperature=0.1)
+llm_c1 = llm.with_structured_output(IntentSchema)            # C1 は JSON 固定
 # フォールバック
 from langchain_anthropic import ChatAnthropic
 cloud = ChatAnthropic(model="claude-...", temperature=0.1)
