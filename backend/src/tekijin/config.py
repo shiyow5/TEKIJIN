@@ -30,6 +30,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        frozen=True,  # immutable singleton: mutation must not leak across requests
     )
 
     app_env: str = "development"

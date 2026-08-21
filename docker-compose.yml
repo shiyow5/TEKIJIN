@@ -13,7 +13,8 @@ services:
       POSTGRES_PASSWORD: tekijin
       POSTGRES_DB: tekijin
     ports:
-      - "5432:5432"
+      # Bind to loopback only: avoids exposing the weak dev password on the LAN.
+      - "127.0.0.1:5432:5432"
     volumes:
       - tekijin_pgdata:/var/lib/postgresql/data
     healthcheck:
