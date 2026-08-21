@@ -1,0 +1,82 @@
+# `docs/benchmarks/` — モデル選定の実測結果
+
+測定日: **2026-08-21** / 実機: `internship-dgx1`（NVIDIA GB10 / 121GB ユニファイドメモリ / aarch64 / CUDA 13.0）
+
+詳細な読み解きは `analysis/20_モデル実測結果.md`（非gitの検討資料）にある。ここには**数字と再現方法**を置く。
+
+## 結論
+
+| 役割 | 採用 | 根拠 |
+|---|---|---|
+| C3 埋め込み | **Nemotron-3-Embed-1B**（次点 Qwen3-Embedding-0.6B） | 層2 Recall@3 = 0.615（次点 0.533） |
+| C1 意図理解 | **Qwen3.6-35B-A3B-NVFP4** + **構造化出力** | トピックF1 0.780 / JSON妥当率 1.000 / p50 0.52s |
+| C2 充足判定 | **Qwen3.6-35B-A3B-NVFP4** + 構造化出力 | 正解率 0.900 |
+| C7 下書き | **保留**（人手で品質評価が要る） | Qwen3.6 は 1.40s/191字、Swallow は 4.66s/549字 |
+
+## ファイル
+
+| ファイル | 中身 |
+|---|---|
+| `bench_emb.json` | 埋め込み5本の層1/層2スコアとレイテンシ |
+| `res_swallow_off.json` | Qwen3-Swallow-30B-A3B-AWQ（thinking off、構造化出力なし） |
+| `res_swallow_guided.json` | 同上 + 構造化出力 |
+| `res_qwen36_guided.json` | Qwen3.6-35B-A3B-NVFP4 + 構造化出力。**C7 の下書き出力も入っている**（人手評価用） |
+
+## 埋め込み（層2 Recall@3 が主指標）
+
+| モデル | 次元 | 層1 R@10 | 層1 R@20 | **層2 R@3** | MRR | L1 | L2 | L3 |
+|---|---|---|---|---|---|---|---|---|
+| **Nemotron-3-Embed-1B** | 2048 | **0.290** | **0.475** | **0.615** | **0.768** | 0.833 | **0.620** | **0.383** |
+| Qwen3-Embedding-0.6B | 1024 | 0.271 | 0.396 | 0.533 | 0.729 | 0.733 | 0.527 | 0.350 |
+| multilingual-e5-large | 1024 | 0.193 | 0.336 | 0.530 | 0.667 | 0.800 | 0.527 | 0.267 |
+| bge-m3 | 1024 | 0.198 | 0.314 | 0.519 | 0.651 | 0.600 | 0.547 | 0.367 |
+| ruri-v3-310m | 768 | 0.174 | 0.239 | 0.515 | 0.631 | 0.767 | 0.473 | 0.367 |
+
+ベースライン: random 0.107 / answers_count 0.393 / lexical_profile 0.193（`scripts/eval_baselines.py`）
+
+**Nemotron-3-Embed-1B は 2048次元。pgvector の HNSW は `vector` が2000次元上限なので `halfvec` が必須。**
+ライセンスは NVIDIA Open Model License なので商用条件の確認が要る。
+Apache-2.0 と 1024次元の扱いやすさを優先するなら Qwen3-Embedding-0.6B。
+
+## LLM
+
+| モデル | 設定 | C1 JSON | C1 F1 | C1 p50 | C1 出力tok | C2 正解率 | C2 p50 | C7 p50 | tok/s |
+|---|---|---|---|---|---|---|---|---|---|
+| Qwen3-Swallow-30B-A3B-AWQ | thinking off | 0.829 | 0.573 | 5.13s | 約417 | 0.600 | 4.28s | 4.88s | 81 |
+| Qwen3-Swallow-30B-A3B-AWQ | + 構造化出力 | 1.000 | 0.545 | 0.56s | 44 | 0.350 | 0.62s | 4.66s | 79 |
+| **Qwen3.6-35B-A3B-NVFP4** | + 構造化出力 | **1.000** | **0.780** | **0.52s** | 33 | **0.900** | **0.25s** | 1.40s | 62〜73 |
+
+**C1+C2 合計 p95: 1.31秒**（合格ライン3秒）
+
+## 実装に直結する注意（実測で分かったこと）
+
+1. **`--reasoning-parser` を必ず付ける。** 付けないと thinking の出力が `content` に丸ごと入り、
+   **JSON妥当率が 0.083 まで落ちる**。Qwen 系は `--reasoning-parser qwen3`
+2. **`enable_thinking: false` だけでは足りない。** リクエストで切っても内部推論は残り、
+   C1 で1回あたり約417トークン・5秒かかる
+3. **構造化出力（`response_format: json_schema`）を使う。** 出力が 417→44トークン、
+   **p50 が 5.13秒 → 0.56秒**。JSON妥当率も 1.000 になる
+4. **ただし C2（判断が要る処理）は構造化出力で精度が落ちるモデルがある**（Swallow は 0.600→0.350）。
+   Qwen3.6 は 0.900 を維持したので、**モデルごとに確認すること**
+5. **AWQ-INT4 は sm_121a で動く**（vLLM が `awq_marlin` に自動変換）
+6. **GPT-OSS-Swallow-120B-MXFP4（61GiB）は OOM で起動できなかった。**
+   `gpu-memory-utilization` を 0.80 / 0.68 のどちらにしても、全シャードのロード完了後に kill される。
+   **ユニファイドメモリ機では「モデルサイズ < 総メモリ」でも載るとは限らない。**
+   ロード中はホスト全体が固まり ssh も落ちるので、共有機では慎重に
+
+## 再現
+
+```bash
+# GPUホスト（~/tekijin-bench に fixtures/ と scripts/ を置く）
+uv venv .venv
+uv pip install --python .venv/bin/python "sentence-transformers>=3" torch "huggingface_hub[cli]"
+
+# Triton の JIT が Python.h を要求する。システムに python3-dev が無いので uv 管理 CPython のヘッダを見せる
+export CPATH=$HOME/.local/share/uv/python/cpython-3.12.14-linux-aarch64-gnu/include/python3.12
+
+python scripts/bench_embeddings.py --models-dir ~/models --device cuda --out bench_emb.json
+
+GMU=0.60 ./scripts/serve_vllm.sh Qwen3.6-35B-A3B-NVFP4 qwen36-35b \
+  --reasoning-parser qwen3 --quantization modelopt
+python scripts/bench_llm.py --model qwen36-35b --thinking off --guided --out res.json
+```
