@@ -56,6 +56,9 @@ jobs:
           POSTGRES_USER: tekijin
           POSTGRES_PASSWORD: tekijin
           POSTGRES_DB: tekijin
+          # CI-only: trust host auth so the ephemeral service accepts the
+          # connection regardless of scram password negotiation quirks.
+          POSTGRES_HOST_AUTH_METHOD: trust
         ports:
           # Map to host 5433 to avoid clashing with the runner's pre-installed
           # PostgreSQL on 5432 (which has no `tekijin` role → auth failures).
