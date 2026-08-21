@@ -7,7 +7,10 @@
       "購買・仕入れ"
     ],
     "gold_chunks": [
+      "doc:doc_005",
+      "doc:doc_013",
       "doc:doc_021",
+      "doc:doc_029",
       "profile:19",
       "profile:35",
       "profile:36",
@@ -23,12 +26,13 @@
       "サーバー・インフラ運用"
     ],
     "gold_chunks": [
-      "doc:doc_004",
-      "doc:doc_026",
-      "profile:14",
+      "doc:doc_008",
+      "doc:doc_016",
+      "doc:doc_024",
       "profile:15",
-      "profile:18",
+      "profile:25",
       "profile:33",
+      "profile:6",
       "proj:15",
       "proj:16",
       "proj:22",
@@ -45,9 +49,8 @@
       "SNS運用"
     ],
     "gold_chunks": [
-      "doc:doc_016",
       "profile:22",
-      "profile:23",
+      "profile:39",
       "profile:4",
       "profile:5",
       "proj:11",
@@ -66,7 +69,6 @@
       "契約管理"
     ],
     "gold_chunks": [
-      "doc:doc_013",
       "profile:1",
       "profile:2",
       "profile:21",
@@ -87,12 +89,14 @@
       "ネットワーク・VPN"
     ],
     "gold_chunks": [
-      "doc:doc_001",
-      "doc:doc_023",
-      "profile:21",
+      "doc:doc_006",
+      "doc:doc_014",
+      "doc:doc_022",
+      "doc:doc_030",
       "profile:24",
       "profile:3",
       "profile:6",
+      "profile:7",
       "proj:10",
       "proj:24",
       "proj:32",
@@ -109,7 +113,10 @@
       "人事・採用"
     ],
     "gold_chunks": [
-      "doc:doc_019",
+      "doc:doc_004",
+      "doc:doc_012",
+      "doc:doc_020",
+      "doc:doc_028",
       "profile:26",
       "profile:27",
       "profile:8",
@@ -125,7 +132,6 @@
       "広報・PR"
     ],
     "gold_chunks": [
-      "doc:doc_022",
       "profile:20",
       "profile:38",
       "profile:39",
@@ -141,7 +147,10 @@
       "経理・決算"
     ],
     "gold_chunks": [
-      "doc:doc_018",
+      "doc:doc_003",
+      "doc:doc_011",
+      "doc:doc_019",
+      "doc:doc_027",
       "profile:10",
       "profile:11",
       "profile:28",
@@ -157,8 +166,6 @@
       "システム開発・API"
     ],
     "gold_chunks": [
-      "doc:doc_008",
-      "doc:doc_030",
       "profile:13",
       "profile:14",
       "profile:15",
@@ -174,7 +181,6 @@
       "問い合わせ・ヘルプデスク運用"
     ],
     "gold_chunks": [
-      "doc:doc_017",
       "profile:17",
       "profile:18",
       "profile:33",
@@ -189,16 +195,17 @@
   },
   {
     "id": 11,
-    "query": "入社してくる人の端末と権限の準備が毎回バタバタします。標準の段取りを知りたいです。できれば大阪の拠点で動ける方だと助かります。",
+    "query": "入社してくる人の端末と権限の準備が毎回バタバタします。標準の段取りを知りたいです。できれば福岡の拠点で動ける方だと助かります。",
     "difficulty": "L2",
     "gold_topics": [
       "社内IT・ヘルプデスク"
     ],
     "gold_chunks": [
-      "doc:doc_003",
+      "doc:doc_001",
+      "doc:doc_009",
+      "doc:doc_017",
       "doc:doc_025",
-      "profile:18",
-      "profile:6",
+      "profile:25",
       "proj:100",
       "proj:23",
       "proj:26",
@@ -215,8 +222,6 @@
       "基幹システム"
     ],
     "gold_chunks": [
-      "doc:doc_006",
-      "doc:doc_028",
       "profile:2",
       "profile:3",
       "proj:105",
@@ -235,7 +240,6 @@
       "パフォーマンスチューニング"
     ],
     "gold_chunks": [
-      "doc:doc_009",
       "profile:13",
       "profile:14",
       "proj:59",
@@ -248,15 +252,14 @@
   },
   {
     "id": 14,
-    "query": "通販の画面でカゴ落ちが多いと言われました。支払い方法の選択肢が原因なのでしょうか。できれば本社の拠点で動ける方だと助かります。",
+    "query": "通販の画面でカゴ落ちが多いと言われました。支払い方法の選択肢が原因なのでしょうか。できれば大阪の拠点で動ける方だと助かります。",
     "difficulty": "L2",
     "gold_topics": [
       "ECサイト構築"
     ],
     "gold_chunks": [
-      "doc:doc_011",
-      "profile:13",
-      "profile:14",
+      "profile:15",
+      "profile:6",
       "proj:12",
       "proj:24",
       "proj:57",
@@ -273,7 +276,6 @@
       "モバイルアプリ開発"
     ],
     "gold_chunks": [
-      "doc:doc_010",
       "profile:13",
       "profile:14",
       "proj:17",
@@ -292,12 +294,10 @@
       "クラウド移行"
     ],
     "gold_chunks": [
-      "doc:doc_005",
-      "doc:doc_027",
       "profile:13",
       "profile:14",
       "profile:15",
-      "profile:16",
+      "profile:25",
       "proj:16",
       "proj:43",
       "proj:69",
@@ -314,7 +314,6 @@
       "業務効率化コンサル"
     ],
     "gold_chunks": [
-      "doc:doc_014",
       "profile:1",
       "profile:2",
       "profile:21",
@@ -335,8 +334,9 @@
       "セキュリティ"
     ],
     "gold_chunks": [
-      "doc:doc_002",
-      "doc:doc_024",
+      "doc:doc_007",
+      "doc:doc_015",
+      "doc:doc_023",
       "profile:25",
       "profile:33",
       "profile:6",
@@ -354,12 +354,10 @@
       "データ基盤・分析"
     ],
     "gold_chunks": [
-      "doc:doc_007",
-      "doc:doc_029",
-      "profile:13",
       "profile:14",
       "profile:15",
       "profile:16",
+      "profile:22",
       "proj:3",
       "proj:38",
       "proj:4",
@@ -376,7 +374,6 @@
       "CRM・営業支援"
     ],
     "gold_chunks": [
-      "doc:doc_012",
       "profile:1",
       "profile:2",
       "profile:21",
@@ -397,7 +394,6 @@
       "Webマーケティング・広告"
     ],
     "gold_chunks": [
-      "doc:doc_015",
       "profile:22",
       "profile:23",
       "profile:4",
@@ -418,7 +414,10 @@
       "総務・法務"
     ],
     "gold_chunks": [
-      "doc:doc_020",
+      "doc:doc_002",
+      "doc:doc_010",
+      "doc:doc_018",
+      "doc:doc_026",
       "profile:12",
       "profile:30",
       "profile:31",
@@ -434,7 +433,10 @@
       "購買・仕入れ"
     ],
     "gold_chunks": [
+      "doc:doc_005",
+      "doc:doc_013",
       "doc:doc_021",
+      "doc:doc_029",
       "profile:19",
       "profile:35",
       "profile:36",
@@ -450,12 +452,13 @@
       "サーバー・インフラ運用"
     ],
     "gold_chunks": [
-      "doc:doc_004",
-      "doc:doc_026",
-      "profile:14",
+      "doc:doc_008",
+      "doc:doc_016",
+      "doc:doc_024",
       "profile:15",
-      "profile:18",
+      "profile:25",
       "profile:33",
+      "profile:6",
       "proj:15",
       "proj:16",
       "proj:22",
@@ -472,9 +475,8 @@
       "SNS運用"
     ],
     "gold_chunks": [
-      "doc:doc_016",
       "profile:22",
-      "profile:23",
+      "profile:39",
       "profile:4",
       "profile:5",
       "proj:11",
@@ -493,7 +495,6 @@
       "ECサイト構築"
     ],
     "gold_chunks": [
-      "doc:doc_011",
       "profile:15",
       "proj:12",
       "proj:24",
@@ -511,7 +512,6 @@
       "モバイルアプリ開発"
     ],
     "gold_chunks": [
-      "doc:doc_010",
       "profile:16",
       "proj:17",
       "proj:19",
@@ -529,8 +529,6 @@
       "クラウド移行"
     ],
     "gold_chunks": [
-      "doc:doc_005",
-      "doc:doc_027",
       "profile:14",
       "profile:15",
       "proj:16",
@@ -549,8 +547,6 @@
       "基幹システム"
     ],
     "gold_chunks": [
-      "doc:doc_006",
-      "doc:doc_028",
       "profile:2",
       "profile:3",
       "proj:105",
@@ -569,7 +565,6 @@
       "契約管理"
     ],
     "gold_chunks": [
-      "doc:doc_013",
       "profile:1",
       "profile:21",
       "profile:3",
@@ -589,8 +584,9 @@
       "サーバー・インフラ運用"
     ],
     "gold_chunks": [
-      "doc:doc_004",
-      "doc:doc_026",
+      "doc:doc_008",
+      "doc:doc_016",
+      "doc:doc_024",
       "profile:18",
       "profile:33",
       "proj:15",
@@ -662,10 +658,10 @@
       "社内IT・ヘルプデスク"
     ],
     "gold_chunks": [
-      "doc:doc_003",
-      "doc:doc_006",
+      "doc:doc_001",
+      "doc:doc_009",
+      "doc:doc_017",
       "doc:doc_025",
-      "doc:doc_028",
       "profile:2",
       "profile:25",
       "profile:3",
@@ -692,9 +688,10 @@
       "システム開発・API"
     ],
     "gold_chunks": [
-      "doc:doc_008",
+      "doc:doc_005",
+      "doc:doc_013",
       "doc:doc_021",
-      "doc:doc_030",
+      "doc:doc_029",
       "profile:13",
       "profile:16",
       "profile:19",
@@ -711,9 +708,12 @@
       "社内IT・ヘルプデスク"
     ],
     "gold_chunks": [
-      "doc:doc_002",
-      "doc:doc_003",
-      "doc:doc_024",
+      "doc:doc_001",
+      "doc:doc_007",
+      "doc:doc_009",
+      "doc:doc_015",
+      "doc:doc_017",
+      "doc:doc_023",
       "doc:doc_025",
       "profile:25",
       "profile:6",
@@ -736,9 +736,10 @@
       "データ基盤・分析"
     ],
     "gold_chunks": [
-      "doc:doc_007",
-      "doc:doc_018",
-      "doc:doc_029",
+      "doc:doc_003",
+      "doc:doc_011",
+      "doc:doc_019",
+      "doc:doc_027",
       "profile:10",
       "profile:15",
       "profile:16",
@@ -760,10 +761,9 @@
       "サーバー・インフラ運用"
     ],
     "gold_chunks": [
-      "doc:doc_004",
-      "doc:doc_005",
-      "doc:doc_026",
-      "doc:doc_027",
+      "doc:doc_008",
+      "doc:doc_016",
+      "doc:doc_024",
       "profile:14",
       "profile:15",
       "profile:33",
@@ -787,8 +787,10 @@
       "広報・PR"
     ],
     "gold_chunks": [
-      "doc:doc_019",
-      "doc:doc_022",
+      "doc:doc_004",
+      "doc:doc_012",
+      "doc:doc_020",
+      "doc:doc_028",
       "profile:26",
       "profile:27",
       "profile:39",
@@ -805,8 +807,10 @@
       "総務・法務"
     ],
     "gold_chunks": [
-      "doc:doc_011",
-      "doc:doc_020",
+      "doc:doc_002",
+      "doc:doc_010",
+      "doc:doc_018",
+      "doc:doc_026",
       "profile:12",
       "profile:14",
       "profile:15",
@@ -828,9 +832,9 @@
       "セキュリティ"
     ],
     "gold_chunks": [
-      "doc:doc_002",
-      "doc:doc_012",
-      "doc:doc_024",
+      "doc:doc_007",
+      "doc:doc_015",
+      "doc:doc_023",
       "profile:1",
       "profile:21",
       "profile:25",
@@ -854,9 +858,6 @@
       "データ基盤・分析"
     ],
     "gold_chunks": [
-      "doc:doc_007",
-      "doc:doc_017",
-      "doc:doc_029",
       "profile:15",
       "profile:16",
       "profile:17",
@@ -883,8 +884,6 @@
       "パフォーマンスチューニング"
     ],
     "gold_chunks": [
-      "doc:doc_009",
-      "doc:doc_010",
       "profile:13",
       "profile:16",
       "proj:17",
