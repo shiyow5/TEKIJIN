@@ -61,7 +61,6 @@ def insert_shown_recommendations(
     session: Session,
     question_id: str,
     recommendations: list[dict[str, Any]],
-    now: dt.datetime,
 ) -> list[int]:
     """Persist EVERY shown recommendation (rank 1..N) and return their ids in order.
 
@@ -69,6 +68,13 @@ def insert_shown_recommendations(
     The returned ids preserve that order, so ``ids[0]`` is the primary (top /
     handed-off) recommendation whose outcome the responder later records; the rest
     are stored as ``outcome=NULL`` "shown" rows for the dashboard / audit trail.
+
+    ``created_at`` is intentionally NOT set here: the column's ``server_default``
+    (``now()``) stamps the actual INSERT time, which is the recommendation's real
+    generation moment. This is deliberately separate from the injected ``now`` the
+    agent uses for scoring — a reroute inserts a fresh row whose ``created_at``
+    reflects when it was produced, keeping the scorer's 7-day ``load`` window
+    accurate (codex#4).
     """
 
     ids: list[int] = []
@@ -80,7 +86,6 @@ def insert_shown_recommendations(
             score=rec.get("score"),
             reasons={"reasons": rec.get("reasons") or []},  # JSONB column typed as dict
             outcome=None,
-            created_at=now,
         )
         session.add(row)
         session.flush()

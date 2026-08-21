@@ -48,7 +48,13 @@ from sse_starlette import ServerSentEvent
 from tekijin.agent.graph import build_agent
 from tekijin.agent.protocols import DraftModel, IntentModel, SufficiencyModel
 from tekijin.api import schemas
-from tekijin.api.events import interrupt_event, node_event, reconnect_event
+from tekijin.api.events import (
+    TERMINAL_EVENTS,
+    interrupt_event,
+    node_event,
+    reconnect_event,
+    replay_terminal,
+)
 from tekijin.data.db import session_scope
 from tekijin.data.writes import (
     employee_exists,
@@ -130,6 +136,7 @@ class AgentService:
         retriever: Any | None = None,
         scorer: Any | None = None,
         now_factory: Any = _default_now,
+        clock: Any = time.monotonic,
     ) -> None:
         self._session_factory = session_factory
         self._checkpointer = checkpointer
@@ -143,7 +150,12 @@ class AgentService:
         self._retriever = retriever
         self._scorer = scorer
         self._now_factory = now_factory
+        # Monotonic clock for TTL bookkeeping — injectable so ``_sweep`` is
+        # deterministic in tests (the process ``time.monotonic`` epoch is the boot
+        # time, which is arbitrary and, on a fresh CI runner, small; see #0).
+        self._clock = clock
         self._registry: dict[str, _SessionCtx] = {}
+        self._registry_guard = threading.Lock()  # guards _registry membership only
         # One lock per session, handed out under a guard lock. Serialises accept /
         # resume / stream for the same session (see the module docstring).
         self._locks_guard = threading.Lock()
@@ -170,17 +182,44 @@ class AgentService:
         with self._locks_guard:
             return self._locks.setdefault(session_id, threading.Lock())
 
-    # -- registry / TTL --------------------------------------------------- #
+    # -- registry (membership changes go through these, under the guard) --- #
+    def _reg_get(self, session_id: str) -> _SessionCtx | None:
+        with self._registry_guard:
+            return self._registry.get(session_id)
+
+    def _reg_ensure(self, session_id: str) -> _SessionCtx:
+        with self._registry_guard:
+            return self._registry.setdefault(session_id, _SessionCtx())
+
+    # -- TTL sweep -------------------------------------------------------- #
     def _sweep(self) -> None:
-        cutoff = time.monotonic() - SESSION_TTL_SECONDS
-        for sid, ctx in list(self._registry.items()):
-            if ctx.touched_at >= cutoff:
-                continue
-            # Never evict a session that is mid-interrupt: a human is being waited
-            # on (a clarification reply or a responder outcome).
+        """Evict idle sessions (and their locks); never a mid-interrupt one.
+
+        Runs opportunistically on ``/ask``. Membership changes are made under the
+        registry guard; a candidate is only evicted while its per-session lock is
+        held (non-blocking), so it cannot race a live dispatch on that session.
+        """
+
+        cutoff = self._clock() - SESSION_TTL_SECONDS
+        with self._registry_guard:
+            candidates = [sid for sid, ctx in self._registry.items() if ctx.touched_at < cutoff]
+        for sid in candidates:
+            # A human is being waited on (clarification / outcome): keep it.
             if self._next_nodes(sid):
                 continue
-            del self._registry[sid]
+            lock = self._lock(sid)
+            if not lock.acquire(blocking=False):
+                continue  # a dispatch is touching this session now — next sweep
+            try:
+                with self._registry_guard:
+                    ctx = self._registry.get(sid)
+                    if ctx is None or ctx.touched_at >= cutoff:
+                        continue  # revived since the scan above
+                    del self._registry[sid]
+                with self._locks_guard:  # GC the lock so ids don't leak (codex#2)
+                    self._locks.pop(sid, None)
+            finally:
+                lock.release()
 
     def _config(self, session_id: str) -> dict[str, Any]:
         return {"configurable": {"thread_id": session_id}}
@@ -209,7 +248,7 @@ class AgentService:
 
         with self._lock(session_id):
             self._sweep()
-            ctx = self._registry.get(session_id)
+            ctx = self._reg_get(session_id)
             if ctx is not None and ctx.pending is not None:
                 raise SessionConflict("a run is already queued for this session")
             if self._next_nodes(session_id):
@@ -223,14 +262,14 @@ class AgentService:
                 if not employee_exists(session, asker_id):
                     raise AskerNotFound(f"asker_id {asker_id} is not a known employee")
                 persist_question(session, question_id, asker_id, question, now)
-            ctx = self._registry.setdefault(session_id, _SessionCtx())
+            ctx = self._reg_ensure(session_id)
             ctx.pending = {
                 "question": question,
                 "asker": {"id": asker_id},
                 "now": now,
                 "question_id": question_id,
             }
-            ctx.touched_at = time.monotonic()
+            ctx.touched_at = self._clock()
 
     # -- /answer : resume a paused run ------------------------------------ #
     def submit_resume(
@@ -247,7 +286,7 @@ class AgentService:
             next_nodes = tuple(snapshot.next)
             if not next_nodes:
                 raise SessionConflict("session is not awaiting a resume")
-            ctx = self._registry.get(session_id)
+            ctx = self._reg_get(session_id)
             if ctx is not None and ctx.pending is not None:
                 # A resume is already queued and not yet streamed (codex#5).
                 raise SessionConflict("a resume is already queued for this session")
@@ -265,9 +304,9 @@ class AgentService:
             else:  # pragma: no cover - the graph only ever interrupts at ask/send
                 raise SessionConflict("session cannot be resumed from its current state")
 
-            ctx = self._registry.setdefault(session_id, _SessionCtx())
+            ctx = self._reg_ensure(session_id)
             ctx.pending = Command(resume=resume_value)
-            ctx.touched_at = time.monotonic()
+            ctx.touched_at = self._clock()
 
     def _record_outcome(self, session_id: str, values: dict[str, Any], outcome: str) -> None:
         """Record the responder outcome on the durable primary recommendation."""
@@ -290,12 +329,18 @@ class AgentService:
 
     # -- /events : stream ------------------------------------------------- #
     def is_streamable(self, session_id: str) -> bool:
-        """True if there is a queued run OR a paused/mid-run state to continue."""
+        """True if there is a queued run, a paused run, or a replayable terminal.
 
-        ctx = self._registry.get(session_id)
+        The terminal case lets a client that dropped before receiving ``done`` /
+        the terminal ``message`` reconnect and re-fetch it (codex#3). A genuinely
+        unknown session has no checkpoint at all → not streamable → 404.
+        """
+
+        ctx = self._reg_get(session_id)
         if ctx is not None and ctx.pending is not None:
             return True
-        return bool(self._next_nodes(session_id))
+        snapshot = self._snapshot(session_id)
+        return bool(snapshot.next) or snapshot.values.get("last_event") is not None
 
     def stream_events(self, session_id: str) -> Iterator[ServerSentEvent]:
         """Stream the queued run, or reconnect to a paused/mid-run state.
@@ -321,19 +366,24 @@ class AgentService:
     def _dispatch_stream(self, session: Session, session_id: str) -> Iterator[ServerSentEvent]:
         graph = self._graph(session)
         config = self._config(session_id)
-        ctx = self._registry.get(session_id)
+        ctx = self._reg_get(session_id)
         if ctx is not None and ctx.pending is not None:
             pending = ctx.pending
             ctx.pending = None
-            ctx.touched_at = time.monotonic()
+            ctx.touched_at = self._clock()
             yield from self._run(graph, config, pending)
             return
 
         state = graph.get_state(config)
         if ctx is not None:
-            ctx.touched_at = time.monotonic()
+            ctx.touched_at = self._clock()
         if not state.next:
-            return  # nothing queued and nothing paused: route already 404s
+            # Finished run: replay its terminal event so a reconnecting client can
+            # still receive done / message (codex#3). Unknown session → nothing.
+            replay = replay_terminal(state.values)
+            if replay is not None:
+                yield replay
+            return
         node = state.next[0]
         if node in _INTERRUPT_NODES:
             reconnect = reconnect_event(node, state.values)
@@ -362,40 +412,53 @@ class AgentService:
     ) -> Iterator[ServerSentEvent]:
         """Stream one run segment, persisting topics/recommendations as it goes.
 
-        ``question_id`` / ``now`` come from the fresh input (a ``/ask`` dict) or,
-        for a resume / mid-run continuation, from the durable state. After the
-        segment, the shown recommendation ids are written back into the state so
-        ``/answer`` can record the outcome durably.
+        ``question_id`` comes from the fresh input (a ``/ask`` dict) or, for a
+        resume / mid-run continuation, from the durable state. After the segment,
+        the shown recommendation ids AND the terminal event (if the run finished)
+        are written back into the state — the former so ``/answer`` records the
+        outcome durably, the latter so a reconnect can replay ``done`` / ``message``.
         """
 
-        question_id, now = self._run_identity(graph, config, agent_input)
+        question_id = self._run_question_id(graph, config, agent_input)
         rec_ids: list[int] | None = None
+        terminal: ServerSentEvent | None = None
         for update in graph.stream(agent_input, config, stream_mode="updates"):
             for node, data in update.items():
                 if node == "c1_intent":
                     self._persist_topics(question_id, data)
                 elif node == "c6_score":
-                    rec_ids = self._persist_recommendations(question_id, now, data)
+                    rec_ids = self._persist_recommendations(question_id, data)
                 event = (
                     interrupt_event(_interrupt_payload(data))
                     if node == "__interrupt__"
                     else node_event(node, data)
                 )
                 if event is not None:
+                    if event.event in TERMINAL_EVENTS:
+                        terminal = event
                     yield event
-        if rec_ids:
-            graph.update_state(
-                config,
-                {"recommendation_ids": rec_ids, "primary_recommendation_id": rec_ids[0]},
-            )
+        self._persist_run_state(graph, config, rec_ids, terminal)
 
-    def _run_identity(
-        self, graph: Any, config: dict[str, Any], agent_input: Any
-    ) -> tuple[str | None, dt.datetime | None]:
+    def _persist_run_state(
+        self,
+        graph: Any,
+        config: dict[str, Any],
+        rec_ids: list[int] | None,
+        terminal: ServerSentEvent | None,
+    ) -> None:
+        updates: dict[str, Any] = {}
+        if rec_ids:
+            updates["recommendation_ids"] = rec_ids
+            updates["primary_recommendation_id"] = rec_ids[0]
+        if terminal is not None:
+            updates["last_event"] = {"event": terminal.event, "data": terminal.data}
+        if updates:
+            graph.update_state(config, updates)
+
+    def _run_question_id(self, graph: Any, config: dict[str, Any], agent_input: Any) -> str | None:
         if isinstance(agent_input, dict):
-            return agent_input.get("question_id"), agent_input.get("now")
-        values = graph.get_state(config).values
-        return values.get("question_id"), values.get("now")
+            return agent_input.get("question_id")
+        return graph.get_state(config).values.get("question_id")
 
     def _persist_topics(self, question_id: str | None, data: dict[str, Any] | None) -> None:
         if question_id is None:  # pragma: no cover - question_id always set via /ask
@@ -406,13 +469,13 @@ class AgentService:
             update_question_topics(session, question_id, topics)
 
     def _persist_recommendations(
-        self, question_id: str | None, now: dt.datetime | None, data: dict[str, Any] | None
+        self, question_id: str | None, data: dict[str, Any] | None
     ) -> list[int] | None:
         recs = (data or {}).get("recommendations") or []
         if not recs:
             return None
-        if question_id is None or now is None:  # pragma: no cover - both set via /ask
-            logger.warning("c6 recommendations with no question_id/now; skipping persist")
+        if question_id is None:  # pragma: no cover - question_id always set via /ask
+            logger.warning("c6 recommendations with no question_id; skipping persist")
             return None
         with session_scope(self._session_factory) as session:
-            return insert_shown_recommendations(session, question_id, recs, now)
+            return insert_shown_recommendations(session, question_id, recs)

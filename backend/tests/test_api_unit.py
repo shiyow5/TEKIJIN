@@ -134,7 +134,8 @@ def test_node_event_route_recommend_draft_done() -> None:
         )
     )
     assert recommend.event == "recommend"
-    assert _data(recommend)["recommendations"][0]["person_id"] == 1
+    # int person_id (internal) is emitted as the external "E###" string (codex#7).
+    assert _data(recommend)["recommendations"][0]["person_id"] == "E001"
 
     draft = _ev(events.node_event("c7_draft", {"draft": "文面"}))
     assert draft.event == "draft" and _data(draft)["draft"] == "文面"
@@ -380,7 +381,7 @@ class _FakeSF:
         return _FakeSession()
 
 
-def _service(*, intent=None, checkpointer=None, session_factory=None) -> AgentService:
+def _service(*, intent=None, checkpointer=None, session_factory=None, clock=None) -> AgentService:
     from langgraph.checkpoint.memory import MemorySaver
 
     return AgentService(
@@ -393,17 +394,50 @@ def _service(*, intent=None, checkpointer=None, session_factory=None) -> AgentSe
         retriever=_FakeRetriever(),
         scorer=_FakeScorer(),
         now_factory=lambda: _NOW,
+        **({"clock": clock} if clock is not None else {}),
     )
 
 
-def test_service_sweep_evicts_stale_sessions() -> None:
-    import time
-
-    svc = _service()
-    svc._registry["old"] = _SessionCtx(touched_at=time.monotonic() - SESSION_TTL_SECONDS - 1)
-    svc._registry["fresh"] = _SessionCtx()
+def test_service_sweep_evicts_stale_sessions_with_injected_clock() -> None:
+    # #0: the sweep clock is injectable, so eviction is fully deterministic and
+    # does NOT depend on the process monotonic epoch (arbitrary on a CI runner).
+    fake_now = [10_000.0]
+    svc = _service(clock=lambda: fake_now[0])
+    svc._registry["old"] = _SessionCtx(touched_at=fake_now[0] - SESSION_TTL_SECONDS - 1)
+    svc._registry["fresh"] = _SessionCtx(touched_at=fake_now[0])
     svc._sweep()
     assert "old" not in svc._registry and "fresh" in svc._registry
+    assert "old" not in svc._locks  # the stale session's lock is GC'd (codex#2)
+
+
+def test_sweep_skips_session_whose_lock_is_held() -> None:
+    # A stale session that is actively being dispatched (its lock is held) must NOT
+    # be evicted mid-flight; sweep's non-blocking acquire fails and it is skipped.
+    fake_now = [10_000.0]
+    svc = _service(clock=lambda: fake_now[0])
+    svc._registry["busy"] = _SessionCtx(touched_at=fake_now[0] - SESSION_TTL_SECONDS - 1)
+    svc._lock("busy").acquire()
+    try:
+        svc._sweep()
+        assert "busy" in svc._registry  # skipped: lock held by a live dispatch
+    finally:
+        svc._lock("busy").release()
+
+
+def test_sweep_skips_session_revived_during_scan() -> None:
+    # If a session is touched again between the candidate scan and the guarded
+    # re-check, the re-check sees it fresh and keeps it (no lost update).
+    fake_now = [10_000.0]
+    svc = _service(clock=lambda: fake_now[0])
+    svc._registry["rev"] = _SessionCtx(touched_at=fake_now[0] - SESSION_TTL_SECONDS - 1)
+
+    def _revive(session_id: str) -> tuple[str, ...]:
+        svc._registry["rev"].touched_at = fake_now[0]  # revived: now within TTL
+        return ()
+
+    svc._next_nodes = _revive  # type: ignore[method-assign]
+    svc._sweep()
+    assert "rev" in svc._registry  # re-check under the guard saw it fresh
 
 
 def test_stream_events_empty_when_nothing_queued_or_paused() -> None:

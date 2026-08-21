@@ -82,6 +82,10 @@ class AgentState(TypedDict, total=False):
     question_id: str | None  # uuid4 assigned at POST /ask
     recommendation_ids: list[int]  # DB ids of every *shown* recommendation
     primary_recommendation_id: int | None  # the one actually handed off
+    # The last terminal SSE event ({"event", "data"}) of a completed run, kept so
+    # a client that disconnected before receiving ``done`` / terminal ``message``
+    # can re-fetch it on reconnect (EventSource retry) — read-only replay.
+    last_event: dict[str, Any] | None
 
     # -- C1 intent ---------------------------------------------------------
     topics: list[str]

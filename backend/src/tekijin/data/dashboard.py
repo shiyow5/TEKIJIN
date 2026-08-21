@@ -19,9 +19,12 @@ def dashboard_summary(
     session: Session,
     *,
     top_responders: int = 5,
-    recent: int = 5,
 ) -> dict[str, Any]:
-    """Aggregate counts, load distribution, topic mix, and recent recommendations."""
+    """Aggregate counts, load distribution, topic mix, and outcome ratios.
+
+    Aggregate-only by design (product-spec §241-251): no individual records are
+    enumerated — the dashboard summarises usage, it is not an audit log.
+    """
 
     total_employees = session.scalar(select(func.count()).select_from(Employee)) or 0
     total_questions = session.scalar(select(func.count()).select_from(Question)) or 0
@@ -52,38 +55,27 @@ def dashboard_summary(
         {"topic": topic, "count": count} for topic, count in session.execute(topic_stmt)
     ]
 
-    # Most recent recommendations (empty until the recommendation loop persists).
-    recent_stmt = (
-        select(
-            Recommendation.question_id,
-            Recommendation.employee_id,
-            Employee.name,
-            Recommendation.score,
-            Recommendation.outcome,
-            Recommendation.created_at,
-        )
-        .join(Employee, Employee.id == Recommendation.employee_id)
-        .order_by(Recommendation.created_at.desc(), Recommendation.id.desc())
-        .limit(recent)
-    )
-    recent_recommendations = [
-        {
-            "question_id": qid,
-            "employee_id": eid,
-            "name": name,
-            "score": score,
-            "outcome": outcome,
-            "created_at": created_at,
-        }
-        for qid, eid, name, score, outcome, created_at in session.execute(recent_stmt)
-    ]
+    # Outcome aggregation (accept/decline/pending) + acceptance ratio — the
+    # "使うほど育つ" signal, as aggregates only (no per-record listing).
+    outcome_stmt = select(Recommendation.outcome, func.count()).group_by(Recommendation.outcome)
+    outcome_counts = {outcome: count for outcome, count in session.execute(outcome_stmt)}
+    accepted = outcome_counts.get("accepted", 0)
+    declined = outcome_counts.get("declined", 0)
+    pending = outcome_counts.get(None, 0)
+    decided = accepted + declined
+    acceptance_rate = (accepted / decided) if decided else 0.0
 
     return {
         "total_employees": total_employees,
         "total_questions": total_questions,
         "total_answers": total_answers,
         "recommendation_count": recommendation_count,
+        "recommendation_outcomes": {
+            "accepted": accepted,
+            "declined": declined,
+            "pending": pending,
+        },
+        "acceptance_rate": acceptance_rate,
         "answers_per_responder": answers_per_responder,
         "topic_distribution": topic_distribution,
-        "recent_recommendations": recent_recommendations,
     }

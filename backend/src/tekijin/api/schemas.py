@@ -7,7 +7,6 @@ models mirror the events emitted by :mod:`tekijin.api.events`.
 
 from __future__ import annotations
 
-import datetime as dt
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -18,6 +17,17 @@ Outcome = Literal["accepted", "declined"]
 # ``thread_id``; constrain it to path-safe characters (no ``/``) so a created
 # session is always reachable over GET /events.
 _SESSION_ID_PATTERN = r"^[A-Za-z0-9_-]+$"
+
+
+def format_employee_id(employee_id: int) -> str:
+    """Render an internal int employee id as the external ``"E###"`` string form.
+
+    Model-definition §163-170: the external contract uses zero-padded string ids
+    (``"E017"``). Internal/DB stays int; this is applied only at the API boundary
+    (recommend events), mirroring the ``"E###"`` asker_id we accept on input.
+    """
+
+    return f"E{int(employee_id):03d}"
 
 
 def _coerce_asker_id(value: object) -> int:
@@ -112,7 +122,7 @@ class Reason(BaseModel):
 
 
 class Recommendation(BaseModel):
-    person_id: int
+    person_id: str  # external "E###" form (see format_employee_id)
     name: str
     dept: str | None = None
     score: float
@@ -178,20 +188,27 @@ class TopicCount(BaseModel):
     count: int
 
 
-class RecentRecommendation(BaseModel):
-    question_id: str
-    employee_id: int
-    name: str
-    score: float | None = None
-    outcome: str | None = None
-    created_at: dt.datetime | None = None
+class OutcomeCounts(BaseModel):
+    """Aggregate recommendation outcomes (no per-record enumeration)."""
+
+    accepted: int = 0
+    declined: int = 0
+    pending: int = 0  # shown but not yet accepted/declined
 
 
 class DashboardResponse(BaseModel):
+    """Aggregate-only view (counts / distributions / ratios).
+
+    Deliberately carries NO per-record listing (product-spec §241-251: the
+    dashboard summarises usage, it is not a monitoring/audit log of individual
+    recommendations).
+    """
+
     total_employees: int
     total_questions: int
     total_answers: int
     recommendation_count: int
+    recommendation_outcomes: OutcomeCounts = Field(default_factory=OutcomeCounts)
+    acceptance_rate: float = 0.0  # accepted / (accepted + declined), 0 when none decided
     answers_per_responder: list[ResponderLoad] = Field(default_factory=list)
     topic_distribution: list[TopicCount] = Field(default_factory=list)
-    recent_recommendations: list[RecentRecommendation] = Field(default_factory=list)

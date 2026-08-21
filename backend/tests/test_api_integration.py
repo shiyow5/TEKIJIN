@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 from langgraph.checkpoint.memory import MemorySaver
 
 from tekijin.agent.stubs import KeywordIntentModel, RuleSufficiencyModel, TemplateDraftModel
-from tekijin.api.service import AgentService, SessionConflict, _SessionCtx
+from tekijin.api.service import SESSION_TTL_SECONDS, AgentService, SessionConflict, _SessionCtx
 from tekijin.app import create_app
 from tekijin.data.dashboard import dashboard_summary
 from tekijin.data.db import get_sessionmaker
@@ -145,7 +145,8 @@ def test_happy_path_ask_events_answer(seed_counts, engine, fake_embedder) -> Non
     assert names == ["understood", "route", "recommend", "draft"]
     assert evs[0][1]["topics"] == ["ネットワーク・VPN"]
     assert evs[1][1]["route"] == "person"
-    assert [r["person_id"] for r in evs[2][1]["recommendations"]] == [1, 2, 3]
+    # person_id crosses the boundary in the external "E###" form (codex#7).
+    assert [r["person_id"] for r in evs[2][1]["recommendations"]] == ["E001", "E002", "E003"]
     assert "社員1さん" in evs[3][1]["draft"]
 
     # Resume with the responder's acceptance -> done.
@@ -192,13 +193,13 @@ def test_decline_reroutes_then_accept(seed_counts, engine, fake_embedder) -> Non
     )
     client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "s3"})
     first = _events(client, "s3")
-    assert first[2][1]["recommendations"][0]["person_id"] == 1  # drafted for 1
+    assert first[2][1]["recommendations"][0]["person_id"] == "E001"  # drafted for 1
 
     # Decline -> reroute -> re-scored excluding 1 -> next candidate 2.
     client.post("/answer", json={"session_id": "s3", "outcome": "declined"})
     second = _events(client, "s3")
     assert [e for e, _ in second] == ["recommend", "draft"]
-    assert second[0][1]["recommendations"][0]["person_id"] == 2
+    assert second[0][1]["recommendations"][0]["person_id"] == "E002"
 
     client.post("/answer", json={"session_id": "s3", "outcome": "accepted"})
     done = _events(client, "s3")
@@ -398,19 +399,27 @@ def test_dashboard_route_shape_and_seed_values(seed_counts, engine, fake_embedde
     assert body["answers_per_responder"]  # load distribution from seed
     assert all("answer_count" in r for r in body["answers_per_responder"])
     assert body["topic_distribution"]  # topic mix from seed questions
-    assert body["recent_recommendations"] == []
+    # Aggregate-only: no per-record listing (codex#5, product-spec §241-251).
+    assert "recent_recommendations" not in body
+    assert body["recommendation_outcomes"] == {"accepted": 0, "declined": 0, "pending": 0}
+    assert body["acceptance_rate"] == 0.0
 
 
-def test_dashboard_summary_includes_recent_recommendations(seed_counts, session) -> None:
+def test_dashboard_summary_aggregates_outcomes(seed_counts, session) -> None:
     # Direct data-layer test: flushed rows are visible within the same session.
-    session.add(
-        Recommendation(question_id="q_0001", employee_id=3, rank=1, score=0.87, outcome="accepted")
-    )
+    # 2 accepted, 1 declined, 1 pending -> acceptance_rate = 2/3.
+    for eid, outcome in [(3, "accepted"), (4, "accepted"), (5, "declined"), (6, None)]:
+        session.add(
+            Recommendation(
+                question_id="q_0001", employee_id=eid, rank=1, score=0.8, outcome=outcome
+            )
+        )
     session.flush()
     summary = dashboard_summary(session)
-    assert summary["recommendation_count"] >= 1
-    top = summary["recent_recommendations"][0]
-    assert top["employee_id"] == 3 and top["name"] and top["score"] == 0.87
+    assert summary["recommendation_count"] >= 4
+    assert summary["recommendation_outcomes"] == {"accepted": 2, "declined": 1, "pending": 1}
+    assert summary["acceptance_rate"] == 2 / 3
+    assert "recent_recommendations" not in summary  # aggregate-only
 
 
 # --------------------------------------------------------------------------- #
@@ -659,11 +668,16 @@ def test_sweep_protects_paused_and_evicts_idle(seed_counts, engine, fake_embedde
     )
     svc.start_question("keep", 10, GOOD_Q)
     list(svc.stream_events("keep"))  # paused at send
-    svc._registry["keep"].touched_at = 0.0  # make the paused session look stale
-    svc._registry["idle"] = _SessionCtx(pending=None, touched_at=0.0)  # stale, no run
+    _ = svc._lock("idle")  # materialise the idle session's lock so we can watch GC
+    # "Stale" is measured against the SAME injected clock the sweep uses (#0): a
+    # magic 0.0 wrongly reads as "recent" on a freshly-booted CI runner.
+    stale = svc._clock() - SESSION_TTL_SECONDS - 1
+    svc._registry["keep"].touched_at = stale  # make the paused session look stale
+    svc._registry["idle"] = _SessionCtx(pending=None, touched_at=stale)  # stale, no run
     svc._sweep()
     assert "keep" in svc._registry  # protected: a human is being waited on
     assert "idle" not in svc._registry  # evicted: stale and not mid-interrupt
+    assert "idle" not in svc._locks  # its per-session lock was GC'd too (codex#2)
 
 
 # --------------------------------------------------------------------------- #
@@ -773,3 +787,61 @@ def test_record_outcome_warns_when_no_target(seed_counts, engine, fake_embedder,
     with caplog.at_level(logging.WARNING):
         svc._record_outcome("orphan", {}, "accepted")
     assert "no recommendation to record outcome" in caplog.text
+
+
+# --------------------------------------------------------------------------- #
+# codex#3: a finished run replays its terminal event on reconnect
+# --------------------------------------------------------------------------- #
+def test_reconnect_replays_done_after_completion(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine, fake_embedder, retriever=_FakeRetriever(people=[1]), scorer=_FakeScorer(_recs(1))
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "td"})
+    _events(client, "td")  # to the send interrupt
+    client.post("/answer", json={"session_id": "td", "outcome": "accepted"})
+    done = _events(client, "td")
+    assert [e for e, _ in done] == ["done"]
+
+    again = _events(client, "td")  # reconnect AFTER completion
+    assert [e for e, _ in again] == ["done"]  # terminal replayed (read-only)
+    assert again[0][1] == done[0][1]  # identical payload
+    # replay must not re-run the graph / re-insert recommendations.
+    assert len(_recs_for(engine, _latest_question(engine).id)) == 1
+
+
+def test_reconnect_replays_terminal_message(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1], people_confidence=0.2),
+        scorer=_FakeScorer([]),  # no_candidate terminal
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "tmsg"})
+    first = [e for e, _ in _events(client, "tmsg")]
+    assert first[-1] == "message"
+    again = _events(client, "tmsg")
+    assert [e for e, _ in again] == ["message"]  # terminal message replayed
+
+
+# --------------------------------------------------------------------------- #
+# codex#4: Recommendation.created_at is the generation time, not the /ask time
+# --------------------------------------------------------------------------- #
+def test_reroute_created_at_is_generation_time_not_ask_time(
+    seed_counts, engine, fake_embedder
+) -> None:
+    svc = _svc(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    svc.start_question("rt", 10, GOOD_Q)
+    list(svc.stream_events("rt"))  # first C6 pass
+    svc.submit_resume("rt", outcome="declined")
+    list(svc.stream_events("rt"))  # reroute -> a later C6 pass inserts another row
+
+    times = [r.created_at for r in _recs_for(engine, _latest_question(engine).id)]
+    # DB server_default(now()) stamps the real insert time — never the injected
+    # /ask NOW (which is a fixed future date in these tests).
+    assert all(t != NOW for t in times)
+    assert max(times) > min(times)  # the reroute pass was inserted strictly later

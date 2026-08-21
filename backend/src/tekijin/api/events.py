@@ -68,10 +68,13 @@ def node_event(node: str, update: dict[str, Any]) -> ServerSentEvent | None:
             ),
         )
     if node == "c6_score":
-        return _sse(
-            "recommend",
-            schemas.RecommendData(recommendations=update.get("recommendations", [])),
-        )
+        # person_id crosses the boundary as the external "E###" string form
+        # (model-definition §163-170), paired with the "E###" asker_id we accept.
+        recs: list[Any] = [
+            {**rec, "person_id": schemas.format_employee_id(rec["person_id"])}
+            for rec in update.get("recommendations", [])
+        ]
+        return _sse("recommend", schemas.RecommendData(recommendations=recs))
     if node == "c7_draft":
         return _sse("draft", schemas.DraftData(draft=update.get("draft") or ""))
     if node == "c8_update":
@@ -103,6 +106,26 @@ def reconnect_event(next_node: str, values: dict[str, Any]) -> ServerSentEvent |
     if next_node == "send":
         return _sse("draft", schemas.DraftData(draft=values.get("draft") or ""))
     return None
+
+
+# SSE event names that represent a *terminal* run outcome (worth replaying on a
+# reconnect after the run has already finished).
+TERMINAL_EVENTS: frozenset[str] = frozenset({"done", "message"})
+
+
+def replay_terminal(values: dict[str, Any]) -> ServerSentEvent | None:
+    """Re-emit the stored terminal event (``done`` / ``message``) on reconnect.
+
+    A run that finished commits its final event into ``last_event`` (see the
+    service). If a client disconnected before receiving it, reconnecting to
+    /events replays it verbatim — read-only, no re-run, no double insert. Returns
+    ``None`` when there is no stored terminal event (a genuinely unknown session).
+    """
+
+    last = values.get("last_event")
+    if not last:
+        return None
+    return ServerSentEvent(event=last["event"], data=last["data"])
 
 
 def interrupt_event(payload: dict[str, Any]) -> ServerSentEvent | None:

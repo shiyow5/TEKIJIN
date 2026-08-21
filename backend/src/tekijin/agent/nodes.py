@@ -109,6 +109,7 @@ class AgentNodes:
             # ``invoke`` input and must survive this merge.
             "recommendation_ids": [],
             "primary_recommendation_id": None,
+            "last_event": None,
         }
 
     # -- C1: intent understanding (LLM stub) ------------------------------
