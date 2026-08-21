@@ -380,21 +380,19 @@ ROBUSTNESS_ITEMS = [
     ),
 ]
 
-# route の判定基準（著述ラベル）。原則3のとおりクエリの言い回しからは決まらないようにする
+# route の判定は**コーパスの状態から決める**（#52 でトピックごとに差を作った）。
 #   person       : 状況判断・提案の勘所が要る → 人に取り次ぐ（主線）
-#   prior_answer : 同種の問いが過去に出ており、その回答の再利用が効く（補助）
-#   document     : 標準手順・規程として文書に書いてある（格下げ）
+#   prior_answer : 同種の問いが繰り返され、過去回答が実際に再利用されている（補助）
+#   document     : 標準手順・規程として文書化されている（格下げ）
 #   none         : 専門家不在。答えない
-PROCEDURAL_TOPICS = {
-    "社内IT・ヘルプデスク",
-    "総務・法務",
-}  # 標準手順が文書にある性質の領域
-RECALL_TOPICS = {
-    "契約管理",
-    "経理・決算",
-    "問い合わせ・ヘルプデスク運用",
-    "SNS運用",
-}  # 定型的な過去回答が効く領域
+#
+# 以前は PROCEDURAL_TOPICS / RECALL_TOPICS という定数を本ファイルに持っていた。
+# 全22トピックが「回答6〜7件・文書1〜2件」と横並びで、コーパスから決めようとすると
+# 全件が同じラベルになってしまったため。#52 で fixtures 側にトピック差を作ったので、
+# **定数を廃止してコーパスから導出できるようになった。**
+DOC_THRESHOLD = 3  # この件数以上の文書があれば「文書化されている」
+LOW_REUSE = 2.0  # 有用回答の平均 reuse_count がこれ未満 = 過去回答は使い回されていない
+HIGH_REUSE = 4.0  # これ以上 = 過去回答がよく使い回されている
 
 
 def load(rel):
@@ -425,6 +423,32 @@ def leaks(query, topic):
         hits.append(topic)
     hits += [k for k in TOPICS[topic] if k in query]
     return hits
+
+
+def topic_corpus_profile():
+    """トピックごとの「答えの在り処」をコーパスから測る（route 判定の入力）。"""
+    documents = load("documents/documents.json")
+    answers = load("answers/answers.json")
+
+    docs = Counter()
+    for d in documents:
+        for t in TOPICS:
+            if d["title"].startswith(t):
+                docs[t] += 1
+    reuse = defaultdict(list)
+    n_ans = Counter()
+    for a in answers:
+        n_ans[a["topic"]] += 1
+        if a.get("was_helpful"):
+            reuse[a["topic"]].append(a.get("reuse_count", 0))
+    return {
+        t: {
+            "docs": docs.get(t, 0),
+            "n_answers": n_ans.get(t, 0),
+            "mean_reuse": (sum(reuse[t]) / len(reuse[t])) if reuse[t] else 0.0,
+        }
+        for t in TOPICS
+    }
 
 
 def build_gold_evidence():
@@ -463,12 +487,16 @@ def rank_experts(ev, topic, k=4, min_score=0.6):
     return [e for e, _ in r[:k]]
 
 
-def route_for(topic, experts):
+def route_for(topic, experts, corpus):
+    """route の正解をコーパスの状態から決める。クエリの言い回しは一切見ない。"""
     if not experts:
         return "none"
-    if topic in PROCEDURAL_TOPICS:
+    p = corpus.get(topic)
+    if not p:
+        return "person"
+    if p["docs"] >= DOC_THRESHOLD and p["mean_reuse"] < LOW_REUSE:
         return "document"
-    if topic in RECALL_TOPICS:
+    if p["docs"] == 0 and p["mean_reuse"] >= HIGH_REUSE:
         return "prior_answer"
     return "person"
 
@@ -479,6 +507,7 @@ def main():
     projects = load("projects/projects.json")
     emp_ids = {e["id"] for e in employees}
 
+    corpus = topic_corpus_profile()
     ev, proj_topics = build_gold_evidence()
     gold = {t: rank_experts(ev, t) for t in TOPICS}
     usable = [t for t in TOPICS if gold[t]]
@@ -530,7 +559,7 @@ def main():
             "L1",
             [t],
             gold[t],
-            route_for(t, gold[t]),
+            route_for(t, gold[t], corpus),
             "auto:project_daily",
             "トピック語を明示。易しい床（回帰検出用）",
         )
@@ -558,7 +587,7 @@ def main():
                 "L2",
                 [t],
                 experts,
-                route_for(t, experts),
+                route_for(t, experts, corpus),
                 "auto:project_daily",
                 f"症状のみ＋拠点制約({applied})。制約を無視すると外れる",
                 constraint={"branch": applied},
@@ -570,7 +599,7 @@ def main():
                 "L2",
                 [t],
                 base,
-                route_for(t, base),
+                route_for(t, base, corpus),
                 "auto:project_daily",
                 "症状のみ。トピック語をクエリから除去済み",
             )

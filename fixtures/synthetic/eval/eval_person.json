@@ -12,7 +12,7 @@
       36,
       37
     ],
-    "gold_route": "person",
+    "gold_route": "document",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
@@ -27,12 +27,12 @@
       "サーバー・インフラ運用"
     ],
     "gold_experts": [
-      15,
       33,
-      14,
-      18
+      15,
+      25,
+      6
     ],
-    "gold_route": "person",
+    "gold_route": "document",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
@@ -48,9 +48,9 @@
     ],
     "gold_experts": [
       5,
-      22,
       4,
-      23
+      22,
+      39
     ],
     "gold_route": "prior_answer",
     "expect_abstain": false,
@@ -87,12 +87,12 @@
       "ネットワーク・VPN"
     ],
     "gold_experts": [
+      6,
       24,
       3,
-      21,
-      6
+      7
     ],
-    "gold_route": "person",
+    "gold_route": "document",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
@@ -112,7 +112,7 @@
       8,
       9
     ],
-    "gold_route": "person",
+    "gold_route": "document",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
@@ -152,7 +152,7 @@
       29,
       11
     ],
-    "gold_route": "prior_answer",
+    "gold_route": "document",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
@@ -189,8 +189,8 @@
     "gold_experts": [
       17,
       33,
-      18,
-      34
+      34,
+      18
     ],
     "gold_route": "prior_answer",
     "expect_abstain": false,
@@ -201,23 +201,22 @@
   },
   {
     "id": 11,
-    "query": "入社してくる人の端末と権限の準備が毎回バタバタします。標準の段取りを知りたいです。できれば大阪の拠点で動ける方だと助かります。",
+    "query": "入社してくる人の端末と権限の準備が毎回バタバタします。標準の段取りを知りたいです。できれば福岡の拠点で動ける方だと助かります。",
     "difficulty": "L2",
     "gold_topics": [
       "社内IT・ヘルプデスク"
     ],
     "gold_experts": [
-      6,
-      18
+      25
     ],
     "gold_route": "document",
     "expect_abstain": false,
     "constraint": {
-      "branch": "大阪"
+      "branch": "福岡"
     },
     "source_topic": null,
     "label_source": "auto:project_daily",
-    "note": "症状のみ＋拠点制約(大阪)。制約を無視すると外れる"
+    "note": "症状のみ＋拠点制約(福岡)。制約を無視すると外れる"
   },
   {
     "id": 12,
@@ -261,23 +260,23 @@
   },
   {
     "id": 14,
-    "query": "通販の画面でカゴ落ちが多いと言われました。支払い方法の選択肢が原因なのでしょうか。できれば本社の拠点で動ける方だと助かります。",
+    "query": "通販の画面でカゴ落ちが多いと言われました。支払い方法の選択肢が原因なのでしょうか。できれば大阪の拠点で動ける方だと助かります。",
     "difficulty": "L2",
     "gold_topics": [
       "ECサイト構築"
     ],
     "gold_experts": [
-      14,
-      13
+      15,
+      6
     ],
-    "gold_route": "person",
+    "gold_route": "prior_answer",
     "expect_abstain": false,
     "constraint": {
-      "branch": "本社"
+      "branch": "大阪"
     },
     "source_topic": null,
     "label_source": "auto:project_daily",
-    "note": "症状のみ＋拠点制約(本社)。制約を無視すると外れる"
+    "note": "症状のみ＋拠点制約(大阪)。制約を無視すると外れる"
   },
   {
     "id": 15,
@@ -309,7 +308,7 @@
     "gold_experts": [
       15,
       14,
-      16,
+      25,
       13
     ],
     "gold_route": "person",
@@ -332,7 +331,7 @@
       2,
       21
     ],
-    "gold_route": "person",
+    "gold_route": "prior_answer",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
@@ -352,7 +351,7 @@
       7,
       33
     ],
-    "gold_route": "person",
+    "gold_route": "document",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
@@ -369,8 +368,8 @@
     "gold_experts": [
       15,
       16,
-      14,
-      13
+      22,
+      14
     ],
     "gold_route": "person",
     "expect_abstain": false,
@@ -389,8 +388,8 @@
     "gold_experts": [
       1,
       21,
-      2,
-      3
+      3,
+      2
     ],
     "gold_route": "person",
     "expect_abstain": false,
@@ -412,7 +411,7 @@
       5,
       22
     ],
-    "gold_route": "person",
+    "gold_route": "prior_answer",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
@@ -452,7 +451,7 @@
       36,
       37
     ],
-    "gold_route": "person",
+    "gold_route": "document",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
@@ -467,12 +466,12 @@
       "サーバー・インフラ運用"
     ],
     "gold_experts": [
-      15,
       33,
-      14,
-      18
+      15,
+      25,
+      6
     ],
-    "gold_route": "person",
+    "gold_route": "document",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
@@ -488,9 +487,9 @@
     ],
     "gold_experts": [
       5,
-      22,
       4,
-      23
+      22,
+      39
     ],
     "gold_route": "prior_answer",
     "expect_abstain": false,

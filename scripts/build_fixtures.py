@@ -44,7 +44,10 @@ random.seed(42)
 # --------------------------------------------------------------------------
 # パス
 # --------------------------------------------------------------------------
-DEFAULT_INPUT = "/tmp/claude-1000/-home-satosho-Ootsuka-summer/c294eda3-5ccc-466e-b834-d54e5ffa2eae/scratchpad"
+REPO_ROOT_ = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+# 一次データはリポジトリ内に置く（fixtures/source/README.md 参照）。
+# 以前は一時ディレクトリを指しており、それが消えると再生成不能になる状態だった。
+DEFAULT_INPUT = os.path.join(REPO_ROOT_, "fixtures", "source")
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 OUT_ROOT = os.path.join(REPO_ROOT, "fixtures", "synthetic")
 
@@ -100,6 +103,133 @@ TOPICS = {
     "購買・仕入れ": ["仕入れ", "発注", "サプライヤー", "在庫", "納期調整"],
     "広報・PR": ["プレスリリース", "社内報", "採用広報", "メディア対応", "会社SNS"],
 }
+
+# --------------------------------------------------------------------------
+# トピックごとの「答えの在り処」の差（#52）
+# --------------------------------------------------------------------------
+# 以前は全22トピックが「回答6〜7件・文書1〜2件」と横並びで、
+# 「文書があるトピックは document」と定義すると全件が該当してしまい、
+# **route の正解をコーパスの状態から決められなかった**（評価セット側で著述するしかなかった）。
+# ここでトピックを3つの性格に分ける。
+#
+#   DOCUMENTED_TOPICS  … 標準手順・規程が文書化されている。過去回答は薄い    -> document
+#   RECALL_RICH_TOPICS … 文書は無いが、再利用される過去回答が厚い            -> prior_answer
+#   それ以外            … 文書も過去回答も薄い。現場判断が要る                -> person（主線）
+
+# 手順・規程として書き下せる領域（社内手続き・IT運用の定型）
+DOCUMENTED_TOPICS = [
+    "社内IT・ヘルプデスク",
+    "総務・法務",
+    "経理・決算",
+    "人事・採用",
+    "購買・仕入れ",
+    "ネットワーク・VPN",
+    "セキュリティ",
+    "サーバー・インフラ運用",
+]
+
+# 同じ問いが繰り返され、過去の回答がそのまま使い回される領域
+RECALL_RICH_TOPICS = [
+    "契約管理",
+    "問い合わせ・ヘルプデスク運用",
+    "SNS運用",
+    "Webマーケティング・広告",
+    "ECサイト構築",
+    "業務効率化コンサル",
+]
+
+# 過去QAを1件も持たせないトピック（現場判断のみ。route=person の純粋なケース）
+NO_ANSWER_TOPICS = ["モバイルアプリ開発", "パフォーマンスチューニング", "基幹システム"]
+
+
+def reuse_for_topic(topic, base):
+    """0〜8 の一様乱数を、トピックの性格に応じたレンジへ写像する。乱数は消費しない。"""
+    if topic in RECALL_RICH_TOPICS:
+        return 4 + base // 2  # 4〜8（よく使い回される）
+    if topic in DOCUMENTED_TOPICS:
+        return base // 4  # 0〜2（文書を見るので回答は使い回されない）
+    return base // 2  # 0〜4
+
+
+def helpful_rate_for_topic(topic):
+    if topic in RECALL_RICH_TOPICS:
+        return 0.85
+    if topic in DOCUMENTED_TOPICS:
+        return 0.55
+    return 0.70
+
+
+SPECIALIZE_RNG_SEED = 4251
+CROSS_DEPT_RATE = 0.75  # 選ばれたメンバーを他部署の担当者へ差し替える確率
+
+# 案件に後方から関わる部署。一次データは「顧客接点のある4部署」にしか案件を割り当てていないため、
+# バックオフィスの社員は案件の証拠を一切持てず、トピック→専門家が部署に一意に決まってしまう。
+# 実務では契約書のリーガルチェックに総務、請求まわりに経理、といった形で他部署が入る。
+# これをメンバーとして表現する（件数は変えない。同部署メンバーとの差し替え）。
+SUPPORT_DEPT_BY_TOPIC = {
+    "契約管理": ["総務部", "営業部"],
+    "経理・決算": ["経理部"],
+    "人事・採用": ["人事部"],
+    "購買・仕入れ": ["購買部"],
+    "広報・PR": ["広報部"],
+    "Webマーケティング・広告": ["マーケティング部"],
+    "SNS運用": ["マーケティング部", "広報部"],
+    "問い合わせ・ヘルプデスク運用": ["カスタマーサポート部"],
+    "セキュリティ": ["情報システム部"],
+    "社内IT・ヘルプデスク": ["情報システム部"],
+    "ネットワーク・VPN": ["情報システム部", "カスタマーサポート部"],
+    "サーバー・インフラ運用": ["カスタマーサポート部", "情報システム部"],
+    "基幹システム": ["情報システム部", "営業部"],
+    "業務効率化コンサル": ["営業部", "総務部"],
+    "CRM・営業支援": ["営業部", "マーケティング部"],
+    "データ基盤・分析": ["開発部", "マーケティング部"],
+    "クラウド移行": ["開発部", "情報システム部"],
+    "システム開発・API": ["開発部"],
+    "パフォーマンスチューニング": ["開発部"],
+    "モバイルアプリ開発": ["開発部"],
+    "ECサイト構築": ["開発部", "マーケティング部"],
+    "総務・法務": ["総務部"],
+}
+
+
+def pick_members(chosen, case, case_topics, dept_members, id2dept, lead_id):
+    """メンバーの選び方（#51）。件数は変えない。
+
+    選ばれた同部署メンバーの一定割合を、**支援部署**（SUPPORT_DEPT_BY_TOPIC）の社員へ差し替える。
+    「営業がリードし、契約まわりで総務が入る」「開発がリードし、要件で情シスが入る」といった構成になり、
+    トピック→専門家が単一部署に閉じなくなる。
+
+    一次データにはバックオフィス部署の案件が1件も無いため、この差し替えが無いと
+    経理・人事・総務・購買・広報の社員は案件の証拠を一切持てない。
+
+    乱数は案件IDで決まる専用インスタンス。グローバルの random を消費しない
+    （消費するとダウンストリームの件数がすべてずれ、他PRのテストを壊す）。
+    """
+    rng = random.Random(SPECIALIZE_RNG_SEED + case["id"])
+    lead_dept = id2dept.get(lead_id)
+    topics = case_topics[case["id"]]
+
+    support = []
+    for t in topics:
+        for d in SUPPORT_DEPT_BY_TOPIC.get(t, []):
+            if d != lead_dept:
+                support += sorted(dept_members.get(d, []))
+    support = sorted(set(support))
+
+    out, taken = [], {lead_id}
+    for mid in chosen:
+        pick = mid
+        cands = [m for m in support if m not in taken]
+        if cands and rng.random() < CROSS_DEPT_RATE:
+            pick = rng.choice(cands)
+        if pick in taken:
+            pick = mid
+        if pick in taken:
+            continue
+        taken.add(pick)
+        out.append(pick)
+    return out
+
 
 # 質問文テンプレ (トピックごと。営業/技術/事務いずれの聞き手からも自然な相談文)
 QUESTION_TEMPLATES = {
@@ -316,12 +446,19 @@ def main():
     # 案件から: 主担当(lead)=1.0。member は後で project_members 構築時に加算
     case_topics = {}  # case_id -> [topic]
     for c in cases:
-        text = f"{c['title']} {c['product']} {c['issue']}"
-        topics = match_topics(text)
-        case_topics[c["id"]] = topics
-        lead_id = name2id[c["name"]]
-        for t in topics:
-            topic_evidence[lead_id][t] += 1.0
+        case_topics[c["id"]] = match_topics(f"{c['title']} {c['product']} {c['issue']}")
+
+    # リードは一次データ（case_history_dummy.json の name）のまま。**付け替えない。**
+    # 一度は部署内で付け替えて専門特化させることを試したが、PR #46 の人手ラベルは
+    # 「元のリード割当」を人が読んで付けたものなので、付け替えると外部検証の土台が崩れる。
+    # 実測: 付け替えあり = 人手ラベルとの一致 Jaccard 0.68 / 付け替えなし = 0.74。
+    # 独立サンプル数は 38 vs 35 で付け替えありが有利だが、外部検証のほうが価値が高いと判断した。
+    id2dept = {e["id"]: e["department"] for e in out_employees}
+    case_lead = {c["id"]: name2id[c["name"]] for c in cases}
+
+    for c in cases:
+        for t in case_topics[c["id"]]:
+            topic_evidence[case_lead[c["id"]]][t] += 1.0
 
     # 日報から: content 一致 = 0.15 (件数が多いので低重み)
     for d in dailies:
@@ -363,12 +500,17 @@ def main():
             "start_date": c["start_date"],
             "end_date": c["end_date"],
         })
-        lead_id = name2id[c["name"]]
+        lead_id = case_lead[c["id"]]
         out_members.append({"project_id": c["id"], "employee_id": lead_id, "role": "lead"})
-        # 同部署から 0〜2 名を member として付与 (lead 除く)
+        # 0〜2 名を member として付与 (lead 除く)。
+        # **グローバル random の呼び出し順・回数は従来のまま**にしてある
+        # (変えると以降の全データの件数がずれ、他PRのテストを壊すため)。
         pool = [x for x in dept_members[c["department"]] if x != lead_id]
         random.shuffle(pool)
-        for mid in pool[:random.randint(0, 2)]:
+        chosen = pool[:random.randint(0, 2)]
+        # #51: 一部を支援部署の担当者へ差し替える。専用RNGなのでストリームを消費しない
+        chosen = pick_members(chosen, c, case_topics, dept_members, id2dept, lead_id)
+        for mid in chosen:
             out_members.append({"project_id": c["id"], "employee_id": mid, "role": "member"})
             for t in case_topics[c["id"]]:
                 topic_evidence[mid][t] += 0.6  # member の証拠
@@ -388,7 +530,7 @@ def main():
         eid = e["id"]
         tops = emp_top_topics.get(eid, [])
         # その社員の案件と日報から具体語を拾う
-        my_cases = [c for c in cases if name2id[c["name"]] == eid]
+        my_cases = [c for c in cases if case_lead[c["id"]] == eid]
         prod = my_cases[0]["product"] if my_cases else None
         if tops:
             topic_phrase = "・".join(tops)
@@ -475,13 +617,19 @@ def main():
     # -------- 7) questions/questions.json + answers/answers.json (150ペア) --------
     # 専門家が存在するトピックのみ対象。件数はトピック横断で均す
     usable_topics = [t for t in TOPICS if experts_by_topic[t]]
+    # #52: 全トピックへ均等に配らない。NO_ANSWER_TOPICS は過去QAを持たせず、
+    # RECALL_RICH_TOPICS は厚くする。合計は 150 のまま。
+    qa_topics = [t for t in usable_topics if t not in NO_ANSWER_TOPICS] or usable_topics
+    qa_weighted = []
+    for t in qa_topics:
+        qa_weighted += [t] * (2 if t in RECALL_RICH_TOPICS else 1)
     N = 150
     out_questions = []
     out_answers = []
     base_dt = datetime(2026, 4, 1, 9, 0, 0)
     span_days = (SNAPSHOT - date(2026, 4, 1)).days
     for i in range(N):
-        topic = usable_topics[i % len(usable_topics)]
+        topic = qa_weighted[i % len(qa_weighted)]
         experts = experts_by_topic[topic]
         # responder は上位専門家 (上位3、無ければ全体) から
         responder_id = random.choice(experts[:3] if len(experts) >= 3 else experts)
@@ -514,8 +662,10 @@ def main():
             "responder_id": responder_id,
             "body": ANSWER_TEMPLATES[topic],
             "created_at": a_created.isoformat(),
-            "reuse_count": random.randint(0, 8),
-            "was_helpful": random.random() < 0.7,
+            # #52: トピックごとに「過去回答がどれだけ再利用されるか」を変える。
+            # 乱数の消費回数は従来と同じ (1回ずつ) にしてある。
+            "reuse_count": reuse_for_topic(topic, random.randint(0, 8)),
+            "was_helpful": random.random() < helpful_rate_for_topic(topic),
             "topic": topic,
         })
 
@@ -575,14 +725,20 @@ def main():
         out_answers.append({
             "id": aid, "question_id": qid, "responder_id": eid,
             "body": ANSWER_TEMPLATES[t], "created_at": a_created.isoformat(),
-            "reuse_count": random.randint(0, 8),
-            "was_helpful": random.random() < 0.7, "topic": t,
+            # #52: トピックごとに「過去回答がどれだけ再利用されるか」を変える。
+            # 乱数の消費回数は従来と同じ (1回ずつ) にしてある。
+            "reuse_count": reuse_for_topic(topic, random.randint(0, 8)),
+            "was_helpful": random.random() < helpful_rate_for_topic(topic), "topic": t,
         })
 
     # -------- 8) documents/documents.json（社内文書30件・格下げ経路用） --------
     DOC_SOURCES = ["社内ナレッジベース", "業務手順書", "社内FAQ", "運用マニュアル", "提案テンプレート集"]
     out_documents = []
-    doc_topics = usable_topics[:] if usable_topics else list(TOPICS)
+    # #52: 全トピックに一律で文書を作らない。標準手順・規程として文書化される領域に寄せる
+    # (= 経路 document が成立する領域)。一律だと route を切り分けられず経路判定精度を測れない。
+    doc_topics = [t for t in DOCUMENTED_TOPICS if t in set(usable_topics)]
+    if not doc_topics:
+        doc_topics = usable_topics[:] if usable_topics else list(TOPICS)
     for i in range(30):
         topic = doc_topics[i % len(doc_topics)]
         kw = TOPICS[topic][0]
