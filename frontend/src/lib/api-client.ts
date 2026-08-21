@@ -1,13 +1,14 @@
 /**
  * Fetch-based client for the TEKIJIN API boundary.
  *
- * #35 wires only `postAsk` (POST /ask). The base URL comes from config
- * (`NEXT_PUBLIC_API_BASE_URL`) — never hardcoded at call sites. Non-2xx
- * responses throw a typed {@link ApiError}.
+ * `postAsk` (POST /ask) starts a question; `postAnswer` (POST /answer) resumes a
+ * paused run with a clarification reply or a responder outcome. The base URL
+ * comes from config (`NEXT_PUBLIC_API_BASE_URL`) — never hardcoded at call
+ * sites. Non-2xx responses throw a typed {@link ApiError}.
  */
 
-import type { AckResponse, AskRequest } from "@/lib/api-types";
-import { getApiBaseUrl, normalizeBaseUrl } from "@/lib/config";
+import type { AckResponse, AskRequest, ResumeRequest } from "@/lib/api-types";
+import { getApiBaseUrl } from "@/lib/config";
 
 /** Error thrown for a non-2xx API response, carrying the HTTP status. */
 export class ApiError extends Error {
@@ -42,23 +43,17 @@ async function extractErrorMessage(response: Response): Promise<string> {
   return `Request failed with status ${response.status}`;
 }
 
-/**
- * POST /ask — start a question for a session. Returns the acknowledgement; the
- * actual stream flows over GET /events (subscribed in #36). Throws
- * {@link ApiError} on a non-2xx response.
- */
-export async function postAsk(
-  request: AskRequest,
-  options: RequestOptions = {},
-): Promise<AckResponse> {
-  const baseUrl =
-    options.baseUrl !== undefined ? normalizeBaseUrl(options.baseUrl) : getApiBaseUrl();
+/** POST `body` as JSON to `{base}{path}`, throwing {@link ApiError} on non-2xx. */
+async function postJson<T>(path: string, body: unknown, options: RequestOptions = {}): Promise<T> {
+  // Trim a trailing slash on an explicit override so `${base}${path}` never
+  // doubles up; the config default is already normalized.
+  const baseUrl = (options.baseUrl ?? getApiBaseUrl()).replace(/\/+$/, "");
   const doFetch = options.fetchImpl ?? fetch;
 
-  const response = await doFetch(`${baseUrl}/ask`, {
+  const response = await doFetch(`${baseUrl}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(request),
+    body: JSON.stringify(body),
     signal: options.signal,
   });
 
@@ -66,5 +61,25 @@ export async function postAsk(
     throw new ApiError(response.status, await extractErrorMessage(response));
   }
 
-  return (await response.json()) as AckResponse;
+  return (await response.json()) as T;
+}
+
+/**
+ * POST /ask — start a question for a session. Returns the acknowledgement; the
+ * actual stream flows over GET /events (subscribed via `useEventStream`).
+ */
+export function postAsk(request: AskRequest, options: RequestOptions = {}): Promise<AckResponse> {
+  return postJson<AckResponse>("/ask", request, options);
+}
+
+/**
+ * POST /answer — resume a paused run. Carries either a clarification `reply`
+ * (answering a `followup` interrupt) or a responder `outcome`. The stream
+ * resumes over the still-open GET /events connection.
+ */
+export function postAnswer(
+  request: ResumeRequest,
+  options: RequestOptions = {},
+): Promise<AckResponse> {
+  return postJson<AckResponse>("/answer", request, options);
 }

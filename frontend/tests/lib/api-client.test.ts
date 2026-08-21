@@ -1,5 +1,5 @@
-import { ApiError, postAsk } from "@/lib/api-client";
-import type { AskRequest } from "@/lib/api-types";
+import { ApiError, postAnswer, postAsk } from "@/lib/api-client";
+import type { AskRequest, ResumeRequest } from "@/lib/api-types";
 import { DEFAULT_API_BASE_URL } from "@/lib/config";
 import { describe, expect, it, vi } from "vitest";
 
@@ -91,5 +91,35 @@ describe("postAsk", () => {
 
     await expect(postAsk(REQUEST, { fetchImpl })).rejects.toBeInstanceOf(ApiError);
     await expect(postAsk(REQUEST, { fetchImpl })).rejects.toThrow("status 500");
+  });
+});
+
+describe("postAnswer", () => {
+  const RESUME: ResumeRequest = { session_id: "abc-123", reply: "UTMです" };
+
+  it("POSTs to {base}/answer with JSON headers and the resume body", async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonResponse({ session_id: "abc-123", status: "accepted" }));
+
+    const result = await postAnswer(RESUME, { fetchImpl });
+
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe(`${DEFAULT_API_BASE_URL}/answer`);
+    expect(init?.method).toBe("POST");
+    expect(init?.headers).toMatchObject({ "Content-Type": "application/json" });
+    expect(JSON.parse(init?.body as string)).toEqual(RESUME);
+    expect(result).toEqual({ session_id: "abc-123", status: "accepted" });
+  });
+
+  it("throws ApiError on a non-2xx response", async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonResponse({ detail: "bad" }, { ok: false, status: 409 }));
+
+    await expect(postAnswer(RESUME, { fetchImpl })).rejects.toMatchObject({
+      name: "ApiError",
+      status: 409,
+    });
   });
 });
