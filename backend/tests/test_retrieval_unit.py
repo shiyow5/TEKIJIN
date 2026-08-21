@@ -250,7 +250,7 @@ def test_answer_text_falls_back_to_answer_when_no_question_body() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# fix A: dense answer candidates also come from dense question matches
+# fix A/E: question-matched answers form an INDEPENDENT dense ranking for RRF
 # --------------------------------------------------------------------------- #
 def _retriever_without_db(top_k: int = 10) -> HybridRetriever:
     # session is stored but never touched by the helpers under test here.
@@ -258,23 +258,31 @@ def _retriever_without_db(top_k: int = 10) -> HybridRetriever:
     return HybridRetriever(embedder, session=None, top_k=top_k)  # type: ignore[arg-type]
 
 
-def test_dense_answer_ids_merges_question_hits(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_question_mapped_answer_ids_ranks_by_question_similarity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from tekijin.retrieval import retriever as retriever_mod
 
     def fake_dense(_session, _vec, target, _top_k):
-        if target == "answers":
-            return [("a1", 1.0)]
-        if target == "questions":
-            return [("q1", 1.0), ("q2", 0.9)]
-        return []
+        # Only the question channel is exercised by this helper.
+        assert target == "questions"
+        return [("q1", 1.0), ("q2", 0.9)]
 
     monkeypatch.setattr(retriever_mod.dense, "search", fake_dense)
     retriever = _retriever_without_db()
-    # q1 -> a2, a3 ; q2 -> a1 (already present via the direct answer channel).
-    answers_by_question = {"q1": ["a2", "a3"], "q2": ["a1"]}
-    merged = retriever._dense_answer_ids([0.0], answers_by_question)
-    # Direct answer hit first, then question-derived answers, de-duplicated.
-    assert merged == ["a1", "a2", "a3"]
+    # q1 -> a2, a3 ; q2 -> a2 (duplicate: first occurrence via q1 wins).
+    answers_by_question = {"q1": ["a2", "a3"], "q2": ["a2"]}
+    ranked = retriever._question_mapped_answer_ids([0.0], answers_by_question)
+    # Ranked by the question order, de-duplicated — an independent ranking, NOT
+    # appended behind any direct-answer pool.
+    assert ranked == ["a2", "a3"]
+
+
+def test_fuse_accepts_three_rankings() -> None:
+    retriever = _retriever_without_db(top_k=5)
+    # "x" is rank 1 in all three lists; agreement lifts it above each list's #0.
+    fused = retriever._fused_ids(["a", "x"], ["b", "x"], ["c", "x"])
+    assert fused[0] == "x"
 
 
 # --------------------------------------------------------------------------- #

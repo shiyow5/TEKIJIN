@@ -252,3 +252,44 @@ def test_hybrid_retriever_fuses_before_truncating_to_top_k(
     result = retriever.search("anything")
 
     assert [p["qa_id"] for p in result["past_answers"]] == [ans_x.id]
+
+
+# --------------------------------------------------------------------------- #
+# fix E: a question-matched answer surfaces at default top_k even when the
+# direct-answer dense pool is full and BM25 finds no overlap.
+# --------------------------------------------------------------------------- #
+def test_hybrid_retriever_question_match_surfaces_at_default_top_k(
+    seed_counts, session, fake_embedder, monkeypatch
+) -> None:
+    # The bag-of-tokens fake embedder couples dense similarity to BM25 overlap
+    # (both read the question body), so a pure-DB test cannot isolate the
+    # question-dense channel. Stub the two search primitives over the REAL repo
+    # to reproduce the exact regression: direct-answer pool full, no BM25 hit,
+    # the answer reachable ONLY via its strongly-matching question.
+    from tekijin.retrieval import retriever as retriever_mod
+    from tekijin.retrieval.sparse import BM25Index
+
+    answers = session.scalars(select(Answer).order_by(Answer.id)).all()
+    special = answers[-1]  # not among the first 50 dummy ids below
+    pool_ids = [a.id for a in answers[:50]]  # fills the direct-answer dense pool
+
+    def fake_dense(_session, _vec, target, top_k):
+        if target == "answers":
+            return [(aid, 1.0) for aid in pool_ids][:top_k]  # 50 unrelated hits
+        if target == "questions":
+            return [(special.question_id, 1.0)][:top_k]  # the paraphrased question
+        return []  # employee_profiles: irrelevant here
+
+    def fake_bm25(_self, _query, _top_k):
+        return []  # no lexical overlap on any channel
+
+    monkeypatch.setattr(retriever_mod.dense, "search", fake_dense)
+    monkeypatch.setattr(BM25Index, "search", fake_bm25)
+
+    # DEFAULT top_k=10. Under the old concat approach the special answer sat at
+    # dense rank 51 (RRF ~1/111, below all 50 pool ids) and was dropped; as an
+    # independent third ranking it ranks ~0 and lands in the top results.
+    retriever = HybridRetriever(fake_embedder, session, top_k=10)
+    result = retriever.search("paraphrased query with no lexical overlap")
+
+    assert special.id in {p["qa_id"] for p in result["past_answers"]}

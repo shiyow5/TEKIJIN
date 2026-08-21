@@ -67,39 +67,41 @@ class HybridRetriever:
         # Per-channel retrieval depth before fusion (see CANDIDATE_POOL).
         self._pool = max(top_k * 5, CANDIDATE_POOL)
 
-    def _fuse(self, dense_ids: list[Any], sparse_ids: list[Any]) -> list[tuple[Any, float]]:
+    def _fuse(self, *rankings: list[Any]) -> list[tuple[Any, float]]:
         # RRF over the full channel pools; truncate to top_k only afterwards.
-        return rrf([dense_ids, sparse_ids], k=self._rrf_k)[: self._top_k]
+        return rrf(list(rankings), k=self._rrf_k)[: self._top_k]
 
-    def _fused_ids(self, dense_ids: list[Any], sparse_ids: list[Any]) -> list[Any]:
-        return [id_ for id_, _ in self._fuse(dense_ids, sparse_ids)]
+    def _fused_ids(self, *rankings: list[Any]) -> list[Any]:
+        return [id_ for id_, _ in self._fuse(*rankings)]
 
     def _dense_ids(self, query_vec: list[float], target: str) -> list[Any]:
         return [id_ for id_, _ in dense.search(self._session, query_vec, target, self._pool)]
 
-    def _dense_answer_ids(
+    def _question_mapped_answer_ids(
         self,
         query_vec: list[float],
         answers_by_question: dict[str, list[str]],
     ) -> list[Any]:
-        """Dense answer candidates from BOTH the answer and question vectors.
+        """Answer ids ranked by DENSE similarity of their *question*.
 
         A user often paraphrases the question rather than the answer, so a dense
         search over answer bodies alone (which are frequently generic procedures)
-        can miss the right answer. Searching the ``questions`` target too and
-        expanding each question hit to its answers recovers those cases. Direct
-        answer hits come first; question-derived answers are appended, keeping
-        the first occurrence of each id. RRF and the sparse channel re-rank.
+        can miss the right answer. This searches the ``questions`` target and
+        expands each question hit to its answers, preserving the question ranking
+        (first occurrence wins on duplicates). It is fed to RRF as an independent
+        ranking — NOT appended behind the direct-answer pool — so an answer whose
+        question matches strongly ranks near the top of its own list and gains a
+        large RRF contribution, instead of drowning at rank ``pool + n``.
         """
 
-        merged = self._dense_ids(query_vec, "answers")
-        seen = set(merged)
+        ranked: list[Any] = []
+        seen: set[Any] = set()
         for question_id in self._dense_ids(query_vec, "questions"):
             for answer_id in answers_by_question.get(question_id, ()):
                 if answer_id not in seen:
                     seen.add(answer_id)
-                    merged.append(answer_id)
-        return merged
+                    ranked.append(answer_id)
+        return ranked
 
     @staticmethod
     def _answer_text(answer: Any, question_body_by_id: dict[str, str | None]) -> str:
@@ -141,9 +143,15 @@ class HybridRetriever:
         profile_index = BM25Index.build((p.employee_id, p.description or "") for p in profiles)
 
         # --- past answers -------------------------------------------------- #
+        # Three independent rankings fused by RRF: dense over answer bodies,
+        # dense over question bodies (mapped to their answers), and sparse BM25.
+        # Keeping the question channel separate (rather than concatenated behind
+        # the direct-answer pool) lets a strongly-matching question lift its
+        # answer into top_k on its own ranking's merit.
         sparse_answers = [id_ for id_, _ in answer_index.search(query, self._pool)]
-        dense_answers = self._dense_answer_ids(query_vec, answers_by_question)
-        fused_answers = self._fuse(dense_answers, sparse_answers)
+        dense_answers = self._dense_ids(query_vec, "answers")
+        question_answers = self._question_mapped_answer_ids(query_vec, answers_by_question)
+        fused_answers = self._fuse(dense_answers, question_answers, sparse_answers)
         past_answers = [
             {"qa_id": id_, "score": score, "responder_id": responder_of.get(id_)}
             for id_, score in fused_answers
