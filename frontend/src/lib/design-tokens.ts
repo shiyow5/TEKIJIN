@@ -1,9 +1,10 @@
 /**
  * Design tokens for TEKIJIN (たずねーる).
  *
- * Source of truth: ui_template/stitch_tekijin_ai_ui_dashboard/tekijin/DESIGN.md
- * These constants are consumed by tailwind.config.ts and are unit-tested so the
- * theme stays in sync with the design system. Keep values immutable.
+ * Source: the Stitch design export (DESIGN.md), kept in the project workspace
+ * outside this repository (ui_template/stitch_tekijin_ai_ui_dashboard/tekijin/).
+ * These constants mirror it, are consumed by tailwind.config.ts, and are
+ * unit-tested so the Tailwind theme cannot drift. Keep values immutable.
  */
 
 export const colors = {
