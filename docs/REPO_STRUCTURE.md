@@ -22,7 +22,7 @@
 | `frontend/` | クライアント側。TypeScript | ツール設定のみ |
 | `frontend/src/` | アプリのソース | 空 |
 | `frontend/tests/` | テスト | scaffold のみ |
-| `docs/specs/` | 仕様書の置き場 | 空（これから追加） |
+| `docs/specs/` | 仕様書の置き場 | プロダクト仕様書 / 技術仕様書（Notion から取り込み） |
 | `docs/adr/` | 意思決定記録 | テンプレートのみ |
 | `scripts/` | 補助スクリプト | 空 |
 | `fixtures/synthetic/` | **コミット対象の**合成データ（デモ/評価/テスト用の種データ） | 置き場所＋スキーマ定義のみ（データ本体は実装フェーズ） |
