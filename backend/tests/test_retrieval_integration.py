@@ -11,6 +11,7 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import select
 
+from tekijin.agent.route import PERSON, PRIOR_ANSWER_SIM, decide_route
 from tekijin.data.repository import Repository
 from tekijin.models.tables import Answer, Document, EmployeeProfile, Question
 from tekijin.retrieval import dense
@@ -305,3 +306,49 @@ def test_hybrid_retriever_question_match_surfaces_at_default_top_k(
     result = retriever.search("paraphrased query with no lexical overlap")
 
     assert special.id in {p["qa_id"] for p in result["past_answers"]}
+
+
+# --------------------------------------------------------------------------- #
+# answer_confidence gate: a near-duplicate question with NO answers must not
+# raise answer_confidence (nobody to hand off to) -> C5 does not pick prior_answer
+# --------------------------------------------------------------------------- #
+def test_answer_confidence_ignores_answerless_questions(
+    seed_counts, session, fake_embedder
+) -> None:
+    query = "ZQXUNIQ alpha beta gamma delta"  # unique tokens -> no seed collision
+    # Question A: an EXACT near-duplicate of the query, but with NO answers.
+    session.add(
+        Question(id="q_noans", asker_id=1, body=query, topics=["ネットワーク・VPN"], status="open")
+    )
+    # Question B: unrelated text, but it HAS an answer (also unrelated to the query).
+    session.add(
+        Question(
+            id="q_withans",
+            asker_id=1,
+            body="無関係な別の話題",
+            topics=["セキュリティ"],
+            status="open",
+        )
+    )
+    session.flush()
+    session.add(
+        Answer(
+            id="ans_withans",
+            question_id="q_withans",
+            responder_id=7,
+            body="無関係な回答本文",
+            topic="セキュリティ",
+        )
+    )
+    session.flush()
+    embed_corpus(session, fake_embedder)  # populate dense vectors
+
+    retriever = HybridRetriever(fake_embedder, session, top_k=10)
+    result = retriever.search(query)
+
+    # The answerless near-duplicate (cosine ~1.0) does NOT leak into confidence:
+    # only questions that actually have an answer count.
+    assert result["answer_confidence"] < PRIOR_ANSWER_SIM
+    assert result["answer_confidence"] < 0.5  # far from the ~1.0 of the answerless dup
+    # ...so C5 does not short-circuit to prior_answer.
+    assert decide_route(result).route == PERSON

@@ -7,10 +7,14 @@ no network.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from typing import Any, cast
+
 import pytest
 
 from tekijin.agent import graph as graph_mod
 from tekijin.agent.nodes import AgentNodes, _top_by_score
+from tekijin.agent.protocols import IntentResult
 from tekijin.agent.route import (
     DOCUMENT,
     DOCUMENT_SIM,
@@ -20,6 +24,7 @@ from tekijin.agent.route import (
     PRIOR_ANSWER_SIM,
     decide_route,
 )
+from tekijin.agent.state import AgentState, PastAnswer, RetrievalResult
 from tekijin.agent.stubs import (
     MAX_FOLLOWUPS,
     KeywordIntentModel,
@@ -28,12 +33,20 @@ from tekijin.agent.stubs import (
 )
 
 
-def _retrieval(*, answer=0.0, document=0.0, people_sim=0.0, people=(), past_answers=None) -> dict:
+def _retrieval(
+    *,
+    answer: float = 0.0,
+    document: float = 0.0,
+    people_sim: float = 0.0,
+    people: Sequence[int] = (),
+    past_answers: list[PastAnswer] | None = None,
+) -> RetrievalResult:
     # C5 routes on the absolute cosine similarities (*_confidence), not RRF scores.
     # ``past_answers`` defaults to one entry whenever answer confidence is set, so
     # the prior_answer gate (needs actual past answers) is satisfied by default.
     if past_answers is None:
-        past_answers = [{"qa_id": "a", "score": 0.01, "responder_id": 7}] if answer else []
+        answer_hit: PastAnswer = {"qa_id": "a", "score": 0.01, "responder_id": 7}
+        past_answers = [answer_hit] if answer else []
     return {
         "past_answers": list(past_answers),
         "documents": [],
@@ -88,6 +101,21 @@ def test_route_document_at_exact_thresholds() -> None:
     assert decide_route(people_ok).route == PERSON
 
 
+def test_route_high_answer_without_past_answers_does_not_demote_to_document() -> None:
+    # Guard (route.py document branch): answer_conf == PRIOR_ANSWER_SIM but
+    # past_answers is empty, so prior_answer is skipped by its gate. A strong
+    # document + weak people would otherwise demote — but the ``answer_conf <
+    # prior_answer_sim`` term keeps this strong-answer query on the PERSON line.
+    r = _retrieval(
+        answer=PRIOR_ANSWER_SIM,  # == bar, so NOT < prior_answer_sim
+        document=DOCUMENT_SIM,  # == bar
+        people_sim=PERSON_WEAK_SIM - 0.001,  # weak profile match
+        people=[1],
+        past_answers=[],  # no answers -> prior_answer gate fails
+    )
+    assert decide_route(r).route == PERSON  # not DOCUMENT
+
+
 def test_route_person_when_profile_match_is_strong() -> None:
     # A strong profile match keeps the person route even with a strong document.
     r = _retrieval(answer=0.10, document=0.85, people_sim=0.80, people=[1, 2, 3])
@@ -110,8 +138,10 @@ def test_route_thresholds_are_tunable() -> None:
 
 
 def test_route_missing_confidence_keys_default_to_zero() -> None:
-    # A retriever that omits the confidence fields -> all-zero -> person.
-    assert decide_route({"candidate_people": [1]}).route == PERSON
+    # A retriever that OMITS the confidence fields -> the .get() defaults kick in
+    # -> all-zero -> person (cast: intentionally a partial payload).
+    partial = cast(RetrievalResult, {"candidate_people": [1]})
+    assert decide_route(partial).route == PERSON
 
 
 # --------------------------------------------------------------------------- #
@@ -142,7 +172,8 @@ def test_after_c6_and_send_routers() -> None:
 def test_after_send_reconfirms_unexpected_outcome() -> None:
     # Fix B: anything but accepted/declined loops back to send (never c8_update).
     assert graph_mod._after_send({"outcome": None}) == "send"
-    assert graph_mod._after_send({"outcome": "garbage"}) == "send"
+    # "garbage" is not a valid Outcome literal -> cast the intentionally-bad input.
+    assert graph_mod._after_send(cast("AgentState", {"outcome": "garbage"})) == "send"
     assert graph_mod._after_send({}) == "send"
 
 
@@ -154,21 +185,26 @@ def _nodes() -> AgentNodes:
         def analyze(self, *a, **k):  # pragma: no cover - not called here
             raise AssertionError
 
+    # These tests only exercise reset()/helpers, which never call the models, so a
+    # single Any-typed stub satisfies every dependency slot.
+    stub: Any = _Stub()
     return AgentNodes(
-        intent_model=_Stub(),
-        sufficiency_model=_Stub(),
-        draft_model=_Stub(),
-        embedder=_Stub(),
-        retriever=_Stub(),
-        scorer=_Stub(),
+        intent_model=stub,
+        sufficiency_model=stub,
+        draft_model=stub,
+        embedder=stub,
+        retriever=stub,
+        scorer=stub,
     )
 
 
 def test_top_by_score_picks_max_and_handles_empty() -> None:
     assert _top_by_score([]) is None
     items = [{"doc_id": "a", "score": 0.01}, {"doc_id": "b", "score": 0.03}]
-    assert _top_by_score(items)["doc_id"] == "b"
-    assert _top_by_score(list(reversed(items)))["doc_id"] == "b"  # order-independent
+    top = _top_by_score(items)
+    assert top is not None and top["doc_id"] == "b"
+    reversed_top = _top_by_score(list(reversed(items)))
+    assert reversed_top is not None and reversed_top["doc_id"] == "b"  # order-independent
 
 
 def test_reset_validates_question_and_now() -> None:
@@ -341,9 +377,11 @@ def test_sufficiency_requires_slot_values_not_labels() -> None:
 
 
 def test_sufficiency_site_count_needs_a_number() -> None:
-    # "拠点" without a number is not a count; "3拠点" is.
-    assert RuleSufficiencyModel._slot_present("対象拠点数", "拠点間の相談", None) is False
-    assert RuleSufficiencyModel._slot_present("対象拠点数", "対象は5拠点です", None) is True
+    # "拠点" without a number is not a count; "3拠点" is. (The intent is unused for
+    # this slot, but pass a real IntentResult to keep the call well-typed.)
+    intent = IntentResult()
+    assert RuleSufficiencyModel._slot_present("対象拠点数", "拠点間の相談", intent) is False
+    assert RuleSufficiencyModel._slot_present("対象拠点数", "対象は5拠点です", intent) is True
 
 
 # --------------------------------------------------------------------------- #

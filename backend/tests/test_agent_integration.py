@@ -10,11 +10,13 @@ seeded DB. ``now`` is injected, so runs are reproducible.
 from __future__ import annotations
 
 import datetime as dt
+from collections.abc import Sequence
 
 from langgraph.types import Command
 
 from tekijin.agent import build_agent
 from tekijin.agent.route import DOCUMENT, PERSON, PRIOR_ANSWER
+from tekijin.agent.state import RetrievalResult
 from tekijin.models.tables import Skill
 from tekijin.retrieval.indexing import embed_corpus
 
@@ -38,7 +40,7 @@ class _FakeRetriever:
         document_confidence=0.0,
         people_confidence=0.0,
     ) -> None:
-        self._payload = {
+        self._payload: RetrievalResult = {
             "past_answers": list(answers),
             "documents": list(documents),
             "candidate_people": list(people),
@@ -48,7 +50,7 @@ class _FakeRetriever:
         }
         self.calls: list[tuple[str, bool]] = []  # (query, got_query_vector)
 
-    def search(self, query: str, *, query_vector=None) -> dict:
+    def search(self, query: str, *, query_vector: Sequence[float] | None = None) -> RetrievalResult:
         self.calls.append((query, query_vector is not None))
         return self._payload
 
