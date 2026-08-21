@@ -1,0 +1,26 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Base layer overrides for the TEKIJIN design system.
+ * Japanese body text uses a 1.7 line-height for legibility (see DESIGN.md).
+ */
+@layer base {
+  :root {
+    /* Noto Sans JP first, with Japanese-capable system fallbacks. No build-time
+       webfont fetch, so the build stays network-independent. */
+    --font-noto: "Noto Sans JP", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", Meiryo,
+      sans-serif;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    @apply bg-surface text-on-surface;
+    line-height: 1.7;
+  }
+}
