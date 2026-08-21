@@ -1,13 +1,16 @@
 # DBスキーマ（ER図） — TEKIJIN
 
-PR #18 の ER図（`docs/specs/人材サーチ_ER図.pdf`）を、差分レビュー可能な Markdown（Mermaid）に起こしたもの。
-内容は ER 設計に忠実。他テーブルはすべて `EMPLOYEES` の「誰」を指す形でつながる。
+TEKIJIN のデータベース設計。**3層**で構成する。
 
-> 整合メモ: 本 ER と実データ（PR #19）・技術仕様 §4 の間には差分がある
-> （`name` 文字列 vs `employee_id` FK、`EMPLOYEE_PROFILES`/`embedding` の有無、`certifications`/`answers`/`recommendations`/`events` の未登場 等）。
-> 統一方針は PR #18 / #19 のレビューコメントで追跡中。
+- **A. 入力データ層** … 合成データ（PR #19）が埋める、社員・プロフィール・案件・チャット・日報。PR #18 の ER をベースとし、本ドキュメントを正とする。
+- **B. アプリ実行時テーブル** … 質問・回答・推薦・計測など、アプリ稼働で溜まるデータ（技術仕様 §4 準拠）。
+- **C. 専門性グラフ** … 行動痕跡から推定した「人×トピック」の重み付きエッジ（doc15＝新規性の中核）。
 
-## ER図
+他テーブルはすべて `EMPLOYEES` の「誰」を FK で指す。永続化は PostgreSQL 16 + pgvector 1本（LangGraph の checkpoints は PostgresSaver が自動管理し、本図には含めない）。
+
+> 整合状況（2026-08-21 監査）: A層は PR #18 の ER に忠実。**B層・C層は技術仕様 §4 / doc15 が要求するが ER 未登場**のため本ドキュメントで補完した。A層にも proximity 用の `branch`(拠点) 等が不足（末尾「A層の補足」参照）。実データ(PR #19)を A層スキーマへ寄せる方針は #18/#19 のレビューで追跡。
+
+## A. 入力データ層（合成データ層）— ER図
 
 ```mermaid
 erDiagram
@@ -74,7 +77,7 @@ erDiagram
   }
 ```
 
-## 各テーブルの説明
+## A層 各テーブルの説明
 
 ### EMPLOYEES（社員基本情報）
 社員1人につき1行。部・課の両方を記録できる。他のテーブルはすべてこのテーブルの「誰」を指し示す形でつながっている。
@@ -145,3 +148,149 @@ erDiagram
 | `content` | その日行った業務内容 |
 | `issue` | その日感じた課題・困りごと |
 | `created_at` | 日報が登録された日時 |
+
+---
+
+## B. アプリ実行時テーブル（技術仕様 §4 準拠）
+
+アプリ稼働で溜まるデータ。質問→推薦→回答→計測のループを支える。合成データではなく、デモ実行中に生成される（一部は評価用に合成でシードする）。
+
+```mermaid
+erDiagram
+  EMPLOYEES ||--o{ CERTIFICATIONS : "資格を持つ"
+  EMPLOYEES ||--o{ SKILLS : "スキル(自己申告/推定)"
+  EMPLOYEES ||--o{ QUESTIONS : "質問する(asker)"
+  EMPLOYEES ||--o{ ANSWERS : "回答する(responder)"
+  QUESTIONS ||--o{ ANSWERS : "への回答"
+  QUESTIONS ||--o{ RECOMMENDATIONS : "の推薦"
+  EMPLOYEES ||--o{ RECOMMENDATIONS : "推薦された人"
+  QUESTIONS ||--o{ EVENTS : "の計測"
+  PROJECTS ||--o{ PROJECT_MEMBERS : "参加"
+  EMPLOYEES ||--o{ PROJECT_MEMBERS : "担当"
+
+  CERTIFICATIONS {
+    uuid id PK
+    uuid employee_id FK
+    string name
+    date acquired_at
+  }
+  SKILLS {
+    uuid id PK
+    uuid employee_id FK
+    string topic
+    string level
+    string source
+  }
+  QUESTIONS {
+    uuid id PK
+    uuid asker_id FK
+    text body
+    string_array topics
+    string status
+    timestamp created_at
+    vector embedding
+  }
+  ANSWERS {
+    uuid id PK
+    uuid question_id FK
+    uuid responder_id FK
+    text body
+    timestamp created_at
+    vector embedding
+    int reuse_count
+    bool was_helpful
+  }
+  RECOMMENDATIONS {
+    uuid id PK
+    uuid question_id FK
+    uuid employee_id FK
+    int rank
+    float score
+    jsonb reasons
+    string outcome
+  }
+  EVENTS {
+    uuid id PK
+    uuid question_id FK
+    string stage
+    timestamp started_at
+    timestamp ended_at
+    jsonb meta
+  }
+  PROJECT_MEMBERS {
+    uuid project_id FK
+    uuid employee_id FK
+    string role
+  }
+  DOCUMENTS {
+    uuid id PK
+    string title
+    text body
+    string source
+    timestamp updated_at
+    vector embedding
+  }
+```
+
+| テーブル | 役割 | 主なカラム |
+|---|---|---|
+| `CERTIFICATIONS` | 資格（**最も確実な証拠**、base_score 0.6） | `employee_id` FK, `name`, `acquired_at` |
+| `SKILLS` | 自己申告/推定スキル（base_score 0.3） | `employee_id` FK, `topic`, `level`, `source` |
+| `QUESTIONS` | 聞く側の質問 | `asker_id` FK, `body`, `topics[]`, `status`, `embedding` |
+| `ANSWERS` | 回答（**補助経路 F-10 と学習の燃料**） | `question_id` FK, `responder_id` FK, `body`, `embedding`, `reuse_count`, `was_helpful` |
+| `RECOMMENDATIONS` | 推薦結果と結末（**学習の要**） | `question_id` FK, `employee_id` FK, `rank`, `score`, `reasons`(jsonb), `outcome`(accepted/declined/timeout) |
+| `EVENTS` | 各ステージの計測（**p50/p95 レイテンシKPI**） | `question_id` FK, `stage`, `started_at`, `ended_at`, `meta` |
+| `PROJECT_MEMBERS` | 案件の担当（**lead/member を区別**。base_score が lead 0.8 / member 0.5） | `project_id` FK, `employee_id` FK, `role`(lead/member) |
+| `DOCUMENTS` | 社内文書（格下げ経路用・優先度低） | `title`, `body`, `source`, `embedding` |
+
+> `ANSWERS.reuse_count`/`was_helpful` は `answer_quality` スコアと C8 グラフ更新に、`RECOMMENDATIONS.outcome` は `load`（負荷）減点と「使うほど育つ」学習に、`EVENTS` はレイテンシ計測に直結する（技術仕様 §5・§7）。
+
+---
+
+## C. 専門性グラフ（doc15＝新規性の中核）
+
+「誰が何に詳しいか」を、行動痕跡（回答・案件・資格）から**決定的に積み上げて**表す「人 × トピック」の重み付きエッジ。C8 ノードがオンライン更新する。**エッジは `EVIDENCE` から再計算可能**（監査可能＝根拠表示に使う）。
+
+```mermaid
+erDiagram
+  EMPLOYEES ||--o{ PERSON_TOPIC_EDGES : "トピック専門性"
+  EMPLOYEES ||--o{ EVIDENCE : "専門性の証拠"
+
+  PERSON_TOPIC_EDGES {
+    uuid person_id FK
+    string topic_id
+    float weight
+    float confidence
+    int evidence_count
+    timestamp last_updated
+  }
+  EVIDENCE {
+    uuid id PK
+    uuid person_id FK
+    string topic_id
+    string source_type
+    float base_score
+    float weight_contrib
+    timestamp ts
+  }
+```
+
+| テーブル | 役割 | 主なカラム |
+|---|---|---|
+| `PERSON_TOPIC_EDGES` | 人×トピックの専門性エッジ | `person_id` FK, `topic_id`, `weight`, `confidence`, `evidence_count`, `last_updated` |
+| `EVIDENCE` | エッジの根拠（積み上げ） | `person_id` FK, `topic_id`, `source_type`(cert/project/answer/self/redirect), `base_score`, `weight_contrib`, `ts` |
+
+> `base_score`: 有用回答 1.0 > 案件リード 0.8 > 過去回答 0.7 > 資格 0.6 > 案件メンバー 0.5 > 自己申告 0.3（doc15）。断り(declined)は専門性を下げず余裕度のみ下げる。
+
+---
+
+## A層の補足（仕様整合のための追加が必要な列）
+
+PR #18 の ER（A層）に、仕様上あと少し不足がある。実データ(PR #19)を寄せる際に合わせて補う。
+
+| 対象 | 追加/変更 | 理由 |
+|---|---|---|
+| `EMPLOYEES` | `branch`(拠点) を追加 | `proximity`（同支店>同エリア>全社）の計算に必要（技術仕様 §5 `w4·proximity`） |
+| `EMPLOYEES` | `role` を追加（`position` と別に職種） | 職種比率・スコアの説明に使用 |
+| `PROJECTS` | `employees uuid[]` は **`PROJECT_MEMBERS`（役割つき）を正**とする | 配列では lead/member を区別できず base_score(0.8/0.5)を割り当てられない |
+| （算出でよい） | `years`(在籍年数) は `hire_date` から算出 | 冗長カラムにしない |
