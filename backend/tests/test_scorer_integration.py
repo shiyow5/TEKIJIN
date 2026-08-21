@@ -173,11 +173,14 @@ def test_high_load_lowers_score(seed_counts, session) -> None:
     assert result["recommendations"][0]["person_id"] == 1
 
 
-def test_declined_recommendations_do_not_count_as_load(seed_counts, session) -> None:
+def test_declined_recommendations_count_as_load(seed_counts, session) -> None:
+    # Spec (db-schema.md / model-definition C8 / technical-spec §5): a decline
+    # lowers only availability (余裕度), so it DOES count toward the 7-day load
+    # window — it just never counts as expertise evidence. So emp 1 (8 recent
+    # declines) must rank BELOW emp 2 (identical evidence, no load).
     _add_question(session, "q_decl")
     for emp in (1, 2):
         _add_skill(session, f"sk_decl_{emp}", emp)
-    # emp 1 has many DECLINED recs this week; declines must not raise load.
     for _ in range(8):
         _add_recommendation(
             session, 1, created=NOW - dt.timedelta(days=1), outcome="declined", qid="q_decl"
@@ -187,9 +190,8 @@ def test_declined_recommendations_do_not_count_as_load(seed_counts, session) -> 
     result = scorer.rank(TOPIC, [1, 2], asker_id=None, now=NOW, top_k=3)
 
     scores = _scores_by_person(result)
-    # Identical evidence + no counted load -> equal scores, tiebreak by person_id.
-    assert scores[1] == scores[2]
-    assert [r["person_id"] for r in result["recommendations"]] == [1, 2]
+    assert scores[1] < scores[2]  # declined load drags emp 1 down
+    assert result["recommendations"][0]["person_id"] == 2
 
 
 def test_old_recommendations_outside_window_ignored(seed_counts, session) -> None:
@@ -294,3 +296,143 @@ def test_reasons_include_cert_and_project(seed_counts, session) -> None:
     assert "中小企業診断士" in cert_reason["detail"]
     project_reason = next(r for r in rec["reasons"] if r["type"] == "project")
     assert "案件" in project_reason["detail"]
+
+
+# --------------------------------------------------------------------------- #
+# fix 2: a self-declared skill is surfaced as a reason
+# --------------------------------------------------------------------------- #
+def test_skill_only_candidate_has_self_reason(seed_counts, session) -> None:
+    _add_skill(session, "sk_self", 3)  # only evidence: one self-declared skill
+
+    scorer = ExpertiseScorer(Repository(session))
+    result = scorer.rank(TOPIC, [3], asker_id=None, now=NOW, top_k=3)
+
+    rec = result["recommendations"][0]
+    self_reasons = [r for r in rec["reasons"] if r["type"] == "self"]
+    assert self_reasons  # the expertise signal is explained, not just load/proximity
+    assert TOPIC in self_reasons[0]["detail"]
+
+
+# --------------------------------------------------------------------------- #
+# fix 3: the asker is never recommended to themselves
+# --------------------------------------------------------------------------- #
+def test_asker_excluded_from_candidates(seed_counts, session) -> None:
+    for emp in (1, 2):
+        _add_skill(session, f"sk_asker_{emp}", emp)
+
+    scorer = ExpertiseScorer(Repository(session))
+    result = scorer.rank(TOPIC, [1, 2], asker_id=1, now=NOW, top_k=3)
+
+    person_ids = {r["person_id"] for r in result["recommendations"]}
+    assert person_ids == {2}  # asker (1) dropped, only 2 remains
+
+
+def test_asker_only_candidate_yields_empty(seed_counts, session) -> None:
+    _add_skill(session, "sk_solo", 5)
+    scorer = ExpertiseScorer(Repository(session))
+    result = scorer.rank(TOPIC, [5], asker_id=5, now=NOW, top_k=3)
+    assert result["recommendations"] == []
+
+
+# --------------------------------------------------------------------------- #
+# fix 5: an answer tagged for a DIFFERENT subtopic is not counted
+# --------------------------------------------------------------------------- #
+def test_answer_tagged_other_subtopic_is_not_evidence(seed_counts, session) -> None:
+    topic_a = "__SCORER_TOPIC_A__"
+    topic_b = "__SCORER_TOPIC_B__"
+    # A multi-topic question (topics include B), but the answer is tagged for A.
+    session.add(
+        Question(id="q_multi", asker_id=1, body="q", topics=[topic_a, topic_b], status="open")
+    )
+    session.flush()
+    # emp 3: skill on B + an answer whose own topic is A (must NOT count for B).
+    # Dated outside the 7-day load window so its (topic-independent) load does not
+    # confound the comparison — this test is purely about evidence filtering.
+    _add_skill(session, "sk_b3", 3)
+    session.add(
+        Answer(
+            id="a_tagged_a",
+            question_id="q_multi",
+            responder_id=3,
+            body="a",
+            topic=topic_a,
+            reuse_count=5,
+            was_helpful=True,
+            created_at=NOW - dt.timedelta(days=30),
+        )
+    )
+    # emp 4: control — only the skill on B.
+    _add_skill(session, "sk_b4", 4)
+    session.flush()
+
+    scorer = ExpertiseScorer(Repository(session))
+    result = scorer.rank(topic_b, [3, 4], asker_id=None, now=NOW, top_k=3)
+    scores = _scores_by_person(result)
+
+    # The A-tagged answer is ignored for B, so emp 3 == emp 4 (skill only).
+    assert scores[3] == scores[4]
+    emp3 = next(r for r in result["recommendations"] if r["person_id"] == 3)
+    assert not any(r["type"] == "answers" for r in emp3["reasons"])
+
+
+def test_null_topic_answer_uses_question_topics(seed_counts, session) -> None:
+    # An answer with NO own topic DOES count via the question's topics (fallback).
+    topic_b = "__SCORER_TOPIC_B2__"
+    session.add(Question(id="q_null", asker_id=1, body="q", topics=[topic_b], status="open"))
+    session.flush()
+    session.add(
+        Answer(
+            id="a_null_topic",
+            question_id="q_null",
+            responder_id=3,
+            body="a",
+            topic=None,  # falls back to the question's topics
+            reuse_count=1,
+            was_helpful=True,
+            created_at=NOW,
+        )
+    )
+    _add_skill(session, "sk_null4", 4)  # control: skill only
+    session.flush()
+
+    scorer = ExpertiseScorer(Repository(session))
+    result = scorer.rank(topic_b, [3, 4], asker_id=None, now=NOW, top_k=3)
+    scores = _scores_by_person(result)
+    assert scores[3] > scores[4]  # the null-topic answer counts for emp 3
+
+
+# --------------------------------------------------------------------------- #
+# fix 10: empty candidates and the 7-day load-window boundary
+# --------------------------------------------------------------------------- #
+def test_empty_candidates_yield_empty(seed_counts, session) -> None:
+    scorer = ExpertiseScorer(Repository(session))
+    assert scorer.rank(TOPIC, [], asker_id=None, now=NOW, top_k=3) == {"recommendations": []}
+
+
+def test_load_window_boundary_is_inclusive(seed_counts, session) -> None:
+    from tekijin.scorer.weights import LOAD_WINDOW_DAYS
+
+    for emp in (1, 2):
+        _add_skill(session, f"sk_bnd_{emp}", emp)
+    _add_question(session, "q_bnd")
+    # emp 1: a rec EXACTLY at the window edge (now - 7d) -> counted (>= since).
+    _add_recommendation(
+        session,
+        1,
+        created=NOW - dt.timedelta(days=LOAD_WINDOW_DAYS),
+        outcome="accepted",
+        qid="q_bnd",
+    )
+    # emp 2: a rec one second before the edge -> outside the window.
+    _add_recommendation(
+        session,
+        2,
+        created=NOW - dt.timedelta(days=LOAD_WINDOW_DAYS, seconds=1),
+        outcome="accepted",
+        qid="q_bnd",
+    )
+
+    scorer = ExpertiseScorer(Repository(session))
+    scores = _scores_by_person(scorer.rank(TOPIC, [1, 2], asker_id=None, now=NOW, top_k=3))
+    # Only emp 1's boundary rec is inside the window, so emp 1 carries the load.
+    assert scores[1] < scores[2]

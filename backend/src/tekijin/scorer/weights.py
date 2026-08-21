@@ -54,6 +54,15 @@ LOAD_HALF_SATURATION = 5.0
 # ``answer_quality`` saturation scale (larger raw quality -> closer to 1.0).
 ANSWER_QUALITY_SCALE = 3.0
 
+# ``answer_quality`` raw-score coefficients: a helpful answer counts most, reuse
+# adds, and simply having answered gives a floor (all summed, then saturated).
+ANSWER_QUALITY_ANSWER_COEF = 0.3
+ANSWER_QUALITY_HELPFUL_COEF = 0.7
+ANSWER_QUALITY_REUSE_COEF = 0.2
+
+# Approximate days per month, for the human-readable "約Nか月前" recency reason.
+DAYS_PER_MONTH = 30.4
+
 # The ``load`` window: how many days back "recent" reaches (technical-spec §5:
 # 直近7日).
 LOAD_WINDOW_DAYS = 7

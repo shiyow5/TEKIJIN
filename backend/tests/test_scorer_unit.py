@@ -212,3 +212,35 @@ def test_load_label_bands() -> None:
     assert ExpertiseScorer._load_label(0) == "少なめ"
     assert ExpertiseScorer._load_label(3) == "やや多め"
     assert ExpertiseScorer._load_label(9) == "多め"
+
+
+def test_recency_moments_excludes_certifications() -> None:
+    # A cert carries a date but must not feed recency (it does not age out).
+    evidence = [
+        Evidence("cert", 0.6, dt.date(2020, 1, 1), "old cert"),
+        Evidence("answer", 0.7, NOW, "fresh answer"),
+        Evidence("self", 0.3, None, "skill"),
+    ]
+    moments = ExpertiseScorer._recency_moments(evidence)
+    assert moments == [NOW]  # only the answer's timestamp
+
+
+# --------------------------------------------------------------------------- #
+# rank input validation (DB-free: raised before any DB access)
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("top_k", [0, -1, -5])
+def test_rank_rejects_nonpositive_top_k(top_k: int) -> None:
+    from tekijin.data.repository import Repository
+
+    scorer = ExpertiseScorer(Repository(None))  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="top_k must be positive"):
+        scorer.rank(TOPIC, [1], asker_id=None, now=NOW, top_k=top_k)
+
+
+def test_rank_rejects_aware_now() -> None:
+    from tekijin.data.repository import Repository
+
+    scorer = ExpertiseScorer(Repository(None))  # type: ignore[arg-type]
+    aware = dt.datetime(2026, 8, 21, 12, 0, 0, tzinfo=dt.timezone(dt.timedelta(hours=9)))
+    with pytest.raises(AssertionError, match="now must be naive"):
+        scorer.rank(TOPIC, [1], asker_id=None, now=aware, top_k=3)

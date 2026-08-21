@@ -10,6 +10,7 @@ mutation.
 from __future__ import annotations
 
 import datetime as dt
+from collections.abc import Sequence
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, joinedload, selectinload
@@ -139,28 +140,43 @@ class Repository:
         return [ProjectMembershipDTO.from_member(m) for m in self._session.scalars(stmt)]
 
     # -- load (recency windows) ------------------------------------------ #
-    def recent_recommendation_counts(self, since: dt.datetime) -> dict[int, int]:
+    def recent_recommendation_counts(
+        self, since: dt.datetime, employee_ids: Sequence[int]
+    ) -> dict[int, int]:
         """Per-employee count of recommendations created at/after ``since``.
 
-        Feeds the scorer's ``load`` penalty (technical-spec §5, last-7-days
-        window). ``declined`` recommendations are excluded: a decline does not
-        add real workload and must not depress a person's availability.
+        Feeds the scorer's ``load`` penalty (technical-spec §5: "直近7日の推薦件数",
+        which is outcome-independent). ``declined`` recommendations ARE counted:
+        a decline lowers only availability (余裕度), never expertise — the spec
+        keeps declines out of the expertise evidence, not out of the load window.
+        Scoped to ``employee_ids`` (the candidates being scored); an empty list
+        yields ``{}`` without a query.
         """
 
+        if not employee_ids:
+            return {}
         stmt = (
             select(Recommendation.employee_id, func.count())
             .where(Recommendation.created_at >= since)
-            .where(func.coalesce(Recommendation.outcome, "") != "declined")
+            .where(Recommendation.employee_id.in_(employee_ids))
             .group_by(Recommendation.employee_id)
         )
         return {employee_id: count for employee_id, count in self._session.execute(stmt)}
 
-    def recent_answer_counts(self, since: dt.datetime) -> dict[int, int]:
-        """Per-responder count of answers created at/after ``since`` (load)."""
+    def recent_answer_counts(
+        self, since: dt.datetime, responder_ids: Sequence[int]
+    ) -> dict[int, int]:
+        """Per-responder count of answers created at/after ``since`` (load).
 
+        Scoped to ``responder_ids``; an empty list yields ``{}`` without a query.
+        """
+
+        if not responder_ids:
+            return {}
         stmt = (
             select(Answer.responder_id, func.count())
             .where(Answer.created_at >= since)
+            .where(Answer.responder_id.in_(responder_ids))
             .group_by(Answer.responder_id)
         )
         return {responder_id: count for responder_id, count in self._session.execute(stmt)}

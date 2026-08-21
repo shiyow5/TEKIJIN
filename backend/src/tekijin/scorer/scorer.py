@@ -27,21 +27,27 @@ from tekijin.scorer.features import (
     recency,
 )
 from tekijin.scorer.weights import (
+    DAYS_PER_MONTH,
     DEFAULT_WEIGHTS,
     LOAD_WINDOW_DAYS,
     REGION_OF_BRANCH,
     Weights,
 )
 
-_DAYS_PER_MONTH = 30.4
+# Evidence types that decay with time. Certifications are excluded: a
+# qualification does not become less true as it ages, so it must not drag the
+# recency term down (technical-spec §5 ties recency to projects/answers).
+_RECENCY_SOURCE_TYPES = ("project", "answer")
+
 # Fixed order to break reason-contribution ties deterministically.
 _REASON_TYPE_ORDER = {
     "cert": 0,
-    "answers": 1,
-    "project": 2,
-    "recency": 3,
-    "proximity": 4,
-    "load": 5,
+    "self": 1,
+    "answers": 2,
+    "project": 3,
+    "recency": 4,
+    "proximity": 5,
+    "load": 6,
 }
 
 
@@ -64,17 +70,30 @@ class ExpertiseScorer:
         """Return ``{"recommendations": [...]}`` — the top-``top_k`` candidates.
 
         Only ids in ``candidate_ids`` that resolve to a real employee are scored;
-        unknown ids are dropped (never fabricated).
+        unknown ids are dropped (never fabricated). The asker (``asker_id``) is
+        removed from the candidates — never recommend a person to themselves.
+
+        ``now`` must be timezone-naive: stored ``created_at`` values are naive, so
+        an aware ``now`` would raise on comparison/subtraction.
         """
 
+        if top_k <= 0:
+            raise ValueError(f"top_k must be positive, got {top_k}")
+        assert now.tzinfo is None, "now must be naive (matches stored timestamps)"
+
+        # De-dupe (keep first order), then drop the asker (only when known).
+        candidates = [
+            pid for pid in dict.fromkeys(candidate_ids) if asker_id is None or pid != asker_id
+        ]
+
         since = now - dt.timedelta(days=LOAD_WINDOW_DAYS)
-        rec_counts = self._repo.recent_recommendation_counts(since)
-        ans_counts = self._repo.recent_answer_counts(since)
-        answers_by_person = self._group_answers_by_person(self._repo.answers_by_topic(topic))
+        rec_counts = self._repo.recent_recommendation_counts(since, candidates)
+        ans_counts = self._repo.recent_answer_counts(since, candidates)
+        answers_by_person = self._group_answers_by_person(self._topic_answers(topic))
         asker_branch = self._asker_branch(asker_id)
 
         scored: list[tuple[float, int, dict[str, Any]]] = []
-        for person_id in dict.fromkeys(candidate_ids):  # de-dupe, keep first order
+        for person_id in candidates:
             employee = self._repo.get_employee(person_id)
             if employee is None:
                 continue
@@ -94,6 +113,20 @@ class ExpertiseScorer:
         # Descending score, then ascending person_id for a stable tiebreak.
         scored.sort(key=lambda item: (-item[0], item[1]))
         return {"recommendations": [record for _, _, record in scored[:top_k]]}
+
+    def _topic_answers(self, topic: str) -> list[AnswerDTO]:
+        """Answers that are genuine evidence for ``topic``.
+
+        ``answers_by_topic`` also returns answers matched only via their
+        question's ``topics`` array. An answer that carries its OWN ``topic`` for
+        a *different* subtopic must not count as this topic's evidence, so keep an
+        answer only when ``answer.topic == topic`` or ``answer.topic`` is unset
+        (in which case the question-topics fallback is the intended signal).
+        """
+
+        return [
+            a for a in self._repo.answers_by_topic(topic) if a.topic == topic or a.topic is None
+        ]
 
     # ------------------------------------------------------------------ #
     # per-person scoring
@@ -121,12 +154,7 @@ class ExpertiseScorer:
         weights = self._weights
 
         topic_fit = edge_weight(evidence)
-        moments = [
-            e.timestamp
-            for e in evidence
-            if e.timestamp is not None and e.source_type in ("project", "answer")
-        ]
-        recency_score = recency(now, moments)
+        recency_score = recency(now, self._recency_moments(evidence))
         helpful_count = sum(1 for a in answers if a.was_helpful is True)
         reuse_total = sum(a.reuse_count or 0 for a in answers)
         quality = answer_quality(helpful_count, reuse_total, len(answers))
@@ -142,6 +170,7 @@ class ExpertiseScorer:
         )
 
         reasons = self._build_reasons(
+            topic=topic,
             evidence=evidence,
             topic_fit=topic_fit,
             recency_score=recency_score,
@@ -171,6 +200,7 @@ class ExpertiseScorer:
     def _build_reasons(
         self,
         *,
+        topic: str,
         evidence: Sequence[Evidence],
         topic_fit: float,
         recency_score: float,
@@ -198,6 +228,16 @@ class ExpertiseScorer:
         if cert_names:
             entries.append(
                 (topic_fit_share(("cert",)), {"type": "cert", "detail": "、".join(cert_names)})
+            )
+
+        # Self-declared skill: surface it so cold-start candidates (chosen on a
+        # skill alone) are explained by their expertise signal, not just load.
+        if any(e.source_type == "self" for e in evidence):
+            entries.append(
+                (
+                    topic_fit_share(("self",)),
+                    {"type": "self", "detail": f"自己申告スキル: {topic}"},
+                )
             )
 
         if answers:
@@ -243,19 +283,29 @@ class ExpertiseScorer:
         return [reason for _, reason in entries]
 
     @staticmethod
-    def _recency_detail(evidence: Sequence[Evidence], now: dt.datetime) -> str:
-        moments = [
+    def _recency_moments(evidence: Sequence[Evidence]) -> list[dt.date | dt.datetime]:
+        """Timestamps of the time-decaying evidence (projects/answers).
+
+        Certifications are omitted on purpose — a qualification does not fade
+        with age, so it must not feed the recency term (see _RECENCY_SOURCE_TYPES).
+        """
+
+        return [
             e.timestamp
             for e in evidence
-            if e.timestamp is not None and e.source_type in ("project", "answer")
+            if e.timestamp is not None and e.source_type in _RECENCY_SOURCE_TYPES
         ]
+
+    @classmethod
+    def _recency_detail(cls, evidence: Sequence[Evidence], now: dt.datetime) -> str:
+        moments = cls._recency_moments(evidence)
         if not moments:
             return ""
         newest = max(
             (m if isinstance(m, dt.datetime) else dt.datetime(m.year, m.month, m.day))
             for m in moments
         )
-        months = max((now - newest).total_seconds() / 86400.0 / _DAYS_PER_MONTH, 0.0)
+        months = max((now - newest).total_seconds() / 86400.0 / DAYS_PER_MONTH, 0.0)
         if months < 1.0:
             return "直近1か月以内の関連実績あり"
         return f"直近の関連実績: 約{round(months)}か月前"

@@ -13,6 +13,9 @@ import math
 from collections.abc import Iterable, Mapping
 
 from tekijin.scorer.weights import (
+    ANSWER_QUALITY_ANSWER_COEF,
+    ANSWER_QUALITY_HELPFUL_COEF,
+    ANSWER_QUALITY_REUSE_COEF,
     ANSWER_QUALITY_SCALE,
     LOAD_HALF_SATURATION,
     PROXIMITY_COMPANY_WIDE,
@@ -64,7 +67,11 @@ def answer_quality(helpful_count: int, reuse_total: int, answer_count: int) -> f
     floor. Saturating so a prolific answerer cannot dominate on volume alone.
     """
 
-    raw = 0.3 * answer_count + 0.7 * helpful_count + 0.2 * reuse_total
+    raw = (
+        ANSWER_QUALITY_ANSWER_COEF * answer_count
+        + ANSWER_QUALITY_HELPFUL_COEF * helpful_count
+        + ANSWER_QUALITY_REUSE_COEF * reuse_total
+    )
     return saturate(raw, ANSWER_QUALITY_SCALE)
 
 
