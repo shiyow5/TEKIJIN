@@ -48,6 +48,13 @@ class Settings(BaseSettings):
     # Embedding model used by the retrieval component (later).
     embedding_model: str = "intfloat/multilingual-e5-large"
 
+    # Whether to prepend e5-style ``query:`` / ``passage:`` prefixes when
+    # embedding. Correct for the e5 family (the default model); other models
+    # (e.g. ruri, BGE variants) must NOT receive these prefixes or retrieval
+    # quality degrades. Kept configurable because the embedding model is still
+    # being benchmarked — flip this off when switching to a non-e5 model.
+    embedding_use_e5_prefix: bool = True
+
     # Dimensionality of the embedding vectors produced by ``embedding_model``.
     # ``intfloat/multilingual-e5-large`` emits 1024-d vectors; this drives the
     # width of every ``pgvector`` column so the schema and the model agree.

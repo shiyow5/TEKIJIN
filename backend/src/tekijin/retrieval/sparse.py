@@ -58,10 +58,18 @@ class BM25Index:
     returned verbatim.
     """
 
-    def __init__(self, ids: list[Any], bm25: Any | None, tokenizer: Tokenizer) -> None:
+    def __init__(
+        self,
+        ids: list[Any],
+        bm25: Any | None,
+        tokenizer: Tokenizer,
+        doc_tokens: list[set[str]] | None = None,
+    ) -> None:
         self._ids = ids
         self._bm25 = bm25
         self._tokenizer = tokenizer
+        # Per-document token *sets* — the match signal (see :meth:`search`).
+        self._doc_tokens = doc_tokens if doc_tokens is not None else []
 
     @classmethod
     def build(
@@ -70,28 +78,45 @@ class BM25Index:
         *,
         tokenizer: Tokenizer | None = None,
     ) -> BM25Index:
-        """Tokenize and index ``docs`` (pairs of ``(id, text)``)."""
+        """Tokenize and index ``docs`` (pairs of ``(id, text)``).
+
+        Documents that tokenize to nothing (empty or punctuation-only text) are
+        dropped, keeping ids and token lists aligned. If nothing indexable
+        remains, an empty index is returned — ``BM25Okapi`` divides by the mean
+        document length, so an all-empty corpus would raise ``ZeroDivisionError``.
+        """
 
         tok = tokenizer or SudachiTokenizer()
         ids: list[Any] = []
         corpus: list[list[str]] = []
         for id_, text in docs:
+            tokens = tok.tokenize(text or "")
+            if not tokens:
+                continue
             ids.append(id_)
-            corpus.append(tok.tokenize(text or ""))
+            corpus.append(tokens)
 
         bm25: Any | None = None
         if corpus:
             from rank_bm25 import BM25Okapi
 
             bm25 = BM25Okapi(corpus)
-        return cls(ids, bm25, tok)
+        doc_tokens = [set(tokens) for tokens in corpus]
+        return cls(ids, bm25, tok, doc_tokens)
 
     def search(self, query: str, top_k: int = 10) -> list[tuple[Any, float]]:
-        """Return the ``top_k`` highest-scoring ``(id, score)`` for ``query``.
+        """Return up to ``top_k`` ``(id, score)`` documents matching ``query``.
 
-        Only positive-scoring documents (those sharing at least one query term)
-        are returned, so the result may be shorter than ``top_k`` — or empty when
-        the index is empty or the query has no indexable tokens.
+        A document *matches* when it shares at least one token with the query
+        (lexical overlap). Matches are then ranked by descending BM25 score.
+
+        Overlap — not ``score > 0`` — is the match signal on purpose: on a small
+        or homogeneous corpus BM25Okapi's IDF can go zero or negative when a term
+        occurs in many (or, with a single document, all) documents, dragging a
+        genuine exact-match score to ``<= 0``. Filtering on score would then drop
+        exactly the model-number / in-house-term hits this sparse channel exists
+        to recover. Overlap keeps every real match regardless of IDF sign, while
+        still excluding unrelated documents. Empty index or query -> ``[]``.
         """
 
         if self._bm25 is None:
@@ -99,9 +124,12 @@ class BM25Index:
         tokens = self._tokenizer.tokenize(query or "")
         if not tokens:
             return []
+        query_tokens = set(tokens)
         scores: Sequence[float] = self._bm25.get_scores(tokens)
-        ranked = sorted(
-            zip(self._ids, scores, strict=True),
-            key=lambda pair: (-float(pair[1]), str(pair[0])),
-        )
-        return [(id_, float(score)) for id_, score in ranked[:top_k] if score > 0]
+        matches = [
+            (id_, float(score))
+            for id_, score, doc_tokens in zip(self._ids, scores, self._doc_tokens, strict=True)
+            if query_tokens & doc_tokens
+        ]
+        matches.sort(key=lambda pair: (-pair[1], str(pair[0])))
+        return matches[:top_k]

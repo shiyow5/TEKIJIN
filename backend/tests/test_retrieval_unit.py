@@ -7,8 +7,15 @@ so no weights are downloaded).
 
 from __future__ import annotations
 
+import contextlib
+import importlib.util
+import os
+from pathlib import Path
+from types import SimpleNamespace
+
 import pytest
 
+from tekijin.config import Settings
 from tekijin.retrieval.embedding import (
     PASSAGE,
     QUERY,
@@ -16,6 +23,7 @@ from tekijin.retrieval.embedding import (
     SentenceTransformerEmbedder,
 )
 from tekijin.retrieval.fusion import rrf
+from tekijin.retrieval.retriever import HybridRetriever
 from tekijin.retrieval.sparse import BM25Index, SudachiTokenizer
 
 
@@ -123,6 +131,35 @@ def test_sudachi_tokenizer_mode_c() -> None:
     assert tok.tokenize("   ") == []
 
 
+# --- fix 4: all-empty corpus must not raise (BM25Okapi divides by mean length) #
+def test_bm25_all_empty_corpus_returns_empty_index() -> None:
+    index = BM25Index.build([("a", "   "), ("b", ""), ("c", "!!!")])
+    assert index.search("anything", top_k=3) == []
+
+
+def test_bm25_drops_empty_docs_keeping_alignment() -> None:
+    # The empty doc is skipped, but the real doc stays correctly indexed.
+    index = BM25Index.build([("empty", ""), ("real", "VPN 設定 の 手順")])
+    hits = index.search("VPN", top_k=3)
+    assert hits and hits[0][0] == "real"
+
+
+# --- fix 5: exact-match must survive non-positive IDF (small/homogeneous data) #
+def test_bm25_single_document_exact_match_survives_nonpositive_idf() -> None:
+    # With one document the IDF of every term is <= 0, so BM25 scores the exact
+    # match <= 0. Overlap-based matching must still return it.
+    index = BM25Index.build([("only", "RX-3000 の 見積 手順")])
+    hits = index.search("RX-3000", top_k=3)
+    assert hits and hits[0][0] == "only"
+
+
+def test_bm25_term_present_in_all_docs_still_matches() -> None:
+    # A term in every document has IDF <= 0; overlap keeps the hits anyway.
+    corpus = [("d1", "VPN 設定"), ("d2", "VPN 手順"), ("d3", "VPN 障害")]
+    hits = BM25Index.build(corpus).search("VPN", top_k=5)
+    assert {id_ for id_, _ in hits} == {"d1", "d2", "d3"}
+
+
 # --------------------------------------------------------------------------- #
 # embedding (injected fake model — no download)
 # --------------------------------------------------------------------------- #
@@ -192,3 +229,110 @@ def test_embed_corpus_rejects_nonpositive_batch_size(batch_size: int) -> None:
     with pytest.raises(ValueError, match="batch_size must be positive"):
         # session is never touched: validation runs before any query.
         embed_corpus(None, embedder, batch_size=batch_size)  # type: ignore[arg-type]
+
+
+# --------------------------------------------------------------------------- #
+# fix 1: answer index text combines the linked question body with the answer
+# --------------------------------------------------------------------------- #
+def test_answer_text_combines_question_and_answer() -> None:
+    answer = SimpleNamespace(question_id="q1", body="answer body")
+    text = HybridRetriever._answer_text(answer, {"q1": "question body"})
+    assert text == "question body answer body"
+
+
+def test_answer_text_falls_back_to_answer_when_no_question_body() -> None:
+    # Unknown question id -> fall back to the answer body alone.
+    unknown = SimpleNamespace(question_id="missing", body="just the answer")
+    assert HybridRetriever._answer_text(unknown, {}) == "just the answer"
+    # Question present but with a NULL body -> same fallback.
+    null_body = SimpleNamespace(question_id="q1", body="a")
+    assert HybridRetriever._answer_text(null_body, {"q1": None}) == "a"
+
+
+# --------------------------------------------------------------------------- #
+# fix 3: e5 prefix toggle is a setting (default true, env-overridable)
+# --------------------------------------------------------------------------- #
+def test_embedding_use_e5_prefix_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    for key in list(os.environ):
+        if key.startswith("TEKIJIN_"):
+            monkeypatch.delenv(key, raising=False)
+    assert Settings(_env_file=None).embedding_use_e5_prefix is True
+
+
+def test_embedding_use_e5_prefix_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TEKIJIN_EMBEDDING_USE_E5_PREFIX", "false")
+    assert Settings(_env_file=None).embedding_use_e5_prefix is False
+
+
+# --------------------------------------------------------------------------- #
+# fix 7 + fix 3: embed CLI argument handling and prefix wiring
+# --------------------------------------------------------------------------- #
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _load_embed_script():
+    spec = importlib.util.spec_from_file_location(
+        "embed_fixtures_under_test", _REPO_ROOT / "scripts" / "embed_fixtures.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize("bad", ["0", "-1", "-10"])
+def test_embed_cli_positive_int_rejects_nonpositive(bad: str) -> None:
+    import argparse
+
+    mod = _load_embed_script()
+    with pytest.raises(argparse.ArgumentTypeError, match="positive integer"):
+        mod.positive_int(bad)
+
+
+def test_embed_cli_positive_int_accepts_positive() -> None:
+    mod = _load_embed_script()
+    assert mod.positive_int("64") == 64
+
+
+def test_embed_cli_parser_flags() -> None:
+    mod = _load_embed_script()
+    parser = mod.build_parser()
+    default = parser.parse_args([])
+    assert default.only_missing is True and default.no_e5_prefix is False
+    flagged = parser.parse_args(["--all", "--no-e5-prefix", "--batch-size", "8"])
+    assert flagged.only_missing is False
+    assert flagged.no_e5_prefix is True
+    assert flagged.batch_size == 8
+
+
+@pytest.mark.parametrize(
+    ("argv", "expected_prefix"),
+    [(["--no-e5-prefix"], False), ([], True)],
+)
+def test_embed_cli_main_wires_prefix(
+    monkeypatch: pytest.MonkeyPatch, argv: list[str], expected_prefix: bool
+) -> None:
+    mod = _load_embed_script()
+    captured: dict[str, bool] = {}
+
+    class _CapturingEmbedder:
+        def __init__(self, *, use_e5_prefix: bool) -> None:
+            captured["prefix"] = use_e5_prefix
+
+    @contextlib.contextmanager
+    def _fake_scope(_factory):
+        yield object()
+
+    monkeypatch.setattr(mod, "SentenceTransformerEmbedder", _CapturingEmbedder)
+    monkeypatch.setattr(mod, "get_engine", lambda: object())
+    monkeypatch.setattr(mod, "get_sessionmaker", lambda _engine: lambda: object())
+    monkeypatch.setattr(mod, "session_scope", _fake_scope)
+    monkeypatch.setattr(
+        mod,
+        "embed_corpus",
+        lambda _session, _embedder, *, only_missing, batch_size: {"answers": 0},
+    )
+
+    rc = mod.main(argv)
+    assert rc == 0
+    # Default (no flag) follows settings, whose default is True.
+    assert captured["prefix"] is expected_prefix

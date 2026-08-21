@@ -33,6 +33,13 @@ def test_list_answers(seed_counts, session) -> None:
     assert all(a.responder_id is not None for a in answers)
 
 
+def test_list_profiles(seed_counts, session) -> None:
+    profiles = Repository(session).list_profiles()
+    assert len(profiles) == 40
+    ids = [p.employee_id for p in profiles]
+    assert ids == sorted(ids)  # ordered by employee id
+
+
 # --------------------------------------------------------------------------- #
 # dense search
 # --------------------------------------------------------------------------- #
@@ -163,3 +170,81 @@ def test_hybrid_retriever_respects_top_k(seed_counts, session, fake_embedder) ->
     assert len(result["past_answers"]) <= 2
     assert len(result["documents"]) <= 2
     assert len(result["candidate_people"]) <= 2
+
+
+# --------------------------------------------------------------------------- #
+# fix 1: a term living only in the QUESTION still surfaces the answer
+# --------------------------------------------------------------------------- #
+def test_hybrid_retriever_matches_term_in_question_only(
+    seed_counts, session, fake_embedder
+) -> None:
+    # Rare term appears only in the question; the answer is a generic procedure
+    # with no lexical or dense overlap with the query.
+    question = Question(
+        id="q_term_only", asker_id=1, body="ZQX8888 rare model discussion", topics=["misc"]
+    )
+    answer = Answer(
+        id="ans_generic",
+        question_id="q_term_only",
+        responder_id=7,
+        body="follow the standard onboarding procedure",
+    )
+    session.add(question)
+    session.flush()  # insert the question before its answer (FK order)
+    session.add(answer)
+    session.flush()
+    embed_corpus(session, fake_embedder)
+
+    retriever = HybridRetriever(fake_embedder, session, top_k=10)
+    result = retriever.search("ZQX8888")
+
+    qa_ids = {p["qa_id"] for p in result["past_answers"]}
+    assert "ans_generic" in qa_ids  # recovered via question-body BM25 (fix 1)
+
+
+# --------------------------------------------------------------------------- #
+# fix 2: a term living only in a PROFILE surfaces that person (sparse channel)
+# --------------------------------------------------------------------------- #
+def test_hybrid_retriever_profile_sparse_channel(seed_counts, session, fake_embedder) -> None:
+    prof = session.scalars(select(EmployeeProfile).order_by(EmployeeProfile.employee_id)).first()
+    prof.description = f"{prof.description or ''} WQZ7777rareterm"
+    session.flush()
+    embed_corpus(session, fake_embedder)
+
+    # top_k >= 40 (the whole workforce) so dense-answer responders cannot crowd
+    # the profile hit out of the (untruncated) people list.
+    retriever = HybridRetriever(fake_embedder, session, top_k=40)
+    result = retriever.search("WQZ7777rareterm")
+
+    assert prof.employee_id in result["candidate_people"]  # via profile BM25 (fix 2)
+
+
+# --------------------------------------------------------------------------- #
+# fix 6: channels are pooled BEFORE RRF, so a shared just-below-top_k item wins
+# --------------------------------------------------------------------------- #
+def test_hybrid_retriever_fuses_before_truncating_to_top_k(
+    seed_counts, session, fake_embedder, monkeypatch
+) -> None:
+    from tekijin.retrieval import retriever as retriever_mod
+    from tekijin.retrieval.sparse import BM25Index
+
+    ans_a, ans_x, ans_b = session.scalars(select(Answer).order_by(Answer.id).limit(3)).all()
+
+    # Each channel truncates to the top_k it is *called with* (mimics real search).
+    def fake_dense(_session, _vec, target, top_k):
+        if target == "answers":
+            return [(ans_a.id, 1.0), (ans_x.id, 0.9)][:top_k]
+        return []
+
+    def fake_bm25(_self, _query, top_k):
+        return [(ans_b.id, 1.0), (ans_x.id, 0.9)][:top_k]
+
+    monkeypatch.setattr(retriever_mod.dense, "search", fake_dense)
+    monkeypatch.setattr(BM25Index, "search", fake_bm25)
+
+    # top_k=1: if channels were cut to 1 BEFORE fusion, dense=[A], sparse=[B] and
+    # X would be lost. Pooling first lets X (rank 1 in both) win via RRF.
+    retriever = HybridRetriever(fake_embedder, session, top_k=1)
+    result = retriever.search("anything")
+
+    assert [p["qa_id"] for p in result["past_answers"]] == [ans_x.id]
