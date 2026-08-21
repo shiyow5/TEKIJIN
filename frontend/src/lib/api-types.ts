@@ -1,0 +1,132 @@
+/**
+ * TypeScript mirror of the backend API contract.
+ *
+ * Source of truth: `backend/src/tekijin/api/schemas.py` (Pydantic v2 models) and
+ * `backend/src/tekijin/api/events.py` (SSE event mapping). Kept in sync by hand;
+ * the shapes below match those models field-for-field.
+ *
+ * Only `postAsk` (POST /ask) is wired in #35. The SSE data types are defined
+ * ahead of time so the /events subscription hook (#36) can reuse them.
+ */
+
+// --------------------------------------------------------------------------- //
+// requests / responses
+// --------------------------------------------------------------------------- //
+
+/**
+ * Employee id as accepted by the API boundary. The DB stores it as an `int`, but
+ * the external contract also accepts the spec's `"E###"` string form
+ * (schemas.py `_coerce_asker_id`). The frontend normally sends the numeric form.
+ */
+export type EmployeeId = number | string;
+
+/** POST /ask body — start (or restart) a question for a session. */
+export interface AskRequest {
+  asker_id: EmployeeId;
+  question: string;
+  session_id: string;
+}
+
+/**
+ * POST /answer body — resume a paused run with exactly one of `outcome`
+ * (responder accept/decline) or `reply` (clarification answer). Defined for
+ * later screens; #35 does not call /answer.
+ */
+export type Outcome = "accepted" | "declined";
+
+/**
+ * Exactly one of `outcome` or `reply` — encoded as a discriminated union so a
+ * caller (the #38 answer screen) cannot construct a payload with both or neither,
+ * matching the backend's `_exactly_one` validator. The `never` on the unused arm
+ * makes the wrong field a compile error rather than a runtime 422.
+ */
+export type ResumeRequest =
+  | { session_id: string; outcome: Outcome; reply?: never }
+  | { session_id: string; reply: string; outcome?: never };
+
+/** Acknowledgement returned by /ask and /answer (the stream flows over /events). */
+export interface AckResponse {
+  session_id: string;
+  status: string;
+}
+
+// --------------------------------------------------------------------------- //
+// domain models (shared by SSE data and final response)
+// --------------------------------------------------------------------------- //
+
+export interface Reason {
+  type: string;
+  detail: string;
+}
+
+export interface Recommendation {
+  /** external "E###" form (schemas.format_employee_id). */
+  person_id: string;
+  name: string;
+  dept?: string | null;
+  score: number;
+  confidence: string;
+  reasons: Reason[];
+}
+
+// --------------------------------------------------------------------------- //
+// SSE event data (GET /events/{session_id}) — mirrors events.py
+// --------------------------------------------------------------------------- //
+
+export interface UnderstoodData {
+  topics: string[];
+  products: string[];
+  situation?: string | null;
+  question_type?: string | null;
+  confidence: number;
+}
+
+export interface FollowupData {
+  question: string;
+  missing: string[];
+}
+
+export interface RouteData {
+  route: string;
+  reason: string;
+  confidence: number;
+}
+
+export interface RecommendData {
+  recommendations: Recommendation[];
+}
+
+export interface DraftData {
+  draft: string;
+}
+
+export interface DoneData {
+  status: string;
+  answer?: string | null;
+}
+
+export interface MessageData {
+  status: string;
+  message: string;
+}
+
+export interface ErrorData {
+  error: string;
+}
+
+/**
+ * Named SSE events emitted over /events, mapped to their `data` payload type.
+ * (understood/followup/route/recommend/draft/done/message/error — see events.py.)
+ */
+export interface SseEventDataMap {
+  understood: UnderstoodData;
+  followup: FollowupData;
+  route: RouteData;
+  recommend: RecommendData;
+  draft: DraftData;
+  done: DoneData;
+  message: MessageData;
+  error: ErrorData;
+}
+
+export type SseEventName = keyof SseEventDataMap;
