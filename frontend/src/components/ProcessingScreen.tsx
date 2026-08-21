@@ -137,7 +137,9 @@ export function ProcessingScreen({
 
   const steps = buildSteps(stream);
   const hasRecommendations = (stream.recommend?.recommendations.length ?? 0) > 0;
-  const hasResult = hasRecommendations || Boolean(stream.done);
+  // A draft implies a recommendation was produced: on a refresh at the `send`
+  // interrupt the reconnect replays only the draft, so treat it as result access.
+  const hasResult = hasRecommendations || Boolean(stream.draft?.draft) || Boolean(stream.done);
   // Hide the reply box once answered, once the run terminates, or once the
   // stream has advanced past the followup (ack-loss recovery).
   const showFollowup =

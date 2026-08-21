@@ -156,6 +156,35 @@ describe("useEventStream", () => {
     expect(source().closed).toBe(false);
   });
 
+  it("ignores a replayed identical followup (same question and missing)", () => {
+    const { view, source } = setup();
+    act(() => source().emit("followup", { question: "製品名は？", missing: ["product"] }));
+    act(() => source().emit("followup", { question: "製品名は？", missing: ["product"] }));
+
+    // Only one followup event is recorded — the reconnect replay is dropped.
+    expect(view.result.current.events.filter((e) => e.event === "followup")).toHaveLength(1);
+  });
+
+  it("records a genuinely different followup", () => {
+    const { view, source } = setup();
+    act(() => source().emit("followup", { question: "製品名は？", missing: ["product"] }));
+    act(() => source().emit("followup", { question: "拠点数は？", missing: ["sites"] }));
+
+    expect(view.result.current.followup?.question).toBe("拠点数は？");
+    expect(view.result.current.events.filter((e) => e.event === "followup")).toHaveLength(2);
+  });
+
+  it("clears the previous draft when a new recommendation arrives (reroute)", () => {
+    const { view, source } = setup();
+    act(() => source().emit("recommend", { recommendations: [{ person_id: "E001" }] }));
+    act(() => source().emit("draft", { draft: "旧候補への依頼文" }));
+    act(() => source().emit("recommend", { recommendations: [{ person_id: "E002" }] }));
+
+    // The stale draft is dropped until the replacement draft arrives.
+    expect(view.result.current.draft).toBeUndefined();
+    expect(view.result.current.recommend?.recommendations[0].person_id).toBe("E002");
+  });
+
   it("surfaces a generic error and closes on a server error event (has data)", () => {
     const { view, source } = setup();
     act(() => source().emit("error", { error: "boom" }));

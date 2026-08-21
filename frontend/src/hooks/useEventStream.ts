@@ -86,8 +86,24 @@ const READY_STATE_CLOSED = 2;
 
 const INITIAL_STATE: EventStreamState = { events: [], terminal: false };
 
+/** Two followups are the same when their question and missing list match. */
+function isSameFollowup(a: FollowupData | undefined, b: FollowupData): boolean {
+  if (!a || a.question !== b.question) {
+    return false;
+  }
+  const am = a.missing ?? [];
+  const bm = b.missing ?? [];
+  return am.length === bm.length && am.every((v, i) => v === bm[i]);
+}
+
 /** Fold one received event into the state, immutably. */
 function reduceEvent(prev: EventStreamState, name: SseEventName, data: unknown): EventStreamState {
+  // The backend re-emits the pending followup on every automatic reconnect while
+  // the session stays paused; drop an identical replay so the UI does not treat
+  // it as a new question and reopen an already-answered form.
+  if (name === "followup" && isSameFollowup(prev.followup, data as FollowupData)) {
+    return prev;
+  }
   const events = [...prev.events, { event: name, data } as StreamEvent];
   switch (name) {
     case "understood":
@@ -95,7 +111,9 @@ function reduceEvent(prev: EventStreamState, name: SseEventName, data: unknown):
     case "route":
       return { ...prev, events, route: data as RouteData };
     case "recommend":
-      return { ...prev, events, recommend: data as RecommendData };
+      // A fresh recommendation (including a reroute after a decline) invalidates
+      // the previous candidate's draft; the following draft event resets it.
+      return { ...prev, events, recommend: data as RecommendData, draft: undefined };
     case "draft":
       return { ...prev, events, draft: data as DraftData };
     case "followup":

@@ -145,6 +145,12 @@ describe("ProcessingScreen", () => {
     expect(screen.queryByText("依頼文を作成しました")).not.toBeInTheDocument();
   });
 
+  it("grants result access from a draft alone (reconnect at the send interrupt)", () => {
+    // A refresh at `send` replays only the draft (no recommend) — still resultable.
+    renderScreen(state({ draft: { draft: "高梨さんへの依頼文" } }));
+    expect(screen.getByRole("button", { name: "結果を見る" })).toBeInTheDocument();
+  });
+
   it("hides the followup form once the stream advances past it (ack-loss recovery)", () => {
     const events: StreamEvent[] = [
       { event: "followup", data: { question: "製品名を教えてください", missing: [] } },
