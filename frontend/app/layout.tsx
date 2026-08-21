@@ -1,17 +1,13 @@
 import { AppHeader } from "@/components/AppHeader";
 import type { Metadata } from "next";
-import { Noto_Sans_JP } from "next/font/google";
 import "./globals.css";
 
-const notoSansJp = Noto_Sans_JP({
-  subsets: ["latin"],
-  weight: ["400", "500", "700"],
-  display: "swap",
-  variable: "--font-noto",
-});
+// Font is provided via a CSS font stack (see globals.css `--font-noto`) rather
+// than next/font/google, so `next build` never fetches over the network
+// (network-independent build — technical-spec §1 principle 3).
 
 export const metadata: Metadata = {
-  title: "TEKIJIN（たずねーる）",
+  title: "TEKIJIN",
   description: "社内の「訊きづらさ」を溶かす、質問と回答のマッチング支援ツール。",
 };
 
@@ -21,7 +17,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="ja" className={notoSansJp.variable}>
+    <html lang="ja">
       <body className="bg-surface text-on-surface font-sans">
         <div className="mx-auto flex min-h-screen w-full max-w-content flex-col">
           <AppHeader />

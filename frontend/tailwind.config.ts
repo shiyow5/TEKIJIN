@@ -1,5 +1,5 @@
 import type { Config } from "tailwindcss";
-import { borderRadius, colors, fontFamily, spacing } from "./src/lib/design-tokens";
+import { borderRadius, colors, fontFamily, layout, spacing } from "./src/lib/design-tokens";
 
 const config: Config = {
   content: ["./src/**/*.{ts,tsx}", "./app/**/*.{ts,tsx}"],
@@ -12,7 +12,7 @@ const config: Config = {
         sans: [...fontFamily.sans],
       },
       maxWidth: {
-        content: "1440px",
+        content: layout.maxWidth,
       },
     },
   },
