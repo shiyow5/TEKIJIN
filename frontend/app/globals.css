@@ -1,0 +1,19 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Base layer overrides for the TEKIJIN design system.
+ * Japanese body text uses a 1.7 line-height for legibility (see DESIGN.md).
+ */
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    @apply bg-surface text-on-surface;
+    line-height: 1.7;
+  }
+}
