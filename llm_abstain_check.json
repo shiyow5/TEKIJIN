@@ -1,0 +1,352 @@
+[
+  {
+    "id": 1,
+    "content": "{\n  \"answerable\": true,\n  \"reason\": \"全員が購買実績あり\"\n}",
+    "reasoning": "",
+    "latency": 0.46136927604675293,
+    "out_tokens": 24
+  },
+  {
+    "id": 2,
+    "content": "{\"answerable\": true, \"reason\": \"西村氏の実績が相談内容と一致\"}",
+    "reasoning": "",
+    "latency": 0.39901137351989746,
+    "out_tokens": 22
+  },
+  {
+    "id": 3,
+    "content": "{\n  \"answerable\": true,\n  \"reason\": \"SNS運用実績があり、立て直し相談に答えられる。\"\n}",
+    "reasoning": "",
+    "latency": 0.5205836296081543,
+    "out_tokens": 31
+  },
+  {
+    "id": 4,
+    "content": "{\n  \"answerable\": true,\n  \"reason\": \"全員が契約管理実績あり\"\n}",
+    "reasoning": "",
+    "latency": 0.4427051544189453,
+    "out_tokens": 25
+  },
+  {
+    "id": 5,
+    "content": "{\n  \"answerable\": true,\n  \"reason\": \"中島氏にVPN実績あり\"\n}",
+    "reasoning": "",
+    "latency": 0.4505615234375,
+    "out_tokens": 26
+  },
+  {
+    "id": 6,
+    "content": "{\n  \"answerable\": true,\n  \"reason\": \"人事・採用の回答実績があり、制度見直しに対応可能\"\n}",
+    "reasoning": "",
+    "latency": 0.5184576511383057,
+    "out_tokens": 32
+  },
+  {
+    "id": 7,
+    "content": "{\"answerable\": true, \"reason\": \"全員が広報PR実績あり\"}",
+    "reasoning": "",
+    "latency": 0.3332860469818115,
+    "out_tokens": 18
+  },
+  {
+    "id": 8,
+    "content": "{\n  \"answerable\": true,\n  \"reason\": \"経理・決算の実績があり、効率化相談にも対応可能\"\n}",
+    "reasoning": "",
+    "latency": 0.5357866287231445,
+    "out_tokens": 33
+  },
+  {
+    "id": 9,
+    "content": "{\"answerable\": true, \"reason\": \"木村氏の実績が相談内容と一致\"}",
+    "reasoning": "",
+    "latency": 0.39638352394104004,
+    "out_tokens": 22
+  },
+  {
+    "id": 10,
+    "content": "{\n  \"answerable\": true,\n  \"reason\": \"全員が相談テーマの実績を持つため。\"\n}",
+    "reasoning": "",
+    "latency": 0.4870121479034424,
+    "out_tokens": 28
+  },
+  {
+    "id": 11,
+    "content": "{\n  \"answerable\": false,\n  \"reason\": \"福岡拠点の担当者が候補にいないため\"\n}",
+    "reasoning": "",
+    "latency": 0.4799342155456543,
+    "out_tokens": 28
+  },
+  {
+    "id": 12,
+    "content": "{\n  \"answerable\": false,\n  \"reason\": \"基幹システム入れ替えの経験者がいない\"\n}",
+    "reasoning": "",
+    "latency": 0.4828512668609619,
+    "out_tokens": 28
+  },
+  {
+    "id": 13,
+    "content": "{\"answerable\": false, \"reason\": \"実績が広告運用やマーケティング中心で、システム性能調査の経験がない\"}",
+    "reasoning": "",
+    "latency": 0.4645853042602539,
+    "out_tokens": 27
+  },
+  {
+    "id": 14,
+    "content": "{\"answerable\": true, \"reason\": \"EC構築実績があり、カゴ落ち改善の知見があるため\"}",
+    "reasoning": "",
+    "latency": 0.45323967933654785,
+    "out_tokens": 26
+  },
+  {
+    "id": 15,
+    "content": "{\"answerable\": false, \"reason\": \"改善ノウハウや運用実績が不明\"}",
+    "reasoning": "",
+    "latency": 0.3570878505706787,
+    "out_tokens": 19
+  },
+  {
+    "id": 16,
+    "content": "{\"answerable\": true, \"reason\": \"クラウド移行実績が複数あり対応可能\"}",
+    "reasoning": "",
+    "latency": 0.3732132911682129,
+    "out_tokens": 20
+  },
+  {
+    "id": 17,
+    "content": "{\"answerable\": true, \"reason\": \"業務効率化の経験が複数あり対応可能\"}",
+    "reasoning": "",
+    "latency": 0.4024479389190674,
+    "out_tokens": 22
+  },
+  {
+    "id": 18,
+    "content": "{\n  \"answerable\": true,\n  \"reason\": \"前田里奈がセキュリティ分野で実績あり\"\n}",
+    "reasoning": "",
+    "latency": 0.4909541606903076,
+    "out_tokens": 29
+  },
+  {
+    "id": 19,
+    "content": "{\"answerable\": true, \"reason\": \"データ基盤構築実績があり集計可能\"}",
+    "reasoning": "",
+    "latency": 0.3846452236175537,
+    "out_tokens": 21
+  },
+  {
+    "id": 20,
+    "content": "{\"answerable\": true, \"reason\": \"CRM導入実績があり、顧客情報管理の提案が可能\"}",
+    "reasoning": "",
+    "latency": 0.4140591621398926,
+    "out_tokens": 23
+  },
+  {
+    "id": 21,
+    "content": "{\"answerable\": true, \"reason\": \"広告運用実績があり、改善案を提示可能\"}",
+    "reasoning": "",
+    "latency": 0.399799108505249,
+    "out_tokens": 22
+  },
+  {
+    "id": 22,
+    "content": "{\n  \"answerable\": true,\n  \"reason\": \"法務資格と総務法務実績があり対応可能\"\n}",
+    "reasoning": "",
+    "latency": 0.5091018676757812,
+    "out_tokens": 31
+  },
+  {
+    "id": 23,
+    "content": "{\"answerable\": false, \"reason\": \"実績は購買業務のみで、価格管理の整理手法は不明\"}",
+    "reasoning": "",
+    "latency": 0.44068360328674316,
+    "out_tokens": 26
+  },
+  {
+    "id": 24,
+    "content": "{\"answerable\": false, \"reason\": \"IT・法務・営業支援が中心で、機材保守の専門実績なし\"}",
+    "reasoning": "",
+    "latency": 0.510012149810791,
+    "out_tokens": 30
+  },
+  {
+    "id": 25,
+    "content": "{\n  \"answerable\": true,\n  \"reason\": \"SNS運用実績があり、アカウント立て直しの相談に答えられる。\"\n}",
+    "reasoning": "",
+    "latency": 0.5460484027862549,
+    "out_tokens": 33
+  },
+  {
+    "id": 26,
+    "content": "{\"answerable\": true, \"reason\": \"3名ともECサイト構築の実績あり\"}",
+    "reasoning": "",
+    "latency": 0.3840336799621582,
+    "out_tokens": 21
+  },
+  {
+    "id": 27,
+    "content": "{\"answerable\": true, \"reason\": \"複数候補がモバイルアプリ開発のリード経験あり\"}",
+    "reasoning": "",
+    "latency": 0.3957102298736572,
+    "out_tokens": 22
+  },
+  {
+    "id": 28,
+    "content": "{\"answerable\": false, \"reason\": \"費用試算実績が不明で技術寄りの実績のみ\"}",
+    "reasoning": "",
+    "latency": 0.414351224899292,
+    "out_tokens": 23
+  },
+  {
+    "id": 29,
+    "content": "{\"answerable\": true, \"reason\": \"基幹システム導入のリード経験があるため\"}",
+    "reasoning": "",
+    "latency": 0.3883676528930664,
+    "out_tokens": 21
+  },
+  {
+    "id": 30,
+    "content": "{\n  \"answerable\": true,\n  \"reason\": \"複数候補が契約管理システム導入実績あり\"\n}",
+    "reasoning": "",
+    "latency": 0.4799518585205078,
+    "out_tokens": 28
+  },
+  {
+    "id": 31,
+    "content": "{\"answerable\": true, \"reason\": \"CRMや契約管理の導入実績があり、継続支援も可能\"}",
+    "reasoning": "",
+    "latency": 0.44001269340515137,
+    "out_tokens": 25
+  },
+  {
+    "id": 32,
+    "content": "{\"answerable\": false, \"reason\": \"経理知識はあっても、顧客対応の判断基準は不明\"}",
+    "reasoning": "",
+    "latency": 0.4412410259246826,
+    "out_tokens": 26
+  },
+  {
+    "id": 33,
+    "content": "{\"answerable\": false, \"reason\": \"相談は判断基準、実績はシステム構築・運用\"}",
+    "reasoning": "",
+    "latency": 0.4164316654205322,
+    "out_tokens": 23
+  },
+  {
+    "id": 34,
+    "content": "{\n  \"answerable\": true,\n  \"reason\": \"経理担当者が経理実績あり\"\n}",
+    "reasoning": "",
+    "latency": 0.45692968368530273,
+    "out_tokens": 27
+  },
+  {
+    "id": 35,
+    "content": "{\"answerable\": false, \"reason\": \"実績は広報・SNSが中心で、催事準備の経験がない\"}",
+    "reasoning": "",
+    "latency": 0.4530179500579834,
+    "out_tokens": 27
+  },
+  {
+    "id": 36,
+    "content": "{\"answerable\": false, \"reason\": \"端末管理実績が不明で、相談の要件を満たすか不確実\"}",
+    "reasoning": "",
+    "latency": 0.47835469245910645,
+    "out_tokens": 28
+  },
+  {
+    "id": 37,
+    "content": "{\"answerable\": false, \"reason\": \"購買実績が相談の自動化要件と一致しない\"}",
+    "reasoning": "",
+    "latency": 0.4008181095123291,
+    "out_tokens": 22
+  },
+  {
+    "id": 38,
+    "content": "{\n  \"answerable\": false,\n  \"reason\": \"複合機ログ管理の実績が欠如しているため\"\n}",
+    "reasoning": "",
+    "latency": 0.5233261585235596,
+    "out_tokens": 31
+  },
+  {
+    "id": 39,
+    "content": "{\n  \"answerable\": false,\n  \"reason\": \"実績は経理業務のみで、部署横断のデータ統合は対象外\"\n}",
+    "reasoning": "",
+    "latency": 0.5769240856170654,
+    "out_tokens": 36
+  },
+  {
+    "id": 40,
+    "content": "{\n  \"answerable\": false,\n  \"reason\": \"実績は技術移行だが、運用責任の定義は含まない\"\n}",
+    "reasoning": "",
+    "latency": 0.534358024597168,
+    "out_tokens": 32
+  },
+  {
+    "id": 41,
+    "content": "{\"answerable\": false, \"reason\": \"採用実績はあっても、企業ブランディング実績がない\"}",
+    "reasoning": "",
+    "latency": 0.3983457088470459,
+    "out_tokens": 23
+  },
+  {
+    "id": 42,
+    "content": "{\"answerable\": false, \"reason\": \"法務経験はあるがEC・通販特化実績なし\"}",
+    "reasoning": "",
+    "latency": 0.41870832443237305,
+    "out_tokens": 24
+  },
+  {
+    "id": 43,
+    "content": "{\"answerable\": true, \"reason\": \"セキュリティ専門家が情報漏洩対策を相談可能\"}",
+    "reasoning": "",
+    "latency": 0.4092378616333008,
+    "out_tokens": 23
+  },
+  {
+    "id": 44,
+    "content": "{\"answerable\": true, \"reason\": \"問い合わせ対応システム導入実績あり\"}",
+    "reasoning": "",
+    "latency": 0.3484914302825928,
+    "out_tokens": 18
+  },
+  {
+    "id": 45,
+    "content": "{\"answerable\": false, \"reason\": \"実績は開発・インフラ中心で、UI/UX改善の経験が不明\"}",
+    "reasoning": "",
+    "latency": 0.4905104637145996,
+    "out_tokens": 29
+  },
+  {
+    "id": 46,
+    "content": "{\"answerable\": false, \"reason\": \"製造現場の制御設定変更実績がない\"}",
+    "reasoning": "",
+    "latency": 0.3738837242126465,
+    "out_tokens": 20
+  },
+  {
+    "id": 47,
+    "content": "{\"answerable\": false, \"reason\": \"海外登記の実績が不明。\"}",
+    "reasoning": "",
+    "latency": 0.35060977935791016,
+    "out_tokens": 19
+  },
+  {
+    "id": 48,
+    "content": "{\n  \"answerable\": false,\n  \"reason\": \"特許出願の実務経験が記載されていないため\"\n}",
+    "reasoning": "",
+    "latency": 0.49768924713134766,
+    "out_tokens": 30
+  },
+  {
+    "id": 49,
+    "content": "{\"answerable\": false, \"reason\": \"船舶通信の専門知識が欠如しているため\"}",
+    "reasoning": "",
+    "latency": 0.39737653732299805,
+    "out_tokens": 22
+  },
+  {
+    "id": 50,
+    "content": "{\"answerable\": false, \"reason\": \"医薬品GMP監査の専門実績がない\"}",
+    "reasoning": "",
+    "latency": 0.39916491508483887,
+    "out_tokens": 22
+  }
+]
