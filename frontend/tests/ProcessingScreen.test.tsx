@@ -1,0 +1,139 @@
+import { ProcessingScreen } from "@/components/ProcessingScreen";
+import type { EventStreamState } from "@/hooks/useEventStream";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const pushMock = vi.fn();
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: pushMock }),
+}));
+
+const postAnswerMock = vi.fn();
+vi.mock("@/lib/api-client", () => ({
+  postAnswer: (...args: unknown[]) => postAnswerMock(...args),
+}));
+
+function state(partial: Partial<EventStreamState>): EventStreamState {
+  return { events: [], terminal: false, ...partial };
+}
+
+function renderScreen(stream: EventStreamState) {
+  return render(<ProcessingScreen sessionId="abc-123" streamState={stream} />);
+}
+
+describe("ProcessingScreen", () => {
+  beforeEach(() => {
+    pushMock.mockReset();
+    postAnswerMock.mockReset();
+    postAnswerMock.mockResolvedValue({ session_id: "abc-123", status: "accepted" });
+  });
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it("shows an in-progress step while no events have arrived yet", () => {
+    renderScreen(state({}));
+    expect(screen.getByText("最適な回答者を探しています…")).toBeInTheDocument();
+    expect(screen.getByTestId("active-step")).toBeInTheDocument();
+  });
+
+  it("renders the understood step with domain, situation and confidence", () => {
+    renderScreen(
+      state({
+        understood: {
+          topics: ["ネットワーク"],
+          products: ["UTM"],
+          situation: "他社製品からの移行",
+          question_type: "how",
+          confidence: 0.85,
+        },
+      }),
+    );
+    expect(screen.getByText("質問を理解しました")).toBeInTheDocument();
+    expect(screen.getByText("領域: ネットワーク / UTM")).toBeInTheDocument();
+    expect(screen.getByText("状況: 他社製品からの移行")).toBeInTheDocument();
+    expect(screen.getByText("確信度 85%")).toBeInTheDocument();
+  });
+
+  it("renders the route step and confidence", () => {
+    renderScreen(
+      state({ route: { route: "person", reason: "詳しい人がいます", confidence: 0.7 } }),
+    );
+    expect(screen.getByText("回答の経路を判断しました")).toBeInTheDocument();
+    expect(screen.getByText("確信度 70%")).toBeInTheDocument();
+  });
+
+  it("renders the recommend step and a link to the result screen", () => {
+    renderScreen(
+      state({
+        recommend: {
+          recommendations: [
+            { person_id: "E001", name: "高梨", score: 0.9, confidence: "high", reasons: [] },
+            { person_id: "E002", name: "鈴木", score: 0.8, confidence: "mid", reasons: [] },
+          ],
+        },
+      }),
+    );
+    expect(screen.getByText("候補を2名見つけました")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "結果を見る" }));
+    expect(pushMock).toHaveBeenCalledWith("/session/abc-123/result");
+  });
+
+  it("submits a followup reply via postAnswer and hides the form", async () => {
+    renderScreen(state({ followup: { question: "製品名を教えてください", missing: ["product"] } }));
+
+    expect(screen.getByText("製品名を教えてください")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("補足の回答"), { target: { value: "  Fortinet  " } });
+    fireEvent.click(screen.getByRole("button", { name: "回答する" }));
+
+    await waitFor(() =>
+      expect(postAnswerMock).toHaveBeenCalledWith({ session_id: "abc-123", reply: "Fortinet" }),
+    );
+    await waitFor(() =>
+      expect(screen.queryByText("製品名を教えてください")).not.toBeInTheDocument(),
+    );
+  });
+
+  it("shows an error on the followup form when postAnswer fails", async () => {
+    postAnswerMock.mockRejectedValueOnce(new Error("network"));
+    renderScreen(state({ followup: { question: "詳細を教えてください", missing: [] } }));
+
+    fireEvent.change(screen.getByLabelText("補足の回答"), { target: { value: "詳細です" } });
+    fireEvent.click(screen.getByRole("button", { name: "回答する" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("回答の送信に失敗しました");
+  });
+
+  it("shows a terminal message (off-topic / no candidate)", () => {
+    renderScreen(
+      state({ terminal: true, message: { status: "off_topic", message: "業務外の質問です" } }),
+    );
+    expect(screen.getByText("業務外の質問です")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "新しい質問をする" })).toBeInTheDocument();
+    expect(screen.queryByTestId("active-step")).not.toBeInTheDocument();
+  });
+
+  it("shows a generic error display without leaking detail", () => {
+    renderScreen(state({ error: "処理中にエラーが発生しました。" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("エラーが発生しました");
+    expect(screen.queryByTestId("active-step")).not.toBeInTheDocument();
+  });
+
+  it("renders the draft step and an empty recommend result", () => {
+    renderScreen(
+      state({
+        recommend: { recommendations: [] },
+        draft: { draft: "以下の依頼文でいかがでしょうか。" },
+      }),
+    );
+    expect(screen.getByText("候補を0名見つけました")).toBeInTheDocument();
+    expect(screen.getByText("該当者が見つかりませんでした")).toBeInTheDocument();
+    expect(screen.getByText("依頼文を作成しました")).toBeInTheDocument();
+    expect(screen.getByText("以下の依頼文でいかがでしょうか。")).toBeInTheDocument();
+  });
+
+  it("stops showing the in-progress step once the run is done", () => {
+    renderScreen(state({ terminal: true, done: { status: "sent" } }));
+    expect(screen.queryByTestId("active-step")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "結果を見る" })).toBeInTheDocument();
+  });
+});
