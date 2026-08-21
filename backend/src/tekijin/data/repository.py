@@ -53,6 +53,16 @@ class Repository:
         row = self._session.get(EmployeeProfile, employee_id)
         return ProfileDTO.from_row(row) if row is not None else None
 
+    def list_profiles(self) -> list[ProfileDTO]:
+        """Every employee profile, ordered by employee id.
+
+        Used to build the BM25 profile corpus so people whose expertise terms
+        live only in their self-description are reachable by lexical search.
+        """
+
+        stmt = select(EmployeeProfile).order_by(EmployeeProfile.employee_id)
+        return [ProfileDTO.from_row(r) for r in self._session.scalars(stmt)]
+
     # -- expertise evidence ---------------------------------------------- #
     def certifications_for(self, employee_id: int) -> list[CertificationDTO]:
         stmt = (
@@ -91,6 +101,12 @@ class Repository:
     def answers_for_question(self, question_id: str) -> list[AnswerDTO]:
         stmt = select(Answer).where(Answer.question_id == question_id).order_by(Answer.id)
         return [AnswerDTO.from_row(r) for r in self._session.scalars(stmt)]
+
+    def list_answers(self) -> list[AnswerDTO]:
+        """Every answer, ordered by id. Used to build the BM25 answer corpus."""
+
+        rows = self._session.scalars(select(Answer).order_by(Answer.id)).all()
+        return [AnswerDTO.from_row(r) for r in rows]
 
     # -- documents -------------------------------------------------------- #
     def list_documents(self) -> list[DocumentDTO]:
