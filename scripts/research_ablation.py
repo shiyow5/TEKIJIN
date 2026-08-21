@@ -4,10 +4,10 @@
 **測定ハーネスであって製品コードではない。** 埋め込みモデルは固定し（`research_embed_dump.py`
 が吐いた `.npz` を読む）、**アーキテクチャ側だけ**を差し替えて層2 Recall@3 を比べる。
 
-指標と採点条件は `bench_embeddings.py` と同一（L4 と gold 空を除いた45件、
-hit = |pred∩gold| / min(3,|gold|)）。基準線 = Nemotron の 0.615。
+指標と採点条件は `bench_embeddings.py` と同一（L4 と gold 空を除いた56件、
+hit = |pred∩gold| / min(3,|gold|)）。基準線 = Nemotron の 0.601（#73 の評価セット）。
 
-45件しかないので、**差分は対応ありブートストラップで見る**。単発の +0.02 を採用しない。
+56件しかないので、**差分は対応ありブートストラップで見る**。単発の +0.02 を採用しない。
 
     python scripts/research_ablation.py --emb emb/emb_Nemotron-3-Embed-1B-BF16.npz
 """
@@ -33,12 +33,12 @@ SEED = 42
 # --------------------------------------------------------------------------- #
 # 文脈の組み立て
 # --------------------------------------------------------------------------- #
-def build_context(emb_paths, include_daily_default=False):
+def build_context(emb_paths, include_daily_default=False, gold_key="gold_experts"):
     fx = rc.load_all()
     chunks_all, owners = rc.build_chunks(fx, include_daily=True)
     n_base = len(rc.build_chunks(fx, include_daily=False)[0])
     person, _retrieval = rc.load_eval()
-    items = rc.scored_person_items(person)
+    items = rc.scored_person_items(person, gold_key)
 
     models = {}
     for path in emb_paths:
@@ -76,6 +76,7 @@ def build_context(emb_paths, include_daily_default=False):
         "pidx": pidx,
         "qid_pos": qid_pos,
         "include_daily_default": include_daily_default,
+        "gold_key": gold_key,
     }
 
 
@@ -125,10 +126,11 @@ def score_item(pred, gold):
 def evaluate(ctx, system):
     """system(ctx, item, qi) -> ranked person ids。項目ごとのスコア配列を返す。"""
     hits, mrrs, top1s, by_diff = [], [], [], {}
+    gold_key = ctx.get("gold_key", "gold_experts")
     for item in ctx["items"]:
         qi = ctx["qid_pos"][item["id"]]
         pred = system(ctx, item, qi)
-        h, m, t = score_item(pred, item["gold_experts"])
+        h, m, t = score_item(pred, item[gold_key])
         hits.append(h)
         mrrs.append(m)
         top1s.append(t)
@@ -243,8 +245,23 @@ def experiments(model):
         ("A索引", "BM25のみ", make_system(model=model, retrieval="bm25")),
         (
             "A索引",
-            "Dense+BM25 RRF(ハイブリッド)",
+            "Dense+BM25 RRF(等重み=現行C4)",
             make_system(model=model, retrieval="hybrid"),
+        ),
+        (
+            "A索引",
+            "Dense+BM25 RRF(BM25重み0.5)",
+            make_system(model=model, retrieval="hybrid", bm25_weight=0.5),
+        ),
+        (
+            "A索引",
+            "Dense+BM25 RRF(BM25重み0.2)",
+            make_system(model=model, retrieval="hybrid", bm25_weight=0.2),
+        ),
+        (
+            "A索引",
+            "Dense+BM25 RRF(BM25重み0.1)",
+            make_system(model=model, retrieval="hybrid", bm25_weight=0.1),
         ),
         (
             "A索引",
@@ -281,9 +298,15 @@ def main():
     ap.add_argument("--emb", nargs="+", required=True)
     ap.add_argument("--model", default="Nemotron-3-Embed-1B-BF16")
     ap.add_argument("--out", default=None)
+    ap.add_argument(
+        "--gold",
+        default="gold_experts",
+        choices=["gold_experts", "gold_experts_alt"],
+        help="gold_experts_alt は answers だけから導出した第2の正解（#73）",
+    )
     args = ap.parse_args()
 
-    ctx = build_context(args.emb)
+    ctx = build_context(args.emb, gold_key=args.gold)
     print(
         f"採点対象 {len(ctx['items'])} 件 / コーパス {ctx['n_base']}(+日報 {len(ctx['chunk_ids']) - ctx['n_base']})"
     )

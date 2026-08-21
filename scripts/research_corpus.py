@@ -142,6 +142,11 @@ def load_eval():
     return person, retrieval
 
 
-def scored_person_items(person):
-    """層2 で採点対象になる項目（L4 と gold 空を除く）。bench_embeddings.py と同じ条件。"""
-    return [q for q in person if q["difficulty"] != "L4" and q["gold_experts"]]
+def scored_person_items(person, gold_key="gold_experts"):
+    """層2 で採点対象になる項目（L4 と gold 空を除く）。bench_embeddings.py と同じ条件。
+
+    `gold_key="gold_experts_alt"` を渡すと **answers だけから導出した第2の正解**（#73）で採点する。
+    主 gold は projects + daily_reports から作っていて answers を使っていないので、
+    2本の差が「トピックが分かった後の人の並び」の妥当性の目安になる。
+    """
+    return [q for q in person if q["difficulty"] != "L4" and q.get(gold_key)]

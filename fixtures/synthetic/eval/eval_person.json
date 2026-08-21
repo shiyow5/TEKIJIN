@@ -12,11 +12,18 @@
       36,
       37
     ],
+    "gold_experts_alt": [
+      35,
+      19,
+      36,
+      37
+    ],
     "gold_route": "document",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
     "label_source": "auto:project_daily",
+    "alt_label_source": "auto:answers",
     "note": "トピック語を明示。易しい床（回帰検出用）"
   },
   {
@@ -32,11 +39,17 @@
       25,
       6
     ],
+    "gold_experts_alt": [
+      25,
+      33,
+      15
+    ],
     "gold_route": "document",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
     "label_source": "auto:project_daily",
+    "alt_label_source": "auto:answers",
     "note": "トピック語を明示。易しい床（回帰検出用）"
   },
   {
@@ -52,11 +65,17 @@
       22,
       39
     ],
+    "gold_experts_alt": [
+      5,
+      22,
+      4
+    ],
     "gold_route": "prior_answer",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
     "label_source": "auto:project_daily",
+    "alt_label_source": "auto:answers",
     "note": "トピック語を明示。易しい床（回帰検出用）"
   },
   {
@@ -72,11 +91,17 @@
       2,
       3
     ],
+    "gold_experts_alt": [
+      21,
+      2,
+      1
+    ],
     "gold_route": "prior_answer",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
     "label_source": "auto:project_daily",
+    "alt_label_source": "auto:answers",
     "note": "トピック語を明示。易しい床（回帰検出用）"
   },
   {
@@ -92,11 +117,17 @@
       3,
       7
     ],
+    "gold_experts_alt": [
+      6,
+      24,
+      3
+    ],
     "gold_route": "document",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
     "label_source": "auto:project_daily",
+    "alt_label_source": "auto:answers",
     "note": "トピック語を明示。易しい床（回帰検出用）"
   },
   {
@@ -112,11 +143,18 @@
       8,
       9
     ],
+    "gold_experts_alt": [
+      26,
+      27,
+      9,
+      8
+    ],
     "gold_route": "document",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
     "label_source": "auto:project_daily",
+    "alt_label_source": "auto:answers",
     "note": "トピック語を明示。易しい床（回帰検出用）"
   },
   {
@@ -132,11 +170,18 @@
       38,
       20
     ],
+    "gold_experts_alt": [
+      40,
+      38,
+      39,
+      20
+    ],
     "gold_route": "person",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
     "label_source": "auto:project_daily",
+    "alt_label_source": "auto:answers",
     "note": "トピック語を明示。易しい床（回帰検出用）"
   },
   {
@@ -152,11 +197,18 @@
       29,
       11
     ],
+    "gold_experts_alt": [
+      10,
+      29,
+      11,
+      28
+    ],
     "gold_route": "document",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
     "label_source": "auto:project_daily",
+    "alt_label_source": "auto:answers",
     "note": "トピック語を明示。易しい床（回帰検出用）"
   },
   {
@@ -172,11 +224,17 @@
       14,
       15
     ],
+    "gold_experts_alt": [
+      16,
+      13,
+      14
+    ],
     "gold_route": "person",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
     "label_source": "auto:project_daily",
+    "alt_label_source": "auto:answers",
     "note": "トピック語を明示。易しい床（回帰検出用）"
   },
   {
@@ -192,11 +250,18 @@
       34,
       18
     ],
+    "gold_experts_alt": [
+      17,
+      34,
+      33,
+      18
+    ],
     "gold_route": "prior_answer",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
     "label_source": "auto:project_daily",
+    "alt_label_source": "auto:answers",
     "note": "トピック語を明示。易しい床（回帰検出用）"
   },
   {
@@ -209,6 +274,11 @@
     "gold_experts": [
       25
     ],
+    "gold_experts_alt": [
+      24,
+      25,
+      6
+    ],
     "gold_route": "document",
     "expect_abstain": false,
     "constraint": {
@@ -216,6 +286,7 @@
     },
     "source_topic": null,
     "label_source": "auto:project_daily",
+    "alt_label_source": "auto:answers",
     "note": "症状のみ＋拠点制約(福岡)。制約を無視すると外れる"
   },
   {
@@ -229,6 +300,7 @@
       2,
       3
     ],
+    "gold_experts_alt": [],
     "gold_route": "person",
     "expect_abstain": false,
     "constraint": {
@@ -236,6 +308,7 @@
     },
     "source_topic": null,
     "label_source": "auto:project_daily",
+    "alt_label_source": "auto:answers",
     "note": "症状のみ＋拠点制約(本社)。制約を無視すると外れる"
   },
   {
@@ -249,6 +322,7 @@
       13,
       14
     ],
+    "gold_experts_alt": [],
     "gold_route": "person",
     "expect_abstain": false,
     "constraint": {
@@ -256,6 +330,7 @@
     },
     "source_topic": null,
     "label_source": "auto:project_daily",
+    "alt_label_source": "auto:answers",
     "note": "症状のみ＋拠点制約(本社)。制約を無視すると外れる"
   },
   {
@@ -269,6 +344,11 @@
       15,
       6
     ],
+    "gold_experts_alt": [
+      14,
+      15,
+      16
+    ],
     "gold_route": "prior_answer",
     "expect_abstain": false,
     "constraint": {
@@ -276,6 +356,7 @@
     },
     "source_topic": null,
     "label_source": "auto:project_daily",
+    "alt_label_source": "auto:answers",
     "note": "症状のみ＋拠点制約(大阪)。制約を無視すると外れる"
   },
   {
@@ -289,6 +370,7 @@
       13,
       14
     ],
+    "gold_experts_alt": [],
     "gold_route": "person",
     "expect_abstain": false,
     "constraint": {
@@ -296,6 +378,7 @@
     },
     "source_topic": null,
     "label_source": "auto:project_daily",
+    "alt_label_source": "auto:answers",
     "note": "症状のみ＋拠点制約(本社)。制約を無視すると外れる"
   },
   {
@@ -311,11 +394,16 @@
       25,
       13
     ],
+    "gold_experts_alt": [
+      15,
+      25
+    ],
     "gold_route": "person",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
     "label_source": "auto:project_daily",
+    "alt_label_source": "auto:answers",
     "note": "症状のみ。トピック語をクエリから除去済み"
   },
   {
@@ -331,11 +419,17 @@
       2,
       21
     ],
+    "gold_experts_alt": [
+      3,
+      2,
+      1
+    ],
     "gold_route": "prior_answer",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
     "label_source": "auto:project_daily",
+    "alt_label_source": "auto:answers",
     "note": "症状のみ。トピック語をクエリから除去済み"
   },
   {
@@ -351,11 +445,17 @@
       7,
       33
     ],
+    "gold_experts_alt": [
+      6,
+      7,
+      25
+    ],
     "gold_route": "document",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
     "label_source": "auto:project_daily",
+    "alt_label_source": "auto:answers",
     "note": "症状のみ。トピック語をクエリから除去済み"
   },
   {
@@ -371,11 +471,17 @@
       22,
       14
     ],
+    "gold_experts_alt": [
+      22,
+      15,
+      16
+    ],
     "gold_route": "person",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
     "label_source": "auto:project_daily",
+    "alt_label_source": "auto:answers",
     "note": "症状のみ。トピック語をクエリから除去済み"
   },
   {
@@ -391,11 +497,16 @@
       3,
       2
     ],
+    "gold_experts_alt": [
+      3,
+      21
+    ],
     "gold_route": "person",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
     "label_source": "auto:project_daily",
+    "alt_label_source": "auto:answers",
     "note": "症状のみ。トピック語をクエリから除去済み"
   },
   {
@@ -411,11 +522,17 @@
       5,
       22
     ],
+    "gold_experts_alt": [
+      5,
+      23,
+      4
+    ],
     "gold_route": "prior_answer",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
     "label_source": "auto:project_daily",
+    "alt_label_source": "auto:answers",
     "note": "症状のみ。トピック語をクエリから除去済み"
   },
   {
@@ -431,11 +548,18 @@
       32,
       30
     ],
+    "gold_experts_alt": [
+      31,
+      12,
+      32,
+      30
+    ],
     "gold_route": "document",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
     "label_source": "auto:project_daily",
+    "alt_label_source": "auto:answers",
     "note": "症状のみ。トピック語をクエリから除去済み"
   },
   {
@@ -451,11 +575,18 @@
       36,
       37
     ],
+    "gold_experts_alt": [
+      35,
+      19,
+      36,
+      37
+    ],
     "gold_route": "document",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
     "label_source": "auto:project_daily",
+    "alt_label_source": "auto:answers",
     "note": "症状のみ。トピック語をクエリから除去済み"
   },
   {
@@ -471,11 +602,17 @@
       25,
       6
     ],
+    "gold_experts_alt": [
+      25,
+      33,
+      15
+    ],
     "gold_route": "document",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
     "label_source": "auto:project_daily",
+    "alt_label_source": "auto:answers",
     "note": "症状のみ。トピック語をクエリから除去済み"
   },
   {
@@ -491,11 +628,17 @@
       22,
       39
     ],
+    "gold_experts_alt": [
+      5,
+      22,
+      4
+    ],
     "gold_route": "prior_answer",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
     "label_source": "auto:project_daily",
+    "alt_label_source": "auto:answers",
     "note": "症状のみ。トピック語をクエリから除去済み"
   },
   {
@@ -508,11 +651,17 @@
     "gold_experts": [
       15
     ],
+    "gold_experts_alt": [
+      14,
+      15,
+      16
+    ],
     "gold_route": "person",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": "ECサイト構築",
     "label_source": "human:pr46",
+    "alt_label_source": "auto:answers",
     "note": "人手ラベルは1名。自動導出は開発部4名一括で鈍い"
   },
   {
@@ -525,11 +674,13 @@
     "gold_experts": [
       16
     ],
+    "gold_experts_alt": [],
     "gold_route": "person",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": "モバイルアプリ開発",
     "label_source": "human:pr46",
+    "alt_label_source": "auto:answers",
     "note": "人手ラベルは1名"
   },
   {
@@ -543,11 +694,16 @@
       14,
       15
     ],
+    "gold_experts_alt": [
+      15,
+      25
+    ],
     "gold_route": "person",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": "クラウド移行支援",
     "label_source": "human:pr46",
+    "alt_label_source": "auto:answers",
     "note": "人手ラベルは2名。費用試算という別切り口"
   },
   {
@@ -561,11 +717,13 @@
       2,
       3
     ],
+    "gold_experts_alt": [],
     "gold_route": "person",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": "基幹システム導入",
     "label_source": "human:pr46",
+    "alt_label_source": "auto:answers",
     "note": "人手ラベルは2名"
   },
   {
@@ -580,11 +738,17 @@
       3,
       21
     ],
+    "gold_experts_alt": [
+      21,
+      2,
+      1
+    ],
     "gold_route": "person",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": "契約管理システム導入",
     "label_source": "human:pr46",
+    "alt_label_source": "auto:answers",
     "note": "人手ラベルは3名"
   },
   {
@@ -598,11 +762,17 @@
       18,
       33
     ],
+    "gold_experts_alt": [
+      25,
+      33,
+      15
+    ],
     "gold_route": "person",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": "保守運用サポート",
     "label_source": "human:pr46",
+    "alt_label_source": "auto:answers",
     "note": "人手ラベルは2名"
   },
   {
@@ -616,11 +786,13 @@
       3,
       21
     ],
+    "gold_experts_alt": [],
     "gold_route": "person",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": "見積書作成・顧客提示",
     "label_source": "human:pr46",
+    "alt_label_source": "auto:answers",
     "note": "営業事務。自前22トピック体系に無い領域"
   },
   {
@@ -634,11 +806,13 @@
       33,
       34
     ],
+    "gold_experts_alt": [],
     "gold_route": "person",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": "クレーム・エスカレーション対応",
     "label_source": "human:pr46",
+    "alt_label_source": "auto:answers",
     "note": "CS。自前22トピック体系に無い領域"
   },
   {
@@ -652,11 +826,13 @@
       28,
       29
     ],
+    "gold_experts_alt": [],
     "gold_route": "person",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": "出張旅費精算方法",
     "label_source": "human:pr46",
+    "alt_label_source": "auto:answers",
     "note": "経理の庶務。自前22トピック体系に無い領域"
   },
   {
@@ -670,15 +846,294 @@
       22,
       23
     ],
+    "gold_experts_alt": [],
     "gold_route": "person",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": "展示会出展企画",
     "label_source": "human:pr46",
+    "alt_label_source": "auto:answers",
     "note": "マーケの日常業務。自前22トピック体系に無い領域"
   },
   {
     "id": 36,
+    "query": "画面が出るまでに時間がかかると言われました。詰まりどころを調べた経験のある方を探しています。",
+    "difficulty": "L2",
+    "gold_topics": [
+      "パフォーマンスチューニング"
+    ],
+    "gold_experts": [
+      13,
+      16
+    ],
+    "gold_experts_alt": [],
+    "gold_route": "person",
+    "expect_abstain": false,
+    "constraint": null,
+    "source_topic": "パフォーマンスチューニング",
+    "label_source": "human:pr46",
+    "alt_label_source": "auto:answers",
+    "note": "人手ラベルは2名。自動導出（開発部4名）より細かい"
+  },
+  {
+    "id": 37,
+    "query": "一次受けの窓口を外に出したいそうです。回した経験のある方に相談したいです。",
+    "difficulty": "L2",
+    "gold_topics": [
+      "問い合わせ・ヘルプデスク運用"
+    ],
+    "gold_experts": [
+      17,
+      34
+    ],
+    "gold_experts_alt": [
+      17,
+      34,
+      33,
+      18
+    ],
+    "gold_route": "person",
+    "expect_abstain": false,
+    "constraint": null,
+    "source_topic": "ヘルプデスク運用代行",
+    "label_source": "human:pr46",
+    "alt_label_source": "auto:answers",
+    "note": "人手ラベルは2名"
+  },
+  {
+    "id": 38,
+    "query": "出稿の設計から見直したいと言われました。伴走した経験のある方はどなたでしょうか。",
+    "difficulty": "L2",
+    "gold_topics": [
+      "Webマーケティング・広告"
+    ],
+    "gold_experts": [
+      23
+    ],
+    "gold_experts_alt": [
+      5,
+      23,
+      4
+    ],
+    "gold_route": "person",
+    "expect_abstain": false,
+    "constraint": null,
+    "source_topic": "Webマーケティング支援",
+    "label_source": "human:pr46",
+    "alt_label_source": "auto:answers",
+    "note": "人手ラベルは1名。最も細かいラベル"
+  },
+  {
+    "id": 39,
+    "query": "受け付けた連絡を人手で台帳に写しているそうです。仕組みを入れた経験のある方を探しています。",
+    "difficulty": "L2",
+    "gold_topics": [
+      "問い合わせ・ヘルプデスク運用"
+    ],
+    "gold_experts": [
+      17
+    ],
+    "gold_experts_alt": [
+      17,
+      34,
+      33,
+      18
+    ],
+    "gold_route": "person",
+    "expect_abstain": false,
+    "constraint": null,
+    "source_topic": "問い合わせ対応システム導入",
+    "label_source": "human:pr46",
+    "alt_label_source": "auto:answers",
+    "note": "人手ラベルは1名。同じトピックでも別の切り口"
+  },
+  {
+    "id": 40,
+    "query": "各部署がばらばらに数字を持っていて突き合わせに時間がかかるそうです。基盤を作った経験のある方に相談したいです。",
+    "difficulty": "L2",
+    "gold_topics": [
+      "データ基盤・分析"
+    ],
+    "gold_experts": [
+      14,
+      15,
+      16
+    ],
+    "gold_experts_alt": [
+      22,
+      15,
+      16
+    ],
+    "gold_route": "person",
+    "expect_abstain": false,
+    "constraint": null,
+    "source_topic": "データ基盤構築",
+    "label_source": "human:pr46",
+    "alt_label_source": "auto:answers",
+    "note": "人手ラベルは3名"
+  },
+  {
+    "id": 41,
+    "query": "自社の発信そのものを外に任せたいと言われました。引き受けた経験のある方を探しています。",
+    "difficulty": "L2",
+    "gold_topics": [
+      "SNS運用"
+    ],
+    "gold_experts": [
+      4,
+      5,
+      22
+    ],
+    "gold_experts_alt": [
+      5,
+      22,
+      4
+    ],
+    "gold_route": "person",
+    "expect_abstain": false,
+    "constraint": null,
+    "source_topic": "SNS運用代行",
+    "label_source": "human:pr46",
+    "alt_label_source": "auto:answers",
+    "note": "人手ラベルは3名"
+  },
+  {
+    "id": 42,
+    "query": "事務用品の手配と保管の仕方が拠点ごとにばらばらだそうです。整理した経験のある方に相談したいです。",
+    "difficulty": "L2",
+    "gold_topics": [
+      "総務・法務"
+    ],
+    "gold_experts": [
+      12,
+      30,
+      31,
+      32
+    ],
+    "gold_experts_alt": [
+      31,
+      12,
+      32,
+      30
+    ],
+    "gold_route": "person",
+    "expect_abstain": false,
+    "constraint": null,
+    "source_topic": "オフィス備品の発注・管理",
+    "label_source": "human:pr46",
+    "alt_label_source": "auto:answers",
+    "note": "総務の4名。部署単位のラベルだが導出経路は独立"
+  },
+  {
+    "id": 43,
+    "query": "新しい取り組みを外に出す文面を用意したいそうです。書き慣れている方はどなたでしょうか。",
+    "difficulty": "L2",
+    "gold_topics": [
+      "広報・PR"
+    ],
+    "gold_experts": [
+      20,
+      38,
+      39,
+      40
+    ],
+    "gold_experts_alt": [
+      40,
+      38,
+      39,
+      20
+    ],
+    "gold_route": "person",
+    "expect_abstain": false,
+    "constraint": null,
+    "source_topic": "プレスリリース原稿作成",
+    "label_source": "human:pr46",
+    "alt_label_source": "auto:answers",
+    "note": "広報の4名"
+  },
+  {
+    "id": 44,
+    "query": "経験者の応募書類をどの観点で見るか揃っていないそうです。見慣れている方に相談したいです。",
+    "difficulty": "L2",
+    "gold_topics": [
+      "人事・採用"
+    ],
+    "gold_experts": [
+      8,
+      9,
+      26,
+      27
+    ],
+    "gold_experts_alt": [
+      26,
+      27,
+      9,
+      8
+    ],
+    "gold_route": "person",
+    "expect_abstain": false,
+    "constraint": null,
+    "source_topic": "中途採用書類選考",
+    "label_source": "human:pr46",
+    "alt_label_source": "auto:answers",
+    "note": "人事の4名"
+  },
+  {
+    "id": 45,
+    "query": "部門ごとの使い方の予実が月末までわからないそうです。整えた経験のある方を探しています。",
+    "difficulty": "L2",
+    "gold_topics": [
+      "経理・決算"
+    ],
+    "gold_experts": [
+      10,
+      11,
+      28,
+      29
+    ],
+    "gold_experts_alt": [
+      10,
+      29,
+      11,
+      28
+    ],
+    "gold_route": "person",
+    "expect_abstain": false,
+    "constraint": null,
+    "source_topic": "予算管理表の更新",
+    "label_source": "human:pr46",
+    "alt_label_source": "auto:answers",
+    "note": "経理の4名"
+  },
+  {
+    "id": 46,
+    "query": "同じ品目なのに拠点ごとに単価が違うと言われました。詰めた経験のある方に相談したいです。",
+    "difficulty": "L2",
+    "gold_topics": [
+      "購買・仕入れ"
+    ],
+    "gold_experts": [
+      19,
+      35,
+      36,
+      37
+    ],
+    "gold_experts_alt": [
+      35,
+      19,
+      36,
+      37
+    ],
+    "gold_route": "person",
+    "expect_abstain": false,
+    "constraint": null,
+    "source_topic": "仕入れ先との価格交渉",
+    "label_source": "human:pr46",
+    "alt_label_source": "auto:answers",
+    "note": "購買の4名。同トピックの自動ラベル項目と突き合わせられる"
+  },
+  {
+    "id": 47,
     "query": "新しく建てる拠点で、業務の中心の仕組みと現場の端末をまとめて面倒みてほしいと言われました。誰に相談すべきでしょうか。",
     "difficulty": "L3",
     "gold_topics": [
@@ -691,15 +1146,20 @@
       25,
       6
     ],
+    "gold_experts_alt": [
+      24,
+      25
+    ],
     "gold_route": "person",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
     "label_source": "authored",
+    "alt_label_source": "auto:answers",
     "note": "拠点新設。2領域にまたがる"
   },
   {
-    "id": 37,
+    "id": 48,
     "query": "たのめーるの注文を社内の仕組みと繋いで自動化したいというご相談をいただきました。",
     "difficulty": "L3",
     "gold_topics": [
@@ -712,15 +1172,22 @@
       16,
       13
     ],
+    "gold_experts_alt": [
+      35,
+      19,
+      16,
+      13
+    ],
     "gold_route": "person",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
     "label_source": "authored",
+    "alt_label_source": "auto:answers",
     "note": "商材名のみ。業務領域は書かれていない"
   },
   {
-    "id": 38,
+    "id": 49,
     "query": "複合機の記録から、誰がいつ何を出力したか後から追えるようにしたいそうです。",
     "difficulty": "L3",
     "gold_topics": [
@@ -731,15 +1198,22 @@
       25,
       6
     ],
+    "gold_experts_alt": [
+      6,
+      7,
+      24,
+      25
+    ],
     "gold_route": "person",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
     "label_source": "authored",
+    "alt_label_source": "auto:answers",
     "note": "商材名＋監査要件"
   },
   {
-    "id": 39,
+    "id": 50,
     "query": "締めを早めたいのですが、数字が各部署に散らばっているのが原因のようです。",
     "difficulty": "L3",
     "gold_topics": [
@@ -752,15 +1226,22 @@
       15,
       16
     ],
+    "gold_experts_alt": [
+      10,
+      29,
+      22,
+      15
+    ],
     "gold_route": "person",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
     "label_source": "authored",
+    "alt_label_source": "auto:answers",
     "note": "業務課題と技術課題の橋渡し"
   },
   {
-    "id": 40,
+    "id": 51,
     "query": "自社の設備から外部の基盤へ移したあと、止まったときに誰が面倒を見るのかが決まっていません。",
     "difficulty": "L3",
     "gold_topics": [
@@ -772,15 +1253,21 @@
       14,
       33
     ],
+    "gold_experts_alt": [
+      15,
+      25,
+      33
+    ],
     "gold_route": "person",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
     "label_source": "authored",
+    "alt_label_source": "auto:answers",
     "note": "移行と運用の継ぎ目"
   },
   {
-    "id": 41,
+    "id": 52,
     "query": "求人の反応が悪く、会社の見え方から作り直したいと言われました。",
     "difficulty": "L3",
     "gold_topics": [
@@ -793,15 +1280,22 @@
       39,
       40
     ],
+    "gold_experts_alt": [
+      26,
+      27,
+      40,
+      38
+    ],
     "gold_route": "person",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
     "label_source": "authored",
+    "alt_label_source": "auto:answers",
     "note": "採用課題が発信課題に転化"
   },
   {
-    "id": 42,
+    "id": 53,
     "query": "通販を始めたいそうですが、書面や規約まわりも整っていないとのことです。",
     "difficulty": "L3",
     "gold_topics": [
@@ -814,15 +1308,22 @@
       31,
       12
     ],
+    "gold_experts_alt": [
+      14,
+      15,
+      31,
+      12
+    ],
     "gold_route": "person",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
     "label_source": "authored",
+    "alt_label_source": "auto:answers",
     "note": "構築案件に法務が絡む"
   },
   {
-    "id": 43,
+    "id": 54,
     "query": "お客様の担当者情報を営業が持ち歩いているのが心配だと言われました。",
     "difficulty": "L3",
     "gold_topics": [
@@ -835,15 +1336,22 @@
       25,
       6
     ],
+    "gold_experts_alt": [
+      3,
+      21,
+      6,
+      7
+    ],
     "gold_route": "person",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
     "label_source": "authored",
+    "alt_label_source": "auto:answers",
     "note": "情報管理が2領域にまたがる"
   },
   {
-    "id": 44,
+    "id": 55,
     "query": "窓口に来る連絡を分類して、よくあるものは自動で返したいそうです。",
     "difficulty": "L3",
     "gold_topics": [
@@ -856,15 +1364,22 @@
       15,
       16
     ],
+    "gold_experts_alt": [
+      17,
+      34,
+      22,
+      15
+    ],
     "gold_route": "person",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
     "label_source": "authored",
+    "alt_label_source": "auto:answers",
     "note": "運用改善＋分析"
   },
   {
-    "id": 45,
+    "id": 56,
     "query": "スマホから使えるようにしたら重くて使い物にならないと言われました。",
     "difficulty": "L3",
     "gold_topics": [
@@ -875,76 +1390,238 @@
       16,
       13
     ],
+    "gold_experts_alt": [],
     "gold_route": "person",
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
     "label_source": "authored",
+    "alt_label_source": "auto:answers",
     "note": "実装と性能の切り分け"
   },
   {
-    "id": 46,
+    "id": 57,
     "query": "工場の生産ラインで、装置を止めずに制御の設定を見直したいというご相談です。進め方を相談したいです。",
     "difficulty": "L4",
     "gold_topics": [],
     "gold_experts": [],
+    "gold_experts_alt": [],
     "gold_route": "none",
     "expect_abstain": true,
     "constraint": null,
     "source_topic": null,
     "label_source": "authored",
+    "alt_label_source": "auto:answers",
     "note": "製造制御。社内に案件も日報も無い。文面は L2/L3 と同じ体裁にしてある"
   },
   {
-    "id": 47,
+    "id": 58,
     "query": "海外に拠点を新設する際の登記と現地の労務手続きについて、提案の勘所を知りたいです。",
     "difficulty": "L4",
     "gold_topics": [],
     "gold_experts": [],
+    "gold_experts_alt": [],
     "gold_route": "none",
     "expect_abstain": true,
     "constraint": null,
     "source_topic": null,
     "label_source": "authored",
+    "alt_label_source": "auto:answers",
     "note": "海外法務。社内に痕跡が無い"
   },
   {
-    "id": 48,
+    "id": 59,
     "query": "自社で考えた仕組みを権利化したいと言われました。出願の実務をどう進めるか相談したいです。",
     "difficulty": "L4",
     "gold_topics": [],
     "gold_experts": [],
+    "gold_experts_alt": [],
     "gold_route": "none",
     "expect_abstain": true,
     "constraint": null,
     "source_topic": null,
     "label_source": "authored",
+    "alt_label_source": "auto:answers",
     "note": "知財。社内に痕跡が無い"
   },
   {
-    "id": 49,
+    "id": 60,
     "query": "船舶に載せる通信設備の要件を詰めたいのですが、押さえるべき点を相談したいです。",
     "difficulty": "L4",
     "gold_topics": [],
     "gold_experts": [],
+    "gold_experts_alt": [],
     "gold_route": "none",
     "expect_abstain": true,
     "constraint": null,
     "source_topic": null,
     "label_source": "authored",
+    "alt_label_source": "auto:answers",
     "note": "特殊業界。社内に痕跡が無い"
   },
   {
-    "id": 50,
+    "id": 61,
     "query": "医薬品の製造品質監査に向けて記録の整備を求められています。何から着手すべきでしょうか。",
     "difficulty": "L4",
     "gold_topics": [],
     "gold_experts": [],
+    "gold_experts_alt": [],
     "gold_route": "none",
     "expect_abstain": true,
     "constraint": null,
     "source_topic": null,
     "label_source": "authored",
+    "alt_label_source": "auto:answers",
     "note": "規制業務。社内に痕跡が無い"
+  },
+  {
+    "id": 62,
+    "query": "建物の内装工事の段取りと職人の手配をどう組むか、進め方を相談したいです。",
+    "difficulty": "L4",
+    "gold_topics": [],
+    "gold_experts": [],
+    "gold_experts_alt": [],
+    "gold_route": "none",
+    "expect_abstain": true,
+    "constraint": null,
+    "source_topic": null,
+    "label_source": "authored",
+    "alt_label_source": "auto:answers",
+    "note": "建築施工。社内に痕跡が無い"
+  },
+  {
+    "id": 63,
+    "query": "ビニールハウスの温度と水やりを自動で回したいと言われました。何から手を付けるべきでしょうか。",
+    "difficulty": "L4",
+    "gold_topics": [],
+    "gold_experts": [],
+    "gold_experts_alt": [],
+    "gold_route": "none",
+    "expect_abstain": true,
+    "constraint": null,
+    "source_topic": null,
+    "label_source": "authored",
+    "alt_label_source": "auto:answers",
+    "note": "農業。IT の話に見えるが社内に痕跡が無い"
+  },
+  {
+    "id": 64,
+    "query": "診療で使う機器の薬事の届出について、進め方の勘所を知りたいです。",
+    "difficulty": "L4",
+    "gold_topics": [],
+    "gold_experts": [],
+    "gold_experts_alt": [],
+    "gold_route": "none",
+    "expect_abstain": true,
+    "constraint": null,
+    "source_topic": null,
+    "label_source": "authored",
+    "alt_label_source": "auto:answers",
+    "note": "薬事。社内に痕跡が無い"
+  },
+  {
+    "id": 65,
+    "query": "研修の中身ではなく、学習の到達度をどう測るかの設計を相談したいです。",
+    "difficulty": "L4",
+    "gold_topics": [],
+    "gold_experts": [],
+    "gold_experts_alt": [],
+    "gold_route": "none",
+    "expect_abstain": true,
+    "constraint": null,
+    "source_topic": null,
+    "label_source": "authored",
+    "alt_label_source": "auto:answers",
+    "note": "教育評価。人事に見えるが社内に痕跡が無い"
+  },
+  {
+    "id": 66,
+    "query": "取引先の与信枠をどの基準で決めるか、社内に決まりがなく困っているそうです。",
+    "difficulty": "L4",
+    "gold_topics": [],
+    "gold_experts": [],
+    "gold_experts_alt": [],
+    "gold_route": "none",
+    "expect_abstain": true,
+    "constraint": null,
+    "source_topic": null,
+    "label_source": "authored",
+    "alt_label_source": "auto:answers",
+    "note": "与信管理。経理に見えるが社内に痕跡が無い"
+  },
+  {
+    "id": 67,
+    "query": "厨房の衛生の記録をどう残すべきか指摘を受けたそうです。進め方を相談したいです。",
+    "difficulty": "L4",
+    "gold_topics": [],
+    "gold_experts": [],
+    "gold_experts_alt": [],
+    "gold_route": "none",
+    "expect_abstain": true,
+    "constraint": null,
+    "source_topic": null,
+    "label_source": "authored",
+    "alt_label_source": "auto:answers",
+    "note": "食品衛生。社内に痕跡が無い"
+  },
+  {
+    "id": 68,
+    "query": "部品の寸法のばらつきをどう抑えるか、工程側の見直しを相談したいです。",
+    "difficulty": "L4",
+    "gold_topics": [],
+    "gold_experts": [],
+    "gold_experts_alt": [],
+    "gold_route": "none",
+    "expect_abstain": true,
+    "constraint": null,
+    "source_topic": null,
+    "label_source": "authored",
+    "alt_label_source": "auto:answers",
+    "note": "製造品質。社内に痕跡が無い"
+  },
+  {
+    "id": 69,
+    "query": "撮影した映像の二次利用の許諾をどう進めるか、勘所を知りたいです。",
+    "difficulty": "L4",
+    "gold_topics": [],
+    "gold_experts": [],
+    "gold_experts_alt": [],
+    "gold_route": "none",
+    "expect_abstain": true,
+    "constraint": null,
+    "source_topic": null,
+    "label_source": "authored",
+    "alt_label_source": "auto:answers",
+    "note": "映像の権利処理。法務に見えるが社内に痕跡が無い"
+  },
+  {
+    "id": 70,
+    "query": "保険の料率をどう見積もるかの考え方を知りたいと言われました。",
+    "difficulty": "L4",
+    "gold_topics": [],
+    "gold_experts": [],
+    "gold_experts_alt": [],
+    "gold_route": "none",
+    "expect_abstain": true,
+    "constraint": null,
+    "source_topic": null,
+    "label_source": "authored",
+    "alt_label_source": "auto:answers",
+    "note": "保険数理。社内に痕跡が無い"
+  },
+  {
+    "id": 71,
+    "query": "テナントの賃貸借の条件をどう詰めるか、実務の進め方を相談したいです。",
+    "difficulty": "L4",
+    "gold_topics": [],
+    "gold_experts": [],
+    "gold_experts_alt": [],
+    "gold_route": "none",
+    "expect_abstain": true,
+    "constraint": null,
+    "source_topic": null,
+    "label_source": "authored",
+    "alt_label_source": "auto:answers",
+    "note": "不動産賃貸。契約に見えるが社内に痕跡が無い"
   }
 ]

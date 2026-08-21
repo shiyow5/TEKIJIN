@@ -17,6 +17,7 @@ import json
 import math
 import os
 import random
+import sys
 from collections import Counter, defaultdict
 
 random.seed(42)
@@ -86,6 +87,9 @@ def recall_at_k(pred, gold, k=K):
 
 
 def main():
+    # --alt: answers だけから導出した第2の正解で測る（#73）。主 gold と経路が独立なので、
+    # ベースラインの高さが「導出経路の癖」なのかを切り分けられる。
+    gold_key = "gold_experts_alt" if "--alt" in sys.argv else "gold_experts"
     person = load("eval/eval_person.json")
     employees = load("people/employees.json")
     profiles = load("people/employee_profiles.json")
@@ -151,7 +155,8 @@ def main():
 
     layers = ["L1", "L2", "L3"]
     print(
-        f"評価セット: eval_person.json（{len(person)}件）。L4は abstain 判定なので Recall 対象外\n"
+        f"評価セット: eval_person.json（{len(person)}件、gold={gold_key}）。"
+        "L4は abstain 判定なので Recall 対象外\n"
     )
     print(f"{'baseline':18s} " + "".join(f"{l:>9s}" for l in layers) + f"{'全体':>9s}")
     print("-" * 62)
@@ -161,7 +166,7 @@ def main():
         for q in person:
             if q["difficulty"] == "L4":
                 continue
-            r = recall_at_k(fn(q), q["gold_experts"])
+            r = recall_at_k(fn(q), q[gold_key])
             if r is not None:
                 per[q["difficulty"]].append(r)
         row = [sum(per[l]) / len(per[l]) if per[l] else float("nan") for l in layers]

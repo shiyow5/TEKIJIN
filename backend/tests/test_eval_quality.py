@@ -164,7 +164,7 @@ def test_enough_independent_samples(person):
 
 def test_difficulty_layers_present(person):
     dist = Counter(q["difficulty"] for q in person)
-    assert dist == {"L1": 10, "L2": 25, "L3": 10, "L4": 5}, dist
+    assert dist == {"L1": 10, "L2": 36, "L3": 10, "L4": 15}, dist
 
 
 def test_l4_expects_abstain(person):
@@ -214,7 +214,7 @@ def test_human_labeled_slice_present(person):
     scripts/eval_label_agreement.py による外部検証が成立する。
     """
     human = [q for q in person if q["label_source"] == "human:pr46"]
-    assert len(human) == 10, f"人手ラベル由来が {len(human)} 件"
+    assert len(human) == 21, f"人手ラベル由来が {len(human)} 件"
     assert all(q["source_topic"] for q in human), "source_topic（PR #46 側のトピック名）が無い"
     assert all(q["gold_experts"] for q in human)
     # うち一定数は「自前22トピック体系に無い領域」であること（営業事務・庶務など）
@@ -232,3 +232,33 @@ def test_retrieval_set_aligned_with_person(person):
     assert {r["id"] for r in retrieval} == person_ids
     assert all(r["gold_chunks"] for r in retrieval), "根拠チャンクが空の項目がある"
     assert not math.isnan(len(retrieval))
+
+
+def test_alt_gold_is_an_independent_derivation(person):
+    """第2の正解（`gold_experts_alt`）が、主 gold と別経路で作られていること（#73）。
+
+    主 gold は `projects` + `daily_reports`、第2の正解は `answers` のみから作る。
+    完全一致してしまうなら経路を分けた意味が無く、まったく重ならないならどちらかが壊れている。
+    段B（トピックが分かった後の人の並び）の検証は、この2本の差でしか測れない。
+    """
+    scored = [q for q in person if q["difficulty"] != "L4" and q["gold_experts"]]
+    assert scored, "採点対象が空"
+    assert all("gold_experts_alt" in q for q in scored), "gold_experts_alt が無い項目がある"
+
+    both = [q for q in scored if q["gold_experts_alt"]]
+    assert len(both) >= 40, f"第2の正解を持つ項目が {len(both)} 件しかない"
+
+    def jaccard(a, b):
+        a, b = set(a), set(b)
+        return len(a & b) / len(a | b)
+
+    scores = [jaccard(q["gold_experts"], q["gold_experts_alt"]) for q in both]
+    mean = sum(scores) / len(scores)
+    assert 0.3 < mean < 0.95, f"主 gold との平均 Jaccard が {mean:.2f}（別経路として不適切）"
+
+
+def test_abstention_layer_is_large_enough(person):
+    """棄却の閾値を決めるには L4 が5件では足りなかった（#65 §6 の実測）。"""
+    l4 = [q for q in person if q["difficulty"] == "L4"]
+    assert len(l4) >= 15, f"L4 が {len(l4)} 件"
+    assert all(q["gold_route"] == "none" and not q["gold_experts"] for q in l4)

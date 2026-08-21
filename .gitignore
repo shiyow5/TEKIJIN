@@ -92,3 +92,11 @@ data/
 *.safetensors
 # keep build artifacts out of the tracked data package
 backend/src/tekijin/data/**/__pycache__/
+
+# 測定ハーネスの中間生成物（#65 / #73）。埋め込みは GPU で作り直せるので追跡しない。
+# 採否の根拠として残すのは docs/benchmarks/ablation/ の LLM 実出力だけ。
+/emb/
+*.npz
+/llm_*.json
+/rr_*.json
+/payload_*.json
