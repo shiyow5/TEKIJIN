@@ -20,6 +20,7 @@ from tekijin.models.tables import (
     EmployeeProfile,
     ProjectMember,
     Question,
+    Recommendation,
 )
 
 
@@ -50,21 +51,34 @@ def test_indexes_exist_on_filtered_columns(engine) -> None:
         ("employee_profiles", "employee_id"),
         ("evidence", "person_id"),
         ("person_topic_edges", "person_id"),
+        ("recommendations", "created_at"),  # scorer's 7-day `load` recency window
     }
     with engine.connect() as conn:
+        # Scope to the current schema (the tests run inside `tekijin_test`).
         rows = conn.execute(
             text(
                 "SELECT t.relname AS table_name, a.attname AS column_name "
                 "FROM pg_index i "
                 "JOIN pg_class t ON t.oid = i.indrelid "
+                "JOIN pg_namespace n ON n.oid = t.relnamespace "
                 "JOIN pg_attribute a "
                 "  ON a.attrelid = t.oid AND a.attnum = ANY(i.indkey) "
-                "WHERE t.relnamespace = 'public'::regnamespace"
+                "WHERE n.nspname = current_schema()"
             )
         ).all()
     indexed = {(r.table_name, r.column_name) for r in rows}
     missing = expected - indexed
     assert not missing, f"missing indexes: {missing}"
+
+
+def test_recommendation_created_at_server_default(seed_counts, session) -> None:
+    # created_at is stamped by the DB (server_default=now); the scorer's 7-day
+    # `load` window depends on it.
+    rec = Recommendation(question_id="q_0001", employee_id=3, rank=1, score=0.9)
+    session.add(rec)
+    session.flush()
+    session.refresh(rec)
+    assert rec.created_at is not None
 
 
 def test_project_members_role_check_constraint(engine, seed_counts) -> None:
@@ -99,7 +113,8 @@ def test_seed_leaves_embeddings_null(seed_counts, session) -> None:
 
 def test_seed_is_idempotent(engine, seed_counts) -> None:
     # Re-running truncates and re-inserts, converging on identical counts.
-    again = run_seed(str(engine.url), get_settings().fixtures_dir)
+    # Pass the live engine (never str(engine.url), which masks the password).
+    again = run_seed(engine=engine, fixtures_dir=get_settings().fixtures_dir)
     assert again == seed_counts
 
 
@@ -127,8 +142,31 @@ def test_answers_by_topic(seed_counts, session) -> None:
     repo = Repository(session)
     topic = "ネットワーク・VPN"
     answers = repo.answers_by_topic(topic)
-    assert answers and all(a.topic == topic for a in answers)
+    assert answers
     assert all(a.has_embedding is False for a in answers)
+    # Every returned answer is relevant either via its own topic column or via
+    # the topic array of its linked question.
+    q_topics = {q.id: q.topics for q in repo.list_questions()}
+    for a in answers:
+        assert a.topic == topic or topic in q_topics.get(a.question_id, ())
+
+
+def test_answers_by_topic_matches_via_question_topics(seed_counts, session) -> None:
+    # A runtime-style answer has topic=NULL; its topic lives on the question.
+    topic = "ネットワーク・VPN"
+    runtime = Answer(
+        id="ans_runtime_test",
+        question_id="q_0001",  # its questions.topics contains `topic`
+        responder_id=3,
+        body="runtime answer without a topic column",
+        topic=None,
+    )
+    session.add(runtime)
+    session.flush()  # visible in-session; not committed (rolled back on close)
+
+    repo = Repository(session)
+    found = {a.id for a in repo.answers_by_topic(topic)}
+    assert "ans_runtime_test" in found
 
 
 def test_questions_answers_documents(seed_counts, session) -> None:

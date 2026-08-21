@@ -81,9 +81,3 @@ def create_all(engine: Engine) -> None:
     """Create every table registered on :class:`Base`'s metadata."""
 
     Base.metadata.create_all(engine)
-
-
-def drop_all(engine: Engine) -> None:
-    """Drop every table registered on :class:`Base`'s metadata."""
-
-    Base.metadata.drop_all(engine)

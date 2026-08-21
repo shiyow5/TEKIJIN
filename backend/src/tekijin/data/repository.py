@@ -9,7 +9,7 @@ mutation.
 
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from tekijin.data.dto import (
@@ -72,7 +72,20 @@ class Repository:
         return [QuestionDTO.from_row(r) for r in rows]
 
     def answers_by_topic(self, topic: str) -> list[AnswerDTO]:
-        stmt = select(Answer).where(Answer.topic == topic).order_by(Answer.id)
+        """Answers relevant to ``topic``, matched two ways.
+
+        The fixture-only ``answers.topic`` column is NULL for answers created at
+        runtime, so the topic of a runtime answer lives on its linked question
+        (``questions.topics`` is an array). This matches on either signal:
+        ``answers.topic == topic`` OR ``topic = ANY(questions.topics)``.
+        """
+
+        stmt = (
+            select(Answer)
+            .join(Question, Answer.question_id == Question.id)
+            .where(or_(Answer.topic == topic, Question.topics.any(topic)))
+            .order_by(Answer.id)
+        )
         return [AnswerDTO.from_row(r) for r in self._session.scalars(stmt)]
 
     def answers_for_question(self, question_id: str) -> list[AnswerDTO]:

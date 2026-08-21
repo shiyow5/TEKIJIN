@@ -16,7 +16,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from sqlalchemy import text
+from sqlalchemy import Engine, text
 from sqlalchemy.orm import Session
 
 from tekijin.config import get_settings
@@ -25,6 +25,7 @@ from tekijin.data.db import (
     create_all,
     ensure_pgvector,
     get_engine,
+    get_sessionmaker,
     session_scope,
 )
 from tekijin.data.mappers import build_all
@@ -79,19 +80,25 @@ def seed_session(session: Session, fixtures_dir: Path) -> dict[str, int]:
 def run_seed(
     database_url: str | None = None,
     fixtures_dir: Path | None = None,
+    *,
+    engine: Engine | None = None,
 ) -> dict[str, int]:
-    """Full seed pipeline: ensure extension, create schema, load fixtures."""
+    """Full seed pipeline: ensure extension, create schema, load fixtures.
+
+    Pass ``engine`` to reuse an existing engine (preferred by callers that
+    already hold one — a live ``Engine`` carries the real password, whereas
+    ``str(engine.url)`` masks it and would produce a broken URL). Otherwise an
+    engine is built from ``database_url`` (or the configured default).
+    """
 
     settings = get_settings()
-    engine = get_engine(database_url)
+    eng = engine if engine is not None else get_engine(database_url)
     fixtures = fixtures_dir or settings.fixtures_dir
 
-    ensure_pgvector(engine)
-    create_all(engine)
+    ensure_pgvector(eng)
+    create_all(eng)
 
-    from tekijin.data.db import get_sessionmaker
-
-    factory = get_sessionmaker(engine)
+    factory = get_sessionmaker(eng)
     with session_scope(factory) as session:
         counts = seed_session(session, fixtures)
     return counts

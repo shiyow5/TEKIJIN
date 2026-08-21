@@ -32,6 +32,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    func,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -201,12 +202,15 @@ class Recommendation(Base):
     __tablename__ = "recommendations"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    question_id: Mapped[str] = mapped_column(ForeignKey("questions.id"))
-    employee_id: Mapped[int] = mapped_column(ForeignKey("employees.id"))
+    question_id: Mapped[str] = mapped_column(ForeignKey("questions.id"), index=True)
+    employee_id: Mapped[int] = mapped_column(ForeignKey("employees.id"), index=True)
     rank: Mapped[int | None] = mapped_column(Integer)
     score: Mapped[float | None] = mapped_column(Float)
     reasons: Mapped[dict | None] = mapped_column(JSONB)
     outcome: Mapped[str | None] = mapped_column(String(32))
+    # Needed by the scorer's ``load`` calc (recommendations in the last 7 days,
+    # technical-spec §5). DB stamps it at insert; indexed for the recency window.
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now(), index=True)
 
 
 class Event(Base):
