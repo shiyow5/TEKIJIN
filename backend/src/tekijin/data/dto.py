@@ -21,6 +21,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
         Employee,
         EmployeeProfile,
         Project,
+        ProjectMember,
         Question,
         Skill,
     )
@@ -202,4 +203,39 @@ class ProjectWithMembersDTO:
             industry=row.industry,
             status=row.status,
             members=members,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectMembershipDTO:
+    """One employee's membership in a project, with the project's fields.
+
+    Built for the C6 scorer: ``role`` drives the evidence base_score
+    (lead 0.8 / member 0.5), ``product`` drives topic matching, and the dates
+    drive recency.
+    """
+
+    project_id: int
+    employee_id: int
+    role: str
+    product: str | None
+    industry: str | None
+    subject: str | None
+    status: str | None
+    start_date: dt.date | None
+    end_date: dt.date | None
+
+    @classmethod
+    def from_member(cls, member: ProjectMember) -> ProjectMembershipDTO:
+        project = member.project
+        return cls(
+            project_id=member.project_id,
+            employee_id=member.employee_id,
+            role=member.role,
+            product=project.product,
+            industry=project.industry,
+            subject=project.subject,
+            status=project.status,
+            start_date=project.start_date,
+            end_date=project.end_date,
         )
