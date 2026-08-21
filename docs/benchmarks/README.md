@@ -78,10 +78,14 @@ Apache-2.0 と 1024次元の扱いやすさを優先するなら Qwen3-Embedding
 uv venv .venv
 uv pip install --python .venv/bin/python "sentence-transformers>=3" torch "huggingface_hub[cli]"
 
-# 【重要】共有機なので、重い処理は1つずつ nohup で流す。
-# vLLM(35B, GMU=0.60) の起動と埋め込み3本のエンコードを1つの ssh セッションで同時に投げたら、
-# ping は通るのに ssh が10分以上返らなくなり、セッションごと落ちた（2026-08-22）。
+# 【重要】重い処理は1つずつ nohup で流す。前景の ssh セッションで走らせると、
+# 接続が切れた時点でリモート側も SIGHUP で死ぬ（2026-08-22 に実際に消えた）。
 #   nohup <cmd> > run.log 2>&1 &    … として、ログを見に行く
+#
+# 【ssh が繋がらないとき】ping は通るのに ssh だけタイムアウトするなら、
+# Tailscale SSH の再認証切れを疑う。短い timeout で殺すと下のメッセージが見えない。
+#   # Tailscale SSH requires an additional check. To authenticate, visit: https://login.tailscale.com/a/...
+# 長め（600秒）で1回だけ叩いて stderr を最後まで読むこと。
 
 # Triton の JIT が Python.h を要求する。システムに python3-dev が無いので uv 管理 CPython のヘッダを見せる
 export CPATH=$HOME/.local/share/uv/python/cpython-3.12.14-linux-aarch64-gnu/include/python3.12
