@@ -122,9 +122,15 @@ def main():
     ap.add_argument("--extra-emb", default=None, help="HyDE/専門語の埋め込み（任意）")
     ap.add_argument("--model", default="Nemotron-3-Embed-1B-BF16")
     ap.add_argument("--out", default=None)
+    ap.add_argument(
+        "--gold",
+        default="gold_experts",
+        choices=["gold_experts", "gold_experts_alt"],
+        help="gold_experts_alt は answers だけから導出した第2の正解（#73）",
+    )
     args = ap.parse_args()
 
-    ctx = A.build_context([args.emb])
+    ctx = A.build_context([args.emb], gold_key=args.gold)
     fx, items = ctx["fx"], ctx["items"]
     ctopics = rt.chunk_topics(fx)
     model = args.model
