@@ -49,6 +49,27 @@ jobs:
     needs: changes
     if: needs.changes.outputs.backend == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    services:
+      db:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: tekijin
+          POSTGRES_PASSWORD: tekijin
+          POSTGRES_DB: tekijin
+          # CI-only: trust host auth so the ephemeral service accepts the
+          # connection regardless of scram password negotiation quirks.
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          # Map to host 5433 to avoid clashing with the runner's pre-installed
+          # PostgreSQL on 5432 (which has no `tekijin` role → auth failures).
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U tekijin -d tekijin"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEKIJIN_DATABASE_URL: postgresql+psycopg://tekijin:tekijin@localhost:5433/tekijin
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-backend

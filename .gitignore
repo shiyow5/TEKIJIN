@@ -90,3 +90,5 @@ data/
 *.bin
 *.gguf
 *.safetensors
+# keep build artifacts out of the tracked data package
+backend/src/tekijin/data/**/__pycache__/

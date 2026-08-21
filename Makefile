@@ -3,7 +3,7 @@
         fmt-check fmt-check-backend fmt-check-frontend \
         lint lint-backend lint-frontend \
         test test-backend test-frontend \
-        run-backend \
+        run-backend db-up db-down seed \
         typecheck-frontend check clean
 
 # ============================================================
@@ -88,6 +88,18 @@ typecheck-frontend: ## Type-check the frontend (tsc)
 # ============================================================
 run-backend: ## Run the backend dev server (uvicorn, auto-reload)
 	cd $(BACKEND_DIR) && $(PY) -m uvicorn tekijin.main:app --reload --app-dir src
+
+# ============================================================
+# Database
+# ============================================================
+db-up: ## Start the local PostgreSQL 16 + pgvector container
+	docker compose up -d db
+
+db-down: ## Stop the local PostgreSQL container
+	docker compose down
+
+seed: ## Seed the database from the synthetic fixtures
+	cd $(BACKEND_DIR) && PYTHONPATH=src $(PY) -m tekijin.data.seed
 
 # ============================================================
 # Aggregate

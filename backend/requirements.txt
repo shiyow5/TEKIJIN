@@ -8,3 +8,8 @@ fastapi==0.115.6
 uvicorn[standard]==0.34.0
 pydantic==2.10.4
 pydantic-settings==2.7.1
+
+# Data layer (Issue #28): PostgreSQL 16 + pgvector persistence.
+sqlalchemy>=2.0,<2.1
+psycopg[binary]>=3.2,<4
+pgvector>=0.3,<0.4
