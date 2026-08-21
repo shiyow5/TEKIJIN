@@ -15,6 +15,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from tekijin.agent.state import PastAnswer
 from tekijin.config import Settings
 from tekijin.retrieval.embedding import (
     PASSAGE,
@@ -258,21 +259,14 @@ def _retriever_without_db(top_k: int = 10) -> HybridRetriever:
     return HybridRetriever(embedder, session=None, top_k=top_k)  # type: ignore[arg-type]
 
 
-def test_question_mapped_answer_ids_ranks_by_question_similarity(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from tekijin.retrieval import retriever as retriever_mod
+def test_question_mapped_answer_ids_ranks_by_question_similarity() -> None:
+    from tekijin.retrieval.retriever import HybridRetriever
 
-    def fake_dense(_session, _vec, target, _top_k):
-        # Only the question channel is exercised by this helper.
-        assert target == "questions"
-        return [("q1", 1.0), ("q2", 0.9)]
-
-    monkeypatch.setattr(retriever_mod.dense, "search", fake_dense)
-    retriever = _retriever_without_db()
+    # Question dense hits (id, similarity), best-first.
+    question_hits = [("q1", 1.0), ("q2", 0.9)]
     # q1 -> a2, a3 ; q2 -> a2 (duplicate: first occurrence via q1 wins).
     answers_by_question = {"q1": ["a2", "a3"], "q2": ["a2"]}
-    ranked = retriever._question_mapped_answer_ids([0.0], answers_by_question)
+    ranked = HybridRetriever._question_mapped_answer_ids(question_hits, answers_by_question)
     # Ranked by the question order, de-duplicated — an independent ranking, NOT
     # appended behind any direct-answer pool.
     assert ranked == ["a2", "a3"]
@@ -288,9 +282,15 @@ def test_fuse_accepts_three_rankings() -> None:
 # --------------------------------------------------------------------------- #
 # fix B: responders and profile matches are round-robin interleaved
 # --------------------------------------------------------------------------- #
+def _pa(responder_id: int | None) -> PastAnswer:
+    """A minimal PastAnswer (only responder_id matters to _aggregate_people)."""
+
+    return {"qa_id": "q", "score": 0.0, "responder_id": responder_id}
+
+
 def test_aggregate_people_interleaves_responder_first() -> None:
     retriever = _retriever_without_db(top_k=6)
-    past = [{"responder_id": 1}, {"responder_id": 2}, {"responder_id": 1}]  # distinct: 1, 2
+    past = [_pa(1), _pa(2), _pa(1)]  # distinct: 1, 2
     people = retriever._aggregate_people(past, [30, 31, 32])
     # responder, profile, responder, profile, profile
     assert people == [1, 30, 2, 31, 32]
@@ -299,7 +299,7 @@ def test_aggregate_people_interleaves_responder_first() -> None:
 def test_aggregate_people_profile_survives_many_responders() -> None:
     # 10 responders, default-ish small top_k: the profile hit must still appear.
     retriever = _retriever_without_db(top_k=3)
-    past = [{"responder_id": i} for i in range(1, 11)]
+    past = [_pa(i) for i in range(1, 11)]
     people = retriever._aggregate_people(past, [99])
     assert people == [1, 99, 2]  # profile hit lands at position 1, inside top_k
     assert 99 in people
@@ -307,7 +307,7 @@ def test_aggregate_people_profile_survives_many_responders() -> None:
 
 def test_aggregate_people_skips_none_responders() -> None:
     retriever = _retriever_without_db(top_k=5)
-    past = [{"responder_id": None}, {"responder_id": 7}]
+    past = [_pa(None), _pa(7)]
     people = retriever._aggregate_people(past, [7, 8])
     # None dropped; 7 de-duplicated across the two channels.
     assert people == [7, 8]

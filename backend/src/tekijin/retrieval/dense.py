@@ -22,7 +22,9 @@ from sqlalchemy.orm import Session
 from tekijin.models.tables import Answer, Document, EmployeeProfile, Question
 
 # Retrieval target -> (ORM model, primary-key attribute exposed as the hit id).
-_TARGETS: dict[str, tuple[type, str]] = {
+# ``Any`` for the model so mypy allows the pgvector ``.embedding`` column access
+# (the ORM class is otherwise seen as a bare ``type``).
+_TARGETS: dict[str, tuple[Any, str]] = {
     "answers": (Answer, "id"),
     "documents": (Document, "id"),
     "questions": (Question, "id"),

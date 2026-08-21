@@ -117,6 +117,26 @@ def test_collect_topic_evidence_skill_provenance() -> None:
     assert inferred[0].base_score == declared[0].base_score == BASE_SCORE_SKILL
 
 
+def test_collect_topic_evidence_unions_multiple_topics() -> None:
+    # Skills on either topic are both evidence; a skill on neither is excluded.
+    topics = ["ネットワーク・VPN", "セキュリティ"]
+    skills = [
+        _skill("ネットワーク・VPN"),
+        _skill("セキュリティ"),
+        _skill("経理・決算"),  # neither topic
+    ]
+    evidence = collect_topic_evidence(topics, [], skills, [], [])
+    self_topics = sorted(e.detail for e in evidence if e.source_type == "self")
+    assert self_topics == ["セキュリティ", "ネットワーク・VPN"]  # detail carries skill topic
+
+
+def test_collect_topic_evidence_single_and_multi_are_consistent() -> None:
+    # A single-topic string and a one-element sequence behave identically.
+    one = collect_topic_evidence(TOPIC, [], [_skill(TOPIC)], [], [])
+    seq = collect_topic_evidence([TOPIC], [], [_skill(TOPIC)], [], [])
+    assert [e.source_type for e in one] == [e.source_type for e in seq]
+
+
 def test_collect_topic_evidence_project_role_base_scores() -> None:
     lead = collect_topic_evidence("CRM・営業支援", [], [], [_membership("CRM導入支援", "lead")], [])
     member = collect_topic_evidence(
