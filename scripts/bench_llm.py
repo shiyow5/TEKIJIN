@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-bench_llm.py — 生成LLMの横並び比較（#55 / analysis/18 §5.1）。
+bench_llm.py — 生成LLMの横並び比較（#61 / analysis/18 §5.1）。
 
 **測定ハーネスであって製品コードではない。** #31（LangGraph エージェント）の実装とは独立に、
 「C1/C2/C7 にどのモデルを当てるか」を決めるためだけに書いている。
