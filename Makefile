@@ -3,6 +3,7 @@
         fmt-check fmt-check-backend fmt-check-frontend \
         lint lint-backend lint-frontend \
         test test-backend test-frontend \
+        run-backend \
         typecheck-frontend check clean
 
 # ============================================================
@@ -30,8 +31,8 @@ help: ## Show this help
 # ============================================================
 setup: setup-backend setup-frontend ## Install all dev dependencies
 
-setup-backend: ## Install backend dev tooling (ruff, pytest)
-	cd $(BACKEND_DIR) && $(PY) -m pip install -r requirements-dev.txt
+setup-backend: ## Install backend runtime + dev dependencies
+	cd $(BACKEND_DIR) && $(PY) -m pip install -r requirements.txt -r requirements-dev.txt
 
 setup-frontend: ## Install frontend dev tooling (biome, vitest)
 	cd $(FRONTEND_DIR) && npm install
@@ -79,6 +80,12 @@ test-frontend: ## Run frontend unit tests (vitest)
 
 typecheck-frontend: ## Type-check the frontend (tsc)
 	cd $(FRONTEND_DIR) && npm run typecheck
+
+# ============================================================
+# Run
+# ============================================================
+run-backend: ## Run the backend dev server (uvicorn, auto-reload)
+	cd $(BACKEND_DIR) && $(PY) -m uvicorn tekijin.main:app --reload --app-dir src
 
 # ============================================================
 # Aggregate

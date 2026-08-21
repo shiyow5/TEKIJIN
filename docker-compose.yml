@@ -1,0 +1,26 @@
+# TEKIJIN local development stack.
+#
+# LLM serving is NOT included here: it runs on an external vLLM server
+# (OpenAI-compatible /v1 API) on the DGX host. Point the backend at it via
+# the TEKIJIN_LLM_BASE_URL environment variable
+# (default: http://internship-dgx1:8080/v1).
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: tekijin
+      POSTGRES_PASSWORD: tekijin
+      POSTGRES_DB: tekijin
+    ports:
+      - "5432:5432"
+    volumes:
+      - tekijin_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tekijin -d tekijin"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  tekijin_pgdata:
