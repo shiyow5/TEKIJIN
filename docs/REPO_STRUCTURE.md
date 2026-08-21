@@ -25,6 +25,8 @@
 | `docs/specs/` | 仕様書の置き場 | 空（これから追加） |
 | `docs/adr/` | 意思決定記録 | テンプレートのみ |
 | `scripts/` | 補助スクリプト | 空 |
+| `fixtures/synthetic/` | **コミット対象の**合成データ（デモ/評価/テスト用の種データ） | 置き場所＋スキーマ定義のみ（データ本体は実装フェーズ） |
+| `data/` | ローカル専用の生成物・大容量・実データ・モデル重み | **gitignore 済み**（コミットしない） |
 | `.github/workflows/` | CI 定義 | format / lint / test |
 | `.github/actions/` | セットアップ用 composite action | setup-backend / setup-frontend |
 
@@ -35,6 +37,16 @@
 - **`docs/adr/`** … 「なぜその技術を選んだか」等の意思決定を1件1ファイルで残す。
   発表の「技術アーキテクチャ」パートの素材になる。ADR のテンプレートは
   [`docs/adr/0000-template.md`](adr/0000-template.md)。
+
+## 合成データの置き場所
+
+- **`fixtures/synthetic/`** … デモ・評価・テストで使う合成データ。実データに接続しない
+  方針のため、これが真実源になる。**コミット対象**（全員/毎デモで同一のものを使う）。
+  用途・スキーマ・`evidence.source_type` との対応は
+  [`fixtures/synthetic/README.md`](../fixtures/synthetic/README.md) を参照。
+- **`data/`** … 生成物・大容量・実データ・モデル重みのローカル置き場で **gitignore 済み**。
+  合成データの生成スクリプトの出力先はここにし、吟味した最小セットだけを
+  `fixtures/synthetic/` にコミットする運用を想定する。
 
 ## 仕様確定後に想定される構成（参考・未作成）
 
