@@ -9,8 +9,10 @@ mutation.
 
 from __future__ import annotations
 
-from sqlalchemy import or_, select
-from sqlalchemy.orm import Session, selectinload
+import datetime as dt
+
+from sqlalchemy import func, or_, select
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from tekijin.data.dto import (
     AnswerDTO,
@@ -18,6 +20,7 @@ from tekijin.data.dto import (
     DocumentDTO,
     EmployeeDTO,
     ProfileDTO,
+    ProjectMembershipDTO,
     ProjectWithMembersDTO,
     QuestionDTO,
     SkillDTO,
@@ -29,7 +32,9 @@ from tekijin.models.tables import (
     Employee,
     EmployeeProfile,
     Project,
+    ProjectMember,
     Question,
+    Recommendation,
     Skill,
 )
 
@@ -118,3 +123,44 @@ class Repository:
         stmt = select(Project).options(selectinload(Project.members)).order_by(Project.id)
         rows = self._session.scalars(stmt).all()
         return [ProjectWithMembersDTO.from_row(r) for r in rows]
+
+    def project_memberships_for(self, employee_id: int) -> list[ProjectMembershipDTO]:
+        """Projects an employee is on (with role, product, dates) for scoring.
+
+        Ordered by ``project_id`` so the result is deterministic.
+        """
+
+        stmt = (
+            select(ProjectMember)
+            .options(joinedload(ProjectMember.project))
+            .where(ProjectMember.employee_id == employee_id)
+            .order_by(ProjectMember.project_id)
+        )
+        return [ProjectMembershipDTO.from_member(m) for m in self._session.scalars(stmt)]
+
+    # -- load (recency windows) ------------------------------------------ #
+    def recent_recommendation_counts(self, since: dt.datetime) -> dict[int, int]:
+        """Per-employee count of recommendations created at/after ``since``.
+
+        Feeds the scorer's ``load`` penalty (technical-spec §5, last-7-days
+        window). ``declined`` recommendations are excluded: a decline does not
+        add real workload and must not depress a person's availability.
+        """
+
+        stmt = (
+            select(Recommendation.employee_id, func.count())
+            .where(Recommendation.created_at >= since)
+            .where(func.coalesce(Recommendation.outcome, "") != "declined")
+            .group_by(Recommendation.employee_id)
+        )
+        return {employee_id: count for employee_id, count in self._session.execute(stmt)}
+
+    def recent_answer_counts(self, since: dt.datetime) -> dict[int, int]:
+        """Per-responder count of answers created at/after ``since`` (load)."""
+
+        stmt = (
+            select(Answer.responder_id, func.count())
+            .where(Answer.created_at >= since)
+            .group_by(Answer.responder_id)
+        )
+        return {responder_id: count for responder_id, count in self._session.execute(stmt)}
