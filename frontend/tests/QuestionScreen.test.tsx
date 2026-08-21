@@ -11,7 +11,14 @@ vi.mock("next/navigation", () => ({
 const postAskMock = vi.fn();
 vi.mock("@/lib/api-client", () => ({
   postAsk: (...args: unknown[]) => postAskMock(...args),
-  ApiError: class ApiError extends Error {},
+  ApiError: class ApiError extends Error {
+    readonly status: number;
+    constructor(status: number, message: string) {
+      super(message);
+      this.name = "ApiError";
+      this.status = status;
+    }
+  },
 }));
 
 describe("QuestionScreen", () => {
@@ -103,6 +110,19 @@ describe("QuestionScreen", () => {
     const first = postAskMock.mock.calls[0][0].session_id;
     const second = postAskMock.mock.calls[1][0].session_id;
     expect(second).toBe(first);
+  });
+
+  it("navigates instead of erroring when a retry returns 409 (session already running)", async () => {
+    const { ApiError } = await import("@/lib/api-client");
+    postAskMock.mockRejectedValueOnce(new ApiError(409, "session already has a pending run"));
+    render(<QuestionScreen />);
+    fireEvent.change(screen.getByLabelText("質問を入力"), { target: { value: "質問です" } });
+    fireEvent.click(screen.getByRole("button", { name: "聞いてみる" }));
+
+    await waitFor(() => expect(pushMock).toHaveBeenCalledTimes(1));
+    const target = pushMock.mock.calls[0][0] as string;
+    expect(target.startsWith("/session/")).toBe(true);
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("uses a fresh session id after the question text changes", async () => {

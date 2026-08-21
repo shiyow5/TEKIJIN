@@ -11,7 +11,7 @@
 
 import { RecentQuestions } from "@/components/RecentQuestions";
 import { VoiceInputButton } from "@/components/VoiceInputButton";
-import { postAsk } from "@/lib/api-client";
+import { ApiError, postAsk } from "@/lib/api-client";
 import { createSessionId } from "@/lib/session";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
@@ -62,16 +62,27 @@ export function QuestionScreen({ onSubmitted }: QuestionScreenProps) {
     const sessionId = pendingSessionId ?? createSessionId();
     setPendingSessionId(sessionId);
 
-    try {
-      await postAsk({ asker_id: ASKER_ID, question: trimmed, session_id: sessionId });
+    const proceed = () => {
       if (onSubmitted) {
         onSubmitted(sessionId);
       } else {
         router.push(`/session/${sessionId}`);
       }
-    } catch {
-      // Both transport and non-2xx (ApiError) failures surface the same
-      // user-facing message; the detail is not leaked to the UI.
+    };
+
+    try {
+      await postAsk({ asker_id: ASKER_ID, question: trimmed, session_id: sessionId });
+      proceed();
+    } catch (err) {
+      // A 409 on a retry means the original /ask was actually accepted (this
+      // session already has a run in flight) — recover by watching it rather
+      // than re-showing the error and getting stuck.
+      if (err instanceof ApiError && err.status === 409) {
+        proceed();
+        return;
+      }
+      // Other transport / non-2xx failures surface the same user-facing message;
+      // the detail is not leaked to the UI.
       setError(SUBMIT_ERROR_MESSAGE);
       setSubmitting(false);
     }
