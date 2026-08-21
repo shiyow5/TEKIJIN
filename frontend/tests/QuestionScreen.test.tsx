@@ -88,4 +88,37 @@ describe("QuestionScreen", () => {
     expect(pushMock).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "聞いてみる" })).toBeEnabled();
   });
+
+  it("reuses the session id when retrying the same question after a failure", async () => {
+    postAskMock.mockRejectedValueOnce(new Error("network"));
+    render(<QuestionScreen />);
+    fireEvent.change(screen.getByLabelText("質問を入力"), { target: { value: "質問です" } });
+    fireEvent.click(screen.getByRole("button", { name: "聞いてみる" }));
+    await screen.findByRole("alert");
+
+    // Retry without changing the question — the second /ask must carry the same id.
+    fireEvent.click(screen.getByRole("button", { name: "聞いてみる" }));
+    await waitFor(() => expect(postAskMock).toHaveBeenCalledTimes(2));
+
+    const first = postAskMock.mock.calls[0][0].session_id;
+    const second = postAskMock.mock.calls[1][0].session_id;
+    expect(second).toBe(first);
+  });
+
+  it("uses a fresh session id after the question text changes", async () => {
+    postAskMock.mockRejectedValueOnce(new Error("network"));
+    render(<QuestionScreen />);
+    const input = screen.getByLabelText("質問を入力");
+    fireEvent.change(input, { target: { value: "最初の質問" } });
+    fireEvent.click(screen.getByRole("button", { name: "聞いてみる" }));
+    await screen.findByRole("alert");
+
+    fireEvent.change(input, { target: { value: "別の質問" } });
+    fireEvent.click(screen.getByRole("button", { name: "聞いてみる" }));
+    await waitFor(() => expect(postAskMock).toHaveBeenCalledTimes(2));
+
+    expect(postAskMock.mock.calls[1][0].session_id).not.toBe(
+      postAskMock.mock.calls[0][0].session_id,
+    );
+  });
 });

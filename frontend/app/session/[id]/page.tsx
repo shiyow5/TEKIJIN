@@ -12,13 +12,14 @@ export default async function SessionPage({
 }) {
   const { id } = await params;
 
+  // No <main> here: app/layout.tsx already provides the page's main landmark.
   return (
-    <main className="mx-auto flex max-w-content flex-col gap-md px-gutter py-lg">
+    <div className="mx-auto flex max-w-content flex-col gap-md px-gutter py-lg">
       <h1 className="text-2xl font-bold text-on-surface">処理中…</h1>
       <p className="text-on-surface-variant">質問を受け付けました。詳しい方を探しています。</p>
       <p className="text-sm text-on-surface-variant" data-testid="session-id">
         セッション: {id}
       </p>
-    </main>
+    </div>
   );
 }

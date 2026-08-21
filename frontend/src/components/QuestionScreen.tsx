@@ -38,9 +38,18 @@ export function QuestionScreen({ onSubmitted }: QuestionScreenProps) {
   const [question, setQuestion] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Session id for the *current* question. Reused across retries so an
+  // ambiguous failure (the backend persisted /ask but the ack was lost) does
+  // not create a second session on retry; cleared when the question changes.
+  const [pendingSessionId, setPendingSessionId] = useState<string | null>(null);
 
   const trimmed = question.trim();
   const canSubmit = trimmed.length > 0 && !submitting;
+
+  function handleQuestionChange(value: string) {
+    setQuestion(value);
+    setPendingSessionId(null);
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -50,7 +59,8 @@ export function QuestionScreen({ onSubmitted }: QuestionScreenProps) {
 
     setSubmitting(true);
     setError(null);
-    const sessionId = createSessionId();
+    const sessionId = pendingSessionId ?? createSessionId();
+    setPendingSessionId(sessionId);
 
     try {
       await postAsk({ asker_id: ASKER_ID, question: trimmed, session_id: sessionId });
@@ -79,7 +89,7 @@ export function QuestionScreen({ onSubmitted }: QuestionScreenProps) {
             <input
               type="text"
               value={question}
-              onChange={(e) => setQuestion(e.target.value)}
+              onChange={(e) => handleQuestionChange(e.target.value)}
               aria-label="質問を入力"
               placeholder="質問を入力してください..."
               className="w-full bg-transparent px-sm py-2 text-on-surface outline-none placeholder:text-on-surface-variant"
