@@ -651,6 +651,205 @@
   },
   {
     "id": 36,
+    "query": "画面が出るまでに時間がかかると言われました。詰まりどころを調べた経験のある方を探しています。",
+    "difficulty": "L2",
+    "gold_topics": [
+      "パフォーマンスチューニング"
+    ],
+    "gold_chunks": [
+      "profile:13",
+      "profile:16",
+      "proj:59",
+      "proj:66",
+      "proj:73",
+      "proj:79",
+      "proj:92"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 37,
+    "query": "一次受けの窓口を外に出したいそうです。回した経験のある方に相談したいです。",
+    "difficulty": "L2",
+    "gold_topics": [
+      "問い合わせ・ヘルプデスク運用"
+    ],
+    "gold_chunks": [
+      "profile:17",
+      "profile:34",
+      "proj:23",
+      "proj:26",
+      "proj:5",
+      "proj:7",
+      "proj:74"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 38,
+    "query": "出稿の設計から見直したいと言われました。伴走した経験のある方はどなたでしょうか。",
+    "difficulty": "L2",
+    "gold_topics": [
+      "Webマーケティング・広告"
+    ],
+    "gold_chunks": [
+      "profile:23",
+      "proj:1",
+      "proj:18",
+      "proj:37",
+      "proj:39",
+      "proj:40"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 39,
+    "query": "受け付けた連絡を人手で台帳に写しているそうです。仕組みを入れた経験のある方を探しています。",
+    "difficulty": "L2",
+    "gold_topics": [
+      "問い合わせ・ヘルプデスク運用"
+    ],
+    "gold_chunks": [
+      "profile:17",
+      "proj:23",
+      "proj:26",
+      "proj:5",
+      "proj:7",
+      "proj:74"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 40,
+    "query": "各部署がばらばらに数字を持っていて突き合わせに時間がかかるそうです。基盤を作った経験のある方に相談したいです。",
+    "difficulty": "L2",
+    "gold_topics": [
+      "データ基盤・分析"
+    ],
+    "gold_chunks": [
+      "profile:14",
+      "profile:15",
+      "profile:16",
+      "proj:3",
+      "proj:38",
+      "proj:4",
+      "proj:51",
+      "proj:60"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 41,
+    "query": "自社の発信そのものを外に任せたいと言われました。引き受けた経験のある方を探しています。",
+    "difficulty": "L2",
+    "gold_topics": [
+      "SNS運用"
+    ],
+    "gold_chunks": [
+      "profile:22",
+      "profile:4",
+      "profile:5",
+      "proj:11",
+      "proj:61",
+      "proj:63",
+      "proj:72",
+      "proj:78"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 42,
+    "query": "事務用品の手配と保管の仕方が拠点ごとにばらばらだそうです。整理した経験のある方に相談したいです。",
+    "difficulty": "L2",
+    "gold_topics": [
+      "総務・法務"
+    ],
+    "gold_chunks": [
+      "doc:doc_002",
+      "doc:doc_010",
+      "doc:doc_018",
+      "doc:doc_026",
+      "profile:12",
+      "profile:30",
+      "profile:31",
+      "profile:32"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 43,
+    "query": "新しい取り組みを外に出す文面を用意したいそうです。書き慣れている方はどなたでしょうか。",
+    "difficulty": "L2",
+    "gold_topics": [
+      "広報・PR"
+    ],
+    "gold_chunks": [
+      "profile:20",
+      "profile:38",
+      "profile:39",
+      "profile:40"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 44,
+    "query": "経験者の応募書類をどの観点で見るか揃っていないそうです。見慣れている方に相談したいです。",
+    "difficulty": "L2",
+    "gold_topics": [
+      "人事・採用"
+    ],
+    "gold_chunks": [
+      "doc:doc_004",
+      "doc:doc_012",
+      "doc:doc_020",
+      "doc:doc_028",
+      "profile:26",
+      "profile:27",
+      "profile:8",
+      "profile:9"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 45,
+    "query": "部門ごとの使い方の予実が月末までわからないそうです。整えた経験のある方を探しています。",
+    "difficulty": "L2",
+    "gold_topics": [
+      "経理・決算"
+    ],
+    "gold_chunks": [
+      "doc:doc_003",
+      "doc:doc_011",
+      "doc:doc_019",
+      "doc:doc_027",
+      "profile:10",
+      "profile:11",
+      "profile:28",
+      "profile:29"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 46,
+    "query": "同じ品目なのに拠点ごとに単価が違うと言われました。詰めた経験のある方に相談したいです。",
+    "difficulty": "L2",
+    "gold_topics": [
+      "購買・仕入れ"
+    ],
+    "gold_chunks": [
+      "doc:doc_005",
+      "doc:doc_013",
+      "doc:doc_021",
+      "doc:doc_029",
+      "profile:19",
+      "profile:35",
+      "profile:36",
+      "profile:37"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 47,
     "query": "新しく建てる拠点で、業務の中心の仕組みと現場の端末をまとめて面倒みてほしいと言われました。誰に相談すべきでしょうか。",
     "difficulty": "L3",
     "gold_topics": [
@@ -680,7 +879,7 @@
     "label_source": "auto:document_project_profile"
   },
   {
-    "id": 37,
+    "id": 48,
     "query": "たのめーるの注文を社内の仕組みと繋いで自動化したいというご相談をいただきました。",
     "difficulty": "L3",
     "gold_topics": [
@@ -700,7 +899,7 @@
     "label_source": "auto:document_project_profile"
   },
   {
-    "id": 38,
+    "id": 49,
     "query": "複合機の記録から、誰がいつ何を出力したか後から追えるようにしたいそうです。",
     "difficulty": "L3",
     "gold_topics": [
@@ -728,7 +927,7 @@
     "label_source": "auto:document_project_profile"
   },
   {
-    "id": 39,
+    "id": 50,
     "query": "締めを早めたいのですが、数字が各部署に散らばっているのが原因のようです。",
     "difficulty": "L3",
     "gold_topics": [
@@ -753,7 +952,7 @@
     "label_source": "auto:document_project_profile"
   },
   {
-    "id": 40,
+    "id": 51,
     "query": "自社の設備から外部の基盤へ移したあと、止まったときに誰が面倒を見るのかが決まっていません。",
     "difficulty": "L3",
     "gold_topics": [
@@ -779,7 +978,7 @@
     "label_source": "auto:document_project_profile"
   },
   {
-    "id": 41,
+    "id": 52,
     "query": "求人の反応が悪く、会社の見え方から作り直したいと言われました。",
     "difficulty": "L3",
     "gold_topics": [
@@ -799,7 +998,7 @@
     "label_source": "auto:document_project_profile"
   },
   {
-    "id": 42,
+    "id": 53,
     "query": "通販を始めたいそうですが、書面や規約まわりも整っていないとのことです。",
     "difficulty": "L3",
     "gold_topics": [
@@ -824,7 +1023,7 @@
     "label_source": "auto:document_project_profile"
   },
   {
-    "id": 43,
+    "id": 54,
     "query": "お客様の担当者情報を営業が持ち歩いているのが心配だと言われました。",
     "difficulty": "L3",
     "gold_topics": [
@@ -850,7 +1049,7 @@
     "label_source": "auto:document_project_profile"
   },
   {
-    "id": 44,
+    "id": 55,
     "query": "窓口に来る連絡を分類して、よくあるものは自動で返したいそうです。",
     "difficulty": "L3",
     "gold_topics": [
@@ -876,7 +1075,7 @@
     "label_source": "auto:document_project_profile"
   },
   {
-    "id": 45,
+    "id": 56,
     "query": "スマホから使えるようにしたら重くて使い物にならないと言われました。",
     "difficulty": "L3",
     "gold_topics": [
