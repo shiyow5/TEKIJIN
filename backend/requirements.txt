@@ -21,3 +21,10 @@ sudachipy>=0.6,<0.7
 sudachidict-core>=20240000
 rank-bm25>=0.2,<0.3
 numpy>=1.26
+
+# Agent orchestration (Issue #31): LangGraph StateGraph for the C1-C8 flow.
+# Pure-Python and CI-safe (langgraph + langchain-core + langgraph-checkpoint pull
+# no torch/openai). The LLM nodes (C1/C2/C7) are deterministic stubs for now, so
+# langchain-openai is intentionally NOT added until the vLLM wiring lands (#32+).
+# Pinned per technical-spec §2 ("LangGraph/LangChain は固定").
+langgraph==0.3.34
