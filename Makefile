@@ -3,7 +3,7 @@
         fmt-check fmt-check-backend fmt-check-frontend \
         lint lint-backend lint-frontend \
         test test-backend test-frontend \
-        run-backend db-up db-down seed embed \
+        run-backend serve db-up db-down seed embed \
         typecheck-frontend check clean
 
 # ============================================================
@@ -86,8 +86,17 @@ typecheck-frontend: ## Type-check the frontend (tsc)
 # ============================================================
 # Run
 # ============================================================
-run-backend: ## Run the backend dev server (uvicorn, auto-reload)
+run-backend: ## Run the backend dev server (uvicorn, auto-reload; stub LLM, MemorySaver)
 	cd $(BACKEND_DIR) && $(PY) -m uvicorn tekijin.main:app --reload --app-dir src
+
+serve: ## Run the backend against real vLLM + PostgresSaver (production-like)
+	# Wire the real LLM and persistent sessions. Point TEKIJIN_LLM_BASE_URL at your
+	# vLLM /v1 endpoint and TEKIJIN_DATABASE_URL at Postgres before running:
+	#   TEKIJIN_LLM_BACKEND=vllm TEKIJIN_CHECKPOINTER_BACKEND=postgres make serve
+	cd $(BACKEND_DIR) && \
+		TEKIJIN_LLM_BACKEND=$${TEKIJIN_LLM_BACKEND:-vllm} \
+		TEKIJIN_CHECKPOINTER_BACKEND=$${TEKIJIN_CHECKPOINTER_BACKEND:-postgres} \
+		$(PY) -m uvicorn tekijin.main:app --host 0.0.0.0 --port 8000 --app-dir src
 
 # ============================================================
 # Database

@@ -32,3 +32,13 @@ numpy>=1.26
 langgraph==0.3.34
 langgraph-checkpoint==2.1.2
 langchain-core==0.3.86
+
+# API layer (Issue #32): FastAPI SSE + session persistence + optional vLLM.
+# All pure-Python and CI-safe (no torch). ``langchain-openai`` is used ONLY by the
+# vLLM LLM backend and imported lazily, so the default "stub" backend and CI stay
+# LLM-free. Versions are pinned (technical-spec §2) and chosen to resolve against
+# the pinned langgraph 0.3.34 / langchain-core 0.3.86 above.
+langgraph-checkpoint-postgres==2.0.21
+langchain==0.3.27
+langchain-openai==0.2.14
+sse-starlette==2.2.1

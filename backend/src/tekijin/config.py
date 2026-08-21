@@ -40,10 +40,21 @@ class Settings(BaseSettings):
     # Database (connection code lands in a later component).
     database_url: str = "postgresql+psycopg://tekijin:tekijin@localhost:5432/tekijin"
 
-    # LLM serving via vLLM (OpenAI-compatible /v1). Real client wiring: #31.
+    # LLM serving via vLLM (OpenAI-compatible /v1).
     llm_base_url: str = "http://internship-dgx1:8080/v1"
     llm_model: str = "Qwen3.6-35B-A3B-NVFP4"
     llm_api_key: str = "dummy"
+
+    # Which C1/C2/C7 implementation the API wires: "stub" = deterministic,
+    # network-free defaults (CI/tests); "vllm" = real langchain-openai client
+    # against ``llm_base_url``. Default stub so imports and CI stay ML/LLM-free.
+    llm_backend: str = "stub"
+
+    # LangGraph checkpointer for session persistence / interrupt-resume:
+    # "memory" = in-process MemorySaver (safe default, works without a DB);
+    # "postgres" = PostgresSaver over ``database_url`` (production). The factory
+    # falls back to MemorySaver if a postgres checkpointer cannot be set up.
+    checkpointer_backend: str = "memory"
 
     # Embedding model used by the retrieval component (later).
     embedding_model: str = "intfloat/multilingual-e5-large"
