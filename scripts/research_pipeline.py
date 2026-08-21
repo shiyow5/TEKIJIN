@@ -141,7 +141,7 @@ def main():
     llm_ab = load_topics(os.path.join(d, "llm_topic_abstain.json"))
     llm_sc = load_votes(os.path.join(d, "llm_topic_sc.json"))
     rerank2 = load_order(
-        os.path.join(d, "llm_rerank2.json"), os.path.join(d, "payload_rerank2.json")
+        os.path.join(d, "llm_rerank.json"), os.path.join(d, "payload_rerank.json")
     )
 
     extra = (
@@ -221,6 +221,9 @@ def main():
             f"[{lo:+.3f},{hi:+.3f}] P={p:.2f} MRR={r['MRR']:.3f}"
         )
 
+    print("\n== 段D/E: クエリ拡張とリランカー（人への集約は現行のまま）==")
+    expansion = expansion_and_rerank(ctx, base, model, extra, row, args.llm_dir)
+
     hold = holdout_check(ctx, base, systems)
     print(
         f"\n== 分割検証（半分で構成を選び、残りで測る／200回）==\n"
@@ -228,10 +231,13 @@ def main():
         f"5-95%tile [{hold['p5']:+.3f},{hold['p95']:+.3f}] / 改善した割合 {hold['win_rate']:.2f}"
     )
 
-    print("\n== 段B': 棄却（L4 5件 vs 採点対象45件）==")
     abst = abstention_table(os.path.join(d, "llm_abstain_conf.json"), items)
-    for th, tp, fp in abst:
-        print(f"  confidence<{th:3d}: L4を棄却 {tp}/5   誤って棄却 {fp}/45")
+    n_l4 = abst[0][3] if abst else 0
+    print(f"\n== 段B': 棄却（L4 {n_l4}件 vs 採点対象 {len(items)}件）==")
+    for th, tp, fp, total_l4 in abst:
+        print(
+            f"  confidence<{th:3d}: L4を棄却 {tp}/{total_l4}   誤って棄却 {fp}/{len(items)}"
+        )
 
     if args.out:
         with open(args.out, "w", encoding="utf-8") as f:
@@ -239,6 +245,7 @@ def main():
                 {
                     "stageA": acc_rows,
                     "stageC": rows,
+                    "stageDE": expansion,
                     "holdout": hold,
                     "abstention": abst,
                 },
@@ -247,6 +254,68 @@ def main():
                 indent=2,
             )
         print(f"\n結果を書き出し: {args.out}")
+
+
+def expansion_and_rerank(ctx, base, model, extra, row, llm_dir):
+    """クエリ拡張（HyDE / Query2doc）とクロスエンコーダのリランカーを、現行の集約のまま測る。
+
+    段C（トピック媒介）とは別軸。「検索そのものを良くする」手が効くかを見る。
+    """
+    chunk_emb = ctx["models"][model]["chunks"][: ctx["n_base"]]
+    out = []
+
+    def aggregate(ranked):
+        return rr.to_ranking(
+            rr.aggregate_people(ranked, ctx["owners"], rc.SOURCE_WEIGHT, top_n=20)
+        )
+
+    variants = []
+    if extra is not None:
+        for key, label in [
+            ("hyde__q", "HyDE(queryプレフィクス)"),
+            ("hyde__d", "HyDE(passageプレフィクス)"),
+            ("q_hyde__q", "クエリ+HyDE"),
+            ("q_q2d__q", "クエリ+専門語(Query2doc)"),
+        ]:
+
+            def system(c, item, qi, key=key):
+                sims = extra[key][row[item["id"]]] @ chunk_emb.T
+                return aggregate([c["chunk_ids"][j] for j in np.argsort(-sims)[:64]])
+
+            variants.append((label, system))
+
+    for fname, label in [
+        ("rr_bge.json", "リランカー bge-reranker-v2-m3"),
+        ("rr_qwen.json", "リランカー Qwen3-Reranker-0.6B"),
+    ]:
+        path = os.path.join(llm_dir, fname)
+        if not os.path.exists(path):
+            continue
+        with open(path, encoding="utf-8") as f:
+            payload = json.load(f)
+        rankings = {int(k): v for k, v in payload["rankings"].items()}
+        label = f"{label}（{payload['per_query_ms']:.0f}ms/query）"
+        variants.append(
+            (label, lambda c, item, qi, rk=rankings: aggregate(rk[item["id"]]))
+        )
+
+    for label, system in variants:
+        r = A.evaluate(ctx, system)
+        lo, hi, p = A.paired_bootstrap(base["hits"], r["hits"])
+        out.append(
+            {
+                "name": label,
+                "R@3": r["R@3"],
+                "delta": r["R@3"] - base["R@3"],
+                "ci": [lo, hi],
+                "p_gt0": p,
+            }
+        )
+        print(
+            f"  {label:44s} R@3={r['R@3']:.3f} Δ={r['R@3'] - base['R@3']:+.3f} "
+            f"[{lo:+.3f},{hi:+.3f}] P={p:.2f}"
+        )
+    return out
 
 
 def holdout_check(ctx, base, systems, reps=200, seed=42):
@@ -287,7 +356,7 @@ def abstention_table(path, items):
     for th in (20, 30, 50, 70, 80):
         tp = sum(1 for i in l4 if conf.get(i, 100) < th)
         fp = sum(1 for it in items if conf.get(it["id"], 100) < th)
-        out.append((th, tp, fp))
+        out.append((th, tp, fp, len(l4)))
     return out
 
 

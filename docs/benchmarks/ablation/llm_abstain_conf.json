@@ -1,352 +1,499 @@
 [
   {
     "id": 1,
-    "content": "{\"answerable\": true, \"confidence\": 90, \"reason\": \"全員が購買部所属で実績あり\"}",
+    "content": "{\"answerable\": true, \"confidence\": 100, \"reason\": \"全員が購買・仕入れの実績あり\"}",
     "reasoning": "",
-    "latency": 0.49309515953063965,
-    "out_tokens": 27
+    "latency": 0.4979684352874756,
+    "out_tokens": 29
   },
   {
     "id": 2,
-    "content": "{\n  \"answerable\": true,\n  \"confidence\": 90,\n  \"reason\": \"西村・前田両名がインフラ運用実績あり\"\n}",
+    "content": "{\n  \"answerable\": true,\n  \"confidence\": 90,\n  \"reason\": \"複数候補が保守運用実績あり。\"\n}",
     "reasoning": "",
-    "latency": 0.6565172672271729,
-    "out_tokens": 41
+    "latency": 0.5942416191101074,
+    "out_tokens": 36
   },
   {
     "id": 3,
-    "content": "{\n  \"answerable\": true,\n  \"confidence\": 95,\n  \"reason\": \"SNS運用実績が複数あり、相談に即応可能\"\n}",
+    "content": "{\n  \"answerable\": true,\n  \"confidence\": 90,\n  \"reason\": \"3名ともSNS運用実績あり。\"\n}",
     "reasoning": "",
-    "latency": 0.6444149017333984,
-    "out_tokens": 40
+    "latency": 0.5950720310211182,
+    "out_tokens": 36
   },
   {
     "id": 4,
-    "content": "{\"answerable\": true, \"confidence\": 95, \"reason\": \"3名とも契約管理実績あり\"}",
+    "content": "{\n  \"answerable\": true,\n  \"confidence\": 95,\n  \"reason\": \"全員が契約管理システム導入実績あり\"\n}",
     "reasoning": "",
-    "latency": 0.4611527919769287,
-    "out_tokens": 26
+    "latency": 0.5983405113220215,
+    "out_tokens": 36
   },
   {
     "id": 5,
-    "content": "{\n  \"answerable\": true,\n  \"confidence\": 90,\n  \"reason\": \"中島・清水両名がネットワークスペシャリスト資格を持ち、VPN実績あり\"\n}",
+    "content": "{\n  \"answerable\": true,\n  \"confidence\": 90,\n  \"reason\": \"複数候補がVPN実務経験あり\"\n}",
     "reasoning": "",
-    "latency": 0.7087235450744629,
-    "out_tokens": 45
+    "latency": 0.5917062759399414,
+    "out_tokens": 36
   },
   {
     "id": 6,
-    "content": "{\"answerable\": true, \"confidence\": 90, \"reason\": \"人事採用の実績が複数あり、相談に答えられる\"}",
+    "content": "{\n  \"answerable\": true,\n  \"confidence\": 90,\n  \"reason\": \"複数候補が人事・採用の実績あり。\"\n}",
     "reasoning": "",
-    "latency": 0.508843183517456,
-    "out_tokens": 31
-  },
-  {
-    "id": 7,
-    "content": "{\"answerable\": true, \"confidence\": 80, \"reason\": \"全員が広報部所属でPR実績あり\"}",
-    "reasoning": "",
-    "latency": 0.47048258781433105,
-    "out_tokens": 28
-  },
-  {
-    "id": 8,
-    "content": "{\n  \"answerable\": true,\n  \"confidence\": 90,\n  \"reason\": \"経理・決算の実績が複数あり、効率化相談に適切。\"\n}",
-    "reasoning": "",
-    "latency": 0.6863694190979004,
-    "out_tokens": 44
-  },
-  {
-    "id": 9,
-    "content": "{\n  \"answerable\": true,\n  \"confidence\": 95,\n  \"reason\": \"3名ともシステム開発・APIの実績あり\"\n}",
-    "reasoning": "",
-    "latency": 0.6159141063690186,
+    "latency": 0.6034839153289795,
     "out_tokens": 38
   },
   {
-    "id": 10,
-    "content": "{\n  \"answerable\": true,\n  \"confidence\": 95,\n  \"reason\": \"複数候補が直接経験あり\"\n}",
+    "id": 7,
+    "content": "{\"answerable\": true, \"confidence\": 90, \"reason\": \"全員が広報PRの実績あり\"}",
     "reasoning": "",
-    "latency": 0.568950891494751,
-    "out_tokens": 34
+    "latency": 0.44583940505981445,
+    "out_tokens": 26
+  },
+  {
+    "id": 8,
+    "content": "{\n  \"answerable\": true,\n  \"confidence\": 95,\n  \"reason\": \"全員が経理・決算の実績あり。\"\n}",
+    "reasoning": "",
+    "latency": 0.6045877933502197,
+    "out_tokens": 38
+  },
+  {
+    "id": 9,
+    "content": "{\"answerable\": true, \"confidence\": 90, \"reason\": \"3名とも実績あり。木村氏が最も適任。\"}",
+    "reasoning": "",
+    "latency": 0.5387735366821289,
+    "out_tokens": 32
+  },
+  {
+    "id": 10,
+    "content": "{\n  \"answerable\": true,\n  \"confidence\": 95,\n  \"reason\": \"全員が相談テーマと完全に一致する実績あり\"\n}",
+    "reasoning": "",
+    "latency": 0.621659517288208,
+    "out_tokens": 38
   },
   {
     "id": 11,
-    "content": "{\n  \"answerable\": true,\n  \"confidence\": 85,\n  \"reason\": \"端末権限の標準化実績があり、福岡拠点の記載なし\"\n}",
+    "content": "{\n  \"answerable\": true,\n  \"confidence\": 85,\n  \"reason\": \"前田里奈が福岡拠点でヘルプデスク実績あり\"\n}",
     "reasoning": "",
-    "latency": 0.6674149036407471,
-    "out_tokens": 42
+    "latency": 0.6590189933776855,
+    "out_tokens": 41
   },
   {
     "id": 12,
-    "content": "{\n  \"answerable\": true,\n  \"confidence\": 85,\n  \"reason\": \"基幹システム入れ替えの実績が複数あり。\"\n}",
+    "content": "{\n  \"answerable\": true,\n  \"confidence\": 85,\n  \"reason\": \"鈴木・佐藤が本社で業務効率化実績あり\"\n}",
     "reasoning": "",
-    "latency": 0.632465124130249,
-    "out_tokens": 39
+    "latency": 0.6501209735870361,
+    "out_tokens": 40
   },
   {
     "id": 13,
-    "content": "{\"answerable\": true, \"confidence\": 80, \"reason\": \"両名ともパフォーマンスチューニング実績あり\"}",
+    "content": "{\n  \"answerable\": true,\n  \"confidence\": 80,\n  \"reason\": \"佐々木氏がパフォーマンスチューニング実績あり\"\n}",
     "reasoning": "",
-    "latency": 0.4701688289642334,
-    "out_tokens": 27
+    "latency": 0.6062266826629639,
+    "out_tokens": 37
   },
   {
     "id": 14,
-    "content": "{\"answerable\": true, \"confidence\": 90, \"reason\": \"EC構築実績があり、カゴ落ち分析も可能\"}",
+    "content": "{\"answerable\": true, \"confidence\": 80, \"reason\": \"大阪拠点でEC構築実績あり\"}",
     "reasoning": "",
-    "latency": 0.5100882053375244,
-    "out_tokens": 30
+    "latency": 0.4606502056121826,
+    "out_tokens": 26
   },
   {
     "id": 15,
-    "content": "{\"answerable\": true, \"confidence\": 80, \"reason\": \"複数候補がモバイルアプリ開発実績あり\"}",
+    "content": "{\"answerable\": true, \"confidence\": 80, \"reason\": \"佐々木氏が本社でモバイルアプリ開発実績あり\"}",
     "reasoning": "",
-    "latency": 0.46793079376220703,
-    "out_tokens": 27
+    "latency": 0.512667179107666,
+    "out_tokens": 30
   },
   {
     "id": 16,
     "content": "{\"answerable\": true, \"confidence\": 90, \"reason\": \"複数候補がクラウド移行実績あり\"}",
     "reasoning": "",
-    "latency": 0.45542120933532715,
+    "latency": 0.4600241184234619,
     "out_tokens": 26
   },
   {
     "id": 17,
-    "content": "{\"answerable\": true, \"confidence\": 95, \"reason\": \"業務効率化の実績が複数あり、手作業改善に最適。\"}",
+    "content": "{\n  \"answerable\": true,\n  \"confidence\": 90,\n  \"reason\": \"業務効率化の実績が全員にあり、相談に即応可能\"\n}",
     "reasoning": "",
-    "latency": 0.5665245056152344,
-    "out_tokens": 34
+    "latency": 0.6898462772369385,
+    "out_tokens": 43
   },
   {
     "id": 18,
-    "content": "{\"answerable\": true, \"confidence\": 85, \"reason\": \"セキュリティ担当者が防御機器の提案経験あり\"}",
+    "content": "{\"answerable\": true, \"confidence\": 80, \"reason\": \"セキュリティ担当者が防御機器のサポート提案に対応可能\"}",
     "reasoning": "",
-    "latency": 0.4805417060852051,
-    "out_tokens": 28
+    "latency": 0.4969213008880615,
+    "out_tokens": 29
   },
   {
     "id": 19,
-    "content": "{\"answerable\": true, \"confidence\": 85, \"reason\": \"データ基盤構築の実績が相談課題と一致\"}",
+    "content": "{\n  \"answerable\": true,\n  \"confidence\": 85,\n  \"reason\": \"複数候補がデータ基盤構築実績あり\"\n}",
     "reasoning": "",
-    "latency": 0.5085396766662598,
-    "out_tokens": 30
+    "latency": 0.6039979457855225,
+    "out_tokens": 37
   },
   {
     "id": 20,
-    "content": "{\n  \"answerable\": true,\n  \"confidence\": 90,\n  \"reason\": \"CRM・業務効率化の実績が豊富で解決可能\"\n}",
+    "content": "{\n  \"answerable\": true,\n  \"confidence\": 90,\n  \"reason\": \"CRM・業務効率化の実績が複数あり、相談に答えられる。\"\n}",
     "reasoning": "",
-    "latency": 0.6446936130523682,
-    "out_tokens": 40
+    "latency": 0.7003970146179199,
+    "out_tokens": 44
   },
   {
     "id": 21,
-    "content": "{\"answerable\": true, \"confidence\": 95, \"reason\": \"3名とも広告運用実績あり\"}",
+    "content": "{\"answerable\": true, \"confidence\": 95, \"reason\": \"全員が広告運用実績あり\"}",
     "reasoning": "",
-    "latency": 0.45517516136169434,
-    "out_tokens": 26
+    "latency": 0.4491004943847656,
+    "out_tokens": 25
   },
   {
     "id": 22,
-    "content": "{\"answerable\": true, \"confidence\": 90, \"reason\": \"法務・契約管理の実績が複数あり対応可能\"}",
+    "content": "{\"answerable\": true, \"confidence\": 90, \"reason\": \"法務・契約管理の実績が全員にある\"}",
     "reasoning": "",
-    "latency": 0.5159075260162354,
-    "out_tokens": 31
+    "latency": 0.48929643630981445,
+    "out_tokens": 29
   },
   {
     "id": 23,
-    "content": "{\"answerable\": true, \"confidence\": 75, \"reason\": \"購買部員が価格交渉の整理法を回答実績あり\"}",
+    "content": "{\"answerable\": true, \"confidence\": 80, \"reason\": \"購買部が価格管理の実務経験を持つ\"}",
     "reasoning": "",
-    "latency": 0.5234808921813965,
-    "out_tokens": 32
+    "latency": 0.4722559452056885,
+    "out_tokens": 28
   },
   {
     "id": 24,
-    "content": "{\n  \"answerable\": true,\n  \"confidence\": 75,\n  \"reason\": \"業務効率化・システム導入実績あり\"\n}",
+    "content": "{\n  \"answerable\": false,\n  \"confidence\": 20,\n  \"reason\": \"IT・運用保守実績なし。契約管理のみ。\"\n}",
     "reasoning": "",
-    "latency": 0.593475341796875,
-    "out_tokens": 36
+    "latency": 0.6362135410308838,
+    "out_tokens": 39
   },
   {
     "id": 25,
-    "content": "{\n  \"answerable\": true,\n  \"confidence\": 90,\n  \"reason\": \"SNS運用実績が複数あり、相談に直接対応可能\"\n}",
+    "content": "{\"answerable\": true, \"confidence\": 90, \"reason\": \"SNS運用実績が複数あり、相談に答えられる\"}",
     "reasoning": "",
-    "latency": 0.6437034606933594,
-    "out_tokens": 40
+    "latency": 0.5157723426818848,
+    "out_tokens": 30
   },
   {
     "id": 26,
-    "content": "{\"answerable\": true, \"confidence\": 95, \"reason\": \"3名ともEC構築実績あり\"}",
+    "content": "{\n  \"answerable\": true,\n  \"confidence\": 95,\n  \"reason\": \"3名ともEC構築実績あり\"\n}",
     "reasoning": "",
-    "latency": 0.45417070388793945,
-    "out_tokens": 26
+    "latency": 0.5796840190887451,
+    "out_tokens": 35
   },
   {
     "id": 27,
     "content": "{\"answerable\": true, \"confidence\": 90, \"reason\": \"複数候補がモバイルアプリ開発実績あり\"}",
     "reasoning": "",
-    "latency": 0.46733951568603516,
+    "latency": 0.47200608253479004,
     "out_tokens": 27
   },
   {
     "id": 28,
     "content": "{\n  \"answerable\": true,\n  \"confidence\": 80,\n  \"reason\": \"クラウド移行実績があり、費用試算の知見があるため。\"\n}",
     "reasoning": "",
-    "latency": 0.6555278301239014,
+    "latency": 0.6615712642669678,
     "out_tokens": 41
   },
   {
     "id": 29,
-    "content": "{\n  \"answerable\": true,\n  \"confidence\": 80,\n  \"reason\": \"複数候補がシステム導入リード経験あり\"\n}",
+    "content": "{\"answerable\": true, \"confidence\": 80, \"reason\": \"基幹システムやCRMのリード経験あり\"}",
     "reasoning": "",
-    "latency": 0.591376781463623,
-    "out_tokens": 36
+    "latency": 0.48699331283569336,
+    "out_tokens": 28
   },
   {
     "id": 30,
     "content": "{\n  \"answerable\": true,\n  \"confidence\": 95,\n  \"reason\": \"全員が契約管理システム導入実績あり\"\n}",
     "reasoning": "",
-    "latency": 0.5918715000152588,
+    "latency": 0.5970509052276611,
     "out_tokens": 36
   },
   {
     "id": 31,
-    "content": "{\n  \"answerable\": true,\n  \"confidence\": 85,\n  \"reason\": \"CRMや業務効率化の導入実績が複数あり、継続支援経験と一致\"\n}",
+    "content": "{\n  \"answerable\": true,\n  \"confidence\": 80,\n  \"reason\": \"CRMや業務効率化の導入実績があり、継続支援経験があるため。\"\n}",
     "reasoning": "",
-    "latency": 0.7093756198883057,
-    "out_tokens": 45
+    "latency": 0.7012858390808105,
+    "out_tokens": 44
   },
   {
     "id": 32,
-    "content": "{\n  \"answerable\": true,\n  \"confidence\": 80,\n  \"reason\": \"経理担当者が金額書面の作成基準を熟知しているため。\"\n}",
+    "content": "{\n  \"answerable\": true,\n  \"confidence\": 80,\n  \"reason\": \"経理担当者が金額書面の作成経験あり\"\n}",
     "reasoning": "",
-    "latency": 0.6579225063323975,
-    "out_tokens": 42
+    "latency": 0.6042473316192627,
+    "out_tokens": 38
   },
   {
     "id": 33,
     "content": "{\"answerable\": true, \"confidence\": 80, \"reason\": \"全候補が問い合わせ対応実績あり\"}",
     "reasoning": "",
-    "latency": 0.46055173873901367,
+    "latency": 0.46401023864746094,
     "out_tokens": 26
   },
   {
     "id": 34,
-    "content": "{\n  \"answerable\": true,\n  \"confidence\": 80,\n  \"reason\": \"経理部員が経理実務で回答実績あり\"\n}",
+    "content": "{\n  \"answerable\": true,\n  \"confidence\": 85,\n  \"reason\": \"総務担当者が経費規定に精通しているため。\"\n}",
     "reasoning": "",
-    "latency": 0.6469242572784424,
-    "out_tokens": 41
+    "latency": 0.6339471340179443,
+    "out_tokens": 40
   },
   {
     "id": 35,
-    "content": "{\"answerable\": false, \"confidence\": 0, \"reason\": \"催事準備の実績が皆無\"}",
+    "content": "{\"answerable\": false, \"confidence\": 10, \"reason\": \"催事準備の実績が皆無\"}",
     "reasoning": "",
-    "latency": 0.4436612129211426,
-    "out_tokens": 26
-  },
-  {
-    "id": 36,
-    "content": "{\n  \"answerable\": true,\n  \"confidence\": 80,\n  \"reason\": \"ITインフラと端末管理の経験が複数あり対応可能\"\n}",
-    "reasoning": "",
-    "latency": 0.6581623554229736,
-    "out_tokens": 41
-  },
-  {
-    "id": 37,
-    "content": "{\n  \"answerable\": true,\n  \"confidence\": 80,\n  \"reason\": \"業務効率化・システム導入実績が豊富\"\n}",
-    "reasoning": "",
-    "latency": 0.6035244464874268,
-    "out_tokens": 37
-  },
-  {
-    "id": 38,
-    "content": "{\n  \"answerable\": false,\n  \"confidence\": 20,\n  \"reason\": \"IT実装実績が不明。相談は技術要件。\"\n}",
-    "reasoning": "",
-    "latency": 0.6442792415618896,
-    "out_tokens": 40
-  },
-  {
-    "id": 39,
-    "content": "{\n  \"answerable\": true,\n  \"confidence\": 75,\n  \"reason\": \"経理・決算の実績があり、締め処理の相談に答えられる。\"\n}",
-    "reasoning": "",
-    "latency": 0.6865055561065674,
-    "out_tokens": 44
-  },
-  {
-    "id": 40,
-    "content": "{\n  \"answerable\": true,\n  \"confidence\": 80,\n  \"reason\": \"クラウド移行とインフラ運用の実績が相談に適合\"\n}",
-    "reasoning": "",
-    "latency": 0.645681619644165,
-    "out_tokens": 40
-  },
-  {
-    "id": 41,
-    "content": "{\"answerable\": false, \"confidence\": 20, \"reason\": \"採用実績はあるが、企業ブランディングの経験が不明\"}",
-    "reasoning": "",
-    "latency": 0.5100152492523193,
-    "out_tokens": 31
-  },
-  {
-    "id": 42,
-    "content": "{\"answerable\": true, \"confidence\": 80, \"reason\": \"契約・法務経験があり対応可能\"}",
-    "reasoning": "",
-    "latency": 0.4612314701080322,
+    "latency": 0.4577767848968506,
     "out_tokens": 27
   },
   {
-    "id": 43,
-    "content": "{\"answerable\": true, \"confidence\": 80, \"reason\": \"セキュリティ専門家が相談をカバー\"}",
+    "id": 36,
+    "content": "{\n  \"answerable\": true,\n  \"confidence\": 75,\n  \"reason\": \"画面表示遅延はシステム性能問題。基幹システム導入経験の中島氏が適任。\"\n}",
     "reasoning": "",
-    "latency": 0.4405968189239502,
+    "latency": 0.7514138221740723,
+    "out_tokens": 48
+  },
+  {
+    "id": 37,
+    "content": "{\n  \"answerable\": true,\n  \"confidence\": 90,\n  \"reason\": \"複数候補がヘルプデスク運用の実績あり\"\n}",
+    "reasoning": "",
+    "latency": 0.6209201812744141,
+    "out_tokens": 38
+  },
+  {
+    "id": 38,
+    "content": "{\"answerable\": true, \"confidence\": 90, \"reason\": \"全員が広告運用・Webマーケティングの実績あり\"}",
+    "reasoning": "",
+    "latency": 0.5010805130004883,
+    "out_tokens": 29
+  },
+  {
+    "id": 39,
+    "content": "{\"answerable\": true, \"confidence\": 90, \"reason\": \"問い合わせシステム導入実績が複数あり、自動化に強い。\"}",
+    "reasoning": "",
+    "latency": 0.5303387641906738,
+    "out_tokens": 31
+  },
+  {
+    "id": 40,
+    "content": "{\n  \"answerable\": true,\n  \"confidence\": 95,\n  \"reason\": \"3名ともデータ基盤構築の実績あり\"\n}",
+    "reasoning": "",
+    "latency": 0.6191103458404541,
+    "out_tokens": 38
+  },
+  {
+    "id": 41,
+    "content": "{\"answerable\": true, \"confidence\": 90, \"reason\": \"複数候補が広告運用代行実績あり\"}",
+    "reasoning": "",
+    "latency": 0.476884126663208,
+    "out_tokens": 27
+  },
+  {
+    "id": 42,
+    "content": "{\n  \"answerable\": true,\n  \"confidence\": 75,\n  \"reason\": \"総務・法務の実績があり、事務用品管理の相談に答えられる。\"\n}",
+    "reasoning": "",
+    "latency": 0.7157597541809082,
+    "out_tokens": 46
+  },
+  {
+    "id": 43,
+    "content": "{\"answerable\": true, \"confidence\": 90, \"reason\": \"3名とも広報実績あり\"}",
+    "reasoning": "",
+    "latency": 0.4314765930175781,
     "out_tokens": 25
   },
   {
     "id": 44,
-    "content": "{\n  \"answerable\": true,\n  \"confidence\": 90,\n  \"reason\": \"問い合わせ対応システム導入実績が複数あり、要件に適合\"\n}",
+    "content": "{\n  \"answerable\": true,\n  \"confidence\": 80,\n  \"reason\": \"採用担当者が複数おり、応募書類の観点について回答可能\"\n}",
     "reasoning": "",
-    "latency": 0.6469831466674805,
-    "out_tokens": 40
+    "latency": 0.6422383785247803,
+    "out_tokens": 41
   },
   {
     "id": 45,
-    "content": "{\"answerable\": true, \"confidence\": 85, \"reason\": \"モバイル開発とパフォーマンス改善の実績が明確にあるため。\"}",
+    "content": "{\n  \"answerable\": true,\n  \"confidence\": 80,\n  \"reason\": \"経理・決算の実績があり、予実管理の経験ありと推測\"\n}",
     "reasoning": "",
-    "latency": 0.5194487571716309,
-    "out_tokens": 31
+    "latency": 0.6977200508117676,
+    "out_tokens": 45
   },
   {
     "id": 46,
-    "content": "{\n  \"answerable\": false,\n  \"confidence\": 20,\n  \"reason\": \"製造現場の制御技術実績が皆無\"\n}",
+    "content": "{\"answerable\": true, \"confidence\": 80, \"reason\": \"全員が購買・仕入れの実績あり\"}",
     "reasoning": "",
-    "latency": 0.6059482097625732,
-    "out_tokens": 37
+    "latency": 0.47171711921691895,
+    "out_tokens": 28
   },
   {
     "id": 47,
-    "content": "{\n  \"answerable\": true,\n  \"confidence\": 75,\n  \"reason\": \"社会保険労務士資格があり労務対応実績あり\"\n}",
+    "content": "{\n  \"answerable\": true,\n  \"confidence\": 85,\n  \"reason\": \"中島氏が端末・ネットワークの構築・運用実績を持つため。\"\n}",
     "reasoning": "",
-    "latency": 0.6351678371429443,
-    "out_tokens": 40
+    "latency": 0.6748130321502686,
+    "out_tokens": 42
   },
   {
     "id": 48,
-    "content": "{\n  \"answerable\": false,\n  \"confidence\": 20,\n  \"reason\": \"特許出願の実務経験が皆無\"\n}",
+    "content": "{\"answerable\": true, \"confidence\": 80, \"reason\": \"業務効率化・システム導入実績が豊富\"}",
     "reasoning": "",
-    "latency": 0.6091010570526123,
-    "out_tokens": 38
+    "latency": 0.48974180221557617,
+    "out_tokens": 28
   },
   {
     "id": 49,
-    "content": "{\n  \"answerable\": false,\n  \"confidence\": 10,\n  \"reason\": \"船舶通信の専門知識が皆無\"\n}",
+    "content": "{\n  \"answerable\": true,\n  \"confidence\": 75,\n  \"reason\": \"業務効率化実績があり、記録管理の要件定義が可能\"\n}",
     "reasoning": "",
-    "latency": 0.5868027210235596,
-    "out_tokens": 36
+    "latency": 0.6499722003936768,
+    "out_tokens": 40
   },
   {
     "id": 50,
+    "content": "{\n  \"answerable\": true,\n  \"confidence\": 75,\n  \"reason\": \"経理・決算の実績があり、締め処理の課題に対応可能\"\n}",
+    "reasoning": "",
+    "latency": 0.6585023403167725,
+    "out_tokens": 42
+  },
+  {
+    "id": 51,
+    "content": "{\n  \"answerable\": true,\n  \"confidence\": 80,\n  \"reason\": \"クラウド移行とインフラ運用の実績が豊富\"\n}",
+    "reasoning": "",
+    "latency": 0.6197409629821777,
+    "out_tokens": 38
+  },
+  {
+    "id": 52,
+    "content": "{\n  \"answerable\": true,\n  \"confidence\": 75,\n  \"reason\": \"採用実績があり、会社イメージ改善の相談に答えられる。\"\n}",
+    "reasoning": "",
+    "latency": 0.642991304397583,
+    "out_tokens": 41
+  },
+  {
+    "id": 53,
+    "content": "{\n  \"answerable\": true,\n  \"confidence\": 80,\n  \"reason\": \"契約管理・法務経験があり対応可能\"\n}",
+    "reasoning": "",
+    "latency": 0.5951097011566162,
+    "out_tokens": 37
+  },
+  {
+    "id": 54,
+    "content": "{\n  \"answerable\": true,\n  \"confidence\": 90,\n  \"reason\": \"CRM・契約管理システムの導入実績が相談課題に直結する。\"\n}",
+    "reasoning": "",
+    "latency": 0.6879434585571289,
+    "out_tokens": 43
+  },
+  {
+    "id": 55,
+    "content": "{\n  \"answerable\": true,\n  \"confidence\": 95,\n  \"reason\": \"複数候補が問い合わせシステム導入実績あり\"\n}",
+    "reasoning": "",
+    "latency": 0.5964651107788086,
+    "out_tokens": 36
+  },
+  {
+    "id": 56,
+    "content": "{\"answerable\": true, \"confidence\": 90, \"reason\": \"モバイル開発とパフォーマンス改善の実績が豊富\"}",
+    "reasoning": "",
+    "latency": 0.4849417209625244,
+    "out_tokens": 28
+  },
+  {
+    "id": 57,
+    "content": "{\"answerable\": false, \"confidence\": 20, \"reason\": \"製造現場の制御技術実績なし\"}",
+    "reasoning": "",
+    "latency": 0.4654204845428467,
+    "out_tokens": 26
+  },
+  {
+    "id": 58,
+    "content": "{\n  \"answerable\": true,\n  \"confidence\": 75,\n  \"reason\": \"社会保険労務士資格者が総務法務実績あり\"\n}",
+    "reasoning": "",
+    "latency": 0.6478273868560791,
+    "out_tokens": 41
+  },
+  {
+    "id": 59,
+    "content": "{\n  \"answerable\": false,\n  \"confidence\": 20,\n  \"reason\": \"特許出願の実務経験が皆無\"\n}",
+    "reasoning": "",
+    "latency": 0.6094710826873779,
+    "out_tokens": 38
+  },
+  {
+    "id": 60,
+    "content": "{\"answerable\": false, \"confidence\": 10, \"reason\": \"船舶通信の専門知識が欠如\"}",
+    "reasoning": "",
+    "latency": 0.47339391708374023,
+    "out_tokens": 27
+  },
+  {
+    "id": 61,
     "content": "{\n  \"answerable\": false,\n  \"confidence\": 10,\n  \"reason\": \"医薬品GMP監査の実績が皆無\"\n}",
     "reasoning": "",
-    "latency": 0.6317062377929688,
+    "latency": 0.637592077255249,
     "out_tokens": 39
+  },
+  {
+    "id": 62,
+    "content": "{\"answerable\": false, \"confidence\": 0, \"reason\": \"内装工事の実績が皆無\"}",
+    "reasoning": "",
+    "latency": 0.4452524185180664,
+    "out_tokens": 26
+  },
+  {
+    "id": 63,
+    "content": "{\"answerable\": false, \"confidence\": 10, \"reason\": \"IoT・農業システムの実績が皆無\"}",
+    "reasoning": "",
+    "latency": 0.4923684597015381,
+    "out_tokens": 28
+  },
+  {
+    "id": 64,
+    "content": "{\n  \"answerable\": false,\n  \"confidence\": 10,\n  \"reason\": \"薬事法の実務経験が皆無\"\n}",
+    "reasoning": "",
+    "latency": 0.5963809490203857,
+    "out_tokens": 37
+  },
+  {
+    "id": 65,
+    "content": "{\"answerable\": false, \"confidence\": 10, \"reason\": \"学習評価設計の実績が皆無\"}",
+    "reasoning": "",
+    "latency": 0.4561159610748291,
+    "out_tokens": 27
+  },
+  {
+    "id": 66,
+    "content": "{\"answerable\": false, \"confidence\": 10, \"reason\": \"与信管理の実績が皆無\"}",
+    "reasoning": "",
+    "latency": 0.45849013328552246,
+    "out_tokens": 27
+  },
+  {
+    "id": 67,
+    "content": "{\n  \"answerable\": false,\n  \"confidence\": 20,\n  \"reason\": \"衛生管理の実績が皆無\"\n}",
+    "reasoning": "",
+    "latency": 0.5828042030334473,
+    "out_tokens": 35
+  },
+  {
+    "id": 68,
+    "content": "{\"answerable\": false, \"confidence\": 10, \"reason\": \"製造工程の品質管理実績が欠如\"}",
+    "reasoning": "",
+    "latency": 0.489063024520874,
+    "out_tokens": 28
+  },
+  {
+    "id": 69,
+    "content": "{\n  \"answerable\": false,\n  \"confidence\": 20,\n  \"reason\": \"映像著作権の許諾実績が皆無\"\n}",
+    "reasoning": "",
+    "latency": 0.60890793800354,
+    "out_tokens": 37
+  },
+  {
+    "id": 70,
+    "content": "{\"answerable\": false, \"confidence\": 0, \"reason\": \"保険料率見積りの実績が皆無\"}",
+    "reasoning": "",
+    "latency": 0.45745038986206055,
+    "out_tokens": 27
+  },
+  {
+    "id": 71,
+    "content": "{\"answerable\": true, \"confidence\": 80, \"reason\": \"契約管理の実務経験が複数あり対応可能\"}",
+    "reasoning": "",
+    "latency": 0.5015287399291992,
+    "out_tokens": 29
   }
 ]
