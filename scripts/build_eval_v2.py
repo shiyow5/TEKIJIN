@@ -15,8 +15,15 @@ build_eval_v2.py — 評価セット v2 を生成する（Issue #43）。
   原則3: 難問・異常系は本ファイル内に定数として著述する（label_source="authored"）。
          「自動生成」= チームの手作業を要さず seed 固定で再現できる、という意味。
 
+L2 の25件のうち10件は、**PR #46（reona 作）の人手ラベル**を gold に使う（label_source="human:pr46"）。
+PR #46 は案件・日報・チャットを人手で読んで topic -> 専門家を付けたもので、
+自動導出では出せない「個人単位で鋭いトピック」と「営業事務・庶務の日常業務トピック」を持っている。
+クエリ本文は採らず（38文型の穴埋めでトピック語が92%漏れている）、**ラベルだけ**を取り込み、
+クエリはリーク遮断の原則に従って症状ベースで書き直してある。
+取り込みは scripts/import_human_labels.py、一致度の測定は scripts/eval_label_agreement.py。
+
 出力 (fixtures/synthetic/eval/):
-  eval_person.json      … 40件。主指標（質問→専門家）。難易度 L1/L2/L3/L4
+  eval_person.json      … 50件。主指標（質問→専門家）。難易度 L1(10)/L2(25)/L3(10)/L4(5)
   eval_retrieval.json   … 40件。層1（質問→根拠チャンク）。埋め込みモデル横並び用
   eval_robustness.json  … 20件。異常系（答えてはいけない/聞き返すべき）
 
@@ -208,6 +215,78 @@ L3_ITEMS = [
 ]
 
 # --------------------------------------------------------------------------
+# 人手ラベル由来（PR #46）の L2 追加分。
+#   前半6件: 案件実績ベースで**個人単位に鋭い**トピック（正解1〜3名）。独立サンプルを増やす
+#   後半4件: 営業事務・CS・経理・マーケの**日常業務**トピック。自前の22トピック体系に無く、
+#            TEKIJIN の実際の用途（「これ誰に聞けばいい？」）に最も近い層
+# gold は topic_experts_human.json（人手）から引く。クエリは症状ベースで書き直してある。
+# gold_topics は自前22トピック体系への写像（C1 の評価に使う）。写像先が無い場合は空にし、
+# source_topic に PR #46 側のトピック名を残す。
+# --------------------------------------------------------------------------
+HUMAN_ITEMS = [
+    (
+        "お客様が自社で通販を始めたいそうです。立ち上げをやり切った経験のある方に相談したいです。",
+        "ECサイト構築",
+        ["ECサイト構築"],
+        "人手ラベルは1名。自動導出は開発部4名一括で鈍い",
+    ),
+    (
+        "スマホ向けの画面を新規に作る案件です。設計から入れる方を探しています。",
+        "モバイルアプリ開発",
+        ["モバイルアプリ開発"],
+        "人手ラベルは1名",
+    ),
+    (
+        "外部の基盤へ移したあとの費用が読めないと言われました。試算をやったことのある方はいますか。",
+        "クラウド移行支援",
+        ["クラウド移行"],
+        "人手ラベルは2名。費用試算という別切り口",
+    ),
+    (
+        "業務の中心の仕組みを新しく入れる案件で、稼働まで見届けた経験のある方に相談したいです。",
+        "基幹システム導入",
+        ["基幹システム"],
+        "人手ラベルは2名",
+    ),
+    (
+        "取引先との書面を一元管理する仕組みを入れたいそうです。導入をやったことのある方を探しています。",
+        "契約管理システム導入",
+        ["契約管理"],
+        "人手ラベルは3名",
+    ),
+    (
+        "導入後の面倒を継続して見てほしいと言われました。引き受けた経験のある方に相談したいです。",
+        "保守運用サポート",
+        ["サーバー・インフラ運用"],
+        "人手ラベルは2名",
+    ),
+    (
+        "お客様に出す金額の書面を作るとき、どこまで細かく出すべきか毎回迷います。慣れている方に聞きたいです。",
+        "見積書作成・顧客提示",
+        [],
+        "営業事務。自前22トピック体系に無い領域",
+    ),
+    (
+        "お客様からの強い申し出を受けてしまい、どこまで自分で対応してどこから上に上げるか判断がつきません。",
+        "クレーム・エスカレーション対応",
+        [],
+        "CS。自前22トピック体系に無い領域",
+    ),
+    (
+        "泊まりの移動が絡む費用の申請で、どの区分で出せばよいのか分かりません。詳しい方に聞きたいです。",
+        "出張旅費精算方法",
+        [],
+        "経理の庶務。自前22トピック体系に無い領域",
+    ),
+    (
+        "来期に催事へ出るかを検討しています。準備の段取りを分かっている方に相談したいです。",
+        "展示会出展企画",
+        [],
+        "マーケの日常業務。自前22トピック体系に無い領域",
+    ),
+]
+
+# --------------------------------------------------------------------------
 # L4（不能）: 社内に証拠を持つ人が存在しない領域。「わかりません＋エスカレーション」が正解。
 # **文面は L2/L3 と同じ体裁で書く。** 「〜な方はいますか」のような語尾で書くと、
 # 表層だけで abstain を当てられてしまい、専門家不在の検出を測れなくなる。
@@ -323,6 +402,18 @@ def load(rel):
         return json.load(f)
 
 
+def load_human_labels():
+    """PR #46 由来の人手ラベル（topic -> [employee_id]）。未取り込みなら明示的に落とす。"""
+    path = os.path.join(SYN, "eval", "topic_experts_human.json")
+    if not os.path.exists(path):
+        raise SystemExit(
+            "人手ラベルが未取り込みです。先に実行してください:\n"
+            "  python3 scripts/import_human_labels.py --src <PR#46 の eval_queries.json>"
+        )
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)["topics"]
+
+
 def match_topics(text):
     return [t for t, kws in TOPICS.items() if any(k in text for k in kws)]
 
@@ -403,7 +494,17 @@ def main():
     person = []
     nid = 0
 
-    def add(query, difficulty, topics, experts, route, src, note, constraint=None):
+    def add(
+        query,
+        difficulty,
+        topics,
+        experts,
+        route,
+        src,
+        note,
+        constraint=None,
+        source_topic=None,
+    ):
         nonlocal nid
         nid += 1
         person.append(
@@ -416,6 +517,7 @@ def main():
                 "gold_route": route,
                 "expect_abstain": route == "none",
                 "constraint": constraint,
+                "source_topic": source_topic,
                 "label_source": src,
                 "note": note,
             }
@@ -473,6 +575,22 @@ def main():
                 "症状のみ。トピック語をクエリから除去済み",
             )
 
+    # ---- L2 追加分: 人手ラベル（PR #46）由来の10件 ----
+    human = load_human_labels()
+    for query, src_topic, mapped_topics, note in HUMAN_ITEMS:
+        experts = human.get(src_topic)
+        assert experts, f"人手ラベルに {src_topic} が無い"
+        add(
+            query,
+            "L2",
+            mapped_topics,
+            experts,
+            "person",
+            "human:pr46",
+            note,
+            source_topic=src_topic,
+        )
+
     # L3 は複数トピックにまたがるので、gold は「各トピックの上位2名の和集合」にする。
     # 片方のトピックしか拾えない実装は Recall@3 を落とす＝横断性を測れる。
     for q, ts, note in L3_ITEMS:
@@ -508,6 +626,7 @@ def main():
             chunks += doc_by_topic[t]
             chunks += proj_by_topic[t][:5]
         chunks += [f"profile:{e}" for e in it["gold_experts"]]
+        # gold_topics が空（自前22トピック体系に無い領域）の項目は profile だけが根拠になる
         retrieval.append(
             {
                 "id": it["id"],
@@ -548,7 +667,7 @@ def main():
     print(f"  eval_person.json     {len(person)} 件")
     print(f"  eval_retrieval.json  {len(retrieval)} 件")
     print(f"  eval_robustness.json {len(robustness)} 件")
-    assert len(person) == 40, f"person が40件でない: {len(person)}"
+    assert len(person) == 50, f"person が50件でない: {len(person)}"
     assert len(robustness) == 20, "robustness が20件でない"
 
     print("難易度分布:", dict(Counter(q["difficulty"] for q in person)))
@@ -583,7 +702,7 @@ def main():
     ), "L4 が abstain になっていない"
 
     # 5) クエリ文型の多様性
-    print(f"ユニークなクエリ文字列: {len({q['query'] for q in person})}/40")
+    print(f"ユニークなクエリ文字列: {len({q['query'] for q in person})}/{len(person)}")
 
     # 6) 経路の重なり（旧経路 answers 集計 との比較）= リークの残量
     answers = load("answers/answers.json")

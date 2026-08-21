@@ -487,6 +487,174 @@
   },
   {
     "id": 26,
+    "query": "お客様が自社で通販を始めたいそうです。立ち上げをやり切った経験のある方に相談したいです。",
+    "difficulty": "L2",
+    "gold_topics": [
+      "ECサイト構築"
+    ],
+    "gold_chunks": [
+      "doc:doc_011",
+      "profile:15",
+      "proj:12",
+      "proj:24",
+      "proj:57",
+      "proj:64",
+      "proj:71"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 27,
+    "query": "スマホ向けの画面を新規に作る案件です。設計から入れる方を探しています。",
+    "difficulty": "L2",
+    "gold_topics": [
+      "モバイルアプリ開発"
+    ],
+    "gold_chunks": [
+      "doc:doc_010",
+      "profile:16",
+      "proj:17",
+      "proj:19",
+      "proj:33",
+      "proj:52",
+      "proj:6"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 28,
+    "query": "外部の基盤へ移したあとの費用が読めないと言われました。試算をやったことのある方はいますか。",
+    "difficulty": "L2",
+    "gold_topics": [
+      "クラウド移行"
+    ],
+    "gold_chunks": [
+      "doc:doc_005",
+      "doc:doc_027",
+      "profile:14",
+      "profile:15",
+      "proj:16",
+      "proj:43",
+      "proj:69",
+      "proj:9",
+      "proj:99"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 29,
+    "query": "業務の中心の仕組みを新しく入れる案件で、稼働まで見届けた経験のある方に相談したいです。",
+    "difficulty": "L2",
+    "gold_topics": [
+      "基幹システム"
+    ],
+    "gold_chunks": [
+      "doc:doc_006",
+      "doc:doc_028",
+      "profile:2",
+      "profile:3",
+      "proj:105",
+      "proj:107",
+      "proj:42",
+      "proj:47",
+      "proj:98"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 30,
+    "query": "取引先との書面を一元管理する仕組みを入れたいそうです。導入をやったことのある方を探しています。",
+    "difficulty": "L2",
+    "gold_topics": [
+      "契約管理"
+    ],
+    "gold_chunks": [
+      "doc:doc_013",
+      "profile:1",
+      "profile:21",
+      "profile:3",
+      "proj:14",
+      "proj:25",
+      "proj:30",
+      "proj:31",
+      "proj:35"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 31,
+    "query": "導入後の面倒を継続して見てほしいと言われました。引き受けた経験のある方に相談したいです。",
+    "difficulty": "L2",
+    "gold_topics": [
+      "サーバー・インフラ運用"
+    ],
+    "gold_chunks": [
+      "doc:doc_004",
+      "doc:doc_026",
+      "profile:18",
+      "profile:33",
+      "proj:15",
+      "proj:16",
+      "proj:22",
+      "proj:27",
+      "proj:9"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 32,
+    "query": "お客様に出す金額の書面を作るとき、どこまで細かく出すべきか毎回迷います。慣れている方に聞きたいです。",
+    "difficulty": "L2",
+    "gold_topics": [],
+    "gold_chunks": [
+      "profile:1",
+      "profile:2",
+      "profile:21",
+      "profile:3"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 33,
+    "query": "お客様からの強い申し出を受けてしまい、どこまで自分で対応してどこから上に上げるか判断がつきません。",
+    "difficulty": "L2",
+    "gold_topics": [],
+    "gold_chunks": [
+      "profile:17",
+      "profile:18",
+      "profile:33",
+      "profile:34"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 34,
+    "query": "泊まりの移動が絡む費用の申請で、どの区分で出せばよいのか分かりません。詳しい方に聞きたいです。",
+    "difficulty": "L2",
+    "gold_topics": [],
+    "gold_chunks": [
+      "profile:10",
+      "profile:11",
+      "profile:28",
+      "profile:29"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 35,
+    "query": "来期に催事へ出るかを検討しています。準備の段取りを分かっている方に相談したいです。",
+    "difficulty": "L2",
+    "gold_topics": [],
+    "gold_chunks": [
+      "profile:22",
+      "profile:23",
+      "profile:4",
+      "profile:5"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 36,
     "query": "新しく建てる拠点で、業務の中心の仕組みと現場の端末をまとめて面倒みてほしいと言われました。誰に相談すべきでしょうか。",
     "difficulty": "L3",
     "gold_topics": [
@@ -516,7 +684,7 @@
     "label_source": "auto:document_project_profile"
   },
   {
-    "id": 27,
+    "id": 37,
     "query": "たのめーるの注文を社内の仕組みと繋いで自動化したいというご相談をいただきました。",
     "difficulty": "L3",
     "gold_topics": [
@@ -535,7 +703,7 @@
     "label_source": "auto:document_project_profile"
   },
   {
-    "id": 28,
+    "id": 38,
     "query": "複合機の記録から、誰がいつ何を出力したか後から追えるようにしたいそうです。",
     "difficulty": "L3",
     "gold_topics": [
@@ -560,7 +728,7 @@
     "label_source": "auto:document_project_profile"
   },
   {
-    "id": 29,
+    "id": 39,
     "query": "締めを早めたいのですが、数字が各部署に散らばっているのが原因のようです。",
     "difficulty": "L3",
     "gold_topics": [
@@ -584,7 +752,7 @@
     "label_source": "auto:document_project_profile"
   },
   {
-    "id": 30,
+    "id": 40,
     "query": "自社の設備から外部の基盤へ移したあと、止まったときに誰が面倒を見るのかが決まっていません。",
     "difficulty": "L3",
     "gold_topics": [
@@ -611,7 +779,7 @@
     "label_source": "auto:document_project_profile"
   },
   {
-    "id": 31,
+    "id": 41,
     "query": "求人の反応が悪く、会社の見え方から作り直したいと言われました。",
     "difficulty": "L3",
     "gold_topics": [
@@ -629,7 +797,7 @@
     "label_source": "auto:document_project_profile"
   },
   {
-    "id": 32,
+    "id": 42,
     "query": "通販を始めたいそうですが、書面や規約まわりも整っていないとのことです。",
     "difficulty": "L3",
     "gold_topics": [
@@ -652,7 +820,7 @@
     "label_source": "auto:document_project_profile"
   },
   {
-    "id": 33,
+    "id": 43,
     "query": "お客様の担当者情報を営業が持ち歩いているのが心配だと言われました。",
     "difficulty": "L3",
     "gold_topics": [
@@ -678,7 +846,7 @@
     "label_source": "auto:document_project_profile"
   },
   {
-    "id": 34,
+    "id": 44,
     "query": "窓口に来る連絡を分類して、よくあるものは自動で返したいそうです。",
     "difficulty": "L3",
     "gold_topics": [
@@ -707,7 +875,7 @@
     "label_source": "auto:document_project_profile"
   },
   {
-    "id": 35,
+    "id": 45,
     "query": "スマホから使えるようにしたら重くて使い物にならないと言われました。",
     "difficulty": "L3",
     "gold_topics": [

@@ -156,7 +156,7 @@ def test_enough_independent_samples(person):
     ここを大きく増やすには **fixtures 側で案件を部署横断にする**必要がある。
     """
     uniq = {tuple(sorted(q["gold_experts"])) for q in person}
-    assert len(uniq) >= 20, f"独立サンプルが {len(uniq)} 種類しかない"
+    assert len(uniq) >= 25, f"独立サンプルが {len(uniq)} 種類しかない"
 
 
 # ---------------------------------------------------------------- 構成の担保
@@ -164,7 +164,7 @@ def test_enough_independent_samples(person):
 
 def test_difficulty_layers_present(person):
     dist = Counter(q["difficulty"] for q in person)
-    assert dist == {"L1": 10, "L2": 15, "L3": 10, "L4": 5}, dist
+    assert dist == {"L1": 10, "L2": 25, "L3": 10, "L4": 5}, dist
 
 
 def test_l4_expects_abstain(person):
@@ -201,9 +201,25 @@ def test_queries_are_distinct(person):
 
 def test_label_source_recorded(person):
     """どの正解が自動でどれが著述かを、後から説明できること。"""
-    allowed = {"auto:project_daily", "authored"}
+    allowed = {"auto:project_daily", "authored", "human:pr46"}
     bad = {q["label_source"] for q in person} - allowed
     assert not bad, f"未知の label_source: {bad}"
+
+
+def test_human_labeled_slice_present(person):
+    """PR #46 の人手ラベル由来の項目が取り込まれていること。
+
+    gold が全て自動導出だと「合成データの中の別ルール」でしかない。
+    独立に人が付けたラベルを一部に入れておくことで、
+    scripts/eval_label_agreement.py による外部検証が成立する。
+    """
+    human = [q for q in person if q["label_source"] == "human:pr46"]
+    assert len(human) == 10, f"人手ラベル由来が {len(human)} 件"
+    assert all(q["source_topic"] for q in human), "source_topic（PR #46 側のトピック名）が無い"
+    assert all(q["gold_experts"] for q in human)
+    # うち一定数は「自前22トピック体系に無い領域」であること（営業事務・庶務など）
+    outside = [q for q in human if not q["gold_topics"]]
+    assert len(outside) >= 4, "自前トピック体系の穴を埋める項目が足りない"
 
 
 def test_retrieval_set_aligned_with_person(person):
