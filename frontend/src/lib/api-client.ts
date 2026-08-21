@@ -7,7 +7,7 @@
  */
 
 import type { AckResponse, AskRequest } from "@/lib/api-types";
-import { getApiBaseUrl } from "@/lib/config";
+import { getApiBaseUrl, normalizeBaseUrl } from "@/lib/config";
 
 /** Error thrown for a non-2xx API response, carrying the HTTP status. */
 export class ApiError extends Error {
@@ -51,7 +51,8 @@ export async function postAsk(
   request: AskRequest,
   options: RequestOptions = {},
 ): Promise<AckResponse> {
-  const baseUrl = options.baseUrl ?? getApiBaseUrl();
+  const baseUrl =
+    options.baseUrl !== undefined ? normalizeBaseUrl(options.baseUrl) : getApiBaseUrl();
   const doFetch = options.fetchImpl ?? fetch;
 
   const response = await doFetch(`${baseUrl}/ask`, {

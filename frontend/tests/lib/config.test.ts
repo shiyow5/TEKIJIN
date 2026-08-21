@@ -1,4 +1,4 @@
-import { DEFAULT_API_BASE_URL, getApiBaseUrl } from "@/lib/config";
+import { DEFAULT_API_BASE_URL, getApiBaseUrl, normalizeBaseUrl } from "@/lib/config";
 import { afterEach, describe, expect, it } from "vitest";
 
 const ENV_KEY = "NEXT_PUBLIC_API_BASE_URL";
@@ -32,5 +32,16 @@ describe("getApiBaseUrl", () => {
   it("trims a trailing slash so callers can concatenate a path", () => {
     process.env[ENV_KEY] = "https://api.example.com/";
     expect(getApiBaseUrl()).toBe("https://api.example.com");
+  });
+});
+
+describe("normalizeBaseUrl", () => {
+  it("strips one or more trailing slashes", () => {
+    expect(normalizeBaseUrl("https://x/")).toBe("https://x");
+    expect(normalizeBaseUrl("https://x///")).toBe("https://x");
+  });
+
+  it("leaves a slash-free base unchanged", () => {
+    expect(normalizeBaseUrl("https://x")).toBe("https://x");
   });
 });

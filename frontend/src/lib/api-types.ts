@@ -34,11 +34,15 @@ export interface AskRequest {
  */
 export type Outcome = "accepted" | "declined";
 
-export interface ResumeRequest {
-  session_id: string;
-  outcome?: Outcome;
-  reply?: string;
-}
+/**
+ * Exactly one of `outcome` or `reply` — encoded as a discriminated union so a
+ * caller (the #38 answer screen) cannot construct a payload with both or neither,
+ * matching the backend's `_exactly_one` validator. The `never` on the unused arm
+ * makes the wrong field a compile error rather than a runtime 422.
+ */
+export type ResumeRequest =
+  | { session_id: string; outcome: Outcome; reply?: never }
+  | { session_id: string; reply: string; outcome?: never };
 
 /** Acknowledgement returned by /ask and /answer (the stream flows over /events). */
 export interface AckResponse {

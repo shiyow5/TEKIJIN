@@ -8,6 +8,11 @@
 
 export const DEFAULT_API_BASE_URL = "http://localhost:8000";
 
+/** Trim trailing slashes so callers can safely concatenate `${base}/ask`. */
+export function normalizeBaseUrl(base: string): string {
+  return base.replace(/\/+$/, "");
+}
+
 /**
  * Resolve the API base URL, trimming any trailing slash so callers can safely
  * concatenate `${base}/ask`. Read at call time (not module load) so tests can
@@ -16,5 +21,5 @@ export const DEFAULT_API_BASE_URL = "http://localhost:8000";
 export function getApiBaseUrl(): string {
   const raw = process.env.NEXT_PUBLIC_API_BASE_URL;
   const base = raw && raw.trim() !== "" ? raw.trim() : DEFAULT_API_BASE_URL;
-  return base.replace(/\/+$/, "");
+  return normalizeBaseUrl(base);
 }
