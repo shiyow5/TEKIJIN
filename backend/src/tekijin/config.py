@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     # Directory holding synthetic fixtures used for development/testing.
     fixtures_dir: Path = _DEFAULT_FIXTURES_DIR
 
+    # CORS allowed origins. Explicit list because wildcard "*" combined with
+    # credentialed requests is rejected by browsers (see app.create_app).
+    cors_origins: list[str] = ["http://localhost:3000"]
+
 
 @lru_cache
 def get_settings() -> Settings:

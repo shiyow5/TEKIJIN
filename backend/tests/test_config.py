@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from tekijin.config import Settings, get_settings
 
 
-def test_defaults() -> None:
-    settings = Settings()
+def test_defaults(monkeypatch) -> None:
+    # Isolate from ambient TEKIJIN_* env (the Makefile exports .env) and any
+    # local .env file so this asserts the real code defaults, not the dev's env.
+    for key in list(os.environ):
+        if key.startswith("TEKIJIN_"):
+            monkeypatch.delenv(key, raising=False)
+    settings = Settings(_env_file=None)
 
     assert settings.app_env == "development"
     assert settings.database_url == "postgresql+psycopg://tekijin:tekijin@localhost:5432/tekijin"
@@ -16,6 +22,7 @@ def test_defaults() -> None:
     assert settings.llm_model == "Qwen3.6-35B-A3B-NVFP4"
     assert settings.llm_api_key == "dummy"
     assert settings.embedding_model == "intfloat/multilingual-e5-large"
+    assert settings.cors_origins == ["http://localhost:3000"]
     assert isinstance(settings.fixtures_dir, Path)
     assert settings.fixtures_dir.name == "synthetic"
     assert settings.fixtures_dir.parent.name == "fixtures"
