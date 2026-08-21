@@ -14,6 +14,7 @@ must agree, so both go through the single ``kind`` argument here.
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Sequence
 from typing import Any, Protocol, runtime_checkable
 
@@ -62,12 +63,26 @@ class SentenceTransformerEmbedder:
         self._model_name = model_name or get_settings().embedding_model
         self._model = model
         self._use_e5_prefix = use_e5_prefix
+        # Guards the one-time lazy load so two concurrent sessions sharing this
+        # embedder cannot each start a (heavy) model init (codex#6).
+        self._model_lock = threading.Lock()
 
     def _get_model(self) -> Any:  # pragma: no cover - requires heavy model download
+        # Double-checked locking: the fast path (already loaded, or an injected
+        # model) skips the lock; only the first real load contends.
         if self._model is None:
-            from sentence_transformers import SentenceTransformer
-
-            self._model = SentenceTransformer(self._model_name)
+            with self._model_lock:
+                if self._model is None:
+                    try:
+                        from sentence_transformers import SentenceTransformer
+                    except ImportError as exc:  # guide the operator to the ML extras
+                        raise RuntimeError(
+                            "sentence-transformers is not installed. The default "
+                            "embedder needs the ML dependencies — run `make setup-ml` "
+                            "(installs backend/requirements-ml.txt), or run the API "
+                            "with an injected embedder for tests."
+                        ) from exc
+                    self._model = SentenceTransformer(self._model_name)
         return self._model
 
     @staticmethod

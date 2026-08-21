@@ -97,6 +97,13 @@ def fake_embedder() -> FakeEmbedder:
 
 
 @pytest.fixture(scope="session")
+def test_schema() -> str:
+    """The per-run isolation schema name (for e.g. a PostgresSaver search_path)."""
+
+    return TEST_SCHEMA
+
+
+@pytest.fixture(scope="session")
 def database_url() -> Iterator[str]:
     """Yield a SQLAlchemy URL for a live PostgreSQL+pgvector database.
 

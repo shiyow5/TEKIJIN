@@ -103,6 +103,13 @@ class AgentNodes:
             "outcome": None,
             "answer": None,
             "query_vector": [],
+            # Per-question durable persistence identity: clear the rec ids
+            # (a fresh question has no shown recommendations yet). ``question_id``
+            # is intentionally NOT reset here — it is supplied on the fresh
+            # ``invoke`` input and must survive this merge.
+            "recommendation_ids": [],
+            "primary_recommendation_id": None,
+            "last_event": None,
         }
 
     # -- C1: intent understanding (LLM stub) ------------------------------

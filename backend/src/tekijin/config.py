@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -40,10 +41,23 @@ class Settings(BaseSettings):
     # Database (connection code lands in a later component).
     database_url: str = "postgresql+psycopg://tekijin:tekijin@localhost:5432/tekijin"
 
-    # LLM serving via vLLM (OpenAI-compatible /v1). Real client wiring: #31.
+    # LLM serving via vLLM (OpenAI-compatible /v1).
     llm_base_url: str = "http://internship-dgx1:8080/v1"
     llm_model: str = "Qwen3.6-35B-A3B-NVFP4"
     llm_api_key: str = "dummy"
+
+    # Which C1/C2/C7 implementation the API wires: "stub" = deterministic,
+    # network-free defaults (CI/tests); "vllm" = real langchain-openai client
+    # against ``llm_base_url``. A ``Literal`` so an invalid value is rejected at
+    # startup (never a silent fallback). Default stub keeps imports/CI LLM-free.
+    llm_backend: Literal["stub", "vllm"] = "stub"
+
+    # LangGraph checkpointer for session persistence / interrupt-resume:
+    # "memory" = in-process MemorySaver (safe default, works without a DB);
+    # "postgres" = PostgresSaver over ``database_url`` (production). A ``Literal``
+    # so a typo is rejected at startup; a valid "postgres" that cannot be set up
+    # still falls back to MemorySaver at runtime (see the checkpointer factory).
+    checkpointer_backend: Literal["memory", "postgres"] = "memory"
 
     # Embedding model used by the retrieval component (later).
     embedding_model: str = "intfloat/multilingual-e5-large"

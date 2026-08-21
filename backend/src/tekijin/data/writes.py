@@ -1,0 +1,120 @@
+"""Write-side persistence for the API flow (questions, recommendations, outcomes).
+
+Kept apart from the read-only :mod:`tekijin.data.repository`. Each function takes
+an active session and mutates it; the caller owns the transaction (``session_scope``).
+The API persists so ``load`` (recent recommendations) and the dashboard reflect
+real usage — the "使うほど育つ" loop. (The C8 person_topic_edges write stays a
+separate issue.)
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+from typing import Any
+
+from sqlalchemy import select, update
+from sqlalchemy.orm import Session
+
+from tekijin.models.tables import Employee, Question, Recommendation
+
+
+def employee_exists(session: Session, employee_id: int) -> bool:
+    """True if ``employee_id`` is a real employee (asker FK pre-check).
+
+    Called before inserting a Question so a bad ``asker_id`` becomes a clean 404
+    at the boundary instead of an ``IntegrityError`` (FK violation) mid-flush.
+    """
+
+    return (
+        session.execute(select(Employee.id).where(Employee.id == employee_id)).first() is not None
+    )
+
+
+def persist_question(
+    session: Session,
+    question_id: str,
+    asker_id: int,
+    body: str,
+    now: dt.datetime,
+) -> None:
+    """Insert the asked question (``created_at`` from the run's injected ``now``)."""
+
+    session.add(
+        Question(
+            id=question_id,
+            asker_id=asker_id,
+            body=body,
+            topics=[],
+            status="open",
+            created_at=now,
+        )
+    )
+
+
+def update_question_topics(session: Session, question_id: str, topics: list[str]) -> None:
+    """Backfill C1's extracted topics onto the question (for the dashboard mix)."""
+
+    session.execute(update(Question).where(Question.id == question_id).values(topics=list(topics)))
+
+
+def insert_shown_recommendations(
+    session: Session,
+    question_id: str,
+    recommendations: list[dict[str, Any]],
+) -> list[int]:
+    """Persist EVERY shown recommendation (rank 1..N) and return their ids in order.
+
+    The list is already ranked (top first). ``rank`` is ``1``-based by position.
+    The returned ids preserve that order, so ``ids[0]`` is the primary (top /
+    handed-off) recommendation whose outcome the responder later records; the rest
+    are stored as ``outcome=NULL`` "shown" rows for the dashboard / audit trail.
+
+    ``created_at`` is intentionally NOT set here: the column's ``server_default``
+    (``now()``) stamps the actual INSERT time, which is the recommendation's real
+    generation moment. This is deliberately separate from the injected ``now`` the
+    agent uses for scoring — a reroute inserts a fresh row whose ``created_at``
+    reflects when it was produced, keeping the scorer's 7-day ``load`` window
+    accurate (codex#4).
+    """
+
+    ids: list[int] = []
+    for position, rec in enumerate(recommendations, start=1):
+        row = Recommendation(
+            question_id=question_id,
+            employee_id=rec["person_id"],
+            rank=position,
+            score=rec.get("score"),
+            reasons={"reasons": rec.get("reasons") or []},  # JSONB column typed as dict
+            outcome=None,
+        )
+        session.add(row)
+        session.flush()
+        session.refresh(row)
+        ids.append(row.id)
+    return ids
+
+
+def latest_primary_recommendation(session: Session, question_id: str) -> int | None:
+    """The id of the most recent rank-1 recommendation for a question, if any.
+
+    Durable fallback for outcome recording when the primary id was not written
+    back into the checkpoint (e.g. a disconnect before ``update_state`` ran). On a
+    decline+reroute there are several rank-1 rows; the newest (highest id) is the
+    one currently being answered.
+    """
+
+    row = session.execute(
+        select(Recommendation.id)
+        .where(Recommendation.question_id == question_id, Recommendation.rank == 1)
+        .order_by(Recommendation.id.desc())
+        .limit(1)
+    ).first()
+    return row[0] if row else None
+
+
+def set_recommendation_outcome(session: Session, recommendation_id: int, outcome: str) -> None:
+    """Record the responder's accept/decline on a recommendation."""
+
+    session.execute(
+        update(Recommendation).where(Recommendation.id == recommendation_id).values(outcome=outcome)
+    )
