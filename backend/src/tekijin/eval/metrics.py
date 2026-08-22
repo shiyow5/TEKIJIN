@@ -11,6 +11,14 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
+# The three A/B/C route branches the router can produce. Route accuracy is scored
+# only over queries whose gold route is one of these — an abstain (``none``) gold
+# is measured by the robustness set, not the A/B/C branch metric (spec §7).
+ROUTE_LABELS = frozenset({"person", "prior_answer", "document"})
+
+# Recall is reported at this fixed cutoff (spec §7 "Recall@3").
+RECALL_K = 3
+
 
 @dataclass(frozen=True)
 class QueryResult:
@@ -75,7 +83,8 @@ class EvalMetrics:
     """Aggregate metrics over an evaluation run."""
 
     n: int  # total queries evaluated
-    n_ranked: int  # queries that carry gold experts (contribute to ranking metrics)
+    n_ranked: int  # queries with gold experts (contribute to ranking metrics)
+    n_routed: int  # queries with an A/B/C gold route (contribute to route accuracy)
     top1_accuracy: float
     recall_at_3: float
     mrr: float
@@ -85,6 +94,7 @@ class EvalMetrics:
         return {
             "n": self.n,
             "n_ranked": self.n_ranked,
+            "n_routed": self.n_routed,
             "top1_accuracy": self.top1_accuracy,
             "recall_at_3": self.recall_at_3,
             "mrr": self.mrr,
@@ -96,21 +106,25 @@ def _mean(values: list[float]) -> float:
     return sum(values) / len(values) if values else 0.0
 
 
-def evaluate(results: Sequence[QueryResult], *, k: int = 3) -> EvalMetrics:
+def evaluate(results: Sequence[QueryResult]) -> EvalMetrics:
     """Aggregate per-query results into :class:`EvalMetrics`.
 
-    Ranking metrics (Top-1 / Recall@k / MRR) are averaged only over queries that
-    carry gold experts — a route-only / abstain query has nobody to rank, so it
-    would otherwise drag the average toward zero. Route accuracy is over ALL
-    queries (every query has a gold route).
+    Ranking metrics (Top-1 / Recall@3 / MRR) are averaged only over queries that
+    carry gold experts — an abstain query has nobody to rank, so it would
+    otherwise drag the average toward zero. Route accuracy is over queries whose
+    gold route is an A/B/C branch (``none``/abstain is out of the branch metric).
+    Recall is fixed at ``RECALL_K`` so the reported ``recall_at_3`` is never a
+    mislabelled Recall@k for some other ``k``.
     """
 
     ranked = [r for r in results if r.gold_experts]
+    routed = [r for r in results if r.gold_route in ROUTE_LABELS]
     return EvalMetrics(
         n=len(results),
         n_ranked=len(ranked),
+        n_routed=len(routed),
         top1_accuracy=_mean([1.0 if top1_hit(r) else 0.0 for r in ranked]),
-        recall_at_3=_mean([recall_at_k(r, k) for r in ranked]),
+        recall_at_3=_mean([recall_at_k(r, RECALL_K) for r in ranked]),
         mrr=_mean([reciprocal_rank(r) for r in ranked]),
-        route_accuracy=_mean([1.0 if route_hit(r) else 0.0 for r in results]),
+        route_accuracy=_mean([1.0 if route_hit(r) else 0.0 for r in routed]),
     )

@@ -1,13 +1,13 @@
 """Tests for the offline evaluation runner (#33 / technical-spec §7).
 
-Three layers:
+Layers:
 * pure metric functions — exact, hand-computed expectations;
-* dataset loader — the bundled 40-item set parses and validates;
+* dataset loader — the primary ``eval_person.json`` parses + strict validation;
 * the runner — orchestration via a deterministic stub ranker, plus a real
   retrieval+scorer pipeline pass over the seed (a regression floor, not the spec
   target: with NULL fixture embeddings BM25 drives retrieval, so absolute numbers
   are lower than the fully-embedded target — we assert the pipeline is wired and
-  beats an empty ranking rather than betting CI on absolute accuracy).
+  clears a floor rather than betting CI on absolute accuracy).
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ import datetime as dt
 
 import pytest
 
-from tekijin.eval.dataset import EvalQuery, load_eval_queries
+from tekijin.eval.dataset import VALID_ROUTES, EvalQuery, load_eval_queries
 from tekijin.eval.metrics import (
     QueryResult,
     evaluate,
@@ -38,6 +38,20 @@ def _qr(ranked, gold, predicted_route="person", gold_route="person") -> QueryRes
     )
 
 
+def _q(**kw) -> EvalQuery:
+    base = {
+        "id": 1,
+        "query": "q",
+        "gold_topics": ["t"],
+        "gold_experts": [1],
+        "gold_route": "person",
+        "difficulty": "L1",
+        "expect_abstain": False,
+    }
+    base.update(kw)
+    return EvalQuery(**base)
+
+
 # --------------------------------------------------------------------------- #
 # metrics (pure)
 # --------------------------------------------------------------------------- #
@@ -48,12 +62,10 @@ def test_top1_hit() -> None:
 
 
 def test_recall_at_k_normalises_by_min_k_and_gold() -> None:
-    # 2 of 3 gold in top-3, |gold|=3 -> 2/3.
     assert recall_at_k(_qr([1, 2, 9, 4], [1, 2, 3]), 3) == pytest.approx(2 / 3)
     # gold larger than k: denominator capped at k so a full top-k can reach 1.0.
     assert recall_at_k(_qr([1, 2, 3], [1, 2, 3, 4]), 3) == pytest.approx(1.0)
-    # no gold -> 0.0 (route-only query).
-    assert recall_at_k(_qr([1, 2], []), 3) == 0.0
+    assert recall_at_k(_qr([1, 2], []), 3) == 0.0  # no gold -> 0.0
 
 
 def test_recall_at_k_rejects_nonpositive_k() -> None:
@@ -67,38 +79,49 @@ def test_reciprocal_rank() -> None:
     assert reciprocal_rank(_qr([9, 8], [3])) == 0.0  # miss
 
 
-def test_evaluate_aggregates_and_excludes_goldless_from_ranking() -> None:
+def test_evaluate_excludes_goldless_and_nonabc_routes() -> None:
     results = [
-        # top1 hit, recall@3 = 1/2, route match
+        # top1 hit, recall@3 = 1/2, route match (person)
         _qr([1, 5, 6], [1, 2], predicted_route="person", gold_route="person"),
-        # first hit at rank 2, recall@3 = 1/2, route miss
+        # first hit at rank 2, recall@3 = 1/2, route miss (predicted document)
         _qr([9, 2, 8], [2, 7], predicted_route="document", gold_route="person"),
-        # route-only query (no gold experts) — excluded from ranking metrics
-        _qr([], [], predicted_route="prior_answer", gold_route="prior_answer"),
+        # abstain query: no gold experts (excluded from ranking) AND gold_route
+        # "none" (excluded from route accuracy) — contributes only to n.
+        _qr([], [], predicted_route="person", gold_route="none"),
     ]
-    m = evaluate(results, k=3)
+    m = evaluate(results)
     assert m.n == 3
-    assert m.n_ranked == 2  # the goldless query is excluded from ranking metrics
-    assert m.top1_accuracy == pytest.approx(0.5)  # 1 of 2 ranked queries
-    assert m.recall_at_3 == pytest.approx((0.5 + 0.5) / 2)  # 1/2 and 1/2
+    assert m.n_ranked == 2  # goldless query excluded from ranking metrics
+    assert m.n_routed == 2  # "none"-route query excluded from route accuracy
+    assert m.top1_accuracy == pytest.approx(0.5)
+    assert m.recall_at_3 == pytest.approx(0.5)
     assert m.mrr == pytest.approx((1.0 + 0.5) / 2)
-    assert m.route_accuracy == pytest.approx(2 / 3)  # 2 of 3 routes match
+    assert m.route_accuracy == pytest.approx(0.5)  # 1 of 2 A/B/C routes match
 
-    # as_dict exposes every metric under a stable key (for JSON export / logging).
     d = m.as_dict()
-    assert set(d) == {"n", "n_ranked", "top1_accuracy", "recall_at_3", "mrr", "route_accuracy"}
-    assert d["n"] == 3 and d["n_ranked"] == 2
+    assert set(d) == {
+        "n",
+        "n_ranked",
+        "n_routed",
+        "top1_accuracy",
+        "recall_at_3",
+        "mrr",
+        "route_accuracy",
+    }
+    assert d["n"] == 3 and d["n_ranked"] == 2 and d["n_routed"] == 2
 
 
 # --------------------------------------------------------------------------- #
-# dataset loader
+# dataset loader (primary eval_person.json + strict validation)
 # --------------------------------------------------------------------------- #
-def test_load_bundled_eval_queries() -> None:
+def test_load_bundled_eval_person() -> None:
     queries = load_eval_queries()
-    assert len(queries) == 40
+    assert len(queries) == 71  # eval_person.json v2 (fixtures README)
     assert all(isinstance(q, EvalQuery) for q in queries)
-    assert all(q.correct_experts for q in queries)  # every query has gold experts
-    assert {q.route for q in queries} <= {"person", "prior_answer", "document"}
+    assert {q.gold_route for q in queries} <= VALID_ROUTES
+    # L4 abstain queries carry no gold experts and route "none".
+    l4 = [q for q in queries if q.difficulty == "L4"]
+    assert l4 and all(not q.gold_experts and q.gold_route == "none" for q in l4)
 
 
 def test_load_eval_queries_rejects_missing_keys(tmp_path) -> None:
@@ -122,14 +145,105 @@ def test_load_eval_queries_rejects_non_object_row(tmp_path) -> None:
         load_eval_queries(bad)
 
 
+def _row(**over) -> str:
+    import json
+
+    base = {
+        "id": 1,
+        "query": "q",
+        "gold_topics": ["t"],
+        "gold_experts": [1],
+        "gold_route": "person",
+        "difficulty": "L1",
+    }
+    base.update(over)
+    return json.dumps([base])
+
+
+def test_load_eval_queries_rejects_bad_route(tmp_path) -> None:
+    bad = tmp_path / "bad.json"
+    bad.write_text(_row(gold_route="preson"), encoding="utf-8")  # typo
+    with pytest.raises(ValueError, match="gold_route"):
+        load_eval_queries(bad)
+
+
+def test_load_eval_queries_rejects_non_string_query(tmp_path) -> None:
+    bad = tmp_path / "bad.json"
+    bad.write_text(_row(query=None), encoding="utf-8")  # null must not become "None"
+    with pytest.raises(ValueError, match="expected a string"):
+        load_eval_queries(bad)
+
+
+def test_load_eval_queries_rejects_boolean_expert_id(tmp_path) -> None:
+    bad = tmp_path / "bad.json"
+    bad.write_text(_row(gold_experts=[True]), encoding="utf-8")  # bool must not become 1
+    with pytest.raises(ValueError, match="expected an integer"):
+        load_eval_queries(bad)
+
+
 def test_load_eval_queries_rejects_non_list_field(tmp_path) -> None:
     bad = tmp_path / "bad.json"
-    bad.write_text(
-        '[{"id": 1, "query": "q", "topics": "t", "correct_experts": [1], "route": "person"}]',
-        encoding="utf-8",
-    )
+    bad.write_text(_row(gold_topics="t"), encoding="utf-8")
     with pytest.raises(ValueError, match="expected a list"):
         load_eval_queries(bad)
+
+
+def test_load_eval_queries_rejects_non_bool_expect_abstain(tmp_path) -> None:
+    bad = tmp_path / "bad.json"
+    bad.write_text(_row(expect_abstain="yes"), encoding="utf-8")
+    with pytest.raises(ValueError, match="expected a boolean"):
+        load_eval_queries(bad)
+
+
+# --------------------------------------------------------------------------- #
+# pipeline: prior_answer responder pinning (mirrors the production graph)
+# --------------------------------------------------------------------------- #
+def test_pinned_responder_picks_highest_scoring_past_answer() -> None:
+    from tekijin.eval.pipeline import _pinned_responder
+
+    retrieval = {
+        "past_answers": [
+            {"qa_id": "a", "score": 0.4, "responder_id": 7},
+            {"qa_id": "b", "score": 0.9, "responder_id": 3},  # highest score
+            {"qa_id": "c", "score": 0.8, "responder_id": None},
+        ],
+    }
+    assert _pinned_responder(retrieval) == 3  # type: ignore[arg-type]
+    assert _pinned_responder({"past_answers": []}) is None  # type: ignore[arg-type]
+    # highest score has no responder -> fall through to the next with one.
+    only_none = {"past_answers": [{"qa_id": "a", "score": 0.9, "responder_id": None}]}
+    assert _pinned_responder(only_none) is None  # type: ignore[arg-type]
+
+
+def test_pipeline_ranker_pins_responder_on_prior_answer_route() -> None:
+    from tekijin.eval.pipeline import PipelineRanker
+
+    class _FakeRetriever:
+        def search(self, query: str):  # noqa: ARG002
+            # High answer confidence + a past answer -> decide_route == prior_answer.
+            return {
+                "past_answers": [{"qa_id": "a", "score": 0.95, "responder_id": 3}],
+                "documents": [],
+                "candidate_people": [1, 2, 3, 4],
+                "answer_confidence": 0.99,
+                "document_confidence": 0.0,
+                "people_confidence": 0.2,
+            }
+
+    seen: dict[str, object] = {}
+
+    class _FakeScorer:
+        def rank(self, topics, candidate_ids, asker_id, now, *, top_k=3):  # noqa: ARG002
+            seen["candidate_ids"] = list(candidate_ids)
+            return {"recommendations": [{"person_id": pid} for pid in candidate_ids]}
+
+    ranker = PipelineRanker(retriever=_FakeRetriever(), scorer=_FakeScorer(), now=NOW)
+    result = ranker(_q(gold_route="prior_answer"))
+
+    assert result.route == "prior_answer"
+    # Only the pinned past responder is scored, not the whole candidate pool.
+    assert seen["candidate_ids"] == [3]
+    assert result.ranked_experts == [3]
 
 
 # --------------------------------------------------------------------------- #
@@ -137,12 +251,12 @@ def test_load_eval_queries_rejects_non_list_field(tmp_path) -> None:
 # --------------------------------------------------------------------------- #
 def test_run_eval_with_perfect_stub() -> None:
     queries = [
-        EvalQuery(id=1, query="a", topics=["t"], correct_experts=[3, 1], route="person"),
-        EvalQuery(id=2, query="b", topics=["t"], correct_experts=[5], route="document"),
+        _q(id=1, gold_experts=[3, 1], gold_route="person"),
+        _q(id=2, gold_experts=[5], gold_route="document"),
     ]
 
     def perfect(query: EvalQuery) -> RankResult:
-        return RankResult(ranked_experts=list(query.correct_experts), route=query.route)
+        return RankResult(ranked_experts=list(query.gold_experts), route=query.gold_route)
 
     report = run_eval(queries, perfect)
     assert report.metrics.top1_accuracy == pytest.approx(1.0)
@@ -153,12 +267,8 @@ def test_run_eval_with_perfect_stub() -> None:
 
 
 def test_run_eval_with_empty_stub_scores_zero() -> None:
-    queries = [EvalQuery(id=1, query="a", topics=["t"], correct_experts=[3], route="person")]
-
-    def empty(_query: EvalQuery) -> RankResult:
-        return RankResult(ranked_experts=[], route="document")
-
-    report = run_eval(queries, empty)
+    queries = [_q(id=1, gold_experts=[3], gold_route="person")]
+    report = run_eval(queries, lambda _q: RankResult(ranked_experts=[], route="document"))
     assert report.metrics.top1_accuracy == 0.0
     assert report.metrics.recall_at_3 == 0.0
     assert report.metrics.mrr == 0.0
@@ -166,8 +276,7 @@ def test_run_eval_with_empty_stub_scores_zero() -> None:
 
 
 def test_format_report_contains_all_metrics() -> None:
-    queries = [EvalQuery(id=1, query="a", topics=["t"], correct_experts=[3], route="person")]
-    report = run_eval(queries, lambda q: RankResult([3], "person"))
+    report = run_eval([_q()], lambda q: RankResult([1], "person"))
     text = format_report(report)
     for label in ("Top-1 Accuracy", "Recall@3", "MRR", "Route Accuracy"):
         assert label in text
@@ -184,18 +293,18 @@ def test_run_eval_real_pipeline_over_seed(seed_counts, session, fake_embedder) -
     report = run_eval(queries, ranker)
 
     m = report.metrics
-    assert m.n == 40 and m.n_ranked == 40  # ran over every query
-    # Valid metric ranges.
+    assert m.n == 71  # ran over every query
+    assert m.n_ranked > 0 and m.n_routed > 0
     for value in (m.top1_accuracy, m.recall_at_3, m.mrr, m.route_accuracy):
         assert 0.0 <= value <= 1.0
-    # Regression floors, set with headroom below the deterministic observed values
-    # (Top-1 0.70 / Recall@3 0.81 / MRR 0.83 on this seed). These catch a real
-    # wiring/scoring regression without pinning the exact numbers (which move when
-    # the scorer weights are retuned on the eval set). Absolute spec targets
-    # (§7: 0.70 / 0.90 / 0.75) need real embeddings on the seed rows; here the
-    # fixtures store NULL vectors so BM25 drives retrieval and routing degenerates
-    # to the person line (route accuracy == the person fraction).
+    # Regression floors with headroom below the deterministic observed values on
+    # the NON-leaky set (Top-1 0.66 / Recall@3 0.61 / MRR 0.71 / route 0.70).
+    # These catch a real retrieval/scoring regression without pinning the exact
+    # numbers (which move when the scorer weights are retuned). Absolute spec
+    # targets (§7) need real embeddings on the seed rows; here the fixtures store
+    # NULL vectors so BM25 drives retrieval and routing degenerates to the person
+    # line (route accuracy == the person fraction among routed queries).
     assert m.top1_accuracy >= 0.55
-    assert m.recall_at_3 >= 0.65
-    assert m.mrr >= 0.65
-    assert m.route_accuracy >= 0.50
+    assert m.recall_at_3 >= 0.50
+    assert m.mrr >= 0.60
+    assert m.route_accuracy >= 0.55

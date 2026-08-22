@@ -120,7 +120,7 @@ seed: ## Seed the database from the synthetic fixtures
 embed: ## Compute + store dense embeddings (needs requirements-ml.txt + a real model)
 	PYTHONPATH=$(BACKEND_DIR)/src $(PY) scripts/embed_fixtures.py
 
-eval: ## Run the offline evaluation (Top-1/Recall@3/MRR/route) on a seeded DB
+eval: ## Run the offline evaluation (Top-1/Recall@3/MRR/route); run `make seed embed` first
 	cd $(BACKEND_DIR) && PYTHONPATH=src $(PY) -m tekijin.eval
 
 # ============================================================

@@ -34,31 +34,38 @@ class EvalReport:
     results: list[QueryResult]
 
 
-def run_eval(queries: Sequence[EvalQuery], ranker: Ranker, *, k: int = 3) -> EvalReport:
+def run_eval(queries: Sequence[EvalQuery], ranker: Ranker) -> EvalReport:
     """Run ``ranker`` over every query and aggregate into an :class:`EvalReport`."""
 
-    results = [
-        QueryResult(
-            ranked_experts=list(result.ranked_experts),
-            gold_experts=list(query.correct_experts),
-            predicted_route=result.route,
-            gold_route=query.route,
+    results: list[QueryResult] = []
+    for query in queries:
+        ranked = ranker(query)
+        results.append(
+            QueryResult(
+                ranked_experts=list(ranked.ranked_experts),
+                gold_experts=list(query.gold_experts),
+                predicted_route=ranked.route,
+                gold_route=query.gold_route,
+            )
         )
-        for query in queries
-        for result in (ranker(query),)
-    ]
-    return EvalReport(metrics=evaluate(results, k=k), results=results)
+    return EvalReport(metrics=evaluate(results), results=results)
 
 
 def format_report(report: EvalReport) -> str:
-    """Render the metrics as a human-readable block (spec §7 targets in parens)."""
+    """Render the metrics as a human-readable block (spec §7 targets in parens).
+
+    The ranking metrics use the eval set's gold topics (isolating retrieval +
+    scoring from the C1 intent step), so treat them as a layer-1/2 measurement,
+    not a full end-to-end accuracy.
+    """
 
     m = report.metrics
     return (
-        "評価結果 (technical-spec §7)\n"
-        f"  queries        : {m.n} (ranked {m.n_ranked})\n"
+        "評価結果 (technical-spec §7 / eval_person.json)\n"
+        f"  queries        : {m.n} (ranked {m.n_ranked}, routed {m.n_routed})\n"
         f"  Top-1 Accuracy : {m.top1_accuracy:.3f} (目標 0.70)\n"
         f"  Recall@3       : {m.recall_at_3:.3f} (目標 0.90)\n"
         f"  MRR            : {m.mrr:.3f} (目標 0.75)\n"
-        f"  Route Accuracy : {m.route_accuracy:.3f} (目標 0.80)"
+        f"  Route Accuracy : {m.route_accuracy:.3f} (目標 0.80)\n"
+        "  ※ gold topics を使用（層1-2の測定）。route/dense 指標は埋め込み索引が前提。"
     )
