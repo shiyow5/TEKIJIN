@@ -87,7 +87,9 @@ def format_report(report: EvalReport) -> str:
         f"  Top-1 Accuracy : {m.top1_accuracy:.3f} (目標 0.70)",
         f"  Recall@3       : {m.recall_at_3:.3f} (目標 0.90)",
         f"  MRR            : {m.mrr:.3f} (目標 0.75)",
-        f"  Route Accuracy : {m.route_accuracy:.3f} (目標 0.80)",
+        f"  Route Accuracy : {m.route_accuracy:.3f} (目標 0.80, A/B/C のみ n={m.n_routed})",
+        f"  Abstain Rate   : {m.abstain_accuracy:.3f} (棄却できた割合 n={m.n_abstain}) "
+        "— 現状パイプラインは明示的な棄却経路を持たないため gap の可視化用",
         "  層別 Recall@3 (必ず層別に見る):",
     ]
     for layer, lm in report.by_difficulty.items():

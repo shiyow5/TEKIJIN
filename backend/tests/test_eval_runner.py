@@ -102,22 +102,37 @@ def test_evaluate_excludes_goldless_and_nonabc_routes() -> None:
     assert m.n == 3
     assert m.n_ranked == 2  # goldless query excluded from ranking metrics
     assert m.n_routed == 2  # "none"-route query excluded from route accuracy
+    assert m.n_abstain == 1  # the "none"-route query
     assert m.top1_accuracy == pytest.approx(0.5)
     assert m.recall_at_3 == pytest.approx(0.5)
     assert m.mrr == pytest.approx((1.0 + 0.5) / 2)
     assert m.route_accuracy == pytest.approx(0.5)  # 1 of 2 A/B/C routes match
+    # the abstain query produced no experts -> declined correctly.
+    assert m.abstain_accuracy == pytest.approx(1.0)
 
     d = m.as_dict()
     assert set(d) == {
         "n",
         "n_ranked",
         "n_routed",
+        "n_abstain",
         "top1_accuracy",
         "recall_at_3",
         "mrr",
         "route_accuracy",
+        "abstain_accuracy",
     }
     assert d["n"] == 3 and d["n_ranked"] == 2 and d["n_routed"] == 2
+
+
+def test_abstain_accuracy_counts_only_empty_rankings() -> None:
+    results = [
+        _qr([], [], gold_route="none"),  # declined -> correct
+        _qr([7], [], gold_route="none"),  # produced an expert -> failed to abstain
+    ]
+    m = evaluate(results)
+    assert m.n_abstain == 2
+    assert m.abstain_accuracy == pytest.approx(0.5)
 
 
 def test_evaluate_by_difficulty_splits_per_layer() -> None:
@@ -281,6 +296,69 @@ def test_pipeline_ranker_pins_responder_on_prior_answer_route() -> None:
     assert result.ranked_experts == [3]
 
 
+class _StaticRetriever:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def search(self, query: str):  # noqa: ARG002
+        return self._payload
+
+
+class _RecordingScorer:
+    def __init__(self):
+        self.called = False
+
+    def rank(self, topics, candidate_ids, asker_id, now, *, top_k=3):  # noqa: ARG002
+        self.called = True
+        return {"recommendations": [{"person_id": pid} for pid in candidate_ids]}
+
+
+def test_pipeline_ranker_presents_no_experts_on_document_route() -> None:
+    from tekijin.eval.pipeline import PipelineRanker
+
+    # High document confidence + weak people/answer -> decide_route == document.
+    retriever = _StaticRetriever(
+        {
+            "past_answers": [],
+            "documents": [{"doc_id": "d1", "score": 0.9}],
+            "candidate_people": [1, 2, 3],
+            "answer_confidence": 0.0,
+            "document_confidence": 0.99,
+            "people_confidence": 0.0,
+        }
+    )
+    scorer = _RecordingScorer()
+    result = PipelineRanker(retriever=retriever, scorer=scorer, now=NOW)(_q(gold_route="document"))
+
+    assert result.route == "document"
+    assert result.ranked_experts == []  # document is a terminal: no experts shown
+    assert scorer.called is False  # C6 never runs on the document route
+
+
+def test_pipeline_ranker_returns_no_experts_when_topics_empty() -> None:
+    from tekijin.eval.pipeline import PipelineRanker
+
+    retriever = _StaticRetriever(
+        {
+            "past_answers": [],
+            "documents": [],
+            "candidate_people": [1, 2, 3],
+            "answer_confidence": 0.0,
+            "document_confidence": 0.0,
+            "people_confidence": 0.1,
+        }
+    )
+    scorer = _RecordingScorer()
+    # Unsupported-topic row: gold_topics empty -> mirror c6_score returning nothing.
+    result = PipelineRanker(retriever=retriever, scorer=scorer, now=NOW)(
+        _q(gold_topics=[], gold_route="person")
+    )
+
+    assert result.route == "person"
+    assert result.ranked_experts == []
+    assert scorer.called is False
+
+
 # --------------------------------------------------------------------------- #
 # runner (stub ranker — deterministic orchestration)
 # --------------------------------------------------------------------------- #
@@ -344,6 +422,9 @@ def test_run_eval_real_pipeline_over_seed(seed_counts, session, fake_embedder) -
     # Layer-wise breakdown + anti-circularity run are produced.
     assert {"L1", "L2", "L3"} <= set(report.by_difficulty)
     assert report.metrics_alt.n_ranked > 0
+    # Abstain layer is measured (15 L4 rows) and the rate is a valid fraction.
+    assert m.n_abstain == 15
+    assert 0.0 <= m.abstain_accuracy <= 1.0
     # Sanity: the alt (answers-derived) Recall@3 is not a perfect echo of the
     # primary — if it were 1.0 the scorer would just be reproducing labels.
     assert report.metrics_alt.recall_at_3 < 0.99

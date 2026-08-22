@@ -62,11 +62,25 @@ class PipelineRanker:
     def __call__(self, query: EvalQuery) -> RankResult:
         retrieval = self._retriever.search(query.query)
         route = decide_route(retrieval).route
-        # Mirror the production graph: on the prior_answer route C6 scores ONLY the
-        # pinned past responder (本人に取り次ぐ), not the whole pool — so Top-1 /
-        # Recall / MRR reflect the expert the product actually presents.
+        return RankResult(ranked_experts=self._rank_experts(query, retrieval, route), route=route)
+
+    def _rank_experts(self, query: EvalQuery, retrieval: RetrievalResult, route: str) -> list[int]:
+        """Mirror the production graph so the metrics reflect what the product shows.
+
+        * ``document`` is a terminal route — C6 never runs, so no experts are
+          presented (only the document location).
+        * ``prior_answer`` pins the top past responder and scores ONLY them.
+        * ``c6_score`` returns nothing when there are no topics or no candidates —
+          so an empty ``gold_topics`` (unsupported-topic rows) yields no ranking
+          rather than an arbitrary load/id tie-break the product would never emit.
+        """
+
+        if route == "document":
+            return []
         pinned = _pinned_responder(retrieval) if route == "prior_answer" else None
         candidates = [pinned] if pinned is not None else list(retrieval["candidate_people"])
+        if not query.gold_topics or not candidates:
+            return []
         ranked = self._scorer.rank(
             query.gold_topics,
             candidates,
@@ -74,8 +88,7 @@ class PipelineRanker:
             self._now,
             top_k=self._top_k,
         )
-        experts = [rec["person_id"] for rec in ranked["recommendations"]]
-        return RankResult(ranked_experts=experts, route=route)
+        return [rec["person_id"] for rec in ranked["recommendations"]]
 
 
 def build_pipeline_ranker(

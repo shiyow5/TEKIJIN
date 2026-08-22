@@ -19,6 +19,9 @@ ROUTE_LABELS = frozenset({"person", "prior_answer", "document"})
 # Recall is reported at this fixed cutoff (spec §7 "Recall@3").
 RECALL_K = 3
 
+# Gold route for a query that should be declined (abstain / no expert exists).
+ABSTAIN_ROUTE = "none"
+
 
 @dataclass(frozen=True)
 class QueryResult:
@@ -90,20 +93,27 @@ class EvalMetrics:
     n: int  # total queries evaluated
     n_ranked: int  # queries with gold experts (contribute to ranking metrics)
     n_routed: int  # queries with an A/B/C gold route (contribute to route accuracy)
+    n_abstain: int  # queries whose gold route is abstain ("none")
     top1_accuracy: float
     recall_at_3: float
     mrr: float
     route_accuracy: float
+    # Fraction of abstain queries where the system produced NO experts (declined).
+    # The current pipeline has no explicit abstain path, so this exposes the gap
+    # rather than hiding it by dropping the abstain rows from every metric.
+    abstain_accuracy: float
 
     def as_dict(self) -> dict[str, float | int]:
         return {
             "n": self.n,
             "n_ranked": self.n_ranked,
             "n_routed": self.n_routed,
+            "n_abstain": self.n_abstain,
             "top1_accuracy": self.top1_accuracy,
             "recall_at_3": self.recall_at_3,
             "mrr": self.mrr,
             "route_accuracy": self.route_accuracy,
+            "abstain_accuracy": self.abstain_accuracy,
         }
 
 
@@ -124,14 +134,18 @@ def evaluate(results: Sequence[QueryResult]) -> EvalMetrics:
 
     ranked = [r for r in results if r.gold_experts]
     routed = [r for r in results if r.gold_route in ROUTE_LABELS]
+    abstain = [r for r in results if r.gold_route == ABSTAIN_ROUTE]
     return EvalMetrics(
         n=len(results),
         n_ranked=len(ranked),
         n_routed=len(routed),
+        n_abstain=len(abstain),
         top1_accuracy=_mean([1.0 if top1_hit(r) else 0.0 for r in ranked]),
         recall_at_3=_mean([recall_at_k(r, RECALL_K) for r in ranked]),
         mrr=_mean([reciprocal_rank(r) for r in ranked]),
         route_accuracy=_mean([1.0 if route_hit(r) else 0.0 for r in routed]),
+        # Declined correctly == produced no experts for an abstain query.
+        abstain_accuracy=_mean([1.0 if not r.ranked_experts else 0.0 for r in abstain]),
     )
 
 
