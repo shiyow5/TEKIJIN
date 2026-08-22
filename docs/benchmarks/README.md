@@ -76,7 +76,8 @@ Apache-2.0 と 1024次元の扱いやすさを優先するなら Qwen3-Embedding
 > ⛔ **上の表はすべて `enable_thinking=false` で測った値で、製品の設定では再現しない。**
 > `_openai_model`（`llm/vllm.py`）は `chat_template_kwargs` を渡していないので thinking が ON のまま動く。
 > 製品のリクエストをそのまま再現すると **C1 p50 14.14秒 / C1+C2 p50 83.15秒**、
-> C1 は 76件中10件、C2 は届いた60件中29件が長さ切れになる（製品では 500）。
+> C1 は 76件中10件、C2 は届いた60件中29件が長さ切れになる
+> （製品では SSE に `error` イベントが1つ流れて、回答が出ないまま stream が終わる）。
 > → [llm_faithful.md](llm_faithful.md)（#116）。
 
 ## 実装に直結する注意（実測で分かったこと）
