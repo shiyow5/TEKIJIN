@@ -87,7 +87,10 @@ describe("ResultScreen — terminal-only replay (hard reload)", () => {
 describe("ResultScreen — stream error", () => {
   it("surfaces a generic error (no leaked detail) instead of stalling on 準備中", () => {
     renderResult(state({ error: "処理中にエラーが発生しました。" }));
-    expect(screen.getByRole("alert")).toHaveTextContent("エラーが発生しました");
+    expect(
+      screen.getByRole("heading", { level: 1, name: "エラーが発生しました" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("時間をおいて再度お試しください");
     expect(screen.queryByText("結果を準備中…")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "新しい質問をする" })).toBeInTheDocument();
   });

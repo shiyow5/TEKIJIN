@@ -79,11 +79,12 @@ function ResultTerminal({
 function ResultError() {
   return (
     <section className="mx-auto flex w-full max-w-2xl flex-col gap-md py-lg text-center">
+      <h1 className="font-bold text-2xl text-on-surface">エラーが発生しました</h1>
       <div
         role="alert"
         className="rounded-xl border border-error-container bg-error-container p-md text-on-error-container"
       >
-        エラーが発生しました。時間をおいて再度お試しください。
+        時間をおいて再度お試しください。
       </div>
       <div className="flex justify-center">
         <a
