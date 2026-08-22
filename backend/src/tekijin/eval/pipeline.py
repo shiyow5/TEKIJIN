@@ -28,19 +28,20 @@ _RANK_DEPTH = 10
 
 
 def _pinned_responder(retrieval: RetrievalResult) -> int | None:
-    """The responder of the highest-scoring past answer (prior_answer pin).
+    """The responder of THE single highest-scoring past answer (prior_answer pin).
 
-    Mirrors ``nodes.prior_answer`` / ``c6_score``: the past QA the router matched
-    hands off to its responder. ``None`` when no past answer has a known responder.
+    Mirrors ``nodes.prior_answer`` exactly: it pins the responder of the one
+    top-scored past QA. If that top answer has no known responder, the pin is
+    ``None`` and ``c6_score`` falls back to the full candidate pool — so we do NOT
+    fall through to a lower-scored answer here.
     """
 
     past = retrieval.get("past_answers") or []
-    ranked = sorted(past, key=lambda p: p.get("score", 0.0), reverse=True)
-    for answer in ranked:
-        responder = answer.get("responder_id")
-        if responder is not None:
-            return int(responder)
-    return None
+    if not past:
+        return None
+    top = max(past, key=lambda p: p.get("score", 0.0))
+    responder = top.get("responder_id")
+    return int(responder) if responder is not None else None
 
 
 class PipelineRanker:

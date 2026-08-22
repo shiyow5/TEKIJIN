@@ -217,6 +217,13 @@ def test_load_eval_queries_rejects_bad_route(tmp_path) -> None:
         load_eval_queries(bad)
 
 
+def test_load_eval_queries_rejects_bad_difficulty(tmp_path) -> None:
+    bad = tmp_path / "bad.json"
+    bad.write_text(_row(difficulty="l1"), encoding="utf-8")  # wrong case
+    with pytest.raises(ValueError, match="difficulty"):
+        load_eval_queries(bad)
+
+
 def test_load_eval_queries_rejects_non_string_query(tmp_path) -> None:
     bad = tmp_path / "bad.json"
     bad.write_text(_row(query=None), encoding="utf-8")  # null must not become "None"
@@ -260,9 +267,15 @@ def test_pinned_responder_picks_highest_scoring_past_answer() -> None:
     }
     assert _pinned_responder(retrieval) == 3  # type: ignore[arg-type]
     assert _pinned_responder({"past_answers": []}) is None  # type: ignore[arg-type]
-    # highest score has no responder -> fall through to the next with one.
-    only_none = {"past_answers": [{"qa_id": "a", "score": 0.9, "responder_id": None}]}
-    assert _pinned_responder(only_none) is None  # type: ignore[arg-type]
+    # The SINGLE top-scored answer has no responder -> no pin (production then
+    # falls back to the full pool); we must NOT fall through to a lower-scored one.
+    top_none = {
+        "past_answers": [
+            {"qa_id": "a", "score": 0.9, "responder_id": None},  # top score, no responder
+            {"qa_id": "b", "score": 0.4, "responder_id": 7},
+        ]
+    }
+    assert _pinned_responder(top_none) is None  # type: ignore[arg-type]
 
 
 def test_pipeline_ranker_pins_responder_on_prior_answer_route() -> None:
@@ -429,7 +442,7 @@ def test_run_eval_real_pipeline_over_seed(seed_counts, session, fake_embedder) -
     # primary — if it were 1.0 the scorer would just be reproducing labels.
     assert report.metrics_alt.recall_at_3 < 0.99
     # Regression floors with headroom below the deterministic observed values on
-    # the NON-leaky set (Top-1 0.66 / Recall@3 0.61 / MRR 0.71 / route 0.70).
+    # the NON-leaky set (Top-1 0.66 / Recall@3 0.59 / MRR 0.70 / route 0.70).
     # These catch a real retrieval/scoring regression without pinning the exact
     # numbers (which move when the scorer weights are retuned). Absolute spec
     # targets (§7) need real embeddings on the seed rows; here the fixtures store

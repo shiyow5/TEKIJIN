@@ -100,7 +100,10 @@ class EvalMetrics:
     route_accuracy: float
     # Fraction of abstain queries where the system produced NO experts (declined).
     # The current pipeline has no explicit abstain path, so this exposes the gap
-    # rather than hiding it by dropping the abstain rows from every metric.
+    # rather than hiding it by dropping the abstain rows from every metric. NOTE:
+    # on eval_person the L4 rows all have empty gold_topics, which the ranker maps
+    # to an empty result by construction — so this reads ~1.0 and does NOT yet
+    # demonstrate true no-expert detection (that is the robustness set's job).
     abstain_accuracy: float
 
     def as_dict(self) -> dict[str, float | int]:

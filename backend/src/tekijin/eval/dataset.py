@@ -25,6 +25,10 @@ from tekijin.config import get_settings
 # L4 layer — scored by the robustness set, not the A/B/C route metric).
 VALID_ROUTES = frozenset({"person", "prior_answer", "document", "none"})
 
+# Difficulty layers (fixtures README): L1 easy … L4 abstain. Closed-set-checked so
+# a typo ("l1") fails loudly instead of creating a phantom layer in the breakdown.
+VALID_DIFFICULTIES = frozenset({"L1", "L2", "L3", "L4"})
+
 
 @dataclass(frozen=True)
 class EvalQuery:
@@ -70,13 +74,19 @@ def _parse_query(row: object, source: Path) -> EvalQuery:
     if route not in VALID_ROUTES:
         raise ValueError(f"{source}: gold_route {route!r} is not one of {sorted(VALID_ROUTES)}")
 
+    difficulty = _as_str(row["difficulty"], "difficulty")
+    if difficulty not in VALID_DIFFICULTIES:
+        raise ValueError(
+            f"{source}: difficulty {difficulty!r} is not one of {sorted(VALID_DIFFICULTIES)}"
+        )
+
     return EvalQuery(
         id=_as_int(row["id"], "id"),
         query=_as_str(row["query"], "query"),
         gold_topics=[_as_str(t, "gold_topics[]") for t in _as_list(row["gold_topics"])],
         gold_experts=[_as_int(e, "gold_experts[]") for e in _as_list(row["gold_experts"])],
         gold_route=route,
-        difficulty=_as_str(row["difficulty"], "difficulty"),
+        difficulty=difficulty,
         # ``expect_abstain`` is optional in older rows; default False.
         expect_abstain=_as_bool(row.get("expect_abstain", False), "expect_abstain"),
         gold_experts_alt=[
