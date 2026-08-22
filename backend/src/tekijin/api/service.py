@@ -52,15 +52,17 @@ from tekijin.api.events import (
     TERMINAL_EVENTS,
     interrupt_event,
     node_event,
-    reconnect_event,
+    reconnect_events,
     replay_terminal,
 )
 from tekijin.data.db import session_scope
+from tekijin.data.handoff import employee_brief, responder_reuse_stats
 from tekijin.data.writes import (
     employee_exists,
     insert_shown_recommendations,
     latest_primary_recommendation,
     persist_question,
+    recommendation_outcome,
     set_recommendation_outcome,
     update_question_topics,
 )
@@ -87,6 +89,10 @@ class SessionInvalid(Exception):
 
 class AskerNotFound(Exception):
     """The ``asker_id`` is not a known employee (maps to HTTP 404)."""
+
+
+class HandoffNotFound(Exception):
+    """No responder handoff is available for this session (maps to HTTP 404)."""
 
 
 def _default_now() -> dt.datetime:
@@ -299,8 +305,14 @@ class AgentService:
             elif node == "send":
                 if outcome is None:
                     raise SessionInvalid("this session expects a responder 'outcome'")
-                resume_value = outcome
-                self._record_outcome(session_id, snapshot.values, outcome)
+                # The DB is the source of truth for the outcome. ``_record_outcome``
+                # writes it first-wins and returns the EFFECTIVE (persisted) value:
+                # on a duplicate submission (e.g. a restart lost the in-memory
+                # pending guard and the responder resubmitted) the stored outcome
+                # wins. We resume the graph with that effective value so the
+                # checkpoint always advances consistently with the DB — never
+                # diverging, and never left permanently paused at ``send``.
+                _status, resume_value = self._record_outcome(session_id, snapshot.values, outcome)
             else:  # pragma: no cover - the graph only ever interrupts at ask/send
                 raise SessionConflict("session cannot be resumed from its current state")
 
@@ -308,8 +320,21 @@ class AgentService:
             ctx.pending = Command(resume=resume_value)
             ctx.touched_at = self._clock()
 
-    def _record_outcome(self, session_id: str, values: dict[str, Any], outcome: str) -> None:
-        """Record the responder outcome on the durable primary recommendation."""
+    def _record_outcome(
+        self, session_id: str, values: dict[str, Any], outcome: str
+    ) -> tuple[str, str]:
+        """Record the responder outcome on the durable primary recommendation.
+
+        Returns ``(status, effective_outcome)`` where ``effective_outcome`` is the
+        value the graph should resume with (the DB is authoritative):
+
+        * ``("recorded", outcome)`` — fresh write of the submitted outcome;
+        * ``("already", stored)`` — the primary already carried ``stored`` (a
+          duplicate submission); the stored value wins, and the caller resumes the
+          graph with it so the checkpoint stays consistent instead of diverging;
+        * ``("no_target", outcome)`` — no recommendation to attach it to; resume
+          with the submitted value (nothing to reconcile against).
+        """
 
         primary = values.get("primary_recommendation_id")
         question_id = values.get("question_id")
@@ -324,8 +349,82 @@ class AgentService:
                     session_id,
                     outcome,
                 )
-                return
+                return "no_target", outcome
+            existing = recommendation_outcome(session, primary)
+            if existing is not None:
+                return "already", existing
             set_recommendation_outcome(session, primary, outcome)
+            return "recorded", outcome
+
+    # -- /handoff : responder-facing view (product-spec 画面4) ------------- #
+    def get_handoff(self, session_id: str) -> schemas.HandoffResponse:
+        """Assemble the responder-facing payload for a ``send``-interrupt session.
+
+        Read-only: reads the durable checkpoint (never advances the graph) plus
+        two DB lookups (asker identity, responder reuse totals). Raises
+        :class:`HandoffNotFound` (404) when there is no paused run at all
+        (unknown / finished); :class:`SessionConflict` (409) when the run is
+        paused elsewhere (a clarification is owed to the asker, not a responder
+        outcome).
+
+        The snapshot + pending check runs under the per-session lock (as
+        ``submit_resume`` / ``stream_events`` do) so it is atomic against a
+        concurrent dispatch: a reload cannot pass the "still awaiting" check on a
+        stale snapshot while another reader is mid-way through advancing the graph.
+        """
+
+        with self._lock(session_id):
+            snapshot = self._snapshot(session_id)
+            next_nodes = tuple(snapshot.next)
+            if not next_nodes:
+                raise HandoffNotFound("no responder handoff for this session")
+            if next_nodes[0] != "send":
+                raise SessionConflict("session is not awaiting a responder outcome")
+            # An outcome already queued (submitted, not yet consumed by an /events
+            # reader) leaves the durable snapshot at ``send`` with the same, already
+            # decided recommendation. Treat it as no-longer-offerable so a reload
+            # does not re-render the form and invite a second submission (409).
+            ctx = self._reg_get(session_id)
+            if ctx is not None and ctx.pending is not None:
+                raise HandoffNotFound("this handoff has already been answered")
+
+        values = snapshot.values
+        recs = values.get("recommendations") or []
+        primary = recs[0] if recs else None
+        asker_id = (values.get("asker") or {}).get("id")
+
+        responder: schemas.Recommendation | None = None
+        reuse = {"reuse_count": 0, "helpful_answer_count": 0}
+        asker_name: str | None = None
+        asker_dept: str | None = None
+        with session_scope(self._session_factory) as session:
+            if asker_id is not None:
+                asker_name, asker_dept = employee_brief(session, asker_id)
+            if primary is not None:
+                # person_id crosses the boundary in the external "E###" form,
+                # mirroring the recommend event (events.py / model-definition).
+                responder = schemas.Recommendation(
+                    **{**primary, "person_id": schemas.format_employee_id(primary["person_id"])}
+                )
+                reuse = responder_reuse_stats(session, primary["person_id"])
+
+        return schemas.HandoffResponse(
+            session_id=session_id,
+            question=values.get("question") or "",
+            asker=schemas.HandoffAsker(
+                id=schemas.format_employee_id(asker_id) if asker_id is not None else "",
+                name=asker_name,
+                dept=asker_dept,
+            ),
+            topics=values.get("topics") or [],
+            products=values.get("products") or [],
+            situation=values.get("situation"),
+            missing=values.get("missing") or [],
+            responder=responder,
+            draft=values.get("draft") or "",
+            reuse_count=reuse["reuse_count"],
+            helpful_answer_count=reuse["helpful_answer_count"],
+        )
 
     # -- /events : stream ------------------------------------------------- #
     def is_streamable(self, session_id: str) -> bool:
@@ -386,9 +485,7 @@ class AgentService:
             return
         node = state.next[0]
         if node in _INTERRUPT_NODES:
-            reconnect = reconnect_event(node, state.values)
-            if reconnect is not None:
-                yield reconnect
+            yield from reconnect_events(node, state.values)
         else:
             # codex#6: a client disconnected mid-run (before ask/send). The run is
             # parked at a normal node — continue it from the checkpoint.

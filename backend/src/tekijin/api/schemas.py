@@ -131,6 +131,41 @@ class Recommendation(BaseModel):
 
 
 # --------------------------------------------------------------------------- #
+# handoff (GET /handoff/{session_id}) — responder-facing view (product-spec 画面4)
+# --------------------------------------------------------------------------- #
+class HandoffAsker(BaseModel):
+    """The asking employee, enriched for the responder-facing handoff view."""
+
+    id: str  # external "E###" form (see format_employee_id)
+    name: str | None = None
+    dept: str | None = None
+
+
+class HandoffResponse(BaseModel):
+    """Responder-facing payload for a session paused at the ``send`` interrupt.
+
+    Assembled from the durable checkpoint (question / asker / slots /
+    recommendations / draft) plus DB aggregates (the responder's past-answer
+    reuse). Read-only: fetching it does NOT advance the graph — the responder
+    acts via ``POST /answer`` (outcome=accepted|declined).
+    """
+
+    session_id: str
+    question: str
+    asker: HandoffAsker
+    topics: list[str] = Field(default_factory=list)
+    products: list[str] = Field(default_factory=list)
+    situation: str | None = None
+    missing: list[str] = Field(default_factory=list)
+    # The primary (handed-off) candidate — the person being asked — with the
+    # selection reasons. ``None`` only in the degenerate no-candidate case.
+    responder: Recommendation | None = None
+    draft: str = ""
+    reuse_count: int = 0
+    helpful_answer_count: int = 0
+
+
+# --------------------------------------------------------------------------- #
 # SSE event data
 # --------------------------------------------------------------------------- #
 class UnderstoodData(BaseModel):

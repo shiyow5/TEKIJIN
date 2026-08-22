@@ -7,7 +7,7 @@
  * sites. Non-2xx responses throw a typed {@link ApiError}.
  */
 
-import type { AckResponse, AskRequest, ResumeRequest } from "@/lib/api-types";
+import type { AckResponse, AskRequest, HandoffResponse, ResumeRequest } from "@/lib/api-types";
 import { getApiBaseUrl } from "@/lib/config";
 
 /** Error thrown for a non-2xx API response, carrying the HTTP status. */
@@ -64,6 +64,23 @@ async function postJson<T>(path: string, body: unknown, options: RequestOptions 
   return (await response.json()) as T;
 }
 
+/** GET `{base}{path}` as JSON, throwing {@link ApiError} on non-2xx. */
+async function getJson<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const baseUrl = (options.baseUrl ?? getApiBaseUrl()).replace(/\/+$/, "");
+  const doFetch = options.fetchImpl ?? fetch;
+
+  const response = await doFetch(`${baseUrl}${path}`, {
+    method: "GET",
+    signal: options.signal,
+  });
+
+  if (!response.ok) {
+    throw new ApiError(response.status, await extractErrorMessage(response));
+  }
+
+  return (await response.json()) as T;
+}
+
 /**
  * POST /ask — start a question for a session. Returns the acknowledgement; the
  * actual stream flows over GET /events (subscribed via `useEventStream`).
@@ -82,4 +99,48 @@ export function postAnswer(
   options: RequestOptions = {},
 ): Promise<AckResponse> {
   return postJson<AckResponse>("/answer", request, options);
+}
+
+/**
+ * GET /handoff/{session_id} — the responder-facing view of a session paused at
+ * the `send` interrupt (product-spec 画面4). Read-only: it does not advance the
+ * graph. Throws {@link ApiError} with status 404 (no handoff pending) or 409
+ * (the session is awaiting a clarification instead).
+ */
+export function getHandoff(
+  sessionId: string,
+  options: RequestOptions = {},
+): Promise<HandoffResponse> {
+  return getJson<HandoffResponse>(`/handoff/${encodeURIComponent(sessionId)}`, options);
+}
+
+/**
+ * Drive a paused run forward by consuming one GET /events pass to completion.
+ *
+ * POST /answer only *queues* the resume; the backend advances the graph when an
+ * /events reader enters its dispatch loop. The responder's answer screen has no
+ * long-lived stream of its own, so after submitting an outcome it calls this to
+ * guarantee the queued resume is consumed — accept reaches C8 (done), decline
+ * reroutes to the next candidate — instead of depending on the asker keeping a
+ * tab open. The streamed content is irrelevant here; we only read it to
+ * completion (the stream ends when the run next interrupts or terminates). This
+ * is best-effort: a non-2xx (e.g. the run already finished → 404) or a transport
+ * error is swallowed, since the outcome is already recorded server-side.
+ */
+export async function advanceSession(
+  sessionId: string,
+  options: RequestOptions = {},
+): Promise<void> {
+  const baseUrl = (options.baseUrl ?? getApiBaseUrl()).replace(/\/+$/, "");
+  const doFetch = options.fetchImpl ?? fetch;
+  try {
+    const response = await doFetch(`${baseUrl}/events/${encodeURIComponent(sessionId)}`, {
+      method: "GET",
+      signal: options.signal,
+    });
+    await response.text();
+  } catch {
+    // Best-effort: the outcome is already persisted; the asker's own reconnecting
+    // stream is the backup consumer. Never surface this to the responder.
+  }
 }

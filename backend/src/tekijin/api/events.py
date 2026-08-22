@@ -87,25 +87,40 @@ def node_event(node: str, update: dict[str, Any]) -> ServerSentEvent | None:
     return None  # internal node: no event
 
 
-def reconnect_event(next_node: str, values: dict[str, Any]) -> ServerSentEvent | None:
-    """Re-emit the pending interrupt event when a client reconnects to /events.
+def reconnect_events(next_node: str, values: dict[str, Any]) -> list[ServerSentEvent]:
+    """Re-emit the pending interrupt event(s) when a client reconnects to /events.
 
-    A session paused at ``ask`` re-sends the ``followup`` (from the saved state);
-    one paused at ``send`` re-sends the ``draft`` so the client can re-show it and
-    submit an outcome. Any other pending node yields nothing.
+    A session paused at ``ask`` re-sends the ``followup`` (from the saved state).
+    One paused at ``send`` re-sends BOTH the ``recommend`` (the current
+    candidates, from durable state) AND the ``draft`` — so a reconnect fully
+    reconstructs the hand-off even after a decline-driven reroute, and so a single
+    consumer draining the stream cannot leave a later reconnecting client without
+    the candidates (``ResultScreen`` reads candidates only from ``recommend``).
+    Any other pending node yields nothing.
     """
 
     if next_node == "ask":
-        return _sse(
-            "followup",
-            schemas.FollowupData(
-                question=values.get("followup_question") or "",
-                missing=values.get("missing", []),
-            ),
-        )
+        return [
+            _sse(
+                "followup",
+                schemas.FollowupData(
+                    question=values.get("followup_question") or "",
+                    missing=values.get("missing", []),
+                ),
+            )
+        ]
     if next_node == "send":
-        return _sse("draft", schemas.DraftData(draft=values.get("draft") or ""))
-    return None
+        out: list[ServerSentEvent] = []
+        recs = values.get("recommendations") or []
+        if recs:
+            # person_id -> external "E###" form, mirroring the live recommend event.
+            ext: list[Any] = [
+                {**rec, "person_id": schemas.format_employee_id(rec["person_id"])} for rec in recs
+            ]
+            out.append(_sse("recommend", schemas.RecommendData(recommendations=ext)))
+        out.append(_sse("draft", schemas.DraftData(draft=values.get("draft") or "")))
+        return out
+    return []
 
 
 # SSE event names that represent a *terminal* run outcome (worth replaying on a

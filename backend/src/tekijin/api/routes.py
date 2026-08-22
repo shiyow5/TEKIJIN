@@ -19,6 +19,7 @@ from tekijin.api import schemas
 from tekijin.api.service import (
     AgentService,
     AskerNotFound,
+    HandoffNotFound,
     SessionConflict,
     SessionInvalid,
 )
@@ -77,6 +78,27 @@ def events(session_id: str, request: Request) -> EventSourceResponse:
     if not service.is_streamable(session_id):
         raise HTTPException(status_code=404, detail="no active run for this session")
     return EventSourceResponse(service.stream_events(session_id))
+
+
+@router.get("/handoff/{session_id}", response_model=schemas.HandoffResponse)
+def handoff(session_id: str, request: Request) -> schemas.HandoffResponse:
+    """Responder-facing handoff payload for a session paused at ``send``.
+
+    Read-only view of the durable state (product-spec 画面4): the question, the
+    asker, the filled-in slots, why this responder was chosen, the draft, and the
+    responder's past-answer reuse. 404 when no handoff is pending (unknown /
+    finished); 409 when the session is awaiting a clarification instead.
+    """
+
+    try:
+        return _service(request).get_handoff(session_id)
+    except HandoffNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SessionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:  # unexpected: log detail, return a generic 500
+        logger.exception("GET /handoff failed for session %s", session_id)
+        raise HTTPException(status_code=500, detail="内部エラーが発生しました") from exc
 
 
 @router.get("/dashboard", response_model=schemas.DashboardResponse)
