@@ -26,10 +26,16 @@ export function PersonRouteView({ recommendations, reason, draft }: PersonRouteV
   const [selectedId, setSelectedId] = useState(candidates[0]?.person_id ?? "");
   const [sentTo, setSentTo] = useState<string | null>(null);
 
-  const selected = candidates.find((c) => c.person_id === selectedId) ?? candidates[0];
+  const topCandidate = candidates[0];
+  const selected = candidates.find((c) => c.person_id === selectedId) ?? topCandidate;
+  // The draft is generated for the top candidate. Warn when a different
+  // recipient is selected so the user edits it before sending (no misdirected
+  // send). Per-recipient regeneration lands with the send wiring (#38).
+  const draftMismatch = Boolean(selected) && selected?.person_id !== topCandidate?.person_id;
 
   function handleSend() {
-    setSentTo(selected ? selected.name : "選択した担当者");
+    // Send to the currently selected candidate (not always the top one).
+    setSentTo(selected?.name ?? "選択した担当者");
   }
 
   if (sentTo !== null) {
@@ -74,10 +80,22 @@ export function PersonRouteView({ recommendations, reason, draft }: PersonRouteV
           ))}
         </div>
       ) : (
-        <p className="text-on-surface-variant">候補を確認しています…</p>
+        // Graceful fallback: a reconnect at the send interrupt can replay the
+        // draft without the candidates. Keep the draft sendable rather than
+        // dead-ending.
+        <p className="rounded-lg border border-outline-variant bg-surface-container-low p-md text-on-surface-variant text-sm">
+          宛先候補を再取得しています。この下書きはそのまま送れます。
+        </p>
       )}
 
-      <DraftEditor initialDraft={draft} onSend={handleSend} disabled={candidates.length === 0} />
+      {draftMismatch && topCandidate ? (
+        <p className="rounded-lg border border-tertiary-container bg-surface-container-low p-sm text-on-surface-variant text-sm">
+          下書きは最有力の{topCandidate.name}
+          さん向けです。宛先を変える場合は本文を編集してください。
+        </p>
+      ) : null}
+
+      <DraftEditor initialDraft={draft} onSend={handleSend} />
     </section>
   );
 }

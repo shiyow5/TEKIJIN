@@ -45,7 +45,8 @@ export function ResultScreen({ streamState }: ResultScreenProps) {
   const draft = stream.draft?.draft ?? "";
   const routeName = forceMainLine ? "person" : stream.route?.route;
 
-  const hasAnyData = recommendations.length > 0 || draft !== "" || Boolean(stream.route);
+  const hasMainLineData = recommendations.length > 0 || draft !== "";
+  const hasAnyData = hasMainLineData || Boolean(stream.route);
   if (!hasAnyData) {
     return <ResultPending />;
   }
@@ -55,12 +56,13 @@ export function ResultScreen({ streamState }: ResultScreenProps) {
       <PriorAnswerView
         answerer={recommendations[0]}
         reason={stream.route?.reason}
+        canAskMore={hasMainLineData}
         onAskMore={() => setForceMainLine(true)}
       />
     );
   }
 
-  if (recommendations.length > 0 || draft !== "") {
+  if (hasMainLineData) {
     return (
       <PersonRouteView
         recommendations={recommendations}

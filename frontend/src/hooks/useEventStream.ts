@@ -156,6 +156,10 @@ export function useEventStream(
       }
     };
 
+    // Track the last received event so onerror can tell a send-interrupt pause
+    // (last event = draft) apart from a followup pause (reconnect must survive).
+    let lastEventName: SseEventName | "" = "";
+
     const onEvent = (event: MessageEvent) => {
       // A native transport `error` also dispatches to the "error" listener but
       // carries no string `data`; let it fall through to `onerror` instead of
@@ -172,6 +176,7 @@ export function useEventStream(
         // banner or close — a later well-formed event still renders.
         return;
       }
+      lastEventName = name;
       setState((prev) => reduceEvent(prev, name, data));
       if (name === "done" || name === "message" || name === "error") {
         close();
@@ -183,10 +188,19 @@ export function useEventStream(
     }
 
     source.onerror = () => {
+      // Send interrupt: the backend has emitted the draft and paused waiting for
+      // the responder's outcome (handled responder-side, #38). It keeps closing
+      // the HTTP segment, so the browser would reconnect and re-send the draft in
+      // a loop. The asker does not need this stream anymore, so stop reconnecting.
+      // (A followup pause instead keeps reconnecting: the reply resumes on it.)
+      if (lastEventName === "draft") {
+        close();
+        return;
+      }
       // Native connection error. The browser auto-reconnects transient failures
       // (readyState CONNECTING) — the backend legitimately closes the HTTP
-      // segment at a followup/send interrupt and the stream resumes on /answer,
-      // so that is NOT fatal. Only a genuinely CLOSED stream is surfaced. Ignore
+      // segment at a followup interrupt and the stream resumes on /answer, so
+      // that is NOT fatal. Only a genuinely CLOSED stream is surfaced. Ignore
       // once terminal, or when an error is already shown.
       setState((prev) => {
         if (prev.terminal || prev.error) {

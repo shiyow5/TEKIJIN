@@ -2,28 +2,37 @@
 
 /**
  * Auxiliary result (route === "prior_answer"): a person is still the subject —
- * their past answer is shown as *evidence that they are the expert*, not as the
- * answer itself. "解決した" completes; "この方に追加で聞く" drops down to the
- * main line (取次ぎ) so the flow never dead-ends.
+ * their past-answer record is shown as *evidence that they are the expert*, not
+ * as the answer itself (the backend does not expose the answer body). "解決した"
+ * completes; "この方に追加で聞く" drops down to the main line (取次ぎ) so the flow
+ * never dead-ends — it is disabled when there is no main-line data to drop to.
  */
 
 import type { Recommendation } from "@/lib/api-types";
-import { parseReuseCount } from "@/lib/reasons";
+import { answersEvidence } from "@/lib/reasons";
 import { useState } from "react";
 
 export interface PriorAnswerViewProps {
   answerer?: Recommendation;
   reason?: string;
+  /** Whether the main line has data to drop to (candidates or a draft). */
+  canAskMore?: boolean;
   onAskMore: () => void;
 }
 
-export function PriorAnswerView({ answerer, reason, onAskMore }: PriorAnswerViewProps) {
+export function PriorAnswerView({
+  answerer,
+  reason,
+  canAskMore = true,
+  onAskMore,
+}: PriorAnswerViewProps) {
   const [solved, setSolved] = useState(false);
 
   const name = answerer?.name ?? "詳しい方";
-  const reuseCount = answerer ? parseReuseCount(answerer.reasons) : null;
   const evidence = reason || "同様の質問に過去に回答しています。";
-  const answerLog = answerer?.reasons.find((r) => r.detail.trim() !== "")?.detail;
+  // The past-answer record summary (count of past answers / useful ratio), taken
+  // from the `answers` reason verbatim — not the answer text (we don't have it).
+  const record = answerer ? answersEvidence(answerer.reasons) : null;
 
   if (solved) {
     return (
@@ -54,15 +63,9 @@ export function PriorAnswerView({ answerer, reason, onAskMore }: PriorAnswerView
       </header>
 
       <div className="rounded-xl border border-outline-variant bg-surface-container-lowest p-md">
-        <p className="mb-xs font-bold text-on-surface-variant text-xs">過去の回答ログ</p>
-        <p className="text-on-surface text-sm">{answerLog || "過去の回答内容を確認しています。"}</p>
+        <p className="mb-xs font-bold text-on-surface-variant text-xs">根拠（過去の回答実績）</p>
+        <p className="text-on-surface text-sm">{record || "過去の回答実績を確認しています。"}</p>
       </div>
-
-      {reuseCount !== null ? (
-        <p className="text-on-surface-variant text-sm">
-          この方の回答は、これまで {reuseCount} 人に役立ちました。
-        </p>
-      ) : null}
 
       <div className="flex flex-col gap-sm sm:flex-row">
         <button
@@ -75,7 +78,8 @@ export function PriorAnswerView({ answerer, reason, onAskMore }: PriorAnswerView
         <button
           type="button"
           onClick={onAskMore}
-          className="min-h-[48px] flex-1 rounded-lg border border-outline-variant px-md py-3 font-bold text-on-surface-variant transition-colors hover:bg-surface-container"
+          disabled={!canAskMore}
+          className="min-h-[48px] flex-1 rounded-lg border border-outline-variant px-md py-3 font-bold text-on-surface-variant transition-colors hover:bg-surface-container disabled:cursor-not-allowed disabled:opacity-50"
         >
           この方に追加で聞く
         </button>

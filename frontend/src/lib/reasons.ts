@@ -2,8 +2,10 @@
  * Labels and helpers for recommendation `reasons` (the "why this person" chips).
  *
  * Reason `type` values come from the scorer (model-definition): cert / answers /
- * project / load / proximity / recency / self. Unknown types fall back to the
- * raw string so a new scorer signal still renders.
+ * project / load / proximity / recency / skill / self. `skill` is an *inferred*
+ * skill ("推定スキル: …"), distinct from `self`, the person's *self-declared*
+ * skill ("自己申告スキル: …"). Unknown types fall back to the raw string so a new
+ * scorer signal still renders.
  */
 
 import type { Reason } from "@/lib/api-types";
@@ -15,7 +17,8 @@ export const REASON_LABELS: Record<string, string> = {
   load: "現在の負荷",
   proximity: "距離の近さ",
   recency: "直近の活動",
-  self: "得意分野",
+  skill: "推定スキル",
+  self: "自己申告",
 };
 
 export function reasonLabel(type: string): string {
@@ -23,15 +26,11 @@ export function reasonLabel(type: string): string {
 }
 
 /**
- * Best-effort reuse/answer count from the `answers` reason detail (e.g.
- * "過去回答: 45件" -> 45). Returns `null` when there is no such reason or no
- * number in it, so the caller can omit the "N人に役立ちました" line.
+ * The `answers` reason's detail — the past-answer evidence summary the backend
+ * provides verbatim (e.g. "類似の質問に過去5件回答（うち有用と評価3件）"). Returns
+ * `null` when there is no such reason, so the caller can show a placeholder. The
+ * backend does NOT expose a raw reuse count, so we never synthesise one.
  */
-export function parseReuseCount(reasons: readonly Reason[]): number | null {
-  const answers = reasons.find((r) => r.type === "answers");
-  if (!answers) {
-    return null;
-  }
-  const match = answers.detail.match(/\d+/);
-  return match ? Number(match[0]) : null;
+export function answersEvidence(reasons: readonly Reason[]): string | null {
+  return reasons.find((r) => r.type === "answers")?.detail ?? null;
 }

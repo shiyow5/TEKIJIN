@@ -5,10 +5,13 @@ import type { EventStreamState } from "@/hooks/useEventStream";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
+// Fixtures use the REAL backend shapes: `confidence` is the Japanese fit signal
+// 高/中/低 (scorer.confidence_label), and `reasons[].detail` carries the verbatim
+// evidence strings the scorer emits. `score` is a raw weighted value, never shown.
 function rec(
   partial: Partial<Recommendation> & { person_id: string; name: string },
 ): Recommendation {
-  return { dept: null, score: 0.5, confidence: "mid", reasons: [], ...partial };
+  return { dept: null, score: 0.5, confidence: "中", reasons: [], ...partial };
 }
 
 function state(partial: Partial<EventStreamState>): EventStreamState {
@@ -25,15 +28,15 @@ const THREE_CANDIDATES: Recommendation[] = [
     name: "高梨",
     dept: "営業本部",
     score: 0.92,
-    confidence: "high",
+    confidence: "高",
     reasons: [
-      { type: "cert", detail: "関連資格保持" },
-      { type: "answers", detail: "過去回答: 45件" },
-      { type: "load", detail: "低" },
+      { type: "cert", detail: "第一種電気工事士" },
+      { type: "answers", detail: "類似の質問に過去45件回答（うち有用と評価30件）" },
+      { type: "load", detail: "今週の対応件数: 少なめ" },
     ],
   },
-  { person_id: "E002", name: "鈴木", dept: "技術部", score: 0.85, confidence: "mid", reasons: [] },
-  { person_id: "E003", name: "田中", dept: "法務部", score: 0.78, confidence: "mid", reasons: [] },
+  { person_id: "E002", name: "鈴木", dept: "技術部", score: 0.85, confidence: "中", reasons: [] },
+  { person_id: "E003", name: "田中", dept: "法務部", score: 0.78, confidence: "中", reasons: [] },
 ];
 
 describe("ResultScreen — pending", () => {
@@ -44,14 +47,14 @@ describe("ResultScreen — pending", () => {
 });
 
 describe("ResultScreen — main line (person)", () => {
-  it("renders up to three candidates with fit score and reason labels", () => {
+  it("renders up to three candidates with the fit signal and reason labels", () => {
     renderResult(
       state({
         route: { route: "person", reason: "同様の案件担当者がいます", confidence: 0.9 },
         recommend: {
           recommendations: [
             ...THREE_CANDIDATES,
-            { person_id: "E004", name: "山田", score: 0.5, confidence: "low", reasons: [] },
+            { person_id: "E004", name: "山田", score: 0.5, confidence: "低", reasons: [] },
           ],
         },
         draft: { draft: "お疲れ様です。" },
@@ -65,8 +68,9 @@ describe("ResultScreen — main line (person)", () => {
     expect(screen.getByText("田中")).toBeInTheDocument();
     // 4th candidate is truncated (max 3)
     expect(screen.queryByText("山田")).not.toBeInTheDocument();
-    // fit score as percent
-    expect(screen.getByText("適合度 92%")).toBeInTheDocument();
+    // fit signal is the Japanese confidence label, not a raw score percentage
+    expect(screen.getByText("適合度: 高")).toBeInTheDocument();
+    expect(screen.queryByText(/%/)).not.toBeInTheDocument();
     // reason labels (expanded top card shows detail)
     expect(screen.getByText("関連資格")).toBeInTheDocument();
     expect(screen.getByText("過去回答")).toBeInTheDocument();
@@ -102,6 +106,21 @@ describe("ResultScreen — main line (person)", () => {
     expect(screen.getByRole("link", { name: "新しい質問をする" })).toBeInTheDocument();
   });
 
+  it("warns before sending when a non-top candidate is selected (draft mismatch)", () => {
+    renderResult(
+      state({
+        route: { route: "person", reason: "", confidence: 0.9 },
+        recommend: { recommendations: THREE_CANDIDATES },
+        draft: { draft: "本文" },
+      }),
+    );
+    // No warning while the top candidate is selected.
+    expect(screen.queryByText(/宛先を変える場合は本文を編集/)).not.toBeInTheDocument();
+    // Selecting the 2nd candidate surfaces the mismatch warning.
+    fireEvent.click(screen.getAllByRole("button", { name: "選択する" })[0]);
+    expect(screen.getByText(/下書きは最有力の高梨/)).toBeInTheDocument();
+  });
+
   it("defaults to the main line when the route is unset but candidates exist", () => {
     renderResult(
       state({ recommend: { recommendations: THREE_CANDIDATES }, draft: { draft: "x" } }),
@@ -109,14 +128,15 @@ describe("ResultScreen — main line (person)", () => {
     expect(screen.getByText("この質問は、人に聞くのが確実です")).toBeInTheDocument();
   });
 
-  it("shows a candidate-preparing note and disables send when only a draft exists", () => {
+  it("keeps the draft sendable with a fallback note when only a draft exists (reconnect at send interrupt)", () => {
     renderResult(
       state({ route: { route: "person", reason: "", confidence: 0.9 }, draft: { draft: "本文" } }),
     );
-    expect(screen.getByText("候補を確認しています…")).toBeInTheDocument();
+    // Graceful fallback: candidates missing, but the draft is still sendable.
+    expect(screen.getByText(/宛先候補を再取得しています/)).toBeInTheDocument();
     // reason fallback text
     expect(screen.getByText(/直近で同様の案件を担当した方/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "この方に送る" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "この方に送る" })).toBeEnabled();
   });
 
   it("renders a candidate with no department and no reason detail", () => {
@@ -139,7 +159,8 @@ describe("ResultScreen — main line (person)", () => {
     );
     expect(screen.getByText("佐藤（最有力）")).toBeInTheDocument();
     expect(screen.getByText("E020")).toBeInTheDocument();
-    expect(screen.getByText("得意分野")).toBeInTheDocument();
+    // The self-declared-skill reason label renders even without a detail string.
+    expect(screen.getByText("自己申告")).toBeInTheDocument();
   });
 });
 
@@ -153,18 +174,20 @@ describe("ResultScreen — auxiliary (prior_answer)", () => {
           name: "高梨",
           dept: "法務部",
           score: 0.9,
-          confidence: "high",
-          reasons: [{ type: "answers", detail: "過去回答: 30件" }],
+          confidence: "高",
+          reasons: [{ type: "answers", detail: "類似の質問に過去30件回答（うち有用と評価20件）" }],
         },
       ],
     },
   });
 
-  it("shows the person as evidence, with reuse count and both actions", () => {
+  it("shows the person as evidence, with the past-answer record and both actions", () => {
     renderResult(auxState);
     expect(screen.getByText("この質問には、高梨さんが詳しそうです")).toBeInTheDocument();
     expect(screen.getByText(/2023\/10\/12に同様の質問に回答/)).toBeInTheDocument();
-    expect(screen.getByText(/30 人に役立ちました/)).toBeInTheDocument();
+    // The record is the verbatim `answers` evidence — not a fabricated reuse count.
+    expect(screen.getByText("類似の質問に過去30件回答（うち有用と評価20件）")).toBeInTheDocument();
+    expect(screen.queryByText(/役立ちました/)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "解決した" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "この方に追加で聞く" })).toBeInTheDocument();
   });
@@ -181,12 +204,14 @@ describe("ResultScreen — auxiliary (prior_answer)", () => {
     expect(screen.getByText("解決しました")).toBeInTheDocument();
   });
 
-  it("falls back to placeholders when no answerer/evidence is available", () => {
+  it("falls back to placeholders and disables 追加で聞く when there is no main line", () => {
     renderResult(state({ route: { route: "prior_answer", reason: "", confidence: 0.8 } }));
     expect(screen.getByText("この質問には、詳しい方さんが詳しそうです")).toBeInTheDocument();
     expect(screen.getByText(/同様の質問に過去に回答しています/)).toBeInTheDocument();
-    expect(screen.getByText("過去の回答内容を確認しています。")).toBeInTheDocument();
+    expect(screen.getByText("過去の回答実績を確認しています。")).toBeInTheDocument();
     expect(screen.queryByText(/役立ちました/)).not.toBeInTheDocument();
+    // No candidates or draft to drop to → the ask-more action is disabled (no dead-end).
+    expect(screen.getByRole("button", { name: "この方に追加で聞く" })).toBeDisabled();
   });
 });
 

@@ -7,7 +7,7 @@
  *画面4 / #38).
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 export interface DraftEditorProps {
   initialDraft: string;
@@ -17,15 +17,31 @@ export interface DraftEditorProps {
 
 export function DraftEditor({ initialDraft, disabled = false, onSend }: DraftEditorProps) {
   const [text, setText] = useState(initialDraft);
+  const [dirty, setDirty] = useState(false);
+
+  // The draft can arrive over SSE after this editor is already open (the CTA can
+  // appear on `recommend`, before `draft`). Sync a later draft in — but never
+  // clobber what the user has started editing.
+  useEffect(() => {
+    if (!dirty) {
+      setText(initialDraft);
+    }
+  }, [initialDraft, dirty]);
+
   const canSend = text.trim().length > 0 && !disabled;
+
+  function handleChange(value: string) {
+    setDirty(true);
+    setText(value);
+  }
 
   return (
     <div className="rounded-xl border border-outline-variant bg-surface-container-lowest p-md shadow-sm">
-      <h3 className="mb-sm font-bold text-lg text-on-surface">聞き方の下書き</h3>
+      <h2 className="mb-sm font-bold text-lg text-on-surface">聞き方の下書き</h2>
       <textarea
         aria-label="聞き方の下書き"
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => handleChange(e.target.value)}
         placeholder="質問の背景や詳細を記載してください..."
         className="h-32 w-full resize-none rounded-lg border border-outline-variant bg-surface p-sm text-on-surface outline-none focus:border-primary"
       />

@@ -1,13 +1,14 @@
 /**
  * One recommended person on the main-line result (product-spec 画面3).
  *
- * Shows the person id ("E###"), name, department, fit score (%), and the
- * evidence `reasons`. The top-ranked card is `expanded` (full reason detail);
- * lower ranks show compact reason labels.
+ * Shows the person id ("E###"), name, department, the fit signal (`confidence`
+ * = 高/中/低 — the intended user-facing signal), and the evidence `reasons`. The
+ * raw `score` is a weighted internal ranking value (not a percentage) and is
+ * never shown. The top-ranked card is `expanded` (full reason detail); lower
+ * ranks show compact reason labels.
  */
 
 import type { Recommendation } from "@/lib/api-types";
-import { formatConfidence } from "@/lib/format";
 import { reasonLabel } from "@/lib/reasons";
 
 export interface CandidateCardProps {
@@ -36,7 +37,7 @@ export function CandidateCard({
       }`}
     >
       <div className="absolute top-0 right-0 rounded-bl-lg bg-secondary-container px-sm py-xs font-bold text-on-secondary-container text-xs">
-        適合度 {formatConfidence(candidate.score)}
+        適合度: {candidate.confidence}
       </div>
 
       <div className="mb-sm flex items-center gap-sm">
@@ -44,9 +45,9 @@ export function CandidateCard({
           {avatarInitial(candidate.name)}
         </div>
         <div className="flex flex-col">
-          <h3 className="font-bold text-lg text-on-surface leading-tight">
+          <h2 className="font-bold text-lg text-on-surface leading-tight">
             {rank === 1 ? `${candidate.name}（最有力）` : candidate.name}
-          </h3>
+          </h2>
           <p className="text-on-surface-variant text-xs">
             {[candidate.dept, candidate.person_id].filter(Boolean).join(" / ")}
           </p>
