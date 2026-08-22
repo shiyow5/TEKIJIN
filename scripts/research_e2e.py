@@ -125,8 +125,23 @@ def task_route(url, out):
             f"  {key:20s} 最小{values[0]:.3f} 中央{st.median(values):.3f} 最大{values[-1]:.3f}"
         )
     if out:
+        from tekijin.config import get_settings
+
+        payload = {
+            "_meta": {
+                "embedding_model": get_settings().embedding_model,
+                "thresholds": {
+                    "prior_answer_sim": PRIOR_ANSWER_SIM,
+                    "document_sim": DOCUMENT_SIM,
+                    "person_weak_sim": PERSON_WEAK_SIM,
+                },
+                "n": len(rows),
+                "source": "scripts/research_e2e.py --task route",
+            },
+            "rows": rows,
+        }
         with open(out, "w", encoding="utf-8") as f:
-            json.dump(rows, f, ensure_ascii=False, indent=1)
+            json.dump(payload, f, ensure_ascii=False, indent=1)
         print(f"wrote {out}")
     session.close()
     session.get_bind().dispose()
