@@ -48,7 +48,9 @@ from tekijin.llm.schemas import SufficiencySchema
 OWNER = {
     "normal": ("C2", None),
     "insufficient": ("C2", False),
-    "no_expert": ("C2", None),
+    # C2 に名簿は見えない。「該当者がいない」は retrieval/scoring が no_candidate に
+    # 落ちて初めて確定するので、C2 の担当にはしない。
+    "no_expert": ("C6/no_candidate", None),
     "out_of_scope": ("C1", None),
     "adversarial": ("C1", None),
     "pii": ("C1", None),

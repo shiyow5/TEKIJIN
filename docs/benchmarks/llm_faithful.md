@@ -212,7 +212,7 @@ vLLM 版にも効く。**製品は「1問聞いてから先へ進む」のであ
 |---|---|---|
 | `out_of_scope` / `adversarial` / `pii` | **C1** | `graph._after_c1` が `out_of_scope` なら `off_topic` へ抜ける。**C2 に届かない** |
 | `insufficient` | **C2** | `sufficient=false` が正解（5件中3件が C1 を通過） |
-| `no_expert` | どちらとも言えない | C2 に名簿は見えない。通して `no_candidate` に落とすのが筋だが、聞き返しも誤りではない |
+| `no_expert` | **C6 / `no_candidate`** | C2 に名簿は見えない。「該当者がいない」は retrieval/scoring が `no_candidate` に落ちて初めて確定する |
 
 #111 の「異常系 20/20 で満点」は、**C2 が担当していないものを C2 の手柄として数えていた**。
 C1 の out_of_scope 検出は実際には弱い。**長さ切れで落ちた分と、C1 が通してしまった分を分けて数える。**
