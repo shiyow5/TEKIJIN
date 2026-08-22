@@ -2,7 +2,7 @@
         fmt fmt-backend fmt-frontend \
         fmt-check fmt-check-backend fmt-check-frontend \
         lint lint-backend lint-frontend \
-        test test-backend test-frontend \
+        test test-backend test-frontend e2e \
         run-backend run-frontend serve dev serve-prod \
         db-up db-down seed embed eval \
         typecheck-frontend check clean
@@ -26,7 +26,7 @@ PY           ?= python3
 # Help
 # ============================================================
 help: ## Show this help
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2}'
 
 # ============================================================
@@ -88,6 +88,11 @@ test-frontend: ## Run frontend unit tests (vitest)
 
 typecheck-frontend: ## Type-check the frontend (tsc)
 	cd $(FRONTEND_DIR) && npm run typecheck
+
+e2e: ## Run Playwright end-to-end tests (frontend; builds + serves the app itself)
+	# First run needs the browser: `cd frontend && npx playwright install chromium`
+	# (CI uses `--with-deps`). The suite mocks all backend traffic — no live API.
+	cd $(FRONTEND_DIR) && npm run e2e
 
 # ============================================================
 # Run

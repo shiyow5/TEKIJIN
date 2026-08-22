@@ -47,6 +47,8 @@ htmlcov/
 frontend/playwright-report/
 frontend/test-results/
 frontend/playwright/.auth/
+frontend/playwright/.cache/
+frontend/blob-report/
 
 # ============================================================
 # Docker
