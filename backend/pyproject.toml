@@ -28,6 +28,9 @@ source = ["tekijin"]
 omit = [
     # uvicorn entry point — instantiation is covered, no runtime branch to test.
     "src/tekijin/main.py",
+    # eval CLI shell — thin wiring around the tested run_eval core; needs a live
+    # seeded DB + model download, so it is exercised via `python -m tekijin.eval`.
+    "src/tekijin/eval/__main__.py",
 ]
 
 [tool.coverage.report]
