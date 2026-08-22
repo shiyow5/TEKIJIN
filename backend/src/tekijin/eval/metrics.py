@@ -9,7 +9,7 @@ route (分岐) accuracy.
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 
 # The three A/B/C route branches the router can produce. Route accuracy is scored
 # only over queries whose gold route is one of these — an abstain (``none``) gold
@@ -25,13 +25,18 @@ class QueryResult:
     """One query's predicted ranking + route, paired with its gold labels.
 
     ``ranked_experts`` is the predicted expert-id ranking (best first);
-    ``gold_experts`` is the (unordered) set of correct expert ids.
+    ``gold_experts`` is the (unordered) set of correct expert ids. ``difficulty``
+    (L1–L4) drives layer-wise reporting; ``gold_experts_alt`` is the independent
+    second gold set (derived from ``answers``, not ``projects``) used for the
+    anti-circularity check — empty when the query has no alternate labels.
     """
 
     ranked_experts: list[int]
     gold_experts: list[int]
     predicted_route: str
     gold_route: str
+    difficulty: str = ""
+    gold_experts_alt: list[int] = field(default_factory=list)
 
 
 def _first_hit_rank(ranked: Sequence[int], gold: Iterable[int]) -> int | None:
@@ -128,3 +133,27 @@ def evaluate(results: Sequence[QueryResult]) -> EvalMetrics:
         mrr=_mean([reciprocal_rank(r) for r in ranked]),
         route_accuracy=_mean([1.0 if route_hit(r) else 0.0 for r in routed]),
     )
+
+
+def evaluate_by_difficulty(results: Sequence[QueryResult]) -> dict[str, EvalMetrics]:
+    """Per-layer metrics keyed by difficulty (L1/L2/L3/L4…), sorted by label.
+
+    The primary eval set requires layer-wise reporting — a healthy aggregate can
+    hide an L2/L3 regression (fixtures README: 「必ず層別に出す」).
+    """
+
+    layers = sorted({r.difficulty for r in results if r.difficulty})
+    return {layer: evaluate([r for r in results if r.difficulty == layer]) for layer in layers}
+
+
+def evaluate_alt(results: Sequence[QueryResult]) -> EvalMetrics:
+    """Ranking metrics against the alternate gold labels (anti-circularity check).
+
+    Scores only queries that carry ``gold_experts_alt`` (derived from ``answers``,
+    an evidence source the primary gold deliberately avoids). A scorer that merely
+    reproduces the primary label rule (project membership) will look strong on the
+    primary metrics but not here (fixtures README §gold_experts_alt).
+    """
+
+    alt = [replace(r, gold_experts=r.gold_experts_alt) for r in results if r.gold_experts_alt]
+    return evaluate(alt)

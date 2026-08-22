@@ -20,21 +20,29 @@ from tekijin.eval.dataset import VALID_ROUTES, EvalQuery, load_eval_queries
 from tekijin.eval.metrics import (
     QueryResult,
     evaluate,
+    evaluate_alt,
+    evaluate_by_difficulty,
     recall_at_k,
     reciprocal_rank,
     top1_hit,
 )
 from tekijin.eval.runner import RankResult, format_report, run_eval
 
-NOW = dt.datetime(2026, 9, 15, 12, 0, 0)
+# Anchored just after the fixtures' latest answer (2026-08-21) so the scorer's
+# 7-day load window contains recent activity (matches the CLI's EVAL_NOW).
+NOW = dt.datetime(2026, 8, 22, 0, 0, 0)
 
 
-def _qr(ranked, gold, predicted_route="person", gold_route="person") -> QueryResult:
+def _qr(
+    ranked, gold, predicted_route="person", gold_route="person", difficulty="L1", gold_alt=None
+) -> QueryResult:
     return QueryResult(
         ranked_experts=ranked,
         gold_experts=gold,
         predicted_route=predicted_route,
         gold_route=gold_route,
+        difficulty=difficulty,
+        gold_experts_alt=gold_alt or [],
     )
 
 
@@ -47,6 +55,7 @@ def _q(**kw) -> EvalQuery:
         "gold_route": "person",
         "difficulty": "L1",
         "expect_abstain": False,
+        "gold_experts_alt": [],
     }
     base.update(kw)
     return EvalQuery(**base)
@@ -111,6 +120,30 @@ def test_evaluate_excludes_goldless_and_nonabc_routes() -> None:
     assert d["n"] == 3 and d["n_ranked"] == 2 and d["n_routed"] == 2
 
 
+def test_evaluate_by_difficulty_splits_per_layer() -> None:
+    results = [
+        _qr([1], [1], difficulty="L1"),  # L1 top1 hit
+        _qr([9], [1], difficulty="L2"),  # L2 miss
+        _qr([2], [2], difficulty="L2"),  # L2 hit
+    ]
+    by_layer = evaluate_by_difficulty(results)
+    assert set(by_layer) == {"L1", "L2"}
+    assert by_layer["L1"].top1_accuracy == pytest.approx(1.0)
+    assert by_layer["L2"].top1_accuracy == pytest.approx(0.5)  # 1 of 2
+    assert by_layer["L2"].n_ranked == 2
+
+
+def test_evaluate_alt_uses_alternate_gold_only_where_present() -> None:
+    results = [
+        _qr([5], [1], gold_alt=[5]),  # alt hit (primary would miss)
+        _qr([9], [2], gold_alt=[2]),  # alt miss
+        _qr([1], [1], gold_alt=[]),  # no alt -> excluded from the alt run
+    ]
+    alt = evaluate_alt(results)
+    assert alt.n_ranked == 2  # only the two rows with alt labels
+    assert alt.top1_accuracy == pytest.approx(0.5)
+
+
 # --------------------------------------------------------------------------- #
 # dataset loader (primary eval_person.json + strict validation)
 # --------------------------------------------------------------------------- #
@@ -122,6 +155,8 @@ def test_load_bundled_eval_person() -> None:
     # L4 abstain queries carry no gold experts and route "none".
     l4 = [q for q in queries if q.difficulty == "L4"]
     assert l4 and all(not q.gold_experts and q.gold_route == "none" for q in l4)
+    # The independent alternate labels are present on a sizeable slice (README: 45).
+    assert sum(1 for q in queries if q.gold_experts_alt) >= 40
 
 
 def test_load_eval_queries_rejects_missing_keys(tmp_path) -> None:
@@ -275,11 +310,20 @@ def test_run_eval_with_empty_stub_scores_zero() -> None:
     assert report.metrics.route_accuracy == 0.0
 
 
-def test_format_report_contains_all_metrics() -> None:
-    report = run_eval([_q()], lambda q: RankResult([1], "person"))
+def test_format_report_contains_all_metrics_and_breakdowns() -> None:
+    queries = [
+        _q(id=1, difficulty="L1", gold_experts=[1], gold_experts_alt=[1]),
+        _q(id=2, difficulty="L2", gold_experts=[2], gold_experts_alt=[9]),
+    ]
+    report = run_eval(queries, lambda q: RankResult(list(q.gold_experts), "person"))
     text = format_report(report)
     for label in ("Top-1 Accuracy", "Recall@3", "MRR", "Route Accuracy"):
         assert label in text
+    assert "層別" in text and "L1" in text and "L2" in text  # per-layer breakdown
+    assert "第2正解" in text  # anti-circularity (alt) line
+    # report structure
+    assert set(report.by_difficulty) == {"L1", "L2"}
+    assert report.metrics_alt.n_ranked == 2
 
 
 # --------------------------------------------------------------------------- #
@@ -297,6 +341,12 @@ def test_run_eval_real_pipeline_over_seed(seed_counts, session, fake_embedder) -
     assert m.n_ranked > 0 and m.n_routed > 0
     for value in (m.top1_accuracy, m.recall_at_3, m.mrr, m.route_accuracy):
         assert 0.0 <= value <= 1.0
+    # Layer-wise breakdown + anti-circularity run are produced.
+    assert {"L1", "L2", "L3"} <= set(report.by_difficulty)
+    assert report.metrics_alt.n_ranked > 0
+    # Sanity: the alt (answers-derived) Recall@3 is not a perfect echo of the
+    # primary — if it were 1.0 the scorer would just be reproducing labels.
+    assert report.metrics_alt.recall_at_3 < 0.99
     # Regression floors with headroom below the deterministic observed values on
     # the NON-leaky set (Top-1 0.66 / Recall@3 0.61 / MRR 0.71 / route 0.70).
     # These catch a real retrieval/scoring regression without pinning the exact

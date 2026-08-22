@@ -25,8 +25,11 @@ from tekijin.models.tables import EmployeeProfile
 from tekijin.retrieval.embedding import SentenceTransformerEmbedder
 
 # Fixed reference time so the scorer's recency / 7-day load window (and therefore
-# the metrics) are reproducible run-to-run, independent of the wall clock.
-EVAL_NOW = dt.datetime(2026, 9, 15, 12, 0, 0)
+# the metrics) are reproducible run-to-run, independent of the wall clock. Anchored
+# just after the fixtures' latest answer (2026-08-21) so the 7-day load window
+# actually contains recent activity — otherwise the scorer's load term is never
+# exercised (codex re-review #33).
+EVAL_NOW = dt.datetime(2026, 8, 22, 0, 0, 0)
 
 
 def _embeddings_indexed(session) -> bool:

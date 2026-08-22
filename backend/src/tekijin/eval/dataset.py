@@ -37,6 +37,9 @@ class EvalQuery:
     gold_route: str
     difficulty: str
     expect_abstain: bool
+    # Independent second gold set (from ``answers``); empty when absent. Used for
+    # the anti-circularity check, not the primary metrics.
+    gold_experts_alt: list[int]
 
 
 def default_eval_queries_path() -> Path:
@@ -76,6 +79,9 @@ def _parse_query(row: object, source: Path) -> EvalQuery:
         difficulty=_as_str(row["difficulty"], "difficulty"),
         # ``expect_abstain`` is optional in older rows; default False.
         expect_abstain=_as_bool(row.get("expect_abstain", False), "expect_abstain"),
+        gold_experts_alt=[
+            _as_int(e, "gold_experts_alt[]") for e in _as_list(row.get("gold_experts_alt", []))
+        ],
     )
 
 
