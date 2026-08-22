@@ -218,11 +218,14 @@ def task_variants(url, out, c1_topics=None):
             )
         # 上3つは gold トピックを渡している（＝C1 が完璧という仮定）。
         # 製品では C6 が受け取るのは **C1 が実際に出した自由記述のトピック**。
-        variants["C1 の実トピック＋全社員（#113）"] = lambda q, res, route: rank(
+        # 注意: これは **C1→C6 の切り分け** であって、端から端までの再現ではない。
+        # C2 の聞き返しでも C1 の out_of_scope でも止めず、トピックだけを差し替えている。
+        # 「トピックが語彙外だと C6 が何を返すか」を単独で見るための行。
+        variants["[切り分け] C1 の実トピック＋全社員"] = lambda q, res, route: rank(
             q, all_ids, c1_topics.get(q.id, [])
         )
-        variants["C1 の実トピック＋そのまま（#113）"] = lambda q, res, route: as_is(
-            q, res, route, c1_topics.get(q.id, [])
+        variants["[切り分け] C1 の実トピック＋現状の経路"] = lambda q, res, route: (
+            as_is(q, res, route, c1_topics.get(q.id, []))
         )
 
     report = []
