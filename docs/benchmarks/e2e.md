@@ -91,7 +91,9 @@ C4→C5 を直接叩いて確定した。
    したがってここで測っているのは**層1-2と経路**で、[ablation.md](ablation.md) §4 の
    トピック媒介（LLM 分類）の効果はここには現れない
 2. **`asker` を渡していない**ので `proximity` は company-wide 固定（ランナーの設計どおり）
-3. 埋め込みは既定の `intfloat/multilingual-e5-large`。**#63（Nemotron への差し替え）を当てたら、
-   コサインの絶対値が変わるので閾値を必ず測り直すこと**（§1）
+3. 埋め込みは #63 で `nvidia/Nemotron-3-Embed-1B-BF16` に差し替え済み。この文書の上表は
+   差し替え前の e5-large 時の測定。**Nemotron 実データで再測定した結果は
+   `fixtures/synthetic/eval/route_calibration.json`（全 71 件 person・最大コサイン
+   answer 0.543 / document 0.566 / people 0.454）にあり、閾値較正は #90 で行う**（§1）
 
 個別値は `ablation/e2e_variants.json` / `ablation/e2e_route_confidences.json`。
