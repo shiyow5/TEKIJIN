@@ -68,7 +68,7 @@ def parse_c2(record):
         return None, "no_tool_call"
     try:
         return SufficiencySchema(**json.loads(record["arguments"])), None
-    except ValueError:
+    except (ValueError, TypeError):
         # `_followup_required_when_insufficient` に弾かれる形が代表例
         return None, "schema_violation"
 
@@ -184,9 +184,11 @@ def main():
     normal = [r for r in rows if r["klass"] == "normal"]
     if normal:
         asked = [r for r in normal if not r["vllm_sufficient"]]
+        n_normal = sum(1 for d in all_items.values() if d["klass"] == "normal")
+        n_reached = sum(1 for i in passed if all_items[i]["klass"] == "normal")
         print(
-            f"\n  正常系: 56 件 → C1 通過 {sum(1 for r in rows if r['klass'] == 'normal')} 件 "
-            f"→ vLLM が聞き返す {len(asked)} 件"
+            f"\n  正常系: {n_normal} 件 → C1 を通過 {n_reached} 件 "
+            f"→ C2 の出力が読めた {len(normal)} 件 → vLLM が聞き返す {len(asked)} 件"
         )
         print(
             f"  難易度内訳 {dict(collections.Counter(r['difficulty'] for r in asked))}"

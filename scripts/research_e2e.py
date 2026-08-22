@@ -190,12 +190,14 @@ def task_variants(url, out, c1_topics=None):
         out_ = scorer.rank(topics, candidates, None, NOW, top_k=10)
         return [r["person_id"] for r in out_["recommendations"]]
 
-    def as_is(query, res, route):
+    def as_is(query, res, route, topics=None):
         if route == "document":
             return []
         pinned = _pinned_responder(res) if route == "prior_answer" else None
         return rank(
-            query, [pinned] if pinned is not None else list(res["candidate_people"])
+            query,
+            [pinned] if pinned is not None else list(res["candidate_people"]),
+            topics,
         )
 
     variants = {
@@ -206,21 +208,21 @@ def task_variants(url, out, c1_topics=None):
         "候補を全社員にする（#87）": lambda q, res, route: rank(q, all_ids),
     }
     if c1_topics is not None:
+        # 評価IDの取り違えで全件0点になると「壊滅的な結果」に見えてしまうので、
+        # 突き合わせできた件数をここで必ず出す。
+        matched = sum(1 for q in queries if c1_topics.get(q.id))
+        print(f"  C1 のトピックを突き合わせた件数: {matched}/{len(queries)}")
+        if not matched:
+            raise SystemExit(
+                "C1 の評価IDが1件も一致しない。fixtures の指定を確認すること"
+            )
         # 上3つは gold トピックを渡している（＝C1 が完璧という仮定）。
         # 製品では C6 が受け取るのは **C1 が実際に出した自由記述のトピック**。
         variants["C1 の実トピック＋全社員（#113）"] = lambda q, res, route: rank(
             q, all_ids, c1_topics.get(q.id, [])
         )
-        variants["C1 の実トピック＋そのまま（#113）"] = lambda q, res, route: (
-            []
-            if route == "document"
-            else rank(
-                q,
-                [_pinned_responder(res)]
-                if route == "prior_answer" and _pinned_responder(res) is not None
-                else list(res["candidate_people"]),
-                c1_topics.get(q.id, []),
-            )
+        variants["C1 の実トピック＋そのまま（#113）"] = lambda q, res, route: as_is(
+            q, res, route, c1_topics.get(q.id, [])
         )
 
     report = []

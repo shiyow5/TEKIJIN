@@ -474,7 +474,7 @@ def run_c2(payload, variant="scoped"):
     return out
 
 
-def run_raw(payload):
+def run_raw(payload, extra=None):
     """組み立て済みリクエストをそのまま投げる（#113）。
 
     `research_faithful.py` が製品コードから作った `request` を**一切足さずに**送る
@@ -484,13 +484,18 @@ def run_raw(payload):
     `--max-model-len` で切られると `tool_calls` が欠けた応答が返る。それを
     「モデルが関数を呼ばなかった」と取り違えないため。
     1件の失敗で全体を捨てないよう、例外は行として記録して先へ進む。
+
+    `extra` を渡すとボディに上書きマージする。**製品への修正案を、製品のリクエストに
+    その1点だけ足して測る**ためのもの（例: `--raw-extra` で `chat_template_kwargs` を入れる）。
     """
     out = []
     for i, case in enumerate(payload):
         t0 = time.time()
         req = urllib.request.Request(
             BASE_URL + "/chat/completions",
-            data=json.dumps({**case["request"], "model": MODEL}).encode(),
+            data=json.dumps(
+                {**case["request"], **(extra or {}), "model": MODEL}
+            ).encode(),
             headers={"Content-Type": "application/json"},
         )
         try:
@@ -553,6 +558,11 @@ def main():
     )
     ap.add_argument("--out", required=True)
     ap.add_argument(
+        "--raw-extra",
+        default=None,
+        help='raw でボディに上書きマージする JSON。例: \'{"chat_template_kwargs":{"enable_thinking":false}}\'',
+    )
+    ap.add_argument(
         "--c2-prompt",
         default="scoped",
         choices=sorted(C2_PROMPTS),
@@ -591,7 +601,9 @@ def main():
         elif args.task == "c2":
             out = run_c2(payload, args.c2_prompt)
         elif args.task == "raw":
-            out = run_raw(payload)
+            out = run_raw(
+                payload, json.loads(args.raw_extra) if args.raw_extra else None
+            )
         else:
             out = run_topic_ctx(
                 payload,
