@@ -87,7 +87,9 @@ def predict_topic_lexical(query, tokenizer=None):
     return [t for t, _ in sorted(hits, key=lambda x: (-x[1], x[0]))]
 
 
-def expert_scores_for_topic(fx, topic, use_projects=True, use_answers=True):
+def expert_scores_for_topic(
+    fx, topic, use_projects=True, use_answers=True, answers=None
+):
     """トピックが与えられたときの人スコア（C6 の topic_fit 相当の飽和なし版）。
 
     use_projects=False にすると gold の導出経路（projects + daily）と重ならない証拠だけで並べる。
@@ -110,7 +112,8 @@ def expert_scores_for_topic(fx, topic, use_projects=True, use_answers=True):
                         else BASE["proj_member"]
                     )
     if use_answers:
-        for a in fx["answers"]:
+        # answers を差し替えられるようにしてある（#80 のコールドスタート実験で間引く）
+        for a in fx["answers"] if answers is None else answers:
             if a.get("topic") == topic:
                 score[a["responder_id"]] += (
                     BASE["ans_helpful"] if a.get("was_helpful") else BASE["ans"]
@@ -118,11 +121,59 @@ def expert_scores_for_topic(fx, topic, use_projects=True, use_answers=True):
     return dict(score)
 
 
-def rank_experts_for_topics(fx, topics, weights=None, **kw):
-    """複数トピック（上位k）を重み付きで足して人を並べる。"""
-    weights = weights or [1.0 / (i + 1) for i in range(len(topics))]
-    total = defaultdict(float)
-    for w, t in zip(weights, topics, strict=False):
-        for eid, v in expert_scores_for_topic(fx, t, **kw).items():
-            total[eid] += w * v
-    return rr.to_ranking(total)
+def rank_experts_for_topics(fx, topics, weights=None, mode="weighted_sum", **kw):
+    """複数トピックから人を並べる。
+
+    mode:
+      weighted_sum … トピックごとのスコアを 1/(i+1) 重みで足す（既定。単一トピックならこれで十分）
+      znorm_max    … トピック内で z 正規化してから、その人の**最良トピック**を採る
+      round_robin  … 各トピックの1位、2位…を交互に採る（L3 のように別分野が並ぶ場合向け）
+      union_top2   … 各トピック上位2名の和集合を、元スコアの降順で並べる
+
+    L3（2分野にまたがる相談）では weighted_sum が「1つ目のトピックの人」を薄めてしまうため、
+    集合として混ぜる形を用意してある（#80）。
+    """
+    per_topic = [expert_scores_for_topic(fx, t, **kw) for t in topics]
+    if not per_topic:
+        return []
+
+    if mode == "weighted_sum":
+        weights = weights or [1.0 / (i + 1) for i in range(len(topics))]
+        total = defaultdict(float)
+        for w, scores in zip(weights, per_topic, strict=False):
+            for eid, v in scores.items():
+                total[eid] += w * v
+        return rr.to_ranking(total)
+
+    if mode == "znorm_max":
+        best = {}
+        for scores in per_topic:
+            if not scores:
+                continue
+            vals = list(scores.values())
+            mu = sum(vals) / len(vals)
+            sd = (sum((v - mu) ** 2 for v in vals) / len(vals)) ** 0.5 or 1.0
+            for eid, v in scores.items():
+                z = (v - mu) / sd
+                if eid not in best or z > best[eid]:
+                    best[eid] = z
+        return rr.to_ranking(best)
+
+    if mode == "round_robin":
+        lists = [rr.to_ranking(s) for s in per_topic]
+        out, seen = [], set()
+        for rank in range(max((len(x) for x in lists), default=0)):
+            for lst in lists:
+                if rank < len(lst) and lst[rank] not in seen:
+                    seen.add(lst[rank])
+                    out.append(lst[rank])
+        return out
+
+    if mode == "union_top2":
+        pool = {}
+        for scores in per_topic:
+            for eid in rr.to_ranking(scores)[:2]:
+                pool[eid] = max(pool.get(eid, 0.0), scores[eid])
+        return rr.to_ranking(pool)
+
+    raise ValueError(mode)
