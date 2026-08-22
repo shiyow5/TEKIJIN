@@ -7,7 +7,13 @@
  * sites. Non-2xx responses throw a typed {@link ApiError}.
  */
 
-import type { AckResponse, AskRequest, HandoffResponse, ResumeRequest } from "@/lib/api-types";
+import type {
+  AckResponse,
+  AskRequest,
+  DashboardResponse,
+  HandoffResponse,
+  ResumeRequest,
+} from "@/lib/api-types";
 import { getApiBaseUrl } from "@/lib/config";
 
 /** Error thrown for a non-2xx API response, carrying the HTTP status. */
@@ -112,6 +118,14 @@ export function getHandoff(
   options: RequestOptions = {},
 ): Promise<HandoffResponse> {
   return getJson<HandoffResponse>(`/handoff/${encodeURIComponent(sessionId)}`, options);
+}
+
+/**
+ * GET /dashboard — aggregate usage metrics for the admin dashboard (画面5).
+ * Aggregate-only: no individual question content is returned.
+ */
+export function getDashboard(options: RequestOptions = {}): Promise<DashboardResponse> {
+  return getJson<DashboardResponse>("/dashboard", options);
 }
 
 /**

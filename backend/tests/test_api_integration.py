@@ -329,6 +329,7 @@ def test_flow_persists_question_and_recommendation(seed_counts, engine, fake_emb
         )
         assert q is not None and q.id.startswith("api_")  # uuid-based, collision-free
         assert q.topics == ["ネットワーク・VPN"]  # C1 topics backfilled
+        assert q.route == "person"  # C5 route persisted (dashboard 自己解決率 source)
         recs = (
             check.query(Recommendation)
             .filter(Recommendation.question_id == q.id)
@@ -412,6 +413,44 @@ def test_dashboard_route_shape_and_seed_values(seed_counts, engine, fake_embedde
     assert "recent_recommendations" not in body
     assert body["recommendation_outcomes"] == {"accepted": 0, "declined": 0, "pending": 0}
     assert body["acceptance_rate"] == 0.0
+    # product-spec 画面5 metrics are present.
+    assert body["self_resolution_rate"] == 0.0  # no routed questions in the seed
+    assert body["avg_resolution_hours"] is not None and body["avg_resolution_hours"] > 0
+    assert 0.0 <= body["top_responder_share"] <= 1.0
+    assert body["latest_eval"] is None  # no eval snapshot stored yet
+
+
+def test_dashboard_self_resolution_and_latest_eval(seed_counts, session) -> None:
+    from sqlalchemy import update
+
+    from tekijin.data.writes import insert_eval_run
+    from tekijin.models.tables import Question
+
+    # Route three seeded questions. Only ``document`` counts as self-resolved:
+    # ``prior_answer`` still hands off to the pinned responder in the current graph.
+    routes = {"q_0001": "document", "q_0002": "prior_answer", "q_0003": "person"}
+    for qid, route in routes.items():
+        session.execute(update(Question).where(Question.id == qid).values(route=route))
+    session.flush()
+
+    summary = dashboard_summary(session)
+    assert summary["self_resolution_rate"] == pytest.approx(1 / 3)  # only the document route
+
+    # No eval snapshot -> None; after storing one, the latest is returned.
+    assert summary["latest_eval"] is None
+    insert_eval_run(
+        session,
+        {"top1_accuracy": 0.7, "recall_at_3": 0.6, "mrr": 0.72, "route_accuracy": 0.7},
+    )
+    session.flush()
+    assert dashboard_summary(session)["latest_eval"]["top1_accuracy"] == pytest.approx(0.7)
+
+
+def test_top_responder_share_zero_when_no_answers() -> None:
+    from tekijin.data.dashboard import _top_responder_share
+
+    assert _top_responder_share([], 0) == 0.0  # no answers -> no concentration
+    assert _top_responder_share([{"answer_count": 4}], 10) == pytest.approx(0.4)
 
 
 def test_dashboard_summary_aggregates_outcomes(seed_counts, session) -> None:

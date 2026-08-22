@@ -64,6 +64,7 @@ from tekijin.data.writes import (
     persist_question,
     recommendation_outcome,
     set_recommendation_outcome,
+    update_question_route,
     update_question_topics,
 )
 from tekijin.retrieval.embedding import Embedder
@@ -523,6 +524,8 @@ class AgentService:
             for node, data in update.items():
                 if node == "c1_intent":
                     self._persist_topics(question_id, data)
+                elif node == "c5_route":
+                    self._persist_route(question_id, data)
                 elif node == "c6_score":
                     rec_ids = self._persist_recommendations(question_id, data)
                 event = (
@@ -556,6 +559,16 @@ class AgentService:
         if isinstance(agent_input, dict):
             return agent_input.get("question_id")
         return graph.get_state(config).values.get("question_id")
+
+    def _persist_route(self, question_id: str | None, data: dict[str, Any] | None) -> None:
+        if question_id is None:  # pragma: no cover - question_id always set via /ask
+            logger.warning("c5 route with no question_id; skipping persist")
+            return
+        route = (data or {}).get("route")
+        if route is None:  # pragma: no cover - c5 always sets a route
+            return
+        with session_scope(self._session_factory) as session:
+            update_question_route(session, question_id, route)
 
     def _persist_topics(self, question_id: str | None, data: dict[str, Any] | None) -> None:
         if question_id is None:  # pragma: no cover - question_id always set via /ask

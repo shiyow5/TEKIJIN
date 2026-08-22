@@ -231,6 +231,16 @@ class OutcomeCounts(BaseModel):
     pending: int = 0  # shown but not yet accepted/declined
 
 
+class EvalSnapshot(BaseModel):
+    """The latest stored offline-evaluation metrics (dashboard 推薦精度)."""
+
+    top1_accuracy: float | None = None
+    recall_at_3: float | None = None
+    mrr: float | None = None
+    route_accuracy: float | None = None
+    created_at: str | None = None
+
+
 class DashboardResponse(BaseModel):
     """Aggregate-only view (counts / distributions / ratios).
 
@@ -245,5 +255,10 @@ class DashboardResponse(BaseModel):
     recommendation_count: int
     recommendation_outcomes: OutcomeCounts = Field(default_factory=OutcomeCounts)
     acceptance_rate: float = 0.0  # accepted / (accepted + declined), 0 when none decided
+    # product-spec 画面5 headline metrics.
+    self_resolution_rate: float = 0.0  # 補助経路で解決した割合（route 記録から）
+    avg_resolution_hours: float | None = None  # 平均解決時間（未解決なら None）
+    top_responder_share: float = 0.0  # 上位1名集中率（負荷分散）
+    latest_eval: EvalSnapshot | None = None  # 推薦精度（未計測なら None）
     answers_per_responder: list[ResponderLoad] = Field(default_factory=list)
     topic_distribution: list[TopicCount] = Field(default_factory=list)

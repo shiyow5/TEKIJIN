@@ -41,6 +41,7 @@ _TRUNCATE_ORDER: tuple[str, ...] = (
     "evidence",
     "person_topic_edges",
     "events",
+    "eval_runs",
     "recommendations",
     "answers",
     "questions",
@@ -97,11 +98,26 @@ def run_seed(
 
     ensure_pgvector(eng)
     create_all(eng)
+    _apply_schema_upgrades(eng)
 
     factory = get_sessionmaker(eng)
     with session_scope(factory) as session:
         counts = seed_session(session, fixtures)
     return counts
+
+
+def _apply_schema_upgrades(engine: Engine) -> None:
+    """Additive, idempotent DDL for columns ``create_all`` cannot add.
+
+    The repo has no migration tool — ``create_all`` creates missing TABLES but
+    never ALTERs an existing one. So a database seeded before a column was added
+    (e.g. the Docker Compose persistent volume) would be missing it and break at
+    runtime. ``ADD COLUMN IF NOT EXISTS`` makes re-seeding pick up new columns;
+    new tables (e.g. ``eval_runs``) are handled by ``create_all`` itself.
+    """
+
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE questions ADD COLUMN IF NOT EXISTS route VARCHAR(32)"))
 
 
 def _format_counts(counts: dict[str, int]) -> str:
