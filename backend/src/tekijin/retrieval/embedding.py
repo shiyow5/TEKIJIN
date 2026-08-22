@@ -7,9 +7,10 @@ imported lazily (inside :meth:`SentenceTransformerEmbedder._get_model`) so that
 merely importing this module — or running the test suite with an injected fake
 embedder — never pulls those dependencies. See ``requirements-ml.txt``.
 
-The default model (``settings.embedding_model``) is an e5-family model, which
-expects ``query:`` / ``passage:`` prefixes; index-time and query-time prefixes
-must agree, so both go through the single ``kind`` argument here.
+The default model (``settings.embedding_model``) is Nemotron-3-Embed-1B, which —
+like the e5 family — expects ``query:`` / ``passage:`` prefixes; index-time and
+query-time prefixes must agree, so both go through the single ``kind`` argument
+here. (Prefixing is toggled by ``settings.embedding_use_e5_prefix``.)
 """
 
 from __future__ import annotations

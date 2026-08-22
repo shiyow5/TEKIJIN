@@ -59,20 +59,27 @@ class Settings(BaseSettings):
     # still falls back to MemorySaver at runtime (see the checkpointer factory).
     checkpointer_backend: Literal["memory", "postgres"] = "memory"
 
-    # Embedding model used by the retrieval component (later).
-    embedding_model: str = "intfloat/multilingual-e5-large"
+    # Embedding model used by the retrieval component (C3). Chosen by the on-DGX
+    # benchmark (#61): Nemotron-3-Embed-1B was 1st of 5 on the primary metric
+    # (層2 Recall@3 0.615 vs e5-large 0.530). See docs/benchmarks/README.md.
+    embedding_model: str = "nvidia/Nemotron-3-Embed-1B-BF16"
 
     # Whether to prepend e5-style ``query:`` / ``passage:`` prefixes when
-    # embedding. Correct for the e5 family (the default model); other models
-    # (e.g. ruri, BGE variants) must NOT receive these prefixes or retrieval
-    # quality degrades. Kept configurable because the embedding model is still
-    # being benchmarked — flip this off when switching to a non-e5 model.
+    # embedding. Correct for the e5 family AND Nemotron-3-Embed (both expect
+    # ``query: `` / ``passage: ``); other models (e.g. ruri, BGE, Qwen3-Embedding
+    # instruction-style) must NOT receive these prefixes or retrieval quality
+    # degrades. Kept configurable because the embedding model is still being
+    # benchmarked — flip this off when switching to a non-prefix model.
     embedding_use_e5_prefix: bool = True
 
     # Dimensionality of the embedding vectors produced by ``embedding_model``.
-    # ``intfloat/multilingual-e5-large`` emits 1024-d vectors; this drives the
-    # width of every ``pgvector`` column so the schema and the model agree.
-    embedding_dim: int = 1024
+    # Nemotron-3-Embed-1B emits 2048-d vectors; this drives the width of every
+    # ``pgvector`` column so the schema and the model agree. NOTE: the columns
+    # stay ``vector`` (not ``halfvec``): ``vector`` stores up to 16000 dims and
+    # the retrieval is brute-force, so 2048 is fine everywhere (incl. pgvector
+    # 0.6.2). ``halfvec`` is only needed once an HNSW/ivfflat ANN index is added
+    # (``vector`` indexes cap at 2000 dims) — deferred to #101.
+    embedding_dim: int = 2048
 
     # Directory holding synthetic fixtures used for development/testing.
     fixtures_dir: Path = _DEFAULT_FIXTURES_DIR

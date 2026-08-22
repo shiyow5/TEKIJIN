@@ -67,12 +67,13 @@ EXPECTED_COUNTS = {
 # --------------------------------------------------------------------------- #
 def test_embedding_dim_default(monkeypatch) -> None:
     # Isolate from ambient TEKIJIN_* env and any local .env so this asserts the
-    # real code default (1024), not the developer's TEKIJIN_EMBEDDING_DIM.
+    # real code default (2048, Nemotron-3-Embed-1B), not the developer's
+    # TEKIJIN_EMBEDDING_DIM.
     for key in list(os.environ):
         if key.startswith("TEKIJIN_"):
             monkeypatch.delenv(key, raising=False)
     settings = Settings(_env_file=None)
-    assert settings.embedding_dim == 1024
+    assert settings.embedding_dim == 2048
 
 
 def test_embedding_dim_wired_into_tables() -> None:

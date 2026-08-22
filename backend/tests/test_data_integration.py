@@ -8,12 +8,12 @@ locally, and are skipped when neither is available.
 from __future__ import annotations
 
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import event, select, text
 
 from tekijin.config import get_settings
-from tekijin.data.db import get_sessionmaker, session_scope
+from tekijin.data.db import get_engine, get_sessionmaker, session_scope
 from tekijin.data.repository import Repository
-from tekijin.data.seed import run_seed
+from tekijin.data.seed import _apply_schema_upgrades, run_seed
 from tekijin.models.tables import (
     Answer,
     Employee,
@@ -254,3 +254,85 @@ def test_get_profile(seed_counts, session) -> None:
     assert prof is not None and prof.employee_id == 1
     assert prof.has_embedding is False
     assert repo.get_profile(999999) is None
+
+
+# --------------------------------------------------------------------------- #
+# schema upgrades (migration path for an existing / older database)
+# --------------------------------------------------------------------------- #
+def test_apply_schema_upgrades_migrates_old_db(database_url: str) -> None:
+    """`_apply_schema_upgrades` brings an OLD database up to the current schema.
+
+    Simulates a DB created before #63 (embedding columns ``vector(1024)``,
+    ``questions`` without a ``route`` column) and asserts the guarded DDL:
+    widens every embedding column to ``vector(2048)`` (dropping stale, wrong-model
+    embeddings via ``USING NULL``), adds ``questions.route``, and is idempotent.
+    """
+
+    schema = "mig_upgrade_test"
+    tables = ("employee_profiles", "questions", "answers", "documents")
+
+    admin = get_engine(database_url)
+    try:
+        with admin.begin() as conn:
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+            conn.execute(text(f"DROP SCHEMA IF EXISTS {schema} CASCADE"))
+            conn.execute(text(f"CREATE SCHEMA {schema}"))
+    finally:
+        admin.dispose()
+
+    eng = get_engine(database_url)
+
+    @event.listens_for(eng, "connect")
+    def _set_search_path(dbapi_conn, _record):  # pragma: no cover - driver callback
+        with dbapi_conn.cursor() as cur:
+            cur.execute(f"SET search_path TO {schema}, public")
+
+    def embedding_type(conn, table: str) -> str:
+        return conn.execute(
+            text(
+                "SELECT format_type(atttypid, atttypmod) FROM pg_attribute "
+                "WHERE attrelid = to_regclass(:t) AND attname = 'embedding'"
+            ),
+            {"t": table},
+        ).scalar()
+
+    try:
+        # Old DB: 1024-d embedding columns; questions has no route column.
+        with eng.begin() as conn:
+            for table in tables:
+                conn.execute(
+                    text(f"CREATE TABLE {table} (id int primary key, embedding vector(1024))")
+                )
+            stale = "[" + ",".join(["0.01"] * 1024) + "]"
+            conn.execute(text(f"INSERT INTO documents (id, embedding) VALUES (1, '{stale}')"))
+
+        _apply_schema_upgrades(eng)
+
+        with eng.connect() as conn:
+            for table in tables:
+                assert embedding_type(conn, table) == "vector(2048)"
+            # Stale (wrong-model) embedding was dropped, not left at the old width.
+            assert (
+                conn.execute(text("SELECT embedding FROM documents WHERE id = 1")).scalar() is None
+            )
+            has_route = conn.execute(
+                text(
+                    "SELECT 1 FROM information_schema.columns WHERE table_schema = :s "
+                    "AND table_name = 'questions' AND column_name = 'route'"
+                ),
+                {"s": schema},
+            ).scalar()
+            assert has_route == 1
+
+        # Idempotent: a second run is a no-op (still 2048, no error).
+        _apply_schema_upgrades(eng)
+        with eng.connect() as conn:
+            assert embedding_type(conn, "documents") == "vector(2048)"
+    finally:
+        eng.dispose()
+        admin = get_engine(database_url)
+        try:
+            with admin.begin() as conn:
+                conn.execute(text(f"DROP SCHEMA IF EXISTS {schema} CASCADE"))
+        finally:
+            admin.dispose()
