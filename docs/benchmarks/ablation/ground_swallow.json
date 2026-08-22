@@ -1,0 +1,312 @@
+{
+ "n": 56,
+ "clean": 55,
+ "counts": {
+  "unsupported_branch": 2,
+  "fabricated_amount": 2,
+  "fabricated_code": 1
+ },
+ "cases": [
+  {
+   "id": 1,
+   "chars": 541,
+   "issues": []
+  },
+  {
+   "id": 2,
+   "chars": 459,
+   "issues": []
+  },
+  {
+   "id": 3,
+   "chars": 533,
+   "issues": []
+  },
+  {
+   "id": 4,
+   "chars": 509,
+   "issues": []
+  },
+  {
+   "id": 5,
+   "chars": 943,
+   "issues": []
+  },
+  {
+   "id": 6,
+   "chars": 573,
+   "issues": []
+  },
+  {
+   "id": 7,
+   "chars": 532,
+   "issues": []
+  },
+  {
+   "id": 8,
+   "chars": 365,
+   "issues": []
+  },
+  {
+   "id": 9,
+   "chars": 1247,
+   "issues": []
+  },
+  {
+   "id": 10,
+   "chars": 562,
+   "issues": []
+  },
+  {
+   "id": 11,
+   "chars": 746,
+   "issues": []
+  },
+  {
+   "id": 12,
+   "chars": 642,
+   "issues": []
+  },
+  {
+   "id": 13,
+   "chars": 548,
+   "issues": []
+  },
+  {
+   "id": 14,
+   "chars": 772,
+   "issues": []
+  },
+  {
+   "id": 15,
+   "chars": 389,
+   "issues": []
+  },
+  {
+   "id": 16,
+   "chars": 505,
+   "issues": []
+  },
+  {
+   "id": 17,
+   "chars": 574,
+   "issues": []
+  },
+  {
+   "id": 18,
+   "chars": 608,
+   "issues": []
+  },
+  {
+   "id": 19,
+   "chars": 567,
+   "issues": []
+  },
+  {
+   "id": 20,
+   "chars": 784,
+   "issues": []
+  },
+  {
+   "id": 21,
+   "chars": 776,
+   "issues": []
+  },
+  {
+   "id": 22,
+   "chars": 1322,
+   "issues": []
+  },
+  {
+   "id": 23,
+   "chars": 678,
+   "issues": []
+  },
+  {
+   "id": 24,
+   "chars": 622,
+   "issues": []
+  },
+  {
+   "id": 25,
+   "chars": 417,
+   "issues": []
+  },
+  {
+   "id": 26,
+   "chars": 519,
+   "issues": []
+  },
+  {
+   "id": 27,
+   "chars": 461,
+   "issues": []
+  },
+  {
+   "id": 28,
+   "chars": 1338,
+   "issues": []
+  },
+  {
+   "id": 29,
+   "chars": 619,
+   "issues": []
+  },
+  {
+   "id": 30,
+   "chars": 483,
+   "issues": []
+  },
+  {
+   "id": 31,
+   "chars": 1269,
+   "issues": []
+  },
+  {
+   "id": 32,
+   "chars": 469,
+   "issues": []
+  },
+  {
+   "id": 33,
+   "chars": 353,
+   "issues": []
+  },
+  {
+   "id": 34,
+   "chars": 384,
+   "issues": []
+  },
+  {
+   "id": 35,
+   "chars": 525,
+   "issues": []
+  },
+  {
+   "id": 36,
+   "chars": 419,
+   "issues": []
+  },
+  {
+   "id": 37,
+   "chars": 1305,
+   "issues": []
+  },
+  {
+   "id": 38,
+   "chars": 720,
+   "issues": []
+  },
+  {
+   "id": 39,
+   "chars": 655,
+   "issues": []
+  },
+  {
+   "id": 40,
+   "chars": 502,
+   "issues": []
+  },
+  {
+   "id": 41,
+   "chars": 501,
+   "issues": []
+  },
+  {
+   "id": 42,
+   "chars": 541,
+   "issues": []
+  },
+  {
+   "id": 43,
+   "chars": 788,
+   "issues": []
+  },
+  {
+   "id": 44,
+   "chars": 516,
+   "issues": []
+  },
+  {
+   "id": 45,
+   "chars": 361,
+   "issues": []
+  },
+  {
+   "id": 46,
+   "chars": 550,
+   "issues": [
+    {
+     "kind": "unsupported_branch",
+     "value": "大阪"
+    },
+    {
+     "kind": "unsupported_branch",
+     "value": "東京"
+    },
+    {
+     "kind": "fabricated_amount",
+     "value": "¥1,200"
+    },
+    {
+     "kind": "fabricated_amount",
+     "value": "¥1,350"
+    },
+    {
+     "kind": "fabricated_code",
+     "value": "品番：XXXXX"
+    }
+   ]
+  },
+  {
+   "id": 47,
+   "chars": 528,
+   "issues": []
+  },
+  {
+   "id": 48,
+   "chars": 825,
+   "issues": []
+  },
+  {
+   "id": 49,
+   "chars": 491,
+   "issues": []
+  },
+  {
+   "id": 50,
+   "chars": 389,
+   "issues": []
+  },
+  {
+   "id": 51,
+   "chars": 575,
+   "issues": []
+  },
+  {
+   "id": 52,
+   "chars": 648,
+   "issues": []
+  },
+  {
+   "id": 53,
+   "chars": 525,
+   "issues": []
+  },
+  {
+   "id": 54,
+   "chars": 509,
+   "issues": []
+  },
+  {
+   "id": 55,
+   "chars": 583,
+   "issues": []
+  },
+  {
+   "id": 56,
+   "chars": 636,
+   "issues": []
+  }
+ ]
+}

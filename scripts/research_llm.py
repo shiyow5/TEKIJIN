@@ -334,6 +334,88 @@ def run_abstain_check(payload):
     return out
 
 
+DRAFT_SYS = (
+    "あなたは社内の相談を取り次ぐ担当です。相談者に代わって、詳しい社員へ送る依頼文の下書きを書いてください。"
+    "宛名・用件・背景・依頼事項・相手の負担への配慮を含め、200字程度の丁寧な日本語にしてください。"
+    "**与えられた情報だけを使い、書かれていない実績・商材・資格・拠点を書かないでください。**"
+    "JSONではなく本文だけを出力してください。"
+)
+
+JUDGE_SYS = (
+    "社内の依頼文の下書きを2つ比べる審査員です。次の観点で優劣を決めてください。"
+    "(1) 与えられた根拠だけで書けているか（書かれていない実績を足していないか）"
+    "(2) 相談内容が正しく伝わるか (3) そのまま送れる丁寧さか (4) 長すぎないか。"
+    "どちらが良いかを A / B / tie で答え、理由を30字以内で添えます。"
+)
+
+JUDGE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "winner": {"type": "string", "enum": ["A", "B", "tie"]},
+        "reason": {"type": "string"},
+    },
+    "required": ["winner", "reason"],
+    "additionalProperties": False,
+}
+
+
+def run_draft(payload):
+    """C7 の契約どおり、質問・専門家のレコード・不足スロットだけを渡して下書きを書かせる。"""
+    out = []
+    for i, case in enumerate(payload):
+        r = case["responder"]
+        missing = "、".join(case.get("missing") or []) or "なし"
+        user = (
+            f"相談内容: {case['question']}\n\n"
+            f"取り次ぎ先: {r['name']}（{r.get('dept') or '所属不明'}）\n"
+            f"この方を選んだ根拠: {'、'.join(r['reasons']) or '記載なし'}\n"
+            f"相談者に確認が必要な点: {missing}"
+        )
+        res = call(
+            [
+                {"role": "system", "content": DRAFT_SYS},
+                {"role": "user", "content": user},
+            ],
+            max_tokens=700,
+        )
+        out.append({"id": case["id"], **res})
+        print(
+            f"[{i + 1}/{len(payload)}] {res['latency']:.2f}s {len(res['content'])}字",
+            flush=True,
+        )
+    return out
+
+
+def run_judge(payload):
+    """位置バイアス対策に順序を入れ替えて2回聞く。一致した判定だけを採る側で集計する。"""
+    out = []
+    for i, case in enumerate(payload):
+        verdicts = {}
+        for order in ("ab", "ba"):
+            first, second = (
+                (case["a"], case["b"]) if order == "ab" else (case["b"], case["a"])
+            )
+            res = call(
+                [
+                    {"role": "system", "content": JUDGE_SYS},
+                    {
+                        "role": "user",
+                        "content": (
+                            f"相談内容: {case['question']}\n\n"
+                            f"取り次ぎ先の根拠: {case['reasons']}\n\n"
+                            f"下書きA:\n{first}\n\n下書きB:\n{second}"
+                        ),
+                    },
+                ],
+                schema=JUDGE_SCHEMA,
+                max_tokens=128,
+            )
+            verdicts[order] = res["content"]
+        out.append({"id": case["id"], "verdicts": verdicts})
+        print(f"[{i + 1}/{len(payload)}] {verdicts}", flush=True)
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument(
@@ -347,6 +429,8 @@ def main():
             "topic_ctx",
             "topic_abstain",
             "abstain_check",
+            "draft",
+            "judge",
         ],
     )
     ap.add_argument("--out", required=True)
@@ -360,13 +444,24 @@ def main():
     ap.add_argument("--temperature", type=float, default=0.0)
     args = ap.parse_args()
 
-    if args.task in ("rerank", "topic_ctx", "topic_abstain", "abstain_check"):
+    if args.task in (
+        "rerank",
+        "topic_ctx",
+        "topic_abstain",
+        "abstain_check",
+        "draft",
+        "judge",
+    ):
         with open(args.payload, encoding="utf-8") as f:
             payload = json.load(f)
         if args.task == "rerank":
             out = run_rerank(payload)
         elif args.task == "abstain_check":
             out = run_abstain_check(payload)
+        elif args.task == "draft":
+            out = run_draft(payload)
+        elif args.task == "judge":
+            out = run_judge(payload)
         else:
             out = run_topic_ctx(
                 payload,
