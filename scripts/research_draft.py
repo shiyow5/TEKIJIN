@@ -156,7 +156,20 @@ def check_draft(text, case, vocab):
     if not any(n in text[:60] for n in allowed_names):
         issues.append({"kind": "missing_addressee", "value": responder["name"]})
 
-    # 5) 不足スロットを渡したのに触れていないか
+    # 5) 渡していない数値を作っていないか。
+    #    実測で「品番：XXXXX」「東京拠点では¥1,200」のように、金額と品番を丸ごと作る例が出た。
+    #    実在の同僚に送る文面なので、これは他の違反より重い。
+    for pattern, kind in (
+        (r"[¥￥]\s?[\d,]+|[\d,]+\s?円", "fabricated_amount"),
+        (r"[\d.]+\s?%|[\d.]+\s?パーセント", "fabricated_percentage"),
+        (r"(?:品番|型番|製番|コード)[：:\s]*([A-Za-z0-9\-]{3,})", "fabricated_code"),
+    ):
+        for m in re.finditer(pattern, text):
+            token = m.group(0)
+            if token not in given:
+                issues.append({"kind": kind, "value": token})
+
+    # 6) 不足スロットを渡したのに触れていないか
     for slot in case.get("missing") or []:
         if slot not in text:
             issues.append({"kind": "missing_slot_dropped", "value": slot})
