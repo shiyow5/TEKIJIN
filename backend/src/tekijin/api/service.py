@@ -27,7 +27,7 @@ Durability & concurrency (the core of this design):
   mid-interrupt (a human is being waited on), so long HITL pauses are safe.
 
 This still requires the API to run SINGLE worker (the lock + registry are
-in-process); that is documented on the Makefile ``serve`` target.
+in-process); that is documented on the Makefile ``serve-prod`` target.
 """
 
 from __future__ import annotations

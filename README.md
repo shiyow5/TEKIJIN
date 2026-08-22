@@ -59,9 +59,22 @@ make serve        # backend(uvicorn --reload) + frontend(next dev) を同時起�
 ```
 
 - 起動後: フロント <http://localhost:3000> ／ API <http://localhost:8000>（`/docs` に OpenAPI）。
-- `Ctrl-C` で backend・frontend を**両方**停止します（プロセスの取り残しなし）。
-- 既定ではスタブ LLM ＋ MemorySaver で動くため、**DB や ML 依存（`make setup-ml`）なしで起動**できます。
+- `Ctrl-C`（このターミナル上）で backend・frontend を**両方**停止します。片方が起動に失敗した
+  ら（例: ポート使用中）もう片方も停止し、失敗が伝播します。
+- 既定で LLM（C1/C2/C7）と checkpointer はスタブのため、**vLLM など外部 LLM なしでサーバは起動**します。
+- ただし**質問を実際に処理するには DB と埋め込みが必要**です（下記）。未整備でも UI と両サーバは
+  立ち上がりますが、質問送信はエラーになります。
 - フロントは `NEXT_PUBLIC_API_BASE_URL`（既定 `http://localhost:8000`）で API を参照します。
+
+質問処理まで一通り動かす（DB＋埋め込みを用意する）:
+
+```bash
+make db-up        # PostgreSQL 16 + pgvector を起動（healthy まで待機）
+make seed         # 合成フィクスチャを投入
+make setup-ml     # 実埋め込みモデル用の ML 依存を導入
+make embed        # 密ベクトルを計算・格納
+make serve        # 起動（LLM はスタブのまま）
+```
 
 片方だけ起動したいとき:
 
@@ -70,13 +83,9 @@ make run-backend  # backend のみ（uvicorn --reload）
 make run-frontend # frontend のみ（next dev）
 ```
 
-本番相当（vLLM + PostgreSQL/PostgresSaver、backend のみ）で動かすとき:
+本番相当（実 vLLM + PostgreSQL/PostgresSaver、backend のみ）で動かすとき:
 
 ```bash
-make db-up        # PostgreSQL 16 + pgvector を起動
-make seed         # 合成フィクスチャを投入
-make setup-ml     # 実埋め込みモデル用の ML 依存を導入
-make embed        # 密ベクトルを計算・格納
 TEKIJIN_LLM_BACKEND=vllm TEKIJIN_CHECKPOINTER_BACKEND=postgres make serve-prod
 ```
 
