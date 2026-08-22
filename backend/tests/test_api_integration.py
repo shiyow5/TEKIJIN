@@ -286,11 +286,14 @@ def test_reconnect_resends_pending_interrupt(seed_counts, engine, fake_embedder)
     client = _client(
         engine, fake_embedder, retriever=_FakeRetriever(people=[1]), scorer=_FakeScorer(_recs(1))
     )
-    # send interrupt -> reconnect re-sends the draft.
+    # send interrupt -> reconnect re-sends the candidates AND the draft, so a
+    # client that reconnects (or one that reads after another consumer drained the
+    # live segment) can fully reconstruct the hand-off (#38 re-review).
     client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "r1"})
     _events(client, "r1")
     again = _events(client, "r1")  # no /answer: reconnect
-    assert [e for e, _ in again] == ["draft"]
+    assert [e for e, _ in again] == ["recommend", "draft"]
+    assert again[0][1]["recommendations"][0]["person_id"] == "E001"
 
     # ask interrupt -> reconnect re-sends the followup.
     client.post(
@@ -515,6 +518,26 @@ def test_set_recommendation_outcome_is_idempotent(seed_counts, session) -> None:
     session.flush()
     session.refresh(rec)
     assert rec.outcome == "accepted"  # first write wins; second is a no-op
+
+
+def test_resume_rejected_when_outcome_already_recorded(seed_counts, engine, fake_embedder) -> None:
+    # Divergence guard (#38 re-review): if a restart loses the in-memory pending
+    # guard after the outcome was recorded, a second /answer with a DIFFERENT
+    # action must be rejected — never queue a resume that diverges from the DB.
+    svc = _svc(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2]),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    svc.start_question("dv", 10, GOOD_Q)
+    list(svc.stream_events("dv"))  # pause at send
+    svc.submit_resume("dv", outcome="accepted")  # records outcome + queues resume
+    svc._registry.clear()  # simulate restart: the in-memory pending guard is gone
+    with pytest.raises(SessionConflict):
+        svc.submit_resume("dv", outcome="declined")  # DB already accepted -> reject
+    recs = _recs_for(engine, _latest_question(engine).id)
+    assert recs[0].outcome == "accepted"  # unchanged; graph never told to decline
 
 
 def test_handoff_unexpected_error_is_generic_500(seed_counts, engine, fake_embedder) -> None:
@@ -871,8 +894,9 @@ def test_concurrent_events_no_double_insert(seed_counts, engine, fake_embedder) 
         b = ex.submit(_drain)
         streams = {a.result(), b.result()}
     full = ("understood", "route", "recommend", "draft")
-    # one streamed the whole run; the other blocked on the lock, then reconnected.
-    assert streams == {full, ("draft",)}
+    # One streamed the whole run; the other blocked on the lock, then reconnected
+    # at the send interrupt — which now replays recommend + draft (#38 re-review).
+    assert streams == {full, ("recommend", "draft")}
     assert len(_recs_for(engine, _latest_question(engine).id)) == 2  # inserted once
 
 

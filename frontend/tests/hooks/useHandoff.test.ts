@@ -135,17 +135,20 @@ describe("useHandoff", () => {
     await waitFor(() => expect(result.current.phase).toBe("done"));
   });
 
-  it("treats a 409 on submit as success (ambiguous-ack recovery)", async () => {
+  it("treats a 409 on submit as an 'already handled' terminal, not this action's success", async () => {
     const { ApiError } = await import("@/lib/api-client");
     getHandoffMock.mockResolvedValue(HANDOFF);
-    postAnswerMock.mockRejectedValue(new ApiError(409, "resume already queued"));
+    postAnswerMock.mockRejectedValue(new ApiError(409, "already answered"));
     const { result } = renderHook(() => useHandoff("s1"));
     await waitFor(() => expect(result.current.phase).toBe("ready"));
 
     act(() => result.current.submit("answer"));
 
-    await waitFor(() => expect(result.current.phase).toBe("done"));
-    expect(result.current.action).toBe("answer");
+    // Neutral terminal: we must NOT assert "answer" succeeded (a competing tab may
+    // have declined). It still drains to advance the graph.
+    await waitFor(() => expect(result.current.phase).toBe("error"));
+    expect(result.current.errorKind).toBe("gone");
+    expect(result.current.action).toBeUndefined();
     expect(advanceSessionMock).toHaveBeenCalledWith("s1");
   });
 

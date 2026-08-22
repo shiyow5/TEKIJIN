@@ -188,12 +188,31 @@ def test_interrupt_event_followup_and_send() -> None:
     assert events.interrupt_event({}) is None
 
 
-def test_reconnect_event_by_pause_node() -> None:
-    ask = _ev(events.reconnect_event("ask", {"followup_question": "?", "missing": ["現行製品"]}))
-    assert ask.event == "followup" and _data(ask)["question"] == "?"
-    send = _ev(events.reconnect_event("send", {"draft": "文面"}))
-    assert send.event == "draft" and _data(send)["draft"] == "文面"
-    assert events.reconnect_event("c5_route", {}) is None  # not a pause node
+def test_reconnect_events_by_pause_node() -> None:
+    ask = events.reconnect_events("ask", {"followup_question": "?", "missing": ["現行製品"]})
+    assert [e.event for e in ask] == ["followup"]
+    assert _data(ask[0])["question"] == "?"
+
+    # A ``send`` reconnect replays BOTH the current candidates and the draft, so a
+    # later reconnecting client can fully reconstruct the hand-off (person_id in
+    # the external "E###" form). Without candidates present, only the draft.
+    send = events.reconnect_events(
+        "send",
+        {
+            "draft": "文面",
+            "recommendations": [
+                {"person_id": 1, "name": "高梨", "score": 0.9, "confidence": "高", "reasons": []}
+            ],
+        },
+    )
+    assert [e.event for e in send] == ["recommend", "draft"]
+    assert _data(send[0])["recommendations"][0]["person_id"] == "E001"
+    assert _data(send[1])["draft"] == "文面"
+
+    draft_only = events.reconnect_events("send", {"draft": "文面"})
+    assert [e.event for e in draft_only] == ["draft"]
+
+    assert events.reconnect_events("c5_route", {}) == []  # not a pause node
 
 
 def test_config_rejects_invalid_backends() -> None:

@@ -102,11 +102,17 @@ export function useHandoff(sessionId: string): UseHandoffResult {
       postAnswer({ session_id: sessionId, outcome: OUTCOME_BY_ACTION[action] })
         .then(finish)
         .catch((err: unknown) => {
-          // Ambiguous-ack recovery: a 409 means the resume was already queued /
-          // the run already advanced — treat it as success (mirrors the ask flow),
-          // so a lost acknowledgement never strands the responder on the form.
+          // A 409 means the session is no longer accepting THIS submission: the
+          // handoff was already answered (a lost-ack retry, a competing tab, or an
+          // already-advanced run). We cannot assert which action won, so we drain
+          // to advance the graph and show a neutral "already handled" terminal —
+          // never a (possibly wrong) success confirmation for this action.
           if (err instanceof ApiError && err.status === 409) {
-            finish();
+            advanceSession(sessionId).finally(() => {
+              inFlight.current = false;
+              if (mounted.current)
+                setState((prev) => ({ ...prev, phase: "error", errorKind: "gone" }));
+            });
             return;
           }
           inFlight.current = false;

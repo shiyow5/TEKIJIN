@@ -112,6 +112,14 @@ def latest_primary_recommendation(session: Session, question_id: str) -> int | N
     return row[0] if row else None
 
 
+def recommendation_outcome(session: Session, recommendation_id: int) -> str | None:
+    """The currently recorded outcome for a recommendation (``None`` if unset)."""
+
+    return session.execute(
+        select(Recommendation.outcome).where(Recommendation.id == recommendation_id)
+    ).scalar_one_or_none()
+
+
 def set_recommendation_outcome(session: Session, recommendation_id: int, outcome: str) -> None:
     """Record the responder's accept/decline on a recommendation, once.
 

@@ -52,7 +52,7 @@ from tekijin.api.events import (
     TERMINAL_EVENTS,
     interrupt_event,
     node_event,
-    reconnect_event,
+    reconnect_events,
     replay_terminal,
 )
 from tekijin.data.db import session_scope
@@ -62,6 +62,7 @@ from tekijin.data.writes import (
     insert_shown_recommendations,
     latest_primary_recommendation,
     persist_question,
+    recommendation_outcome,
     set_recommendation_outcome,
     update_question_topics,
 )
@@ -305,7 +306,13 @@ class AgentService:
                 if outcome is None:
                     raise SessionInvalid("this session expects a responder 'outcome'")
                 resume_value = outcome
-                self._record_outcome(session_id, snapshot.values, outcome)
+                # DB is the source of truth for "already answered": if the primary
+                # recommendation already carries an outcome (e.g. a restart lost the
+                # in-memory pending guard, and the responder reloaded the form and
+                # chose a different action), reject rather than queue a resume that
+                # would diverge from the recorded outcome.
+                if self._record_outcome(session_id, snapshot.values, outcome) == "already":
+                    raise SessionConflict("this handoff has already been answered")
             else:  # pragma: no cover - the graph only ever interrupts at ask/send
                 raise SessionConflict("session cannot be resumed from its current state")
 
@@ -313,8 +320,14 @@ class AgentService:
             ctx.pending = Command(resume=resume_value)
             ctx.touched_at = self._clock()
 
-    def _record_outcome(self, session_id: str, values: dict[str, Any], outcome: str) -> None:
-        """Record the responder outcome on the durable primary recommendation."""
+    def _record_outcome(self, session_id: str, values: dict[str, Any], outcome: str) -> str:
+        """Record the responder outcome on the durable primary recommendation.
+
+        Returns ``"recorded"`` on a fresh write, ``"already"`` when the primary
+        already carries an outcome (a duplicate submission — the caller rejects it
+        so the graph does not diverge from the DB), or ``"no_target"`` when there
+        is no recommendation to attach the outcome to.
+        """
 
         primary = values.get("primary_recommendation_id")
         question_id = values.get("question_id")
@@ -329,8 +342,11 @@ class AgentService:
                     session_id,
                     outcome,
                 )
-                return
+                return "no_target"
+            if recommendation_outcome(session, primary) is not None:
+                return "already"
             set_recommendation_outcome(session, primary, outcome)
+            return "recorded"
 
     # -- /handoff : responder-facing view (product-spec 画面4) ------------- #
     def get_handoff(self, session_id: str) -> schemas.HandoffResponse:
@@ -342,21 +358,27 @@ class AgentService:
         (unknown / finished); :class:`SessionConflict` (409) when the run is
         paused elsewhere (a clarification is owed to the asker, not a responder
         outcome).
+
+        The snapshot + pending check runs under the per-session lock (as
+        ``submit_resume`` / ``stream_events`` do) so it is atomic against a
+        concurrent dispatch: a reload cannot pass the "still awaiting" check on a
+        stale snapshot while another reader is mid-way through advancing the graph.
         """
 
-        snapshot = self._snapshot(session_id)
-        next_nodes = tuple(snapshot.next)
-        if not next_nodes:
-            raise HandoffNotFound("no responder handoff for this session")
-        if next_nodes[0] != "send":
-            raise SessionConflict("session is not awaiting a responder outcome")
-        # An outcome already queued (submitted, not yet consumed by an /events
-        # reader) leaves the durable snapshot at ``send`` with the same, already
-        # decided recommendation. Treat it as no-longer-offerable so a reload does
-        # not re-render the form and invite a second submission (which would 409).
-        ctx = self._reg_get(session_id)
-        if ctx is not None and ctx.pending is not None:
-            raise HandoffNotFound("this handoff has already been answered")
+        with self._lock(session_id):
+            snapshot = self._snapshot(session_id)
+            next_nodes = tuple(snapshot.next)
+            if not next_nodes:
+                raise HandoffNotFound("no responder handoff for this session")
+            if next_nodes[0] != "send":
+                raise SessionConflict("session is not awaiting a responder outcome")
+            # An outcome already queued (submitted, not yet consumed by an /events
+            # reader) leaves the durable snapshot at ``send`` with the same, already
+            # decided recommendation. Treat it as no-longer-offerable so a reload
+            # does not re-render the form and invite a second submission (409).
+            ctx = self._reg_get(session_id)
+            if ctx is not None and ctx.pending is not None:
+                raise HandoffNotFound("this handoff has already been answered")
 
         values = snapshot.values
         recs = values.get("recommendations") or []
@@ -455,9 +477,7 @@ class AgentService:
             return
         node = state.next[0]
         if node in _INTERRUPT_NODES:
-            reconnect = reconnect_event(node, state.values)
-            if reconnect is not None:
-                yield reconnect
+            yield from reconnect_events(node, state.values)
         else:
             # codex#6: a client disconnected mid-run (before ask/send). The run is
             # parked at a normal node — continue it from the checkpoint.
