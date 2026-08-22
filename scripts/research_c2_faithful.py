@@ -118,11 +118,19 @@ def main():
         "     有給の残日数・会議室予約のような『社内だが担当外』は基準に無いので、落とせなくても"
     )
     print("     C1 の失敗というより**プロンプトに書いていないだけ**と読むべき。")
+    print(
+        "  ※ 『通した』と『長さ切れで落ちた』は分けて数える。混ぜると C1 の甘さが隠れる。"
+    )
     for klass in CLASSES:
-        ids = [i for i, d in all_items.items() if d["klass"] == klass and i in intents]
-        caught = [i for i in ids if intents[i].out_of_scope]
+        ids = [i for i, d in all_items.items() if d["klass"] == klass]
+        caught = [i for i in ids if i in intents and intents[i].out_of_scope]
+        passed_through = [
+            i for i in ids if i in intents and not intents[i].out_of_scope
+        ]
+        lost = [i for i in ids if i not in intents]
         print(
-            f"  {klass:14s} {len(caught):3d}/{len(ids):3d} が out_of_scope（担当={OWNER[klass][0]}）"
+            f"  {klass:14s} 弾いた {len(caught):3d} / 通した {len(passed_through):3d} / "
+            f"長さ切れ {len(lost):3d}（担当={OWNER[klass][0]}）"
         )
 
     print("\n== 2. C2 に実際に到達した相談だけで見る ==")
