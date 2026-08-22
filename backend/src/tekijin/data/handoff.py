@@ -32,14 +32,10 @@ def responder_reuse_stats(session: Session, responder_id: int) -> dict[str, int]
     Both are 0 for a responder with no answers.
     """
 
-    reuse_sum = session.scalar(
-        select(func.coalesce(func.sum(Answer.reuse_count), 0)).where(
-            Answer.responder_id == responder_id
-        )
-    )
-    helpful = session.scalar(
-        select(func.count())
-        .select_from(Answer)
-        .where(Answer.responder_id == responder_id, Answer.was_helpful.is_(True))
-    )
-    return {"reuse_count": int(reuse_sum or 0), "helpful_answer_count": int(helpful or 0)}
+    row = session.execute(
+        select(
+            func.coalesce(func.sum(Answer.reuse_count), 0),
+            func.count().filter(Answer.was_helpful.is_(True)),
+        ).where(Answer.responder_id == responder_id)
+    ).one()
+    return {"reuse_count": int(row[0] or 0), "helpful_answer_count": int(row[1] or 0)}

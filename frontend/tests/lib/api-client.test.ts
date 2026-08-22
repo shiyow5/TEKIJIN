@@ -1,4 +1,4 @@
-import { ApiError, getHandoff, postAnswer, postAsk } from "@/lib/api-client";
+import { advanceSession, ApiError, getHandoff, postAnswer, postAsk } from "@/lib/api-client";
 import type { AskRequest, HandoffResponse, ResumeRequest } from "@/lib/api-types";
 import { DEFAULT_API_BASE_URL } from "@/lib/config";
 import { describe, expect, it, vi } from "vitest";
@@ -176,5 +176,40 @@ describe("getHandoff", () => {
       name: "ApiError",
       status: 404,
     });
+  });
+});
+
+describe("advanceSession", () => {
+  function sseResponse(): Response {
+    return {
+      ok: true,
+      status: 200,
+      text: async () => "event: done\ndata: {}\n\n",
+    } as Response;
+  }
+
+  it("GETs {base}/events/{id} and drains the stream to completion", async () => {
+    const textSpy = vi.fn(async () => "event: done\ndata: {}\n\n");
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue({ ok: true, status: 200, text: textSpy } as unknown as Response);
+
+    await advanceSession("abc-123", { fetchImpl });
+
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe(`${DEFAULT_API_BASE_URL}/events/abc-123`);
+    expect(init?.method).toBe("GET");
+    expect(textSpy).toHaveBeenCalledTimes(1); // read to completion
+  });
+
+  it("url-encodes the session id path segment", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(sseResponse());
+    await advanceSession("a b/c", { fetchImpl });
+    expect(fetchImpl.mock.calls[0][0]).toBe(`${DEFAULT_API_BASE_URL}/events/a%20b%2Fc`);
+  });
+
+  it("swallows a transport error (best-effort: the outcome is already recorded)", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockRejectedValue(new Error("network"));
+    await expect(advanceSession("x", { fetchImpl })).resolves.toBeUndefined();
   });
 });

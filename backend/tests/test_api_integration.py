@@ -15,7 +15,13 @@ from fastapi.testclient import TestClient
 from langgraph.checkpoint.memory import MemorySaver
 
 from tekijin.agent.stubs import KeywordIntentModel, RuleSufficiencyModel, TemplateDraftModel
-from tekijin.api.service import SESSION_TTL_SECONDS, AgentService, SessionConflict, _SessionCtx
+from tekijin.api.service import (
+    SESSION_TTL_SECONDS,
+    AgentService,
+    HandoffNotFound,
+    SessionConflict,
+    _SessionCtx,
+)
 from tekijin.app import create_app
 from tekijin.data.dashboard import dashboard_summary
 from tekijin.data.db import get_sessionmaker
@@ -481,6 +487,34 @@ def test_handoff_finished_session_404(seed_counts, engine, fake_embedder) -> Non
     client.post("/answer", json={"session_id": "h4", "outcome": "accepted"})
     _events(client, "h4")  # run to completion (done) — no longer awaiting an outcome
     assert client.get("/handoff/h4").status_code == 404
+
+
+def test_handoff_gone_once_outcome_queued(seed_counts, engine, fake_embedder) -> None:
+    # After an outcome is submitted (queued in the registry) but before an /events
+    # reader consumes it, the durable snapshot still shows next==("send",). The
+    # handoff must report itself as no-longer-offerable so a reload does not
+    # re-render the form and invite a duplicate submission.
+    svc = _svc(
+        engine, fake_embedder, retriever=_FakeRetriever(people=[1]), scorer=_FakeScorer(_recs(1))
+    )
+    svc.start_question("hq", 10, GOOD_Q)
+    list(svc.stream_events("hq"))  # pause at send
+    svc.submit_resume("hq", outcome="accepted")  # queues the resume (not yet drained)
+    with pytest.raises(HandoffNotFound):
+        svc.get_handoff("hq")
+
+
+def test_set_recommendation_outcome_is_idempotent(seed_counts, session) -> None:
+    from tekijin.data.writes import set_recommendation_outcome
+
+    rec = Recommendation(question_id="q_0001", employee_id=3, rank=1, score=0.5, outcome=None)
+    session.add(rec)
+    session.flush()
+    set_recommendation_outcome(session, rec.id, "accepted")
+    set_recommendation_outcome(session, rec.id, "declined")  # must NOT overwrite
+    session.flush()
+    session.refresh(rec)
+    assert rec.outcome == "accepted"  # first write wins; second is a no-op
 
 
 def test_handoff_unexpected_error_is_generic_500(seed_counts, engine, fake_embedder) -> None:

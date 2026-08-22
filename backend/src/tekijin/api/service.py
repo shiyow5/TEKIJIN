@@ -350,6 +350,13 @@ class AgentService:
             raise HandoffNotFound("no responder handoff for this session")
         if next_nodes[0] != "send":
             raise SessionConflict("session is not awaiting a responder outcome")
+        # An outcome already queued (submitted, not yet consumed by an /events
+        # reader) leaves the durable snapshot at ``send`` with the same, already
+        # decided recommendation. Treat it as no-longer-offerable so a reload does
+        # not re-render the form and invite a second submission (which would 409).
+        ctx = self._reg_get(session_id)
+        if ctx is not None and ctx.pending is not None:
+            raise HandoffNotFound("this handoff has already been answered")
 
         values = snapshot.values
         recs = values.get("recommendations") or []

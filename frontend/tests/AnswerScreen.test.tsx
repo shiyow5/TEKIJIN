@@ -5,10 +5,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const getHandoffMock = vi.fn();
 const postAnswerMock = vi.fn();
+const advanceSessionMock = vi.fn();
 
 vi.mock("@/lib/api-client", () => ({
   getHandoff: (...args: unknown[]) => getHandoffMock(...args),
   postAnswer: (...args: unknown[]) => postAnswerMock(...args),
+  advanceSession: (...args: unknown[]) => advanceSessionMock(...args),
   ApiError: class ApiError extends Error {
     readonly status: number;
     constructor(status: number, message: string) {
@@ -49,7 +51,9 @@ describe("AnswerScreen", () => {
   beforeEach(() => {
     getHandoffMock.mockReset();
     postAnswerMock.mockReset();
+    advanceSessionMock.mockReset();
     postAnswerMock.mockResolvedValue({ session_id: "s1", status: "resumed" });
+    advanceSessionMock.mockResolvedValue(undefined);
   });
 
   afterEach(() => {

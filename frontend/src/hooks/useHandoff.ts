@@ -17,9 +17,9 @@
  * submit is retryable: it returns to the ready phase with an inline error.
  */
 
-import { ApiError, getHandoff, postAnswer } from "@/lib/api-client";
+import { advanceSession, ApiError, getHandoff, postAnswer } from "@/lib/api-client";
 import type { HandoffResponse, Outcome } from "@/lib/api-types";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export type HandoffAction = "answer" | "defer" | "refer";
 export type HandoffPhase = "loading" | "error" | "ready" | "submitting" | "done";
@@ -50,6 +50,17 @@ export interface UseHandoffResult extends HandoffState {
 
 export function useHandoff(sessionId: string): UseHandoffResult {
   const [state, setState] = useState<HandoffState>({ phase: "loading" });
+  // Single-flight guard: prevents a rapid double-tap from firing a second
+  // postAnswer (the second would 409 and could clobber the successful state).
+  const inFlight = useRef(false);
+  const mounted = useRef(true);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -71,17 +82,37 @@ export function useHandoff(sessionId: string): UseHandoffResult {
 
   const submit = useCallback(
     (action: HandoffAction) => {
-      setState((prev) => {
-        if (prev.phase !== "ready") return prev; // ignore double-submit
-        return { ...prev, phase: "submitting", submitError: undefined };
-      });
+      if (inFlight.current) return; // gate the POST itself, not just the state
+      inFlight.current = true;
+      setState((prev) =>
+        prev.phase === "ready" ? { ...prev, phase: "submitting", submitError: undefined } : prev,
+      );
+
+      // The outcome is recorded synchronously by POST /answer, but the graph only
+      // advances (accept -> C8 done, decline -> reroute) when an /events reader
+      // consumes the queued resume. Drive it here so the hand-off completes even
+      // if the asker's tab is closed. Best-effort: the outcome is already durable.
+      const finish = () => {
+        advanceSession(sessionId).finally(() => {
+          inFlight.current = false;
+          if (mounted.current) setState((prev) => ({ ...prev, phase: "done", action }));
+        });
+      };
+
       postAnswer({ session_id: sessionId, outcome: OUTCOME_BY_ACTION[action] })
-        .then(() => {
-          setState((prev) => ({ ...prev, phase: "done", action }));
-        })
-        .catch(() => {
-          // Retryable: back to ready with an inline error (never dead-ends).
-          setState((prev) => ({ ...prev, phase: "ready", submitError: SUBMIT_ERROR_MESSAGE }));
+        .then(finish)
+        .catch((err: unknown) => {
+          // Ambiguous-ack recovery: a 409 means the resume was already queued /
+          // the run already advanced — treat it as success (mirrors the ask flow),
+          // so a lost acknowledgement never strands the responder on the form.
+          if (err instanceof ApiError && err.status === 409) {
+            finish();
+            return;
+          }
+          inFlight.current = false;
+          if (mounted.current) {
+            setState((prev) => ({ ...prev, phase: "ready", submitError: SUBMIT_ERROR_MESSAGE }));
+          }
         });
     },
     [sessionId],

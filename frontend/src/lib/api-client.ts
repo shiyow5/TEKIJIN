@@ -113,3 +113,34 @@ export function getHandoff(
 ): Promise<HandoffResponse> {
   return getJson<HandoffResponse>(`/handoff/${encodeURIComponent(sessionId)}`, options);
 }
+
+/**
+ * Drive a paused run forward by consuming one GET /events pass to completion.
+ *
+ * POST /answer only *queues* the resume; the backend advances the graph when an
+ * /events reader enters its dispatch loop. The responder's answer screen has no
+ * long-lived stream of its own, so after submitting an outcome it calls this to
+ * guarantee the queued resume is consumed — accept reaches C8 (done), decline
+ * reroutes to the next candidate — instead of depending on the asker keeping a
+ * tab open. The streamed content is irrelevant here; we only read it to
+ * completion (the stream ends when the run next interrupts or terminates). This
+ * is best-effort: a non-2xx (e.g. the run already finished → 404) or a transport
+ * error is swallowed, since the outcome is already recorded server-side.
+ */
+export async function advanceSession(
+  sessionId: string,
+  options: RequestOptions = {},
+): Promise<void> {
+  const baseUrl = (options.baseUrl ?? getApiBaseUrl()).replace(/\/+$/, "");
+  const doFetch = options.fetchImpl ?? fetch;
+  try {
+    const response = await doFetch(`${baseUrl}/events/${encodeURIComponent(sessionId)}`, {
+      method: "GET",
+      signal: options.signal,
+    });
+    await response.text();
+  } catch {
+    // Best-effort: the outcome is already persisted; the asker's own reconnecting
+    // stream is the backup consumer. Never surface this to the responder.
+  }
+}

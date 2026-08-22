@@ -5,10 +5,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const getHandoffMock = vi.fn();
 const postAnswerMock = vi.fn();
+const advanceSessionMock = vi.fn();
 
 vi.mock("@/lib/api-client", () => ({
   getHandoff: (...args: unknown[]) => getHandoffMock(...args),
   postAnswer: (...args: unknown[]) => postAnswerMock(...args),
+  advanceSession: (...args: unknown[]) => advanceSessionMock(...args),
   ApiError: class ApiError extends Error {
     readonly status: number;
     constructor(status: number, message: string) {
@@ -44,7 +46,9 @@ describe("useHandoff", () => {
   beforeEach(() => {
     getHandoffMock.mockReset();
     postAnswerMock.mockReset();
+    advanceSessionMock.mockReset();
     postAnswerMock.mockResolvedValue({ session_id: "s1", status: "resumed" });
+    advanceSessionMock.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -95,6 +99,54 @@ describe("useHandoff", () => {
     await waitFor(() => expect(result.current.phase).toBe("done"));
     expect(postAnswerMock).toHaveBeenCalledWith({ session_id: "s1", outcome: "declined" });
     expect(result.current.action).toBe("refer");
+  });
+
+  it("drains the session to advance the graph after a successful submit", async () => {
+    getHandoffMock.mockResolvedValue(HANDOFF);
+    const { result } = renderHook(() => useHandoff("s1"));
+    await waitFor(() => expect(result.current.phase).toBe("ready"));
+
+    act(() => result.current.submit("answer"));
+
+    await waitFor(() => expect(result.current.phase).toBe("done"));
+    // The queued resume is consumed by an /events pass so accept reaches C8 and
+    // decline reroutes, even with the asker's tab closed.
+    expect(advanceSessionMock).toHaveBeenCalledWith("s1");
+  });
+
+  it("fires postAnswer only once on a rapid double submit (single-flight)", async () => {
+    getHandoffMock.mockResolvedValue(HANDOFF);
+    let resolvePost: (v: unknown) => void = () => {};
+    postAnswerMock.mockReturnValue(
+      new Promise((resolve) => {
+        resolvePost = resolve;
+      }),
+    );
+    const { result } = renderHook(() => useHandoff("s1"));
+    await waitFor(() => expect(result.current.phase).toBe("ready"));
+
+    act(() => {
+      result.current.submit("answer");
+      result.current.submit("answer"); // second tap within the in-flight window
+    });
+    expect(postAnswerMock).toHaveBeenCalledTimes(1);
+
+    resolvePost({ session_id: "s1", status: "resumed" });
+    await waitFor(() => expect(result.current.phase).toBe("done"));
+  });
+
+  it("treats a 409 on submit as success (ambiguous-ack recovery)", async () => {
+    const { ApiError } = await import("@/lib/api-client");
+    getHandoffMock.mockResolvedValue(HANDOFF);
+    postAnswerMock.mockRejectedValue(new ApiError(409, "resume already queued"));
+    const { result } = renderHook(() => useHandoff("s1"));
+    await waitFor(() => expect(result.current.phase).toBe("ready"));
+
+    act(() => result.current.submit("answer"));
+
+    await waitFor(() => expect(result.current.phase).toBe("done"));
+    expect(result.current.action).toBe("answer");
+    expect(advanceSessionMock).toHaveBeenCalledWith("s1");
   });
 
   it("treats a 404/409 load error as 'gone' (no handoff pending)", async () => {
