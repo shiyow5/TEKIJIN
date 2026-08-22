@@ -82,7 +82,11 @@ def main(argv: list[str] | None = None) -> int:
     # settings, which itself follows TEKIJIN_EMBEDDING_USE_E5_PREFIX).
     use_e5_prefix = False if args.no_e5_prefix else settings.embedding_use_e5_prefix
 
-    embedder = SentenceTransformerEmbedder(use_e5_prefix=use_e5_prefix)
+    embedder = SentenceTransformerEmbedder(
+        use_e5_prefix=use_e5_prefix,
+        trust_remote_code=settings.embedding_trust_remote_code,
+        revision=settings.embedding_model_revision,
+    )
 
     # Probe the model's output width BEFORE opening any DB connection, so a
     # dimension mismatch fails fast with a clear message instead of blowing up

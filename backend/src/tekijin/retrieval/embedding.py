@@ -56,6 +56,14 @@ class SentenceTransformerEmbedder:
             default Nemotron-3-Embed-1B ships custom modeling code and needs this;
             ``None`` reads ``settings.embedding_trust_remote_code``. SECURITY: this
             executes code from the model repo — keep it on only for trusted models.
+        revision: Immutable model revision (commit/tag) to load; ``None`` reads
+            ``settings.embedding_model_revision`` (which itself defaults to None =
+            the repo's default branch). Pin it in production so ``trust_remote_code``
+            cannot execute code from a moved branch.
+
+    Callers that build from an explicit ``Settings`` (e.g. ``build_default_service``)
+    should pass ``trust_remote_code`` and ``revision`` from THAT instance so a
+    custom (e.g. security-hardened) config is honored rather than the cached global.
     """
 
     def __init__(
@@ -65,15 +73,16 @@ class SentenceTransformerEmbedder:
         model: Any | None = None,
         use_e5_prefix: bool = True,
         trust_remote_code: bool | None = None,
+        revision: str | None = None,
     ) -> None:
-        self._model_name = model_name or get_settings().embedding_model
+        settings = get_settings()
+        self._model_name = model_name or settings.embedding_model
         self._model = model
         self._use_e5_prefix = use_e5_prefix
         self._trust_remote_code = (
-            get_settings().embedding_trust_remote_code
-            if trust_remote_code is None
-            else trust_remote_code
+            settings.embedding_trust_remote_code if trust_remote_code is None else trust_remote_code
         )
+        self._revision = revision if revision is not None else settings.embedding_model_revision
         # Guards the one-time lazy load so two concurrent sessions sharing this
         # embedder cannot each start a (heavy) model init (codex#6).
         self._model_lock = threading.Lock()
@@ -94,7 +103,9 @@ class SentenceTransformerEmbedder:
                             "with an injected embedder for tests."
                         ) from exc
                     self._model = SentenceTransformer(
-                        self._model_name, trust_remote_code=self._trust_remote_code
+                        self._model_name,
+                        trust_remote_code=self._trust_remote_code,
+                        revision=self._revision,
                     )
         return self._model
 

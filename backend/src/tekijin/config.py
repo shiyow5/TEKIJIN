@@ -80,6 +80,13 @@ class Settings(BaseSettings):
     # and set it False when pointing ``embedding_model`` at an untrusted source.
     embedding_trust_remote_code: bool = True
 
+    # Immutable model revision (git commit SHA or tag on the HF repo) to load.
+    # SECURITY: with ``trust_remote_code=True``, loading the mutable default branch
+    # means an upstream change/compromise would execute new code on the next cold
+    # load. Pin a reviewed revision here for any real deployment so the executed
+    # code is fixed. ``None`` loads the default branch (fine for local/dev).
+    embedding_model_revision: str | None = None
+
     # Dimensionality of the embedding vectors produced by ``embedding_model``.
     # Nemotron-3-Embed-1B emits 2048-d vectors; this drives the width of every
     # ``pgvector`` column so the schema and the model agree. NOTE: the columns

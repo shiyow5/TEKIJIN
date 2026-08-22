@@ -510,3 +510,21 @@ def test_stream_error_yields_generic_event_and_hides_details() -> None:
     assert payload is not None
     assert "内部エラー" in payload
     assert "secret sql" not in payload  # no internal detail leaked
+
+
+# --------------------------------------------------------------------------- #
+# service factory — embedding settings forwarding (#63)
+# --------------------------------------------------------------------------- #
+def test_build_default_service_forwards_embedding_settings() -> None:
+    """The factory must pass the embedding loader flags from the SUPPLIED settings
+    instance, not the cached global — so a hardened config is honored."""
+
+    from tekijin.api.factory import build_default_service
+
+    settings = _settings(
+        embedding_trust_remote_code=False,
+        embedding_model_revision="pinned123",
+    )
+    service = build_default_service(settings)
+    assert service._embedder._trust_remote_code is False
+    assert service._embedder._revision == "pinned123"

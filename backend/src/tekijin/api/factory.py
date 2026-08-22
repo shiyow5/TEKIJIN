@@ -23,7 +23,11 @@ def build_default_service(settings: Settings | None = None) -> AgentService:
     intent_model, sufficiency_model, draft_model = make_llm_nodes(settings)
     embedder = SentenceTransformerEmbedder(
         settings.embedding_model,
-        use_e5_prefix=settings.embedding_use_e5_prefix,  # settings-driven, not hard-coded
+        # All settings-driven from THIS instance (not the cached global), so a
+        # custom/hardened Settings passed to build_default_service is honored.
+        use_e5_prefix=settings.embedding_use_e5_prefix,
+        trust_remote_code=settings.embedding_trust_remote_code,
+        revision=settings.embedding_model_revision,
     )
     return AgentService(
         session_factory=session_factory,
