@@ -207,6 +207,29 @@ C1 の out_of_scope 検出は実際には弱い。**評価セットにある件�
 > ⚠️ **この節の n は小さい**（読めた正常系24件）。長さ切れで母集団が半分以上失われている。
 > **まず #116 を直してから、C2 の是非を議論するべきである。**
 
+## 4.5. 反実仮想 — `enable_thinking=false` を1行足すとどうなるか
+
+同じリクエストに `chat_template_kwargs: {"enable_thinking": false}` だけを足して測り直した
+（`research_llm.py --task raw --raw-extra ...`）。**変えたのはこの1点だけである。**
+
+| | 製品のまま | **thinking を切る** |
+|---|---|---|
+| C1 が構造化出力を返した | 66/76 | **76/76** |
+| `finish_reason=length` | 10 | **0** |
+| 出力トークン中央 | 1019（最大 7329） | **94**（最大 122） |
+| C1 p50 / p95 | 14.14s / 105.35s | **1.38s / 1.57s** |
+| **層2 R@3（C1 実トピック + 全社員）** | 0.131 | **0.190** |
+
+**§2 の長さ切れと遅延は、これ1行で完全に消える。**
+仕様の初回表示 p50 1.5秒に対しても、C1 単体なら収まる水準になる。
+
+**一方 §1 のトピック問題は残る。** トピック 243個のうち語彙に載ったのは **5個**、
+1つでも載った相談は **76件中5件**。R@3 が 0.131 → 0.190 に上がったのは主に
+**採点できる相談が47件から56件に戻ったから**であって、当て方が良くなったからではない
+（ランダム床 0.077、回答数順 0.327）。
+
+**2つの問題は独立している。thinking を切るのは必要だが、それだけでは推薦は成立しない。**
+
 ## 5. 再現
 
 ```bash
@@ -215,6 +238,10 @@ python scripts/research_faithful.py --task c1 --out payload_c1_faithful.json
 
 # 2) 送る（要 vLLM。組み立て済みボディをそのまま POST する）
 python scripts/research_llm.py --task raw --payload payload_c1_faithful.json --out c1_faithful.json
+
+# 2') 反実仮想: thinking を切るだけの版
+python scripts/research_llm.py --task raw --payload payload_c1_faithful.json \
+    --out c1_nothink.json --raw-extra '{"chat_template_kwargs":{"enable_thinking":false}}'
 
 # 3) C1 の実出力から C2 のリクエストを作って送る
 python scripts/research_faithful.py --task c2 --c1 c1_faithful.json --out payload_c2_faithful.json
