@@ -416,6 +416,64 @@ def run_judge(payload):
     return out
 
 
+# 製品の `tekijin.llm.vllm._SUFFICIENCY_SYSTEM` を**そのまま**写したもの。これが出荷時の挙動。
+C2_SYS_PRODUCT = (
+    "あなたは情報充足の点検器です。取り次ぐ前に判断へ必要な情報が揃っているかを"
+    "確認し、足りなければ『まとめて1つ』の逆質問を返します。"
+)
+
+# 「何が揃っていれば十分か」を書き足した版。製品版は基準を書いていないので、
+# モデルが自前の基準（部署名・予算・技術スタック…）を持ち込む余地がある。
+C2_SYS_SCOPED = (
+    "あなたは社内の相談を受け付ける担当です。相談文だけで「誰に取り次ぐか」を判断できるかを決めます。"
+    "困りごとの対象・領域が特定できないほど曖昧なら sufficient を false にし、"
+    "聞き返す質問を1文だけ添えてください。判断できるなら true にし、聞き返しは空文字にします。"
+    "不足している項目があれば missing に短い語で並べます。"
+)
+
+C2_PROMPTS = {"product": C2_SYS_PRODUCT, "scoped": C2_SYS_SCOPED}
+
+C2_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "sufficient": {"type": "boolean"},
+        "missing": {"type": "array", "items": {"type": "string"}},
+        "followup_question": {"type": "string"},
+    },
+    "required": ["sufficient", "missing", "followup_question"],
+    "additionalProperties": False,
+}
+
+
+def run_c2(payload, variant="scoped"):
+    """C2 充足判定（#111）。契約どおり C1 の推定トピックも渡す。
+
+    **変えるのは system プロンプトだけ**にして、渡す情報は両版で同じにする
+    （製品の human 側は `トピック=... 製品=... 種別=...` という書式だが、
+    製品・種別は本ハーネスの入力に無いので字面を揃えず、情報量を揃える方を採った）。
+    """
+    out = []
+    for i, case in enumerate(payload):
+        topics = "、".join(case.get("topics") or []) or "推定できず"
+        res = call(
+            [
+                {"role": "system", "content": C2_PROMPTS[variant]},
+                {
+                    "role": "user",
+                    "content": f"相談文: {case['query']}\n\nC1 が推定した分野: {topics}",
+                },
+            ],
+            schema=C2_SCHEMA,
+            max_tokens=256,
+        )
+        out.append({"id": case["id"], "klass": case.get("klass"), **res})
+        print(
+            f"[{i + 1}/{len(payload)}] {res['latency']:.2f}s {res['content'][:70]}",
+            flush=True,
+        )
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument(
@@ -431,9 +489,16 @@ def main():
             "abstain_check",
             "draft",
             "judge",
+            "c2",
         ],
     )
     ap.add_argument("--out", required=True)
+    ap.add_argument(
+        "--c2-prompt",
+        default="scoped",
+        choices=sorted(C2_PROMPTS),
+        help="product=製品の system プロンプトそのまま / scoped=判断基準を書き足した版",
+    )
     ap.add_argument("--payload", default=None, help="rerank 用の候補者 JSON")
     ap.add_argument(
         "--samples",
@@ -451,6 +516,7 @@ def main():
         "abstain_check",
         "draft",
         "judge",
+        "c2",
     ):
         with open(args.payload, encoding="utf-8") as f:
             payload = json.load(f)
@@ -462,6 +528,8 @@ def main():
             out = run_draft(payload)
         elif args.task == "judge":
             out = run_judge(payload)
+        elif args.task == "c2":
+            out = run_c2(payload, args.c2_prompt)
         else:
             out = run_topic_ctx(
                 payload,
