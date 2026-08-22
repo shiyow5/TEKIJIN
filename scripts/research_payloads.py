@@ -12,6 +12,9 @@ LLM を使う段は「検索結果を文脈に渡す」「候補者の実績サ�
 
     # 3) listwise リランク用: 候補上位10名
     python scripts/research_payloads.py --task rerank --emb ... --topics llm_topic_ctx.json --out payload_rerank.json
+
+    # 4) C2 充足判定用: 採点対象56件（正常系）+ eval_robustness.json 20件（異常系）。埋め込みは要らない
+    python scripts/research_payloads.py --task c2 --topics docs/benchmarks/ablation/llm_topic_ctx.json --out payload_c2.json
 """
 
 from __future__ import annotations
@@ -98,10 +101,53 @@ def candidates_for(ctx, fx, item, topics, top_k):
     return picked
 
 
+def build_c2(person, topics_path):
+    """C2 の入力（#111）。正常系は層2の採点対象56件、異常系は eval_robustness.json の20件。
+
+    C2 は契約上 C1 の推定トピックを受け取るので、**LLM が実際に出した分類**（llm_topic_ctx.json）を
+    渡す。異常系にはトピックが無いので「推定できず」相当の空リストになる。
+    `id` は正常系 `p1..p56` / 異常系 `r1..r20` と振り直す（元の評価IDは `eval_id` に残す）。
+    """
+    if not topics_path:
+        raise SystemExit("--topics が要る")
+    topics = load_topics(topics_path)
+    payload = [
+        {
+            "id": f"p{i + 1}",
+            "eval_id": q["id"],
+            "klass": "normal",
+            "difficulty": q["difficulty"],
+            "query": q["query"],
+            "topics": topics.get(q["id"], []),
+        }
+        for i, q in enumerate(rc.scored_person_items(person))
+    ]
+    payload += [
+        {
+            "id": f"r{r['id']}",
+            "eval_id": r["id"],
+            "klass": r["category"],
+            "difficulty": None,
+            "query": r["query"],
+            "topics": [],
+        }
+        for r in rc.load("eval/eval_robustness.json")
+    ]
+    return payload
+
+
+def write(path, payload):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=1)
+    print(f"wrote {path} ({len(payload)} 件)")
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--task", required=True, choices=["topic_ctx", "abstain", "rerank"])
-    ap.add_argument("--emb", required=True)
+    ap.add_argument(
+        "--task", required=True, choices=["topic_ctx", "abstain", "rerank", "c2"]
+    )
+    ap.add_argument("--emb", default=None, help="c2 以外では必須")
     ap.add_argument("--model", default="Nemotron-3-Embed-1B-BF16")
     ap.add_argument(
         "--topics", default=None, help="abstain / rerank で使う分類結果 JSON"
@@ -109,10 +155,18 @@ def main():
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
 
+    person, _retrieval = rc.load_eval()
+
+    if args.task == "c2":
+        payload = build_c2(person, args.topics)
+        write(args.out, payload)
+        return
+
+    if not args.emb:
+        raise SystemExit("--emb が要る")
     ctx = A.build_context([args.emb])
     ctx["model_name"] = args.model
     fx = ctx["fx"]
-    person, _retrieval = rc.load_eval()
 
     if args.task == "topic_ctx":
         chunks_all, _ = rc.build_chunks(fx, include_daily=True)
@@ -151,9 +205,7 @@ def main():
                 }
             )
 
-    with open(args.out, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=1)
-    print(f"wrote {args.out} ({len(payload)} 件)")
+    write(args.out, payload)
 
 
 if __name__ == "__main__":
