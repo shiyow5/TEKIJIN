@@ -3,7 +3,8 @@
         fmt-check fmt-check-backend fmt-check-frontend \
         lint lint-backend lint-frontend \
         test test-backend test-frontend \
-        run-backend serve db-up db-down seed embed eval \
+        run-backend run-frontend serve dev serve-prod \
+        db-up db-down seed embed eval \
         typecheck-frontend check clean
 
 # ============================================================
@@ -91,13 +92,54 @@ typecheck-frontend: ## Type-check the frontend (tsc)
 # ============================================================
 # Run
 # ============================================================
-run-backend: ## Run the backend dev server (uvicorn, auto-reload; stub LLM, MemorySaver)
+run-backend: ## Run only the backend dev server (uvicorn, auto-reload; stub LLM, MemorySaver)
 	cd $(BACKEND_DIR) && $(PY) -m uvicorn tekijin.main:app --reload --app-dir src
 
-serve: ## Run the backend against real vLLM + PostgresSaver (production-like)
+run-frontend: ## Run only the frontend dev server (Next.js, :3000)
+	cd $(FRONTEND_DIR) && npm run dev
+
+# `make serve` / `make dev`: one-command full-stack dev launcher.
+#
+# Runs the auto-reloading backend and the Next.js dev server together, streaming
+# both logs to this terminal. LLM (C1/C2/C7) and the checkpointer are STUBBED by
+# default, so the servers boot with NO vLLM / external LLM. NOTE: to actually
+# process a question you still need Postgres with seeded, embedded data —
+# `make db-up seed` and `make setup-ml embed`; without them the UI loads and both
+# servers run, but submitting a question errors.
+#
+# Teardown (needs bash): `set -m` puts each server in its OWN process group, so
+# the trap / epilogue kill exactly those two groups (backend reloader + node
+# child included) — Ctrl-C in THIS terminal stops both with no orphan. `wait -n`
+# returns as soon as EITHER server exits, so if one dies at startup (e.g. port in
+# use) the peer is stopped and the failing status is propagated instead of
+# hanging. (Signalling only the top-level make PID out-of-band — not its group —
+# is a Make limitation that can still orphan the servers.)
+serve: ## Run backend (:8000) + frontend (:3000) together for local dev; Ctrl-C stops both
+	@echo ">> backend  http://localhost:8000  (docs: /docs)"
+	@echo ">> frontend http://localhost:3000"
+	@echo ">> Ctrl-C stops both. (LLM/checkpointer stubbed; DB+embeddings needed to answer)"
+	@bash -c 'set -m; \
+		( cd $(BACKEND_DIR) && exec $(PY) -m uvicorn tekijin.main:app --reload --app-dir src ) & back=$$!; \
+		( cd $(FRONTEND_DIR) && exec npm run dev ) & front=$$!; \
+		stop() { \
+			trap - INT TERM EXIT; \
+			kill -TERM -- -$$back -$$front 2>/dev/null; \
+			for _ in 1 2 3 4 5 6 7 8 9 10; do \
+				kill -0 $$back 2>/dev/null || kill -0 $$front 2>/dev/null || break; \
+				sleep 0.5; \
+			done; \
+			kill -KILL -- -$$back -$$front 2>/dev/null; \
+			wait 2>/dev/null; \
+		}; \
+		trap stop INT TERM EXIT; \
+		wait -n; status=$$?; stop; exit $$status'
+
+dev: serve ## Alias for `make serve` (start the full-stack dev environment)
+
+serve-prod: ## Run the backend against real vLLM + PostgresSaver (production-like, backend only)
 	# Needs the ML deps (make setup-ml) for the embedder. Point TEKIJIN_LLM_BASE_URL
 	# at your vLLM /v1 endpoint and TEKIJIN_DATABASE_URL at Postgres, then:
-	#   TEKIJIN_LLM_BACKEND=vllm TEKIJIN_CHECKPOINTER_BACKEND=postgres make serve
+	#   TEKIJIN_LLM_BACKEND=vllm TEKIJIN_CHECKPOINTER_BACKEND=postgres make serve-prod
 	# SINGLE WORKER ONLY: the session dispatch registry is in-process, so do NOT
 	# add --workers (a durable/sticky multi-worker queue is a separate issue).
 	cd $(BACKEND_DIR) && \
@@ -108,8 +150,10 @@ serve: ## Run the backend against real vLLM + PostgresSaver (production-like)
 # ============================================================
 # Database
 # ============================================================
-db-up: ## Start the local PostgreSQL 16 + pgvector container
-	docker compose up -d db
+db-up: ## Start the local PostgreSQL 16 + pgvector container (waits until healthy)
+	# --wait blocks until the compose healthcheck (pg_isready) passes, so a
+	# following `make seed` does not race the database's first-run init.
+	docker compose up -d --wait db
 
 db-down: ## Stop the local PostgreSQL container
 	docker compose down
