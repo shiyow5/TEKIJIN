@@ -96,6 +96,15 @@ class Settings(BaseSettings):
     # (``vector`` indexes cap at 2000 dims) — deferred to #101.
     embedding_dim: int = 2048
 
+    # RRF weight for the BM25 (sparse) channel in C4 hybrid search; the dense
+    # channels stay at 1.0. Equal-weight RRF cost -0.200 層2 R@3 on eval_person v2
+    # (queries are symptom-worded, so lexical BM25 ranks are noisy — #68 /
+    # docs/benchmarks/ablation.md §3). Down-weighting BM25 to ~0.2 recovers dense
+    # -only accuracy. A fixed low weight under-serves product-name / model-number /
+    # error-code queries (where BM25 is the only signal); making it adaptive to the
+    # dense signal strength is tracked in #114. 0.0 disables BM25 entirely.
+    bm25_weight: float = 0.2
+
     # Directory holding synthetic fixtures used for development/testing.
     fixtures_dir: Path = _DEFAULT_FIXTURES_DIR
 

@@ -211,7 +211,12 @@ def test_hybrid_retriever_matches_term_in_question_only(
     session.flush()
     embed_corpus(session, fake_embedder)
 
-    retriever = HybridRetriever(fake_embedder, session, top_k=10)
+    # BM25 indexes the question body alongside the answer (fix 1), so a term living
+    # only in the question is recoverable via the sparse channel. Pin bm25_weight=1.0
+    # to isolate THAT indexing behavior from #68's default down-weighting
+    # (bm25_weight=0.2 deliberately lets dense outrank a lone BM25 hit — the
+    # model-number/exact-match tradeoff is tracked in #114).
+    retriever = HybridRetriever(fake_embedder, session, top_k=10, bm25_weight=1.0)
     result = retriever.search("ZQX8888")
 
     qa_ids = {p["qa_id"] for p in result["past_answers"]}

@@ -23,6 +23,7 @@ def test_defaults(monkeypatch) -> None:
     assert settings.llm_api_key == "dummy"
     assert settings.embedding_model == "nvidia/Nemotron-3-Embed-1B-BF16"
     assert settings.embedding_trust_remote_code is True
+    assert settings.bm25_weight == 0.2
     assert settings.cors_origins == ("http://localhost:3000",)
     assert isinstance(settings.fixtures_dir, Path)
     assert settings.fixtures_dir.name == "synthetic"

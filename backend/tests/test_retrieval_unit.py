@@ -79,6 +79,36 @@ def test_rrf_rejects_nonpositive_k() -> None:
         rrf([["a"]], k=0)
 
 
+def test_rrf_weights_scale_each_ranking_contribution() -> None:
+    # Two singleton lists, each rank-0. Weighting the second below the first makes
+    # the first-list id outrank it despite the identical rank (#68).
+    result = dict(rrf([["a"], ["b"]], k=60, weights=[1.0, 0.2]))
+    assert result["a"] == pytest.approx(1.0 / 61)
+    assert result["b"] == pytest.approx(0.2 / 61)
+    assert result["a"] > result["b"]
+
+
+def test_rrf_weight_zero_disables_a_ranking() -> None:
+    # A zero-weighted ranking contributes nothing (BM25 fully off).
+    result = dict(rrf([["a"], ["b"]], k=60, weights=[1.0, 0.0]))
+    assert result["b"] == 0.0
+
+
+def test_rrf_weights_none_matches_all_ones() -> None:
+    rankings = [["a", "b"], ["b", "c"]]
+    assert rrf(rankings) == rrf(rankings, weights=[1.0, 1.0])
+
+
+def test_rrf_rejects_weight_length_mismatch() -> None:
+    with pytest.raises(ValueError, match="weights length"):
+        rrf([["a"], ["b"]], weights=[1.0])
+
+
+def test_rrf_rejects_negative_weight() -> None:
+    with pytest.raises(ValueError, match="non-negative"):
+        rrf([["a"]], weights=[-0.1])
+
+
 # --------------------------------------------------------------------------- #
 # sparse / BM25 (real SudachiPy)
 # --------------------------------------------------------------------------- #
@@ -307,11 +337,23 @@ def test_question_mapped_answer_ids_ranks_by_question_similarity() -> None:
     assert ranked == ["a2", "a3"]
 
 
-def test_fuse_accepts_three_rankings() -> None:
+def test_fuse_accepts_dense_rankings_and_sparse() -> None:
     retriever = _retriever_without_db(top_k=5)
     # "x" is rank 1 in all three lists; agreement lifts it above each list's #0.
-    fused = retriever._fused_ids(["a", "x"], ["b", "x"], ["c", "x"])
+    fused = retriever._fused_ids([["a", "x"], ["b", "x"]], ["c", "x"])
     assert fused[0] == "x"
+
+
+def test_fuse_downweights_the_bm25_channel() -> None:
+    # A dense #0 and a sparse #0 tie on rank, but the sparse channel is weighted
+    # below 1.0, so the dense hit must win (guards the #68 fix). With equal weight
+    # (bm25_weight=1.0) they'd tie and str-order would decide instead.
+    weighted = _retriever_without_db(top_k=5)
+    weighted._bm25_weight = 0.2
+    fused = weighted._fuse([["dense_hit"]], ["sparse_hit"])
+    scores = dict(fused)
+    assert scores["dense_hit"] > scores["sparse_hit"]
+    assert fused[0][0] == "dense_hit"
 
 
 # --------------------------------------------------------------------------- #
