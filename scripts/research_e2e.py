@@ -229,9 +229,104 @@ def task_variants(url, out):
     session.get_bind().dispose()
 
 
+def task_misrec(url, out):
+    """誤推薦の「外し方」を分類する（#107）。
+
+    Recall@3 は当たり外れしか見ない。**外したときに同じ部署の別の人を挙げたのか、
+    証拠ゼロの無関係な人を挙げたのか**で、デモでの見え方も実運用の害も違う。
+    """
+    from sqlalchemy import select
+    from tekijin.eval.dataset import load_eval_queries
+    from tekijin.models.tables import Employee
+    from tekijin.scorer.evidence import collect_topic_evidence
+
+    session, _retriever, scorer = build(url)
+    employees = {
+        e.id: e for e in session.scalars(select(Employee).order_by(Employee.id)).all()
+    }
+    all_ids = list(employees)
+    repo = scorer._repo
+
+    def evidence_count(person_id, topic):
+        answers = [
+            a
+            for a in repo.answers_by_topic(topic)
+            if a.responder_id == person_id and (a.topic == topic or a.topic is None)
+        ]
+        return len(
+            collect_topic_evidence(
+                topic,
+                repo.certifications_for(person_id),
+                repo.skills_for(person_id),
+                repo.project_memberships_for(person_id),
+                answers,
+            )
+        )
+
+    buckets = collections.Counter()
+    by_conf = collections.Counter()
+    total_slots = 0
+    for q in load_eval_queries():
+        if not q.gold_experts or not q.gold_topics:
+            continue
+        # 候補は全社員（#87）。現状のまま測ると #103 で候補が1名しか出ず、外し方を見られない。
+        ranked = scorer.rank(q.gold_topics, all_ids, None, NOW, top_k=3)[
+            "recommendations"
+        ]
+        gold = set(q.gold_experts)
+        gold_depts = {employees[g].department for g in gold if g in employees}
+        gold_branches = {employees[g].branch for g in gold if g in employees}
+        for rec in ranked:
+            total_slots += 1
+            pid = rec["person_id"]
+            hit = pid in gold
+            by_conf[(rec["confidence"], "正解" if hit else "誤り")] += 1
+            if hit:
+                buckets["正解"] += 1
+                continue
+            emp = employees.get(pid)
+            n_ev = max(evidence_count(pid, t) for t in q.gold_topics)
+            if n_ev == 0:
+                buckets["誤り: そのトピックの証拠ゼロ"] += 1
+            elif emp is not None and emp.department in gold_depts:
+                buckets["誤り: gold と同じ部署（証拠あり）"] += 1
+            elif emp is not None and emp.branch in gold_branches:
+                buckets["誤り: gold と同じ拠点（部署は違う）"] += 1
+            else:
+                buckets["誤り: 部署も拠点も違う（証拠あり）"] += 1
+
+    print(f"3枠 × 採点対象 = {total_slots} スロット")
+    for name, n in buckets.most_common():
+        print(f"  {name:34s} {n:4d} ({n / total_slots:.1%})")
+    print("\n確信度ラベルと正誤:")
+    for label in ("高", "中", "低"):
+        ok = by_conf[(label, "正解")]
+        ng = by_conf[(label, "誤り")]
+        total = ok + ng
+        if total:
+            print(f"  {label}: {total:4d} スロット中 正解 {ok:4d} ({ok / total:.1%})")
+    if out:
+        with open(out, "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "slots": total_slots,
+                    "buckets": dict(buckets),
+                    "confidence": {f"{k[0]}/{k[1]}": v for k, v in by_conf.items()},
+                },
+                f,
+                ensure_ascii=False,
+                indent=2,
+            )
+        print(f"wrote {out}")
+    session.close()
+    session.get_bind().dispose()
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--task", required=True, choices=["prepare", "route", "variants"])
+    ap.add_argument(
+        "--task", required=True, choices=["prepare", "route", "variants", "misrec"]
+    )
     ap.add_argument(
         "--pgdir",
         default=DEFAULT_PGDIR,
@@ -246,6 +341,8 @@ def main():
         prepare(url)
     elif args.task == "route":
         task_route(url, args.out)
+    elif args.task == "misrec":
+        task_misrec(url, args.out)
     else:
         task_variants(url, args.out)
 
