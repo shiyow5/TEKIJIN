@@ -23,6 +23,7 @@ python3 scripts/eval_label_agreement.py  # 自動 gold と人手ラベルの一�
 | `eval_robustness.json` | 20 | 異常系。**全件 abstain（答えない・聞き返す）が正解** | 同上 |
 | `topic_experts_human.json` | 67トピック | **人手ラベル**。topic → 専門家(`employee_id`) | `scripts/import_human_labels.py` |
 | `eval_queries.json` | 40 | **非推奨**（#26）。比較のため残置 | `scripts/build_eval.py` |
+| `route_calibration.json` | 71 | **C5 の閾値較正**。実 DB・実埋め込みで記録したチャネル類似度 | `scripts/research_e2e.py --task route` |
 
 ---
 
@@ -141,3 +142,24 @@ else:                                             -> "person"
 - 独立サンプル数 >= 30
 
 **クエリを足すときは、トピック語をクエリに書かないこと。** そこを崩すと評価が飽和して差が出なくなる。
+
+---
+
+## `route_calibration.json`（#105）
+
+C5 の閾値（`PRIOR_ANSWER_SIM` / `DOCUMENT_SIM` / `PERSON_WEAK_SIM`）が
+**実際のコサイン分布と噛み合っているか**を CI で見張るための記録。
+`backend/tests/test_route_calibration.py` が読む（**GPU も DB も要らない**）。
+
+#103 は「実装は動き、単体テストも通り、数字だけが壊れている」形の不具合だった。
+e5-large では `answer_confidence` の最小値が 0.816 で `PRIOR_ANSWER_SIM`(0.80) を常に超えるため、
+全71件が `prior_answer` に倒れて層2 Recall@3 が 0.592 落ちていた。
+
+**コサインの絶対値はモデル依存**なので、`settings.embedding_model` を変えたら必ず測り直す
+（#63 で Nemotron に差し替えると最大が 0.57 になり、今度は一度も発火しなくなる）。
+モデル名が食い違うとテストが明示的に落ちる。
+
+```bash
+python scripts/research_e2e.py --task prepare   # 初回のみ（seed + embed、CPU で約5分）
+python scripts/research_e2e.py --task route --out fixtures/synthetic/eval/route_calibration.json
+```

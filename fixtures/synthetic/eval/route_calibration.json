@@ -1,0 +1,653 @@
+{
+ "_meta": {
+  "embedding_model": "intfloat/multilingual-e5-large",
+  "thresholds": {
+   "prior_answer_sim": 0.8,
+   "document_sim": 0.7,
+   "person_weak_sim": 0.5
+  },
+  "n": 71,
+  "source": "scripts/research_e2e.py --task route"
+ },
+ "rows": [
+  {
+   "id": 1,
+   "gold_route": "document",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.893,
+   "document_confidence": 0.86,
+   "people_confidence": 0.847
+  },
+  {
+   "id": 2,
+   "gold_route": "document",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.881,
+   "document_confidence": 0.85,
+   "people_confidence": 0.847
+  },
+  {
+   "id": 3,
+   "gold_route": "prior_answer",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.879,
+   "document_confidence": 0.795,
+   "people_confidence": 0.86
+  },
+  {
+   "id": 4,
+   "gold_route": "prior_answer",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.859,
+   "document_confidence": 0.811,
+   "people_confidence": 0.828
+  },
+  {
+   "id": 5,
+   "gold_route": "document",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.886,
+   "document_confidence": 0.848,
+   "people_confidence": 0.834
+  },
+  {
+   "id": 6,
+   "gold_route": "document",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.871,
+   "document_confidence": 0.854,
+   "people_confidence": 0.828
+  },
+  {
+   "id": 7,
+   "gold_route": "person",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.863,
+   "document_confidence": 0.8,
+   "people_confidence": 0.836
+  },
+  {
+   "id": 8,
+   "gold_route": "document",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.878,
+   "document_confidence": 0.858,
+   "people_confidence": 0.854
+  },
+  {
+   "id": 9,
+   "gold_route": "person",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.928,
+   "document_confidence": 0.803,
+   "people_confidence": 0.843
+  },
+  {
+   "id": 10,
+   "gold_route": "prior_answer",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.879,
+   "document_confidence": 0.828,
+   "people_confidence": 0.852
+  },
+  {
+   "id": 11,
+   "gold_route": "document",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.872,
+   "document_confidence": 0.82,
+   "people_confidence": 0.86
+  },
+  {
+   "id": 12,
+   "gold_route": "person",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.874,
+   "document_confidence": 0.822,
+   "people_confidence": 0.837
+  },
+  {
+   "id": 13,
+   "gold_route": "person",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.849,
+   "document_confidence": 0.814,
+   "people_confidence": 0.842
+  },
+  {
+   "id": 14,
+   "gold_route": "prior_answer",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.854,
+   "document_confidence": 0.795,
+   "people_confidence": 0.842
+  },
+  {
+   "id": 15,
+   "gold_route": "person",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.853,
+   "document_confidence": 0.81,
+   "people_confidence": 0.856
+  },
+  {
+   "id": 16,
+   "gold_route": "person",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.873,
+   "document_confidence": 0.815,
+   "people_confidence": 0.825
+  },
+  {
+   "id": 17,
+   "gold_route": "prior_answer",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.872,
+   "document_confidence": 0.817,
+   "people_confidence": 0.829
+  },
+  {
+   "id": 18,
+   "gold_route": "document",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.871,
+   "document_confidence": 0.834,
+   "people_confidence": 0.817
+  },
+  {
+   "id": 19,
+   "gold_route": "person",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.853,
+   "document_confidence": 0.814,
+   "people_confidence": 0.834
+  },
+  {
+   "id": 20,
+   "gold_route": "person",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.878,
+   "document_confidence": 0.829,
+   "people_confidence": 0.823
+  },
+  {
+   "id": 21,
+   "gold_route": "prior_answer",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.867,
+   "document_confidence": 0.8,
+   "people_confidence": 0.821
+  },
+  {
+   "id": 22,
+   "gold_route": "document",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.857,
+   "document_confidence": 0.838,
+   "people_confidence": 0.8
+  },
+  {
+   "id": 23,
+   "gold_route": "document",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.879,
+   "document_confidence": 0.832,
+   "people_confidence": 0.832
+  },
+  {
+   "id": 24,
+   "gold_route": "document",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.865,
+   "document_confidence": 0.791,
+   "people_confidence": 0.823
+  },
+  {
+   "id": 25,
+   "gold_route": "prior_answer",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.877,
+   "document_confidence": 0.798,
+   "people_confidence": 0.84
+  },
+  {
+   "id": 26,
+   "gold_route": "person",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.867,
+   "document_confidence": 0.813,
+   "people_confidence": 0.833
+  },
+  {
+   "id": 27,
+   "gold_route": "person",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.841,
+   "document_confidence": 0.796,
+   "people_confidence": 0.826
+  },
+  {
+   "id": 28,
+   "gold_route": "person",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.864,
+   "document_confidence": 0.8,
+   "people_confidence": 0.804
+  },
+  {
+   "id": 29,
+   "gold_route": "person",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.87,
+   "document_confidence": 0.811,
+   "people_confidence": 0.834
+  },
+  {
+   "id": 30,
+   "gold_route": "person",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.848,
+   "document_confidence": 0.81,
+   "people_confidence": 0.82
+  },
+  {
+   "id": 31,
+   "gold_route": "person",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.849,
+   "document_confidence": 0.806,
+   "people_confidence": 0.816
+  },
+  {
+   "id": 32,
+   "gold_route": "person",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.84,
+   "document_confidence": 0.798,
+   "people_confidence": 0.803
+  },
+  {
+   "id": 33,
+   "gold_route": "person",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.864,
+   "document_confidence": 0.798,
+   "people_confidence": 0.824
+  },
+  {
+   "id": 34,
+   "gold_route": "person",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.83,
+   "document_confidence": 0.795,
+   "people_confidence": 0.797
+  },
+  {
+   "id": 35,
+   "gold_route": "person",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.86,
+   "document_confidence": 0.799,
+   "people_confidence": 0.809
+  },
+  {
+   "id": 36,
+   "gold_route": "person",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.849,
+   "document_confidence": 0.799,
+   "people_confidence": 0.8
+  },
+  {
+   "id": 37,
+   "gold_route": "person",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.857,
+   "document_confidence": 0.789,
+   "people_confidence": 0.82
+  },
+  {
+   "id": 38,
+   "gold_route": "person",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.835,
+   "document_confidence": 0.802,
+   "people_confidence": 0.803
+  },
+  {
+   "id": 39,
+   "gold_route": "person",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.836,
+   "document_confidence": 0.803,
+   "people_confidence": 0.816
+  },
+  {
+   "id": 40,
+   "gold_route": "person",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.864,
+   "document_confidence": 0.801,
+   "people_confidence": 0.834
+  },
+  {
+   "id": 41,
+   "gold_route": "person",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.85,
+   "document_confidence": 0.789,
+   "people_confidence": 0.832
+  },
+  {
+   "id": 42,
+   "gold_route": "person",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.842,
+   "document_confidence": 0.813,
+   "people_confidence": 0.828
+  },
+  {
+   "id": 43,
+   "gold_route": "person",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.837,
+   "document_confidence": 0.788,
+   "people_confidence": 0.797
+  },
+  {
+   "id": 44,
+   "gold_route": "person",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.851,
+   "document_confidence": 0.816,
+   "people_confidence": 0.814
+  },
+  {
+   "id": 45,
+   "gold_route": "person",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.849,
+   "document_confidence": 0.804,
+   "people_confidence": 0.821
+  },
+  {
+   "id": 46,
+   "gold_route": "person",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.831,
+   "document_confidence": 0.809,
+   "people_confidence": 0.827
+  },
+  {
+   "id": 47,
+   "gold_route": "person",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.862,
+   "document_confidence": 0.816,
+   "people_confidence": 0.86
+  },
+  {
+   "id": 48,
+   "gold_route": "person",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.854,
+   "document_confidence": 0.807,
+   "people_confidence": 0.822
+  },
+  {
+   "id": 49,
+   "gold_route": "person",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.827,
+   "document_confidence": 0.787,
+   "people_confidence": 0.79
+  },
+  {
+   "id": 50,
+   "gold_route": "person",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.855,
+   "document_confidence": 0.814,
+   "people_confidence": 0.815
+  },
+  {
+   "id": 51,
+   "gold_route": "person",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.851,
+   "document_confidence": 0.808,
+   "people_confidence": 0.813
+  },
+  {
+   "id": 52,
+   "gold_route": "person",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.841,
+   "document_confidence": 0.799,
+   "people_confidence": 0.805
+  },
+  {
+   "id": 53,
+   "gold_route": "person",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.865,
+   "document_confidence": 0.811,
+   "people_confidence": 0.822
+  },
+  {
+   "id": 54,
+   "gold_route": "person",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.843,
+   "document_confidence": 0.794,
+   "people_confidence": 0.818
+  },
+  {
+   "id": 55,
+   "gold_route": "person",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.85,
+   "document_confidence": 0.8,
+   "people_confidence": 0.816
+  },
+  {
+   "id": 56,
+   "gold_route": "person",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.816,
+   "document_confidence": 0.783,
+   "people_confidence": 0.792
+  },
+  {
+   "id": 57,
+   "gold_route": "none",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.864,
+   "document_confidence": 0.811,
+   "people_confidence": 0.803
+  },
+  {
+   "id": 58,
+   "gold_route": "none",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.846,
+   "document_confidence": 0.81,
+   "people_confidence": 0.818
+  },
+  {
+   "id": 59,
+   "gold_route": "none",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.848,
+   "document_confidence": 0.805,
+   "people_confidence": 0.811
+  },
+  {
+   "id": 60,
+   "gold_route": "none",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.851,
+   "document_confidence": 0.818,
+   "people_confidence": 0.819
+  },
+  {
+   "id": 61,
+   "gold_route": "none",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.852,
+   "document_confidence": 0.822,
+   "people_confidence": 0.804
+  },
+  {
+   "id": 62,
+   "gold_route": "none",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.868,
+   "document_confidence": 0.812,
+   "people_confidence": 0.816
+  },
+  {
+   "id": 63,
+   "gold_route": "none",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.82,
+   "document_confidence": 0.777,
+   "people_confidence": 0.791
+  },
+  {
+   "id": 64,
+   "gold_route": "none",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.837,
+   "document_confidence": 0.811,
+   "people_confidence": 0.801
+  },
+  {
+   "id": 65,
+   "gold_route": "none",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.85,
+   "document_confidence": 0.791,
+   "people_confidence": 0.81
+  },
+  {
+   "id": 66,
+   "gold_route": "none",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.862,
+   "document_confidence": 0.8,
+   "people_confidence": 0.806
+  },
+  {
+   "id": 67,
+   "gold_route": "none",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.846,
+   "document_confidence": 0.795,
+   "people_confidence": 0.801
+  },
+  {
+   "id": 68,
+   "gold_route": "none",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.863,
+   "document_confidence": 0.81,
+   "people_confidence": 0.822
+  },
+  {
+   "id": 69,
+   "gold_route": "none",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.84,
+   "document_confidence": 0.794,
+   "people_confidence": 0.8
+  },
+  {
+   "id": 70,
+   "gold_route": "none",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.847,
+   "document_confidence": 0.8,
+   "people_confidence": 0.798
+  },
+  {
+   "id": 71,
+   "gold_route": "none",
+   "route": "prior_answer",
+   "n_candidates": 10,
+   "answer_confidence": 0.852,
+   "document_confidence": 0.81,
+   "people_confidence": 0.816
+  }
+ ]
+}
