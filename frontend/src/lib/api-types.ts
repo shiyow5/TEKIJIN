@@ -102,6 +102,60 @@ export interface HandoffResponse {
 }
 
 // --------------------------------------------------------------------------- //
+// dashboard (GET /dashboard) — aggregate-only view (product-spec 画面5)
+// --------------------------------------------------------------------------- //
+
+export interface ResponderLoad {
+  employee_id: number;
+  name: string;
+  answer_count: number;
+}
+
+export interface TopicCount {
+  topic: string;
+  count: number;
+}
+
+export interface OutcomeCounts {
+  accepted: number;
+  declined: number;
+  pending: number;
+}
+
+/** Latest stored offline-evaluation metrics (推薦精度); null until `make eval` ran. */
+export interface EvalSnapshot {
+  top1_accuracy: number | null;
+  recall_at_3: number | null;
+  mrr: number | null;
+  route_accuracy: number | null;
+  created_at: string | null;
+}
+
+/**
+ * GET /dashboard payload (schemas.py `DashboardResponse`). Aggregate-only — no
+ * per-record listing (product-spec §241-251: summarise usage, never a monitoring
+ * log of individual questions).
+ */
+export interface DashboardResponse {
+  total_employees: number;
+  total_questions: number;
+  total_answers: number;
+  recommendation_count: number;
+  recommendation_outcomes: OutcomeCounts;
+  acceptance_rate: number;
+  /** 自己解決率: fraction routed to an auxiliary route (prior_answer/document). */
+  self_resolution_rate: number;
+  /** 平均解決時間 in hours; null when nothing is resolved yet. */
+  avg_resolution_hours: number | null;
+  /** 負荷分散: share of answers by the single busiest responder. */
+  top_responder_share: number;
+  /** 推薦精度: latest offline eval snapshot; null when not yet measured. */
+  latest_eval: EvalSnapshot | null;
+  answers_per_responder: ResponderLoad[];
+  topic_distribution: TopicCount[];
+}
+
+// --------------------------------------------------------------------------- //
 // SSE event data (GET /events/{session_id}) — mirrors events.py
 // --------------------------------------------------------------------------- //
 

@@ -15,7 +15,7 @@ from typing import Any
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from tekijin.models.tables import Employee, Question, Recommendation
+from tekijin.models.tables import Employee, EvalRun, Question, Recommendation
 
 
 def employee_exists(session: Session, employee_id: int) -> bool:
@@ -55,6 +55,32 @@ def update_question_topics(session: Session, question_id: str, topics: list[str]
     """Backfill C1's extracted topics onto the question (for the dashboard mix)."""
 
     session.execute(update(Question).where(Question.id == question_id).values(topics=list(topics)))
+
+
+def update_question_route(session: Session, question_id: str, route: str) -> None:
+    """Record the C5 route on the question (drives the dashboard 自己解決率)."""
+
+    session.execute(update(Question).where(Question.id == question_id).values(route=route))
+
+
+def insert_eval_run(session: Session, metrics: dict[str, Any]) -> int:
+    """Persist an offline-evaluation snapshot; returns its row id.
+
+    Stores only the aggregate metrics the dashboard shows — never per-query data.
+    """
+
+    row = EvalRun(
+        top1_accuracy=metrics.get("top1_accuracy"),
+        recall_at_3=metrics.get("recall_at_3"),
+        mrr=metrics.get("mrr"),
+        route_accuracy=metrics.get("route_accuracy"),
+        n_ranked=metrics.get("n_ranked"),
+        n_routed=metrics.get("n_routed"),
+    )
+    session.add(row)
+    session.flush()
+    session.refresh(row)
+    return row.id
 
 
 def insert_shown_recommendations(

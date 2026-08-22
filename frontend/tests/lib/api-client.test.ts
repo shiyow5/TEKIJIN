@@ -1,4 +1,11 @@
-import { advanceSession, ApiError, getHandoff, postAnswer, postAsk } from "@/lib/api-client";
+import {
+  advanceSession,
+  ApiError,
+  getDashboard,
+  getHandoff,
+  postAnswer,
+  postAsk,
+} from "@/lib/api-client";
 import type { AskRequest, HandoffResponse, ResumeRequest } from "@/lib/api-types";
 import { DEFAULT_API_BASE_URL } from "@/lib/config";
 import { describe, expect, it, vi } from "vitest";
@@ -211,5 +218,29 @@ describe("advanceSession", () => {
   it("swallows a transport error (best-effort: the outcome is already recorded)", async () => {
     const fetchImpl = vi.fn<typeof fetch>().mockRejectedValue(new Error("network"));
     await expect(advanceSession("x", { fetchImpl })).resolves.toBeUndefined();
+  });
+});
+
+describe("getDashboard", () => {
+  it("GETs {base}/dashboard and returns the payload", async () => {
+    const body = { total_questions: 150, self_resolution_rate: 0.4, latest_eval: null };
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(body));
+
+    const result = await getDashboard({ fetchImpl });
+
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe(`${DEFAULT_API_BASE_URL}/dashboard`);
+    expect(init?.method).toBe("GET");
+    expect(result).toMatchObject(body);
+  });
+
+  it("throws ApiError on a non-2xx response", async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonResponse({ detail: "boom" }, { ok: false, status: 500 }));
+    await expect(getDashboard({ fetchImpl })).rejects.toMatchObject({
+      name: "ApiError",
+      status: 500,
+    });
   });
 });

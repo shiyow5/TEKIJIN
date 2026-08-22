@@ -18,6 +18,7 @@ from sqlalchemy import func, select
 
 from tekijin.config import get_settings
 from tekijin.data.db import get_engine, get_sessionmaker
+from tekijin.data.writes import insert_eval_run
 from tekijin.eval.dataset import load_eval_queries
 from tekijin.eval.pipeline import build_pipeline_ranker
 from tekijin.eval.runner import format_report, run_eval
@@ -57,6 +58,10 @@ def main() -> int:
         embedder = SentenceTransformerEmbedder(use_e5_prefix=settings.embedding_use_e5_prefix)
         ranker = build_pipeline_ranker(session, embedder, now=EVAL_NOW)
         report = run_eval(queries, ranker)
+        # Persist the snapshot so the dashboard (GET /dashboard) can surface the
+        # latest 推薦精度 without re-running the evaluation on every request.
+        insert_eval_run(session, report.metrics.as_dict())
+        session.commit()
     finally:
         session.close()
         engine.dispose()

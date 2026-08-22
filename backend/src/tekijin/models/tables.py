@@ -179,6 +179,10 @@ class Question(Base):
     body: Mapped[str | None] = mapped_column(Text)
     topics: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
     status: Mapped[str | None] = mapped_column(String(64))
+    # C5 route the run took (person / prior_answer / document). Persisted by the
+    # API when C5 emits, so the dashboard can report the self-resolution rate
+    # (補助経路で人を介さず解決した割合). NULL for pre-seeded/unrouted questions.
+    route: Mapped[str | None] = mapped_column(String(32))
     created_at: Mapped[dt.datetime | None] = mapped_column(DateTime)
     embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM))
 
@@ -217,6 +221,25 @@ class Recommendation(Base):
     # Needed by the scorer's ``load`` calc (recommendations in the last 7 days,
     # technical-spec §5). DB stamps it at insert; indexed for the recency window.
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now(), index=True)
+
+
+class EvalRun(Base):
+    """A stored offline-evaluation snapshot (dashboard 推薦精度 source).
+
+    Written by ``python -m tekijin.eval`` so the dashboard can surface the latest
+    Top-1 / Recall@3 without re-running the (heavy) evaluation on every request.
+    """
+
+    __tablename__ = "eval_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now(), index=True)
+    top1_accuracy: Mapped[float | None] = mapped_column(Float)
+    recall_at_3: Mapped[float | None] = mapped_column(Float)
+    mrr: Mapped[float | None] = mapped_column(Float)
+    route_accuracy: Mapped[float | None] = mapped_column(Float)
+    n_ranked: Mapped[int | None] = mapped_column(Integer)
+    n_routed: Mapped[int | None] = mapped_column(Integer)
 
 
 class Event(Base):
@@ -311,6 +334,7 @@ __all__ = [
     "Question",
     "Answer",
     "Recommendation",
+    "EvalRun",
     "Event",
     "ProjectMember",
     "Document",

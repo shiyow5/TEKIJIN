@@ -12,7 +12,11 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from tekijin.models.tables import Answer, Employee, Question, Recommendation
+from tekijin.models.tables import Answer, Employee, EvalRun, Question, Recommendation
+
+# The 補助経路 (auxiliary) routes that resolve a question without a new live
+# hand-off — the numerator of the self-resolution rate (product-spec 画面5).
+_SELF_RESOLVED_ROUTES = ("prior_answer", "document")
 
 
 def dashboard_summary(
@@ -76,6 +80,90 @@ def dashboard_summary(
             "pending": pending,
         },
         "acceptance_rate": acceptance_rate,
+        "self_resolution_rate": _self_resolution_rate(session),
+        "avg_resolution_hours": _avg_resolution_hours(session),
+        "top_responder_share": _top_responder_share(answers_per_responder, total_answers),
+        "latest_eval": _latest_eval(session),
         "answers_per_responder": answers_per_responder,
         "topic_distribution": topic_distribution,
+    }
+
+
+def _self_resolution_rate(session: Session) -> float:
+    """Share of routed questions resolved via an auxiliary route (画面5 自己解決率).
+
+    Denominator is questions that carry a route (i.e. went through the system);
+    numerator is those routed to ``prior_answer`` / ``document`` (no new live
+    hand-off). 0.0 when nothing has been routed yet (pre-seeded questions have a
+    NULL route).
+    """
+
+    routed = (
+        session.scalar(select(func.count()).select_from(Question).where(Question.route.isnot(None)))
+        or 0
+    )
+    if not routed:
+        return 0.0
+    self_resolved = (
+        session.scalar(
+            select(func.count())
+            .select_from(Question)
+            .where(Question.route.in_(_SELF_RESOLVED_ROUTES))
+        )
+        or 0
+    )
+    return self_resolved / routed
+
+
+def _avg_resolution_hours(session: Session) -> float | None:
+    """Mean hours from a question to its first answer (画面5 平均解決時間).
+
+    ``None`` when no question has an answer yet. Uses the earliest answer per
+    question so a later follow-up answer does not inflate the time.
+    """
+
+    first_answer = (
+        select(Answer.question_id.label("qid"), func.min(Answer.created_at).label("solved"))
+        .group_by(Answer.question_id)
+        .subquery()
+    )
+    hours = func.extract("epoch", first_answer.c.solved - Question.created_at) / 3600.0
+    return session.scalar(
+        select(func.avg(hours))
+        .select_from(Question)
+        .join(first_answer, first_answer.c.qid == Question.id)
+        .where(Question.created_at.isnot(None))
+    )
+
+
+def _top_responder_share(answers_per_responder: list[dict[str, Any]], total_answers: int) -> float:
+    """Concentration on the single busiest responder (画面5 負荷分散).
+
+    ``answers_per_responder`` is already ordered busiest-first, so its head is the
+    max. 0.0 when there are no answers.
+    """
+
+    if not total_answers or not answers_per_responder:
+        return 0.0
+    return answers_per_responder[0]["answer_count"] / total_answers
+
+
+def _latest_eval(session: Session) -> dict[str, Any] | None:
+    """The most recent stored evaluation snapshot (画面5 推薦精度), or ``None``.
+
+    ``None`` until ``python -m tekijin.eval`` has persisted a run — the dashboard
+    then shows a clear "未計測" state rather than a fabricated number.
+    """
+
+    row = session.execute(
+        select(EvalRun).order_by(EvalRun.created_at.desc(), EvalRun.id.desc()).limit(1)
+    ).scalar_one_or_none()
+    if row is None:
+        return None
+    return {
+        "top1_accuracy": row.top1_accuracy,
+        "recall_at_3": row.recall_at_3,
+        "mrr": row.mrr,
+        "route_accuracy": row.route_accuracy,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
     }
