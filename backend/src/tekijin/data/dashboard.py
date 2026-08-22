@@ -148,7 +148,11 @@ def _top_responder_share(answers_per_responder: list[dict[str, Any]], total_answ
     """Concentration on the single busiest responder (画面5 負荷分散).
 
     ``answers_per_responder`` is already ordered busiest-first, so its head is the
-    max. 0.0 when there are no answers.
+    max. 0.0 when there are no answers. NOTE: like 平均解決時間 this reads the
+    ``answers`` distribution (seed / historical), so it does not yet move with
+    live routing (API hand-offs write ``recommendations``, not ``answers``); and
+    the spec's naive-order baseline comparison (product-spec §246) is an offline
+    measure. Both are tracked as follow-ups (#97).
     """
 
     if not total_answers or not answers_per_responder:
