@@ -70,6 +70,33 @@ function ResultTerminal({
   );
 }
 
+/**
+ * The stream failed (server `error` event or a permanently CLOSED connection).
+ * `error` is deliberately non-terminal in the hook, so it is surfaced here
+ * explicitly — otherwise the screen would stall on the pending placeholder that
+ * can no longer advance. Generic text only (no server detail leaked).
+ */
+function ResultError() {
+  return (
+    <section className="mx-auto flex w-full max-w-2xl flex-col gap-md py-lg text-center">
+      <div
+        role="alert"
+        className="rounded-xl border border-error-container bg-error-container p-md text-on-error-container"
+      >
+        エラーが発生しました。時間をおいて再度お試しください。
+      </div>
+      <div className="flex justify-center">
+        <a
+          href="/questions"
+          className="min-h-[48px] rounded-full bg-primary px-lg py-sm font-bold text-on-primary shadow-md transition-colors hover:bg-primary-container"
+        >
+          新しい質問をする
+        </a>
+      </div>
+    </section>
+  );
+}
+
 export function ResultScreen({ streamState }: ResultScreenProps) {
   const contextStream = useOptionalSessionStream();
   const stream = streamState ?? contextStream ?? EMPTY_STREAM;
@@ -80,14 +107,20 @@ export function ResultScreen({ streamState }: ResultScreenProps) {
   const draft = stream.draft?.draft ?? "";
   const routeName = forceMainLine ? "person" : stream.route?.route;
 
+  // A failed stream can no longer advance: surface it before any data gating.
+  if (stream.error) {
+    return <ResultError />;
+  }
+  // A terminal outcome wins over any retained route/recommend: a run that ended
+  // (sent / no_candidate / off_topic), or a completed session replayed after a
+  // hard reload, must show its outcome rather than a stale route or 準備中.
+  if (stream.terminal && (stream.done || stream.message)) {
+    return <ResultTerminal done={stream.done} message={stream.message} />;
+  }
+
   const hasMainLineData = recommendations.length > 0 || draft !== "";
   const hasAnyData = hasMainLineData || Boolean(stream.route);
   if (!hasAnyData) {
-    // A completed session replayed after a hard reload carries only its terminal
-    // event; surface it instead of stalling on the pending placeholder.
-    if (stream.terminal && (stream.done || stream.message)) {
-      return <ResultTerminal done={stream.done} message={stream.message} />;
-    }
     return <ResultPending />;
   }
 
@@ -104,7 +137,12 @@ export function ResultScreen({ streamState }: ResultScreenProps) {
 
   if (hasMainLineData) {
     return (
+      // Keyed by the top candidate so a decline->reroute (new recommend/draft for
+      // a different person) remounts the whole view: it clears a stale "sent"
+      // confirmation and the previous selection/edit, making the reroute
+      // reachable. A same-recipient late draft keeps the key (edits preserved).
       <PersonRouteView
+        key={recommendations[0]?.person_id ?? "no-candidate"}
         recommendations={recommendations}
         reason={stream.route?.reason}
         draft={draft}

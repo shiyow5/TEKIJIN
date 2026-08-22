@@ -96,17 +96,12 @@ export function PersonRouteView({ recommendations, reason, draft }: PersonRouteV
       ) : null}
 
       {/*
-       * Keyed by the top candidate so a reroute (decline -> new recommend/draft
-       * for a different person) remounts the editor: it drops the previous
-       * recipient's edited text and seeds the new draft. A late draft for the
-       * SAME recipient keeps the same key, so in-progress edits are preserved
-       * (handled inside DraftEditor's dirty guard).
+       * Recipient changes remount this whole view (keyed by the top candidate in
+       * ResultScreen), so DraftEditor is reset on a reroute without its own key.
+       * A same-recipient late draft keeps the mount; edits are preserved by
+       * DraftEditor's dirty guard.
        */}
-      <DraftEditor
-        key={topCandidate?.person_id ?? "no-candidate"}
-        initialDraft={draft}
-        onSend={handleSend}
-      />
+      <DraftEditor initialDraft={draft} onSend={handleSend} />
     </section>
   );
 }

@@ -66,6 +66,31 @@ describe("ResultScreen — terminal-only replay (hard reload)", () => {
     expect(screen.getByText("該当者が見つかりませんでした")).toBeInTheDocument();
     expect(screen.queryByText("結果を準備中…")).not.toBeInTheDocument();
   });
+
+  it("prioritises a live terminal outcome over a retained route (all declined)", () => {
+    // After every responder declines, the empty recommend clears the draft and
+    // the backend emits a no_candidate message while `route` is still populated.
+    // The terminal outcome must win over the stale route, not fall through to 準備中.
+    renderResult(
+      state({
+        route: { route: "person", reason: "詳しい人がいます", confidence: 0.7 },
+        recommend: { recommendations: [] },
+        terminal: true,
+        message: { status: "no_candidate", message: "対応できる担当者が見つかりませんでした" },
+      }),
+    );
+    expect(screen.getByText("対応できる担当者が見つかりませんでした")).toBeInTheDocument();
+    expect(screen.queryByText("結果を準備中…")).not.toBeInTheDocument();
+  });
+});
+
+describe("ResultScreen — stream error", () => {
+  it("surfaces a generic error (no leaked detail) instead of stalling on 準備中", () => {
+    renderResult(state({ error: "処理中にエラーが発生しました。" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("エラーが発生しました");
+    expect(screen.queryByText("結果を準備中…")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "新しい質問をする" })).toBeInTheDocument();
+  });
 });
 
 describe("ResultScreen — main line (person)", () => {
@@ -140,6 +165,34 @@ describe("ResultScreen — main line (person)", () => {
     expect(screen.getByLabelText<HTMLTextAreaElement>("聞き方の下書き").value).toBe(
       "鈴木さん向けの下書き",
     );
+  });
+
+  it("clears a stale send confirmation when a reroute changes the recipient", () => {
+    const { rerender } = render(
+      <ResultScreen
+        streamState={state({
+          route: { route: "person", reason: "", confidence: 0.9 },
+          recommend: { recommendations: [rec({ person_id: "E001", name: "高梨" })] },
+          draft: { draft: "高梨さん向け" },
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "この方に送る" }));
+    expect(screen.getByText("送信しました")).toBeInTheDocument();
+
+    // The recipient declines → reroute to a new person. The stale success
+    // confirmation must not persist and block the new candidate's route view.
+    rerender(
+      <ResultScreen
+        streamState={state({
+          route: { route: "person", reason: "", confidence: 0.9 },
+          recommend: { recommendations: [rec({ person_id: "E002", name: "鈴木" })] },
+          draft: { draft: "鈴木さん向け" },
+        })}
+      />,
+    );
+    expect(screen.queryByText("送信しました")).not.toBeInTheDocument();
+    expect(screen.getByText("鈴木（最有力）")).toBeInTheDocument();
   });
 
   it("confirms the send to the selected candidate", () => {
