@@ -3,7 +3,8 @@
         fmt-check fmt-check-backend fmt-check-frontend \
         lint lint-backend lint-frontend \
         test test-backend test-frontend \
-        run-backend serve db-up db-down seed embed eval \
+        run-backend run-frontend serve dev serve-prod \
+        db-up db-down seed embed eval \
         typecheck-frontend check clean
 
 # ============================================================
@@ -91,13 +92,35 @@ typecheck-frontend: ## Type-check the frontend (tsc)
 # ============================================================
 # Run
 # ============================================================
-run-backend: ## Run the backend dev server (uvicorn, auto-reload; stub LLM, MemorySaver)
+run-backend: ## Run only the backend dev server (uvicorn, auto-reload; stub LLM, MemorySaver)
 	cd $(BACKEND_DIR) && $(PY) -m uvicorn tekijin.main:app --reload --app-dir src
 
-serve: ## Run the backend against real vLLM + PostgresSaver (production-like)
+run-frontend: ## Run only the frontend dev server (Next.js, :3000)
+	cd $(FRONTEND_DIR) && npm run dev
+
+serve: ## Run backend (:8000) + frontend (:3000) together for local dev; Ctrl-C stops both
+	# The one-command dev launcher. Starts the auto-reloading backend (stub LLM,
+	# MemorySaver — no ML deps or Postgres needed) and the Next.js dev server in
+	# parallel, forwarding both logs to this terminal. The frontend talks to the
+	# backend via NEXT_PUBLIC_API_BASE_URL (default http://localhost:8000).
+	#
+	# `trap 'kill 0'` tears down the whole process group on Ctrl-C / error, so no
+	# orphaned uvicorn or node process is left behind. Run as ONE shell (`\`) so
+	# the trap and background jobs share it.
+	@echo ">> backend  http://localhost:8000  (docs: /docs)"
+	@echo ">> frontend http://localhost:3000"
+	@echo ">> Ctrl-C stops both."
+	@trap 'kill 0' INT TERM EXIT; \
+		( cd $(BACKEND_DIR) && $(PY) -m uvicorn tekijin.main:app --reload --app-dir src ) & \
+		( cd $(FRONTEND_DIR) && npm run dev ) & \
+		wait
+
+dev: serve ## Alias for `make serve` (start the full-stack dev environment)
+
+serve-prod: ## Run the backend against real vLLM + PostgresSaver (production-like, backend only)
 	# Needs the ML deps (make setup-ml) for the embedder. Point TEKIJIN_LLM_BASE_URL
 	# at your vLLM /v1 endpoint and TEKIJIN_DATABASE_URL at Postgres, then:
-	#   TEKIJIN_LLM_BACKEND=vllm TEKIJIN_CHECKPOINTER_BACKEND=postgres make serve
+	#   TEKIJIN_LLM_BACKEND=vllm TEKIJIN_CHECKPOINTER_BACKEND=postgres make serve-prod
 	# SINGLE WORKER ONLY: the session dispatch registry is in-process, so do NOT
 	# add --workers (a durable/sticky multi-worker queue is a separate issue).
 	cd $(BACKEND_DIR) && \
