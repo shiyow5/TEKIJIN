@@ -16,7 +16,7 @@ from types import SimpleNamespace
 import pytest
 
 from tekijin.agent.state import PastAnswer
-from tekijin.config import Settings
+from tekijin.config import Settings, get_settings
 from tekijin.retrieval.embedding import (
     PASSAGE,
     QUERY,
@@ -204,6 +204,41 @@ def test_embedder_rejects_unknown_kind() -> None:
         embedder.encode(["x"], kind="document")
 
 
+def test_embedder_trust_and_revision_default_from_settings() -> None:
+    # With no explicit args, the loader flags come from settings (Nemotron default
+    # needs trust_remote_code; revision defaults to None = the repo default branch).
+    embedder = SentenceTransformerEmbedder(model=_FakeModel())
+    assert embedder._trust_remote_code is get_settings().embedding_trust_remote_code
+    assert embedder._revision == get_settings().embedding_model_revision
+
+
+def test_embedder_honors_explicit_trust_and_revision() -> None:
+    # Explicit args win over the global settings, so a hardened caller (e.g. the
+    # service factory forwarding a custom Settings) is honored.
+    embedder = SentenceTransformerEmbedder(
+        model=_FakeModel(), trust_remote_code=False, revision="deadbeef"
+    )
+    assert embedder._trust_remote_code is False
+    assert embedder._revision == "deadbeef"
+
+
+def test_embedder_revision_sentinel_distinguishes_omitted_from_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # With a pinned revision in the (global) settings, an OMITTED revision inherits
+    # it, but an EXPLICIT None (a fallback model wanting the default branch) must be
+    # preserved — not silently overridden by the global pin.
+    import tekijin.retrieval.embedding as emb
+
+    pinned = Settings(_env_file=None, embedding_model_revision="global-pin")  # type: ignore[call-arg]
+    monkeypatch.setattr(emb, "get_settings", lambda: pinned)
+
+    assert emb.SentenceTransformerEmbedder(model=_FakeModel())._revision == "global-pin"
+    assert emb.SentenceTransformerEmbedder(model=_FakeModel(), revision=None)._revision is None
+    got = emb.SentenceTransformerEmbedder(model=_FakeModel(), revision="local")._revision
+    assert got == "local"
+
+
 def test_sentence_transformer_embedder_is_an_embedder() -> None:
     # Structural typing: it satisfies the Embedder protocol.
     assert isinstance(SentenceTransformerEmbedder(model=_FakeModel()), Embedder)
@@ -382,7 +417,9 @@ def test_embed_cli_main_wires_prefix(
     captured: dict[str, bool] = {}
 
     class _CapturingEmbedder:
-        def __init__(self, *, use_e5_prefix: bool) -> None:
+        def __init__(
+            self, *, use_e5_prefix: bool, trust_remote_code: bool = True, revision=None
+        ) -> None:
             captured["prefix"] = use_e5_prefix
 
         def encode(self, texts, *, kind="passage"):
@@ -429,7 +466,9 @@ def test_embed_cli_main_rejects_dimension_mismatch(monkeypatch: pytest.MonkeyPat
     wrong_dim = get_settings().embedding_dim - 1
 
     class _WrongWidthEmbedder:
-        def __init__(self, *, use_e5_prefix: bool) -> None:
+        def __init__(
+            self, *, use_e5_prefix: bool, trust_remote_code: bool = True, revision=None
+        ) -> None:
             pass
 
         def encode(self, texts, *, kind="passage"):

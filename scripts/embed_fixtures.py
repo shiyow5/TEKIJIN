@@ -42,9 +42,10 @@ def verify_embedding_width(actual: int, expected: int) -> None:
     """Ensure the model's vector width matches the pgvector column width.
 
     The schema pins every ``embedding`` column to ``settings.embedding_dim``
-    (1024). Swapping ``TEKIJIN_EMBEDDING_MODEL`` for a model of a different width
-    would otherwise fail deep inside the first pgvector flush; probing here fails
-    fast, before any DB connection, with an actionable message.
+    (2048 for the default Nemotron-3-Embed-1B). Swapping ``TEKIJIN_EMBEDDING_MODEL``
+    for a model of a different width would otherwise fail deep inside the first
+    pgvector flush; probing here fails fast, before any DB connection, with an
+    actionable message.
     """
 
     if actual != expected:
@@ -81,7 +82,11 @@ def main(argv: list[str] | None = None) -> int:
     # settings, which itself follows TEKIJIN_EMBEDDING_USE_E5_PREFIX).
     use_e5_prefix = False if args.no_e5_prefix else settings.embedding_use_e5_prefix
 
-    embedder = SentenceTransformerEmbedder(use_e5_prefix=use_e5_prefix)
+    embedder = SentenceTransformerEmbedder(
+        use_e5_prefix=use_e5_prefix,
+        trust_remote_code=settings.embedding_trust_remote_code,
+        revision=settings.embedding_model_revision,
+    )
 
     # Probe the model's output width BEFORE opening any DB connection, so a
     # dimension mismatch fails fast with a clear message instead of blowing up

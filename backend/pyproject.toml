@@ -31,6 +31,9 @@ omit = [
     # eval CLI shell — thin wiring around the tested run_eval core; needs a live
     # seeded DB + model download, so it is exercised via `python -m tekijin.eval`.
     "src/tekijin/eval/__main__.py",
+    # migrate CLI shell — thin wrapper around the tested apply_migrations();
+    # exercised via `python -m tekijin.data.migrate`.
+    "src/tekijin/data/migrate.py",
 ]
 
 [tool.coverage.report]

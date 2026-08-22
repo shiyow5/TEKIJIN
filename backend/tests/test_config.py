@@ -21,7 +21,8 @@ def test_defaults(monkeypatch) -> None:
     assert settings.llm_base_url == "http://internship-dgx1:8080/v1"
     assert settings.llm_model == "Qwen3.6-35B-A3B-NVFP4"
     assert settings.llm_api_key == "dummy"
-    assert settings.embedding_model == "intfloat/multilingual-e5-large"
+    assert settings.embedding_model == "nvidia/Nemotron-3-Embed-1B-BF16"
+    assert settings.embedding_trust_remote_code is True
     assert settings.cors_origins == ("http://localhost:3000",)
     assert isinstance(settings.fixtures_dir, Path)
     assert settings.fixtures_dir.name == "synthetic"
