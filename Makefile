@@ -121,7 +121,16 @@ serve: ## Run backend (:8000) + frontend (:3000) together for local dev; Ctrl-C 
 	@bash -c 'set -m; \
 		( cd $(BACKEND_DIR) && exec $(PY) -m uvicorn tekijin.main:app --reload --app-dir src ) & back=$$!; \
 		( cd $(FRONTEND_DIR) && exec npm run dev ) & front=$$!; \
-		stop() { trap - INT TERM EXIT; kill -- -$$back -$$front 2>/dev/null; }; \
+		stop() { \
+			trap - INT TERM EXIT; \
+			kill -TERM -- -$$back -$$front 2>/dev/null; \
+			for _ in 1 2 3 4 5 6 7 8 9 10; do \
+				kill -0 $$back 2>/dev/null || kill -0 $$front 2>/dev/null || break; \
+				sleep 0.5; \
+			done; \
+			kill -KILL -- -$$back -$$front 2>/dev/null; \
+			wait 2>/dev/null; \
+		}; \
 		trap stop INT TERM EXIT; \
 		wait -n; status=$$?; stop; exit $$status'
 
