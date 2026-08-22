@@ -1,5 +1,5 @@
-import { ApiError, postAnswer, postAsk } from "@/lib/api-client";
-import type { AskRequest, ResumeRequest } from "@/lib/api-types";
+import { ApiError, getHandoff, postAnswer, postAsk } from "@/lib/api-client";
+import type { AskRequest, HandoffResponse, ResumeRequest } from "@/lib/api-types";
 import { DEFAULT_API_BASE_URL } from "@/lib/config";
 import { describe, expect, it, vi } from "vitest";
 
@@ -120,6 +120,61 @@ describe("postAnswer", () => {
     await expect(postAnswer(RESUME, { fetchImpl })).rejects.toMatchObject({
       name: "ApiError",
       status: 409,
+    });
+  });
+});
+
+describe("getHandoff", () => {
+  const HANDOFF: HandoffResponse = {
+    session_id: "abc-123",
+    question: "UTM移行時の注意点",
+    asker: { id: "E010", name: "藤田 悠斗", dept: "第3営業部" },
+    topics: ["ネットワーク・VPN"],
+    products: ["UTM"],
+    situation: "移行",
+    missing: [],
+    responder: {
+      person_id: "E001",
+      name: "高梨 健太",
+      dept: "技術部",
+      score: 0.9,
+      confidence: "高",
+      reasons: [{ type: "cert", detail: "情報処理安全確保支援士" }],
+    },
+    draft: "高梨さんへの依頼文",
+    reuse_count: 7,
+    helpful_answer_count: 5,
+  };
+
+  it("GETs {base}/handoff/{id} and returns the payload", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(HANDOFF));
+
+    const result = await getHandoff("abc-123", { fetchImpl });
+
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe(`${DEFAULT_API_BASE_URL}/handoff/abc-123`);
+    expect(init?.method).toBe("GET");
+    expect(result).toEqual(HANDOFF);
+  });
+
+  it("url-encodes the session id path segment", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(HANDOFF));
+
+    await getHandoff("a b/c", { fetchImpl });
+
+    expect(fetchImpl.mock.calls[0][0]).toBe(`${DEFAULT_API_BASE_URL}/handoff/a%20b%2Fc`);
+  });
+
+  it("throws ApiError on a non-2xx response (e.g. 404 no handoff)", async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        jsonResponse({ detail: "no responder handoff" }, { ok: false, status: 404 }),
+      );
+
+    await expect(getHandoff("gone", { fetchImpl })).rejects.toMatchObject({
+      name: "ApiError",
+      status: 404,
     });
   });
 });

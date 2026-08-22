@@ -1,0 +1,217 @@
+"use client";
+
+/**
+ * Answer screen (product-spec 画面4 / ui_template _3) — the "asked" side.
+ *
+ * The responder receives the question already filled in with the asker's context
+ * and the reasons they were chosen, plus the generated draft (下書き機能の受益者).
+ * Three equal-size choices keep declining a first-class option (F-09): 回答する /
+ * 今は難しい / 別の人を薦める. The reuse count at the bottom is the 見返り (F-13).
+ *
+ * Data + actions come from {@link useHandoff}; this component is presentation and
+ * wiring only. A `sessionId` is the single input (from the route param).
+ */
+
+import type { HandoffAction } from "@/hooks/useHandoff";
+import { useHandoff } from "@/hooks/useHandoff";
+import type { HandoffResponse, Reason } from "@/lib/api-types";
+import { reasonLabel } from "@/lib/reasons";
+
+export interface AnswerScreenProps {
+  sessionId: string;
+}
+
+// One equal-size contract shared by all three actions, so declining is never a
+// second-class choice (product-spec 画面4). Only the color weight differs.
+const BASE_BTN =
+  "flex-1 min-h-[56px] rounded-xl px-md py-sm font-bold text-base shadow-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50";
+const PRIMARY_BTN = `${BASE_BTN} bg-primary text-on-primary hover:bg-primary-container`;
+const DECLINE_BTN = `${BASE_BTN} border border-outline text-on-surface hover:bg-surface-container-low`;
+
+function Centered({ children }: { children: React.ReactNode }) {
+  return (
+    <section className="mx-auto flex w-full max-w-2xl flex-col gap-md py-lg text-center">
+      {children}
+    </section>
+  );
+}
+
+function BackLink() {
+  return (
+    <div className="flex justify-center">
+      <a
+        href="/questions"
+        className="min-h-[48px] rounded-full bg-primary px-lg py-sm font-bold text-on-primary shadow-md transition-colors hover:bg-primary-container"
+      >
+        質問一覧へ
+      </a>
+    </div>
+  );
+}
+
+function ReasonList({ reasons }: { reasons: Reason[] }) {
+  if (reasons.length === 0) {
+    return <p className="text-on-surface-variant text-sm">根拠を確認中…</p>;
+  }
+  return (
+    <ul className="flex flex-col gap-xs">
+      {reasons.map((reason) => (
+        <li
+          key={`${reason.type}-${reason.detail}`}
+          className="flex items-start gap-xs text-on-surface-variant text-sm"
+        >
+          <span aria-hidden="true" className="text-primary">
+            ✓
+          </span>
+          <span>
+            <span className="font-medium text-on-surface">{reasonLabel(reason.type)}</span>
+            {reason.detail ? `：${reason.detail}` : null}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+const DONE_HEADING: Record<HandoffAction, string> = {
+  answer: "回答ありがとうございます",
+  defer: "承知しました",
+  refer: "承知しました",
+};
+
+const DONE_BODY: Record<HandoffAction, string> = {
+  answer: "質問者に回答をお届けします。ご協力ありがとうございました。",
+  defer: "別の方へ自動でお繋ぎします。無理のない範囲でご協力ください。",
+  refer: "別の候補者へお繋ぎします。ご対応ありがとうございました。",
+};
+
+export function AnswerScreen({ sessionId }: AnswerScreenProps) {
+  const { phase, handoff, action, errorKind, submitError, submit } = useHandoff(sessionId);
+
+  if (phase === "loading") {
+    return (
+      <Centered>
+        <h1 className="font-bold text-2xl text-on-surface">質問を読み込み中…</h1>
+        <p className="text-on-surface-variant">届いた質問の内容を取得しています。</p>
+      </Centered>
+    );
+  }
+
+  if (phase === "error") {
+    const message =
+      errorKind === "gone"
+        ? "この依頼はすでに対応が完了したか、受付を終了しています。"
+        : "質問の読み込みに失敗しました。時間をおいて再度お試しください。";
+    return (
+      <Centered>
+        <h1 className="font-bold text-2xl text-on-surface">表示できませんでした</h1>
+        <div
+          role="alert"
+          className="rounded-xl border border-outline-variant bg-surface-container p-md text-on-surface-variant"
+        >
+          {message}
+        </div>
+        <BackLink />
+      </Centered>
+    );
+  }
+
+  if (phase === "done" && action) {
+    return (
+      <Centered>
+        <h1 className="font-bold text-2xl text-primary">{DONE_HEADING[action]}</h1>
+        <p className="text-on-surface-variant">{DONE_BODY[action]}</p>
+        <BackLink />
+      </Centered>
+    );
+  }
+
+  // ready / submitting: the handoff is loaded.
+  const hf = handoff as HandoffResponse;
+  const submitting = phase === "submitting";
+  const askerName = hf.asker.name ?? "質問者";
+  const askerMeta = [hf.asker.dept, hf.asker.id].filter(Boolean).join(" / ");
+  const slots = [
+    hf.products.length > 0 ? `【製品】${hf.products.join("・")}` : null,
+    hf.topics.length > 0 ? `【分野】${hf.topics.join("・")}` : null,
+    hf.situation ? `【状況】${hf.situation}` : null,
+    hf.missing.length > 0 ? `【未確認】${hf.missing.join("・")}` : null,
+  ].filter(Boolean);
+
+  return (
+    <section className="mx-auto flex w-full max-w-2xl flex-col gap-md py-lg">
+      <header className="flex items-baseline justify-between gap-sm">
+        <h1 className="font-bold text-2xl text-on-surface">あなたに届いた質問</h1>
+        {hf.responder ? (
+          <span className="text-on-surface-variant text-sm">{hf.responder.name}</span>
+        ) : null}
+      </header>
+
+      <article className="flex flex-col gap-sm rounded-xl border border-outline-variant bg-surface-container-lowest p-md shadow-sm">
+        <div className="flex items-center gap-sm text-on-surface-variant text-sm">
+          <span className="font-medium text-on-surface">{askerName}さん</span>
+          {askerMeta ? <span>（{askerMeta}）</span> : null}
+        </div>
+        <h2 className="font-bold text-lg text-on-surface leading-snug">{hf.question}</h2>
+        {slots.length > 0 ? (
+          <ul className="flex flex-wrap gap-x-md gap-y-xs text-on-surface-variant text-sm">
+            {slots.map((slot) => (
+              <li key={slot}>{slot}</li>
+            ))}
+          </ul>
+        ) : null}
+      </article>
+
+      <section className="flex flex-col gap-xs">
+        <h2 className="font-bold text-on-surface text-sm">あなたが選ばれた理由</h2>
+        <ReasonList reasons={hf.responder?.reasons ?? []} />
+      </section>
+
+      <section className="flex flex-col gap-xs">
+        <h2 className="font-bold text-on-surface text-sm">依頼内容（下書き）</h2>
+        <p className="whitespace-pre-wrap rounded-xl border border-outline-variant bg-surface-container-low p-md text-on-surface text-sm">
+          {hf.draft || "（下書きは準備中です）"}
+        </p>
+      </section>
+
+      {submitError ? (
+        <p role="alert" className="text-error text-sm">
+          {submitError}
+        </p>
+      ) : null}
+
+      <div className="flex flex-col gap-sm sm:flex-row">
+        <button
+          type="button"
+          className={PRIMARY_BTN}
+          disabled={submitting}
+          onClick={() => submit("answer")}
+        >
+          回答する
+        </button>
+        <button
+          type="button"
+          className={DECLINE_BTN}
+          disabled={submitting}
+          onClick={() => submit("defer")}
+        >
+          今は難しい
+        </button>
+        <button
+          type="button"
+          className={DECLINE_BTN}
+          disabled={submitting}
+          onClick={() => submit("refer")}
+        >
+          別の人を薦める
+        </button>
+      </div>
+
+      <p className="text-center text-on-surface-variant text-sm">
+        あなたの回答は、これまで <span className="font-bold text-on-surface">{hf.reuse_count}</span>{" "}
+        件再利用されています
+        {hf.helpful_answer_count > 0 ? `（有用評価 ${hf.helpful_answer_count} 件）` : null}。
+      </p>
+    </section>
+  );
+}

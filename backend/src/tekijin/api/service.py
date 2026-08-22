@@ -56,6 +56,7 @@ from tekijin.api.events import (
     replay_terminal,
 )
 from tekijin.data.db import session_scope
+from tekijin.data.handoff import employee_brief, responder_reuse_stats
 from tekijin.data.writes import (
     employee_exists,
     insert_shown_recommendations,
@@ -87,6 +88,10 @@ class SessionInvalid(Exception):
 
 class AskerNotFound(Exception):
     """The ``asker_id`` is not a known employee (maps to HTTP 404)."""
+
+
+class HandoffNotFound(Exception):
+    """No responder handoff is available for this session (maps to HTTP 404)."""
 
 
 def _default_now() -> dt.datetime:
@@ -326,6 +331,63 @@ class AgentService:
                 )
                 return
             set_recommendation_outcome(session, primary, outcome)
+
+    # -- /handoff : responder-facing view (product-spec 画面4) ------------- #
+    def get_handoff(self, session_id: str) -> schemas.HandoffResponse:
+        """Assemble the responder-facing payload for a ``send``-interrupt session.
+
+        Read-only: reads the durable checkpoint (never advances the graph) plus
+        two DB lookups (asker identity, responder reuse totals). Raises
+        :class:`HandoffNotFound` (404) when there is no paused run at all
+        (unknown / finished); :class:`SessionConflict` (409) when the run is
+        paused elsewhere (a clarification is owed to the asker, not a responder
+        outcome).
+        """
+
+        snapshot = self._snapshot(session_id)
+        next_nodes = tuple(snapshot.next)
+        if not next_nodes:
+            raise HandoffNotFound("no responder handoff for this session")
+        if next_nodes[0] != "send":
+            raise SessionConflict("session is not awaiting a responder outcome")
+
+        values = snapshot.values
+        recs = values.get("recommendations") or []
+        primary = recs[0] if recs else None
+        asker_id = (values.get("asker") or {}).get("id")
+
+        responder: schemas.Recommendation | None = None
+        reuse = {"reuse_count": 0, "helpful_answer_count": 0}
+        asker_name: str | None = None
+        asker_dept: str | None = None
+        with session_scope(self._session_factory) as session:
+            if asker_id is not None:
+                asker_name, asker_dept = employee_brief(session, asker_id)
+            if primary is not None:
+                # person_id crosses the boundary in the external "E###" form,
+                # mirroring the recommend event (events.py / model-definition).
+                responder = schemas.Recommendation(
+                    **{**primary, "person_id": schemas.format_employee_id(primary["person_id"])}
+                )
+                reuse = responder_reuse_stats(session, primary["person_id"])
+
+        return schemas.HandoffResponse(
+            session_id=session_id,
+            question=values.get("question") or "",
+            asker=schemas.HandoffAsker(
+                id=schemas.format_employee_id(asker_id) if asker_id is not None else "",
+                name=asker_name,
+                dept=asker_dept,
+            ),
+            topics=values.get("topics") or [],
+            products=values.get("products") or [],
+            situation=values.get("situation"),
+            missing=values.get("missing") or [],
+            responder=responder,
+            draft=values.get("draft") or "",
+            reuse_count=reuse["reuse_count"],
+            helpful_answer_count=reuse["helpful_answer_count"],
+        )
 
     # -- /events : stream ------------------------------------------------- #
     def is_streamable(self, session_id: str) -> bool:

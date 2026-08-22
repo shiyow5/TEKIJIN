@@ -19,7 +19,7 @@ from tekijin.api.service import SESSION_TTL_SECONDS, AgentService, SessionConfli
 from tekijin.app import create_app
 from tekijin.data.dashboard import dashboard_summary
 from tekijin.data.db import get_sessionmaker
-from tekijin.models.tables import Question, Recommendation
+from tekijin.models.tables import Answer, Question, Recommendation
 
 NOW = dt.datetime(2026, 9, 15, 12, 0, 0)
 GOOD_Q = "現行のVPN機器で3拠点の拠点間接続について相談したいです"
@@ -420,6 +420,117 @@ def test_dashboard_summary_aggregates_outcomes(seed_counts, session) -> None:
     assert summary["recommendation_outcomes"] == {"accepted": 2, "declined": 1, "pending": 1}
     assert summary["acceptance_rate"] == 2 / 3
     assert "recent_recommendations" not in summary  # aggregate-only
+
+
+# --------------------------------------------------------------------------- #
+# GET /handoff : responder-facing payload for a session paused at ``send`` (#38)
+# --------------------------------------------------------------------------- #
+def test_handoff_returns_responder_payload(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2, 3], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2, 3)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "h1"})
+    _events(client, "h1")  # run to the send interrupt (paused, draft ready)
+
+    resp = client.get("/handoff/h1")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["session_id"] == "h1"
+    assert body["question"] == GOOD_Q
+    # asker enriched from the DB and exposed in the external "E###" form.
+    assert body["asker"]["id"] == "E010"
+    assert body["asker"]["name"]  # employee 10 exists in the seed
+    # responder = the primary (handed-off) candidate, with its selection reasons.
+    assert body["responder"]["person_id"] == "E001"
+    assert body["responder"]["confidence"] == "中"
+    assert body["responder"]["reasons"][0]["type"] == "self"
+    # slots surfaced from the understood state; draft addressed to the responder.
+    assert body["topics"] == ["ネットワーク・VPN"]
+    assert "社員1さん" in body["draft"]
+    # reuse aggregates are present and integral (exact totals covered in the unit).
+    assert isinstance(body["reuse_count"], int)
+    assert isinstance(body["helpful_answer_count"], int)
+
+
+def test_handoff_conflicts_when_awaiting_clarification(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine, fake_embedder, retriever=_FakeRetriever(people=[1]), scorer=_FakeScorer(_recs(1))
+    )
+    # Topic-only question -> paused at ``ask`` (a followup is owed to the asker).
+    client.post(
+        "/ask", json={"asker_id": 10, "question": "ネットワークの技術相談です", "session_id": "h2"}
+    )
+    _events(client, "h2")
+    assert client.get("/handoff/h2").status_code == 409  # not a responder handoff
+
+
+def test_handoff_unknown_session_404(seed_counts, engine, fake_embedder) -> None:
+    client = _client(engine, fake_embedder, retriever=_FakeRetriever(), scorer=_FakeScorer([]))
+    assert client.get("/handoff/nonexistent").status_code == 404
+
+
+def test_handoff_finished_session_404(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine, fake_embedder, retriever=_FakeRetriever(people=[1]), scorer=_FakeScorer(_recs(1))
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "h4"})
+    _events(client, "h4")
+    client.post("/answer", json={"session_id": "h4", "outcome": "accepted"})
+    _events(client, "h4")  # run to completion (done) — no longer awaiting an outcome
+    assert client.get("/handoff/h4").status_code == 404
+
+
+def test_handoff_unexpected_error_is_generic_500(seed_counts, engine, fake_embedder) -> None:
+    service = _svc(engine, fake_embedder, retriever=_FakeRetriever(), scorer=_FakeScorer([]))
+
+    def _boom(*_a, **_k):
+        raise RuntimeError("secret internal detail at 10.0.0.1")
+
+    service.get_handoff = _boom  # type: ignore[method-assign]
+    client = TestClient(create_app(agent_service=service))
+    resp = client.get("/handoff/anything")
+    assert resp.status_code == 500
+    assert "内部エラー" in resp.text
+    assert "secret internal" not in resp.text  # detail logged, never leaked
+
+
+def test_responder_reuse_stats_counts_reuse_and_helpful(seed_counts, session) -> None:
+    from tekijin.data.handoff import responder_reuse_stats
+
+    before = responder_reuse_stats(session, 3)
+    session.add_all(
+        [
+            Answer(
+                id="h_ra_1", question_id="q_0001", responder_id=3, reuse_count=2, was_helpful=True
+            ),
+            Answer(
+                id="h_ra_2", question_id="q_0001", responder_id=3, reuse_count=3, was_helpful=True
+            ),
+            Answer(
+                id="h_ra_3",
+                question_id="q_0001",
+                responder_id=3,
+                reuse_count=None,
+                was_helpful=False,
+            ),
+        ]
+    )
+    session.flush()
+    after = responder_reuse_stats(session, 3)
+    # NULL reuse_count coalesces to 0; only was_helpful=True rows are counted.
+    assert after["reuse_count"] - before["reuse_count"] == 5
+    assert after["helpful_answer_count"] - before["helpful_answer_count"] == 2
+
+
+def test_employee_brief_returns_name_and_dept(seed_counts, session) -> None:
+    from tekijin.data.handoff import employee_brief
+
+    name, _dept = employee_brief(session, 1)
+    assert name  # employee 1 exists in the seed
+    assert employee_brief(session, 999999) == (None, None)  # unknown -> both None
 
 
 # --------------------------------------------------------------------------- #

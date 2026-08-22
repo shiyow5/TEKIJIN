@@ -70,6 +70,38 @@ export interface Recommendation {
 }
 
 // --------------------------------------------------------------------------- //
+// handoff (GET /handoff/{session_id}) — responder-facing view (product-spec 画面4)
+// --------------------------------------------------------------------------- //
+
+/** The asking employee, enriched for the responder-facing handoff view. */
+export interface HandoffAsker {
+  /** external "E###" form (schemas.format_employee_id). */
+  id: string;
+  name?: string | null;
+  dept?: string | null;
+}
+
+/**
+ * Responder-facing payload for a session paused at the `send` interrupt
+ * (schemas.py `HandoffResponse`). Read-only: fetching it does not advance the
+ * graph — the responder acts via POST /answer (outcome=accepted|declined).
+ */
+export interface HandoffResponse {
+  session_id: string;
+  question: string;
+  asker: HandoffAsker;
+  topics: string[];
+  products: string[];
+  situation?: string | null;
+  missing: string[];
+  /** the primary (handed-off) candidate — the person being asked. */
+  responder?: Recommendation | null;
+  draft: string;
+  reuse_count: number;
+  helpful_answer_count: number;
+}
+
+// --------------------------------------------------------------------------- //
 // SSE event data (GET /events/{session_id}) — mirrors events.py
 // --------------------------------------------------------------------------- //
 
