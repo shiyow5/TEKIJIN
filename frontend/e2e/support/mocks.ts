@@ -62,6 +62,9 @@ export const RECOMMENDATION = {
   reasons: [{ type: "certification", detail: "情報処理安全確保支援士を保有" }],
 };
 
+/** The draft the person-route stream feeds into the editor (asserted verbatim). */
+export const PERSON_ROUTE_DRAFT = "高梨さんへ。UTM の移行時に注意すべき点をご相談させてください。";
+
 /** Non-terminal person-route stream → reaches the PersonRouteView result. */
 export const PERSON_ROUTE_FRAMES: SseFrame[] = [
   {
@@ -79,10 +82,7 @@ export const PERSON_ROUTE_FRAMES: SseFrame[] = [
     data: { route: "person", reason: "同様の案件を直近で担当した方がいます。", confidence: 0.82 },
   },
   { event: "recommend", data: { recommendations: [RECOMMENDATION] } },
-  {
-    event: "draft",
-    data: { draft: "高梨さんへ。UTM の移行時に注意すべき点をご相談させてください。" },
-  },
+  { event: "draft", data: { draft: PERSON_ROUTE_DRAFT } },
 ];
 
 /** Terminal no-result stream → ProcessingScreen "回答をお届けします" + message. */

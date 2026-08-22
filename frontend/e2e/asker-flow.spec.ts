@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 import {
   API_BASE,
   MESSAGE_FRAMES,
+  PERSON_ROUTE_DRAFT,
   PERSON_ROUTE_FRAMES,
   fulfillJson,
   fulfillSse,
@@ -44,9 +45,9 @@ test.describe("asker flow", () => {
     ).toBeVisible();
     await expect(page.getByRole("heading", { name: /高梨 健太/ })).toBeVisible();
 
-    // The draft event pre-fills the editor, so sending is enabled immediately.
+    // The draft event pre-fills the editor verbatim, so sending is enabled at once.
     const draft = page.getByRole("textbox", { name: "聞き方の下書き" });
-    await expect(draft).not.toHaveValue("");
+    await expect(draft).toHaveValue(PERSON_ROUTE_DRAFT);
     await page.getByRole("button", { name: "この方に送る" }).click();
 
     await expect(page.getByRole("heading", { name: "送信しました" })).toBeVisible();
