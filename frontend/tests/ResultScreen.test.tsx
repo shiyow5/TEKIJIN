@@ -46,6 +46,28 @@ describe("ResultScreen — pending", () => {
   });
 });
 
+describe("ResultScreen — terminal-only replay (hard reload)", () => {
+  it("shows a sent-completion state when only a done event was replayed", () => {
+    // A finished, sent session hard-reloaded replays only `done` — no route /
+    // recommend / draft to hydrate. It must not stall on 「結果を準備中」.
+    renderResult(state({ terminal: true, done: { status: "sent" } }));
+    expect(screen.getByText("依頼は送信済みです")).toBeInTheDocument();
+    expect(screen.queryByText("結果を準備中…")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "新しい質問をする" })).toBeInTheDocument();
+  });
+
+  it("shows a terminal message (off-topic / no candidate) replayed on reload", () => {
+    renderResult(
+      state({
+        terminal: true,
+        message: { status: "no_candidate", message: "該当者が見つかりませんでした" },
+      }),
+    );
+    expect(screen.getByText("該当者が見つかりませんでした")).toBeInTheDocument();
+    expect(screen.queryByText("結果を準備中…")).not.toBeInTheDocument();
+  });
+});
+
 describe("ResultScreen — main line (person)", () => {
   it("renders up to three candidates with the fit signal and reason labels", () => {
     renderResult(
@@ -88,6 +110,36 @@ describe("ResultScreen — main line (person)", () => {
     expect(textarea.value).toBe("元の下書き");
     fireEvent.change(textarea, { target: { value: "編集後の本文" } });
     expect(textarea.value).toBe("編集後の本文");
+  });
+
+  it("resets the draft editor when a reroute changes the recipient (discards stale edit)", () => {
+    const { rerender } = render(
+      <ResultScreen
+        streamState={state({
+          route: { route: "person", reason: "", confidence: 0.9 },
+          recommend: { recommendations: [rec({ person_id: "E001", name: "高梨" })] },
+          draft: { draft: "高梨さん向けの下書き" },
+        })}
+      />,
+    );
+    const textarea = screen.getByLabelText<HTMLTextAreaElement>("聞き方の下書き");
+    fireEvent.change(textarea, { target: { value: "高梨さん宛に編集した本文" } });
+    expect(textarea.value).toBe("高梨さん宛に編集した本文");
+
+    // A decline reroutes to a different person with a fresh draft. The editor
+    // must remount and show the new recipient's draft, not the stale edit.
+    rerender(
+      <ResultScreen
+        streamState={state({
+          route: { route: "person", reason: "", confidence: 0.9 },
+          recommend: { recommendations: [rec({ person_id: "E002", name: "鈴木" })] },
+          draft: { draft: "鈴木さん向けの下書き" },
+        })}
+      />,
+    );
+    expect(screen.getByLabelText<HTMLTextAreaElement>("聞き方の下書き").value).toBe(
+      "鈴木さん向けの下書き",
+    );
   });
 
   it("confirms the send to the selected candidate", () => {

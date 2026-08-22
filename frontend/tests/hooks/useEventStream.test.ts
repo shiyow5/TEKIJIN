@@ -174,6 +174,31 @@ describe("useEventStream", () => {
     expect(view.result.current.events.filter((e) => e.event === "followup")).toHaveLength(2);
   });
 
+  it("ignores a replayed identical draft and keeps the stream open (send interrupt)", () => {
+    const { view, source } = setup();
+    act(() => source().emit("draft", { draft: "高梨さんへの依頼文" }));
+    // The backend re-emits the same draft on every reconnect while paused at
+    // `send`; the replay must not append a second event, and the stream must
+    // stay open so this consumer can still advance the graph to `done`.
+    act(() => source().emit("draft", { draft: "高梨さんへの依頼文" }));
+
+    expect(view.result.current.events.filter((e) => e.event === "draft")).toHaveLength(1);
+    expect(view.result.current.draft?.draft).toBe("高梨さんへの依頼文");
+    expect(view.result.current.terminal).toBe(false);
+    expect(source().closed).toBe(false);
+  });
+
+  it("does not close or error on a reconnect after a draft (send-interrupt pause)", () => {
+    const { view, source } = setup();
+    act(() => source().emit("draft", { draft: "依頼文" }));
+    // A transient reconnect (CONNECTING) at the send pause must be ignored — the
+    // consumer stays open to receive the eventual `done`.
+    act(() => source().nativeError(FakeEventSource.CONNECTING));
+
+    expect(source().closed).toBe(false);
+    expect(view.result.current.error).toBeUndefined();
+  });
+
   it("clears the previous draft when a new recommendation arrives (reroute)", () => {
     const { view, source } = setup();
     act(() => source().emit("recommend", { recommendations: [{ person_id: "E001" }] }));

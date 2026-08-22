@@ -95,7 +95,18 @@ export function PersonRouteView({ recommendations, reason, draft }: PersonRouteV
         </p>
       ) : null}
 
-      <DraftEditor initialDraft={draft} onSend={handleSend} />
+      {/*
+       * Keyed by the top candidate so a reroute (decline -> new recommend/draft
+       * for a different person) remounts the editor: it drops the previous
+       * recipient's edited text and seeds the new draft. A late draft for the
+       * SAME recipient keeps the same key, so in-progress edits are preserved
+       * (handled inside DraftEditor's dirty guard).
+       */}
+      <DraftEditor
+        key={topCandidate?.person_id ?? "no-candidate"}
+        initialDraft={draft}
+        onSend={handleSend}
+      />
     </section>
   );
 }

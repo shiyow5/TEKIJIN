@@ -35,6 +35,41 @@ function ResultPending() {
   );
 }
 
+/**
+ * Terminal outcome for a session hard-reloaded after it finished: the backend
+ * replays only the stored `done` / `message` event (no route/recommend/draft to
+ * hydrate), so branch on it here instead of dead-ending on the pending state.
+ */
+function ResultTerminal({
+  done,
+  message,
+}: {
+  done?: EventStreamState["done"];
+  message?: EventStreamState["message"];
+}) {
+  const heading = message ? "回答をお届けします" : "依頼は送信済みです";
+  const body =
+    message?.message ||
+    done?.answer ||
+    (message
+      ? "該当する回答が見つかりませんでした。"
+      : "この依頼は送信済みです。返信があると通知でお知らせします。");
+  return (
+    <section className="mx-auto flex w-full max-w-2xl flex-col gap-md py-lg text-center">
+      <h1 className="font-bold text-2xl text-on-surface">{heading}</h1>
+      <p className="whitespace-pre-wrap text-on-surface-variant">{body}</p>
+      <div className="flex justify-center">
+        <a
+          href="/questions"
+          className="min-h-[48px] rounded-full bg-primary px-lg py-sm font-bold text-on-primary shadow-md transition-colors hover:bg-primary-container"
+        >
+          新しい質問をする
+        </a>
+      </div>
+    </section>
+  );
+}
+
 export function ResultScreen({ streamState }: ResultScreenProps) {
   const contextStream = useOptionalSessionStream();
   const stream = streamState ?? contextStream ?? EMPTY_STREAM;
@@ -48,6 +83,11 @@ export function ResultScreen({ streamState }: ResultScreenProps) {
   const hasMainLineData = recommendations.length > 0 || draft !== "";
   const hasAnyData = hasMainLineData || Boolean(stream.route);
   if (!hasAnyData) {
+    // A completed session replayed after a hard reload carries only its terminal
+    // event; surface it instead of stalling on the pending placeholder.
+    if (stream.terminal && (stream.done || stream.message)) {
+      return <ResultTerminal done={stream.done} message={stream.message} />;
+    }
     return <ResultPending />;
   }
 
