@@ -86,6 +86,11 @@ def main():
     out["persons"] = encode(model, [t for _, t in persons], dp)
     out["persons_full"] = encode(model, [t for _, t in person_full], dp)
     out["queries"] = encode(model, queries, qp, batch_size=32)
+    # C5（経路判定）は「回答した過去質問」への近さも見る（retriever._question_mapped_answer_ids）。
+    # 経路の実測（#88）に要るので、質問文も同じ空間に載せておく。
+    answered = {a["question_id"] for a in fx["answers"]}
+    questions = [q for q in fx["questions"] if q["id"] in answered]
+    out["questions"] = encode(model, [q["body"] for q in questions], dp)
     if extra:
         out["extra"] = encode(model, extra, qp, batch_size=32)
 
@@ -94,6 +99,7 @@ def main():
         "chunk_ids": [c for c, _ in chunks],
         "person_ids": [c for c, _ in persons],
         "query_ids": [q["id"] for q in person_ids],
+        "question_ids": [q["id"] for q in questions],
         "n_extra": len(extra),
     }
     np.savez_compressed(args.out, **out)

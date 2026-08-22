@@ -1,0 +1,50 @@
+{
+  "n": 56,
+  "distribution": {
+    "document": 10,
+    "prior_answer": 7,
+    "person": 39
+  },
+  "majority": 0.6964285714285714,
+  "default_thresholds": [
+    0.8,
+    0.7,
+    0.5
+  ],
+  "default_accuracy": 0.6964285714285714,
+  "cv_accuracy": 0.7515151515151516,
+  "picked": [
+    [
+      0.55,
+      0.4,
+      0.4
+    ],
+    [
+      0.55,
+      0.4,
+      0.4
+    ],
+    [
+      0.55,
+      0.4,
+      0.4
+    ],
+    [
+      0.55,
+      0.4,
+      0.4
+    ],
+    [
+      0.55,
+      0.4,
+      0.4
+    ]
+  ],
+  "tuned_accuracy": 0.75,
+  "best_full": [
+    0.55,
+    0.4,
+    0.4
+  ],
+  "best_full_accuracy": 0.75
+}
