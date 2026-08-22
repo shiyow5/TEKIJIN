@@ -4,7 +4,7 @@
         lint lint-backend lint-frontend \
         test test-backend test-frontend e2e \
         run-backend run-frontend serve dev serve-prod \
-        db-up db-down seed embed eval \
+        db-up db-down seed migrate embed eval \
         typecheck-frontend check clean
 
 # ============================================================
@@ -163,8 +163,11 @@ db-up: ## Start the local PostgreSQL 16 + pgvector container (waits until health
 db-down: ## Stop the local PostgreSQL container
 	docker compose down
 
-seed: ## Seed the database from the synthetic fixtures
+seed: ## Seed the database from the synthetic fixtures (DESTRUCTIVE: truncates first)
 	cd $(BACKEND_DIR) && PYTHONPATH=src $(PY) -m tekijin.data.seed
+
+migrate: ## Apply non-destructive schema migrations (keeps data; re-run `make embed` after)
+	cd $(BACKEND_DIR) && PYTHONPATH=src $(PY) -m tekijin.data.migrate
 
 embed: ## Compute + store dense embeddings (needs requirements-ml.txt + a real model)
 	PYTHONPATH=$(BACKEND_DIR)/src $(PY) scripts/embed_fixtures.py

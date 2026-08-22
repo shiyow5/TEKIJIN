@@ -72,6 +72,14 @@ class Settings(BaseSettings):
     # benchmarked — flip this off when switching to a non-prefix model.
     embedding_use_e5_prefix: bool = True
 
+    # Whether to allow the embedding model to execute its own (remote) modeling
+    # code at load time (``SentenceTransformer(..., trust_remote_code=True)``).
+    # REQUIRED by the default Nemotron-3-Embed-1B (it ships custom modeling code);
+    # without it ``make embed`` fails during model loading. SECURITY: this runs
+    # code from the model repo, so keep it True only for a trusted, pinned default
+    # and set it False when pointing ``embedding_model`` at an untrusted source.
+    embedding_trust_remote_code: bool = True
+
     # Dimensionality of the embedding vectors produced by ``embedding_model``.
     # Nemotron-3-Embed-1B emits 2048-d vectors; this drives the width of every
     # ``pgvector`` column so the schema and the model agree. NOTE: the columns

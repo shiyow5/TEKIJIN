@@ -52,6 +52,10 @@ class SentenceTransformerEmbedder:
             Primarily a dependency-injection seam for tests.
         use_e5_prefix: When true, prepend ``"<kind>: "`` to every text (required
             by e5-family models). Set false for models that take raw text.
+        trust_remote_code: Passed to ``SentenceTransformer`` at load time. The
+            default Nemotron-3-Embed-1B ships custom modeling code and needs this;
+            ``None`` reads ``settings.embedding_trust_remote_code``. SECURITY: this
+            executes code from the model repo — keep it on only for trusted models.
     """
 
     def __init__(
@@ -60,10 +64,16 @@ class SentenceTransformerEmbedder:
         *,
         model: Any | None = None,
         use_e5_prefix: bool = True,
+        trust_remote_code: bool | None = None,
     ) -> None:
         self._model_name = model_name or get_settings().embedding_model
         self._model = model
         self._use_e5_prefix = use_e5_prefix
+        self._trust_remote_code = (
+            get_settings().embedding_trust_remote_code
+            if trust_remote_code is None
+            else trust_remote_code
+        )
         # Guards the one-time lazy load so two concurrent sessions sharing this
         # embedder cannot each start a (heavy) model init (codex#6).
         self._model_lock = threading.Lock()
@@ -83,7 +93,9 @@ class SentenceTransformerEmbedder:
                             "(installs backend/requirements-ml.txt), or run the API "
                             "with an injected embedder for tests."
                         ) from exc
-                    self._model = SentenceTransformer(self._model_name)
+                    self._model = SentenceTransformer(
+                        self._model_name, trust_remote_code=self._trust_remote_code
+                    )
         return self._model
 
     @staticmethod

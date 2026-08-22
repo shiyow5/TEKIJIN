@@ -119,8 +119,8 @@ flowchart TD
 ### C3. 埋め込み生成（埋め込みモデル）
 
 - **目的**: 質問・過去QA・案件・文書・人の自己紹介をベクトル化し、意味検索を可能にする。
-- **モデル候補**: 日本語特化の軽量埋め込み（例 `cl-nagoya/ruri-v3` 系）／ `multilingual-e5-large`。
-  **DAY3に評価セットで実測して選定**（13_技術仕様書 §3.5）。ローカル実行。
+- **採用モデル**: `nvidia/Nemotron-3-Embed-1B-BF16`（2048次元）。**実測で選定済み**（#61 /
+  ADR-0002：層2 R@3 = 0.615 で5本中1位）。退避先は Apache-2.0 の `Qwen3-Embedding-0.6B`。ローカル実行。
 - **入力**: テキスト（クエリ/パッセージ）。**出力**: 固定次元ベクトル。
 - **注意**: モデルによって `query:` / `passage:` プレフィックス要否が異なる。索引時と検索時で一致させる。
 
@@ -272,7 +272,7 @@ flowchart TB
 | **LLM 接続 / 構造化出力** | フレームワーク | **LangChain**（`init_chat_model` / `with_structured_output`） | サーバ | — |
 | **状態永続化 / メモリ** | チェックポイント | **langgraph-checkpoint-postgres（PostgresSaver）** | サーバ（既存DB） | InMemorySaver（開発初期） |
 | 意図理解 / 逆質問 / 下書き（C1,C2,C7） | 生成LLM | ローカルLLM 20〜30B級（DGX Sparkに載る最大） | ローカル（GPU） | Claude API（品質不足・環境不調時のフォールバック） |
-| 埋め込み（C3） | 埋め込み | 日本語特化 or multilingual-e5 | ローカル（GPU/CPU） | — |
+| 埋め込み（C3） | 埋め込み | **Nemotron-3-Embed-1B**（2048次元, #61/ADR-0002。退避先 Qwen3-Embedding-0.6B） | ローカル（GPU/CPU） | — |
 | 検索（C4） | 決定的 | pgvector(HNSW) + BM25(SudachiPy) + RRF | サーバ | pgroonga/OpenSearch（規模拡大時） |
 | 経路判定（C5） | 決定的 | 確信度×閾値ルール | サーバ | — |
 | スコアラー（C6） | 決定的 | 証拠積み上げ式 | サーバ | — |

@@ -13,7 +13,7 @@ from sqlalchemy import event, select, text
 from tekijin.config import get_settings
 from tekijin.data.db import get_engine, get_sessionmaker, session_scope
 from tekijin.data.repository import Repository
-from tekijin.data.seed import _apply_schema_upgrades, run_seed
+from tekijin.data.seed import _apply_schema_upgrades, apply_migrations, run_seed
 from tekijin.models.tables import (
     Answer,
     Employee,
@@ -336,3 +336,19 @@ def test_apply_schema_upgrades_migrates_old_db(database_url: str) -> None:
                 conn.execute(text(f"DROP SCHEMA IF EXISTS {schema} CASCADE"))
         finally:
             admin.dispose()
+
+
+def test_apply_migrations_is_non_destructive(engine, seed_counts) -> None:
+    """`apply_migrations` updates the schema without truncating existing rows.
+
+    Unlike ``run_seed`` (which truncates + reloads), the data-preserving deploy
+    path must keep rows intact and be idempotent.
+    """
+
+    factory = get_sessionmaker(engine)
+    with factory() as sess:
+        before = len(Repository(sess).list_employees())
+    apply_migrations(engine=engine)  # must NOT truncate
+    with factory() as sess:
+        after = len(Repository(sess).list_employees())
+    assert before == after == 40

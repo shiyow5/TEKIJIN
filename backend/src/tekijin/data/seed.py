@@ -78,13 +78,40 @@ def seed_session(session: Session, fixtures_dir: Path) -> dict[str, int]:
     return counts
 
 
+def apply_migrations(
+    database_url: str | None = None,
+    *,
+    engine: Engine | None = None,
+) -> None:
+    """Bring the schema up to date WITHOUT touching data (non-destructive).
+
+    Ensures the ``vector`` extension, creates any missing tables (``create_all``
+    never drops or truncates), and runs the idempotent additive DDL in
+    :func:`_apply_schema_upgrades`. Existing rows are retained. NOTE: an embedding
+    column widened by a dimension change is reset to ``NULL`` (a model change
+    invalidates old vectors); recompute with ``make embed``.
+
+    This is the safe deploy-time path when a database already holds data — unlike
+    :func:`run_seed`, which truncates and reloads fixtures. Exposed as a CLI via
+    ``python -m tekijin.data.migrate``.
+    """
+
+    eng = engine if engine is not None else get_engine(database_url)
+    ensure_pgvector(eng)
+    create_all(eng)
+    _apply_schema_upgrades(eng)
+
+
 def run_seed(
     database_url: str | None = None,
     fixtures_dir: Path | None = None,
     *,
     engine: Engine | None = None,
 ) -> dict[str, int]:
-    """Full seed pipeline: ensure extension, create schema, load fixtures.
+    """Full seed pipeline: migrate schema, then TRUNCATE and load fixtures.
+
+    DESTRUCTIVE: :func:`seed_session` truncates every table before re-inserting.
+    For a data-preserving schema update use :func:`apply_migrations` instead.
 
     Pass ``engine`` to reuse an existing engine (preferred by callers that
     already hold one — a live ``Engine`` carries the real password, whereas
@@ -96,9 +123,7 @@ def run_seed(
     eng = engine if engine is not None else get_engine(database_url)
     fixtures = fixtures_dir or settings.fixtures_dir
 
-    ensure_pgvector(eng)
-    create_all(eng)
-    _apply_schema_upgrades(eng)
+    apply_migrations(engine=eng)
 
     factory = get_sessionmaker(eng)
     with session_scope(factory) as session:
@@ -125,6 +150,12 @@ def _apply_schema_upgrades(engine: Engine) -> None:
     builds ``vector(2048)`` so the block is a no-op there (no table rewrite).
     """
 
+    # The target width is derived from the single source of truth
+    # (``settings.embedding_dim``, which also drives ``Vector(EMBEDDING_DIM)`` in
+    # models/tables.py) so a future dim change updates ``create_all`` and this
+    # migration together. It is an internal ``int`` (never external input), so
+    # interpolating it into the SQL is safe.
+    dim = get_settings().embedding_dim
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE questions ADD COLUMN IF NOT EXISTS route VARCHAR(32)"))
         # Widen embedding columns to the current dim when an older DB is narrower.
@@ -143,9 +174,9 @@ def _apply_schema_upgrades(engine: Engine) -> None:
                 "      FROM pg_attribute\n"
                 "      WHERE attrelid = tbl::regclass AND attname = 'embedding'\n"
                 "        AND attnum > 0 AND NOT attisdropped;\n"
-                "    IF cur IS DISTINCT FROM 'vector(2048)' THEN\n"
+                f"    IF cur IS DISTINCT FROM 'vector({dim})' THEN\n"
                 "      EXECUTE format(\n"
-                "        'ALTER TABLE %I ALTER COLUMN embedding TYPE vector(2048) USING NULL',\n"
+                f"        'ALTER TABLE %I ALTER COLUMN embedding TYPE vector({dim}) USING NULL',\n"
                 "        tbl);\n"
                 "    END IF;\n"
                 "  END LOOP;\n"
