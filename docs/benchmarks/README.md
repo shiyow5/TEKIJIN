@@ -42,6 +42,7 @@
 | `ablation/c2_qwen36_{product,scoped}.json` | C2 充足判定の生出力（#111。**結論は取り下げ済み**） |
 | `ablation/{payload_,}c1_faithful.json` / `{payload_,}c2_faithful.json` | **製品のリクエストをそのまま再現した C1/C2 の入出力**。[llm_faithful.md](llm_faithful.md) |
 | `ablation/e2e_variants_c1.json` | C1 の実トピックで測った層2 R@3。[llm_faithful.md](llm_faithful.md) |
+| `ablation/c1_nothink.json` / `e2e_variants_c1_nothink.json` | `enable_thinking=false` を足しただけの反実仮想。同上 §4.5 |
 
 ## 埋め込み（層2 Recall@3 が主指標）
 
@@ -69,12 +70,13 @@ Apache-2.0 と 1024次元の扱いやすさを優先するなら Qwen3-Embedding
 | Qwen3-Swallow-30B-A3B-AWQ | + 構造化出力 | 1.000 | 0.545 | 0.56s | 44 | 0.350 | 0.62s | 4.66s | 79 |
 | **Qwen3.6-35B-A3B-NVFP4** | + 構造化出力 | **1.000** | **0.780** | **0.52s** | 33 | **0.900** | **0.25s** | 1.40s | 62〜73 |
 
-**C1+C2 合計 p95: 1.31秒**（合格ライン3秒）
+**C1+C2 合計 p95: 1.31秒**（仕様の目標は `technical-spec.md` の**初回表示 p50 1.5秒 / p95 3秒**。
+段別の線は仕様に無いので、これは内訳の目安）
 
 > ⛔ **上の表はすべて `enable_thinking=false` で測った値で、製品の設定では再現しない。**
 > `_openai_model`（`llm/vllm.py`）は `chat_template_kwargs` を渡していないので thinking が ON のまま動く。
 > 製品のリクエストをそのまま再現すると **C1 p50 14.14秒 / C1+C2 p50 83.15秒**、
-> C1 は 76件中10件、C2 は届いた60件中30件が長さ切れで関数呼び出しを返さない（製品では 500）。
+> C1 は 76件中10件、C2 は届いた60件中29件が長さ切れになる（製品では 500）。
 > → [llm_faithful.md](llm_faithful.md)（#116）。
 
 ## 実装に直結する注意（実測で分かったこと）

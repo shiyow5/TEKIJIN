@@ -238,7 +238,9 @@ def main():
         print(
             f"  {name:24s} p50 {pct(arr, 50):.2f}s / p95 {pct(arr, 95):.2f}s / 最大 {arr.max():.2f}s"
         )
-    print("  ※ 合格ラインは docs/specs で C1+C2 合計 3秒。")
+    print(
+        "  ※ 仕様の目標は初回表示 p50 1.5秒 / p95 3秒（端から端まで）。段別の線は無い。"
+    )
 
     if args.out:
         with open(args.out, "w", encoding="utf-8") as f:
