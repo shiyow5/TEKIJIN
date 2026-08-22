@@ -222,6 +222,23 @@ def test_embedder_honors_explicit_trust_and_revision() -> None:
     assert embedder._revision == "deadbeef"
 
 
+def test_embedder_revision_sentinel_distinguishes_omitted_from_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # With a pinned revision in the (global) settings, an OMITTED revision inherits
+    # it, but an EXPLICIT None (a fallback model wanting the default branch) must be
+    # preserved — not silently overridden by the global pin.
+    import tekijin.retrieval.embedding as emb
+
+    pinned = Settings(_env_file=None, embedding_model_revision="global-pin")  # type: ignore[call-arg]
+    monkeypatch.setattr(emb, "get_settings", lambda: pinned)
+
+    assert emb.SentenceTransformerEmbedder(model=_FakeModel())._revision == "global-pin"
+    assert emb.SentenceTransformerEmbedder(model=_FakeModel(), revision=None)._revision is None
+    got = emb.SentenceTransformerEmbedder(model=_FakeModel(), revision="local")._revision
+    assert got == "local"
+
+
 def test_sentence_transformer_embedder_is_an_embedder() -> None:
     # Structural typing: it satisfies the Embedder protocol.
     assert isinstance(SentenceTransformerEmbedder(model=_FakeModel()), Embedder)
