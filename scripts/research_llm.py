@@ -429,6 +429,8 @@ def main():
             "topic_ctx",
             "topic_abstain",
             "abstain_check",
+            "draft",
+            "judge",
         ],
     )
     ap.add_argument("--out", required=True)

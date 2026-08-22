@@ -117,11 +117,22 @@ def check_draft(text, case, vocab):
     issues = []
     responder = case["responder"]
     allowed_names = {responder["name"], responder["name"].split()[0]}
-    reasons_text = " ".join(responder["reasons"])
+    # 「渡した情報」= 質問文 + 取り次ぎ先のレコード。質問文に出てくる語は引用してよい
+    # （拠点の制約は質問文に書かれている。ここを根拠だけと照合すると誤検出になる）。
+    given = " ".join(
+        [
+            case["question"],
+            responder["name"],
+            responder.get("dept") or "",
+            *responder["reasons"],
+        ]
+    )
 
     # 1) 取り次ぎ先以外の社員名が出ていないか
     for surname, full in vocab["name_of"].items():
         if surname in allowed_names:
+            continue
+        if surname in given:
             continue
         if re.search(rf"{re.escape(surname)}\s*(?:さん|様|氏)", text):
             issues.append({"kind": "other_person", "value": full})
@@ -129,12 +140,16 @@ def check_draft(text, case, vocab):
     # 2) 渡していない商材名・資格名を書いていないか
     for kind, key in (("product", "products"), ("cert", "certs")):
         for term in vocab[key]:
-            if term and term in text and term not in reasons_text:
+            if term and term in text and term not in given:
                 issues.append({"kind": f"unsupported_{kind}", "value": term})
 
     # 3) 渡していない拠点名（相談者の拠点は渡していない）
     for br in vocab["branches"]:
-        if br and re.search(rf"{re.escape(br)}(?:拠点|支店|オフィス)", text):
+        if (
+            br
+            and br not in given
+            and re.search(rf"{re.escape(br)}(?:拠点|支店|オフィス)", text)
+        ):
             issues.append({"kind": "unsupported_branch", "value": br})
 
     # 4) 宛名が取り次ぎ先になっているか
