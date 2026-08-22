@@ -474,6 +474,64 @@ def run_c2(payload, variant="scoped"):
     return out
 
 
+def run_raw(payload):
+    """組み立て済みリクエストをそのまま投げる（#113）。
+
+    `research_faithful.py` が製品コードから作った `request` を**一切足さずに**送る
+    （`model` だけは差し替える。ベンチのサーバは `--served-model-name` が別名）。
+
+    `finish_reason` も残す。製品は `max_tokens` を指定しないが、サーバ側の
+    `--max-model-len` で切られると `tool_calls` が欠けた応答が返る。それを
+    「モデルが関数を呼ばなかった」と取り違えないため。
+    1件の失敗で全体を捨てないよう、例外は行として記録して先へ進む。
+    """
+    out = []
+    for i, case in enumerate(payload):
+        t0 = time.time()
+        req = urllib.request.Request(
+            BASE_URL + "/chat/completions",
+            data=json.dumps({**case["request"], "model": MODEL}).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=600) as resp:
+                data = json.loads(resp.read())
+            choice = data["choices"][0]
+            msg = choice["message"]
+            calls = msg.get("tool_calls") or []
+            row = {
+                "arguments": calls[0]["function"]["arguments"] if calls else "",
+                "content": msg.get("content") or "",
+                "reasoning": msg.get("reasoning_content") or "",
+                "finish_reason": choice.get("finish_reason"),
+                "out_tokens": data.get("usage", {}).get("completion_tokens"),
+                "error": None,
+            }
+        except Exception as exc:  # noqa: BLE001 - 落ちた事実ごと記録して続ける
+            row = {
+                "arguments": "",
+                "content": "",
+                "reasoning": "",
+                "finish_reason": None,
+                "out_tokens": None,
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+        out.append(
+            {
+                "id": case["id"],
+                "klass": case.get("klass"),
+                **row,
+                "latency": time.time() - t0,
+            }
+        )
+        print(
+            f"[{i + 1}/{len(payload)}] {out[-1]['latency']:.2f}s "
+            f"{out[-1]['error'] or out[-1]['arguments'][:70]}",
+            flush=True,
+        )
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument(
@@ -490,6 +548,7 @@ def main():
             "draft",
             "judge",
             "c2",
+            "raw",
         ],
     )
     ap.add_argument("--out", required=True)
@@ -517,6 +576,7 @@ def main():
         "draft",
         "judge",
         "c2",
+        "raw",
     ):
         with open(args.payload, encoding="utf-8") as f:
             payload = json.load(f)
@@ -530,6 +590,8 @@ def main():
             out = run_judge(payload)
         elif args.task == "c2":
             out = run_c2(payload, args.c2_prompt)
+        elif args.task == "raw":
+            out = run_raw(payload)
         else:
             out = run_topic_ctx(
                 payload,

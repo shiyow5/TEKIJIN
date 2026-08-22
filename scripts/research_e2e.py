@@ -147,7 +147,22 @@ def task_route(url, out):
     session.get_bind().dispose()
 
 
-def task_variants(url, out):
+def load_c1_topics(path):
+    """C1 の実出力を {評価ID: トピック列} に直す（#113）。無ければ None。"""
+    if not path:
+        return None
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import research_faithful as rf
+
+    by_eval = {r["id"]: r["eval_id"] for r in rf.items() if r["klass"] == "normal"}
+    return {
+        by_eval[i]: list(intent.topics)
+        for i, intent in rf.load_c1(path).items()
+        if i in by_eval
+    }
+
+
+def task_variants(url, out, c1_topics=None):
     """経路の pin と候補集合を差し替えて、製品の metrics で測り直す。"""
     from sqlalchemy import select
     from tekijin.agent.route import decide_route
@@ -168,10 +183,11 @@ def task_variants(url, out):
         res = retriever.search(q.query)
         cache[q.id] = (res, decide_route(res).route)
 
-    def rank(query, candidates):
-        if not query.gold_topics or not candidates:
+    def rank(query, candidates, topics=None):
+        topics = query.gold_topics if topics is None else topics
+        if not topics or not candidates:
             return []
-        out_ = scorer.rank(query.gold_topics, candidates, None, NOW, top_k=10)
+        out_ = scorer.rank(topics, candidates, None, NOW, top_k=10)
         return [r["person_id"] for r in out_["recommendations"]]
 
     def as_is(query, res, route):
@@ -189,6 +205,23 @@ def task_variants(url, out):
         ),
         "候補を全社員にする（#87）": lambda q, res, route: rank(q, all_ids),
     }
+    if c1_topics is not None:
+        # 上3つは gold トピックを渡している（＝C1 が完璧という仮定）。
+        # 製品では C6 が受け取るのは **C1 が実際に出した自由記述のトピック**。
+        variants["C1 の実トピック＋全社員（#113）"] = lambda q, res, route: rank(
+            q, all_ids, c1_topics.get(q.id, [])
+        )
+        variants["C1 の実トピック＋そのまま（#113）"] = lambda q, res, route: (
+            []
+            if route == "document"
+            else rank(
+                q,
+                [_pinned_responder(res)]
+                if route == "prior_answer" and _pinned_responder(res) is not None
+                else list(res["candidate_people"]),
+                c1_topics.get(q.id, []),
+            )
+        )
 
     report = []
     for label, fn in variants.items():
@@ -333,6 +366,11 @@ def main():
         help="pgserver のデータディレクトリ（使い回す）",
     )
     ap.add_argument("--out", default=None)
+    ap.add_argument(
+        "--c1",
+        default=None,
+        help="variants で使う C1 の実出力（research_faithful.py --task c1 の結果）",
+    )
     args = ap.parse_args()
 
     url = start_db(args.pgdir)
@@ -344,7 +382,7 @@ def main():
     elif args.task == "misrec":
         task_misrec(url, args.out)
     else:
-        task_variants(url, args.out)
+        task_variants(url, args.out, load_c1_topics(args.c1))
 
 
 if __name__ == "__main__":
