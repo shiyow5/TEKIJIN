@@ -7,8 +7,11 @@
 > ⚠️ **製品コードで回したら層2 Recall@3 は 0.140 だった（[e2e.md](e2e.md) / #103）。**
 > 経路が全件 `prior_answer` に倒れて候補が1名に固定されている。**下の数字はハーネス上のもの。**
 >
-> ⚠️ **C2 の system プロンプトのままだと、正常な相談 56件すべてが聞き返しで止まる（[c2.md](c2.md) / #111）。**
-> 異常系の検出は 20/20 で満点なので、直すのは判断基準の文面だけでよい。
+> ⛔ **`llm_backend=vllm` で製品のまま動かすと、層2 Recall@3 は 0.836 → 0.131（ランダム 0.107）。**
+> C1 の自由記述トピックが C6 の完全一致照合と噛み合わず、証拠源が4つとも空振りする。
+> あわせて thinking が ON のままで **C1+C2 の p50 が 83秒**（合格ライン3秒）。
+> → **[llm_faithful.md](llm_faithful.md)**（#113 / #116）。
+> [c2.md](c2.md)（#111）の結論は取り下げ済み。
 >
 > **続き**: モデルを固定したまま**アーキテクチャ側**で精度を上げる実験は
 > [ablation.md](ablation.md)（#65）にある。層2 Recall@3 は分割検証で **+0.114** 伸びた。
@@ -23,7 +26,7 @@
 |---|---|---|
 | C3 埋め込み | **Nemotron-3-Embed-1B**（次点 Qwen3-Embedding-0.6B） | 層2 Recall@3 = 0.615（次点 0.533） |
 | C1 意図理解 | **Qwen3.6-35B-A3B-NVFP4** + **構造化出力** | トピックF1 0.780 / JSON妥当率 1.000 / p50 0.52s |
-| C2 充足判定 | **Qwen3.6-35B-A3B-NVFP4** + 構造化出力 | 正解率 0.900（n=20 の旧ベンチ。**76件で測り直すと出荷時プロンプトで 0.263** → [c2.md](c2.md) / #111） |
+| C2 充足判定 | **Qwen3.6-35B-A3B-NVFP4** + 構造化出力 | 正解率 0.900（n=20 の旧ベンチ。**製品のまま測ると母集団が長さ切れで壊れる** → [llm_faithful.md](llm_faithful.md) / #113） |
 | C7 下書き | **Qwen3.6-35B-A3B-NVFP4**（#91 で決着） | 根拠違反 0/56・字数中央186・p50 1.38s。Swallow は単価と品番を捏造し、84%で依頼事項を勝手に追加 |
 
 ## ファイル
@@ -34,7 +37,9 @@
 | `res_swallow_off.json` | Qwen3-Swallow-30B-A3B-AWQ（thinking off、構造化出力なし） |
 | `res_swallow_guided.json` | 同上 + 構造化出力 |
 | `res_qwen36_guided.json` | Qwen3.6-35B-A3B-NVFP4 + 構造化出力。**C7 の下書き出力も入っている**（人手評価用） |
-| `ablation/c2_qwen36_{product,scoped}.json` | C2 充足判定の生出力（system プロンプト2版 × 76件）。[c2.md](c2.md) |
+| `ablation/c2_qwen36_{product,scoped}.json` | C2 充足判定の生出力（#111。**結論は取り下げ済み**） |
+| `ablation/{payload_,}c1_faithful.json` / `{payload_,}c2_faithful.json` | **製品のリクエストをそのまま再現した C1/C2 の入出力**。[llm_faithful.md](llm_faithful.md) |
+| `ablation/e2e_variants_c1.json` | C1 の実トピックで測った層2 R@3。[llm_faithful.md](llm_faithful.md) |
 
 ## 埋め込み（層2 Recall@3 が主指標）
 
@@ -62,9 +67,11 @@ Apache-2.0 と 1024次元の扱いやすさを優先するなら Qwen3-Embedding
 
 **C1+C2 合計 p95: 1.31秒**（合格ライン3秒）
 
-> ⚠️ **上の C2 の列は n=20（`insufficient` 5件 + L1/L2 15件、C1 のトピックを渡さない）で測ったもの。**
-> 契約どおり C1 の出力を渡して 76件で測り直すと、**出荷時の system プロンプトでは正常系 0/56**、
-> C2 単体の p95 も 2.73秒 で **C1+C2 合計 3.34秒**（合格ライン割れ）になる。[c2.md](c2.md)（#111）を見ること。
+> ⛔ **上の表はすべて `enable_thinking=false` で測った値で、製品の設定では再現しない。**
+> `_openai_model`（`llm/vllm.py`）は `chat_template_kwargs` を渡していないので thinking が ON のまま動く。
+> 製品のリクエストをそのまま再現すると **C1 p50 14.14秒 / C1+C2 p50 83.15秒**、
+> C1 は 76件中10件、C2 は 66件中31件が長さ切れで関数呼び出しを返さない（製品では例外）。
+> → [llm_faithful.md](llm_faithful.md)（#116）。
 
 ## 実装に直結する注意（実測で分かったこと）
 
