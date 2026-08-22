@@ -50,7 +50,8 @@ def main() -> int:
     engine = get_engine(settings.database_url)
     session = get_sessionmaker(engine)()
     try:
-        if not _embeddings_indexed(session):
+        indexed = _embeddings_indexed(session)
+        if not indexed:
             print(
                 "警告: 埋め込み索引が未生成です（`make embed`）。dense/route 指標は縮退します。",
                 file=sys.stderr,
@@ -59,9 +60,17 @@ def main() -> int:
         ranker = build_pipeline_ranker(session, embedder, now=EVAL_NOW)
         report = run_eval(queries, ranker)
         # Persist the snapshot so the dashboard (GET /dashboard) can surface the
-        # latest 推薦精度 without re-running the evaluation on every request.
-        insert_eval_run(session, report.metrics.as_dict())
-        session.commit()
+        # latest 推薦精度 without re-running the evaluation on every request — but
+        # NOT when embeddings are missing, so a degraded run can't silently
+        # overwrite a valid prior snapshot on the dashboard.
+        if indexed:
+            insert_eval_run(session, report.metrics.as_dict())
+            session.commit()
+        else:
+            print(
+                "埋め込み未生成のため、この評価結果はダッシュボードに保存しません。",
+                file=sys.stderr,
+            )
     finally:
         session.close()
         engine.dispose()

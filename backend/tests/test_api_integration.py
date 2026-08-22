@@ -426,14 +426,15 @@ def test_dashboard_self_resolution_and_latest_eval(seed_counts, session) -> None
     from tekijin.data.writes import insert_eval_run
     from tekijin.models.tables import Question
 
-    # Route three seeded questions: 2 auxiliary (prior_answer/document), 1 person.
-    routes = {"q_0001": "prior_answer", "q_0002": "document", "q_0003": "person"}
+    # Route three seeded questions. Only ``document`` counts as self-resolved:
+    # ``prior_answer`` still hands off to the pinned responder in the current graph.
+    routes = {"q_0001": "document", "q_0002": "prior_answer", "q_0003": "person"}
     for qid, route in routes.items():
         session.execute(update(Question).where(Question.id == qid).values(route=route))
     session.flush()
 
     summary = dashboard_summary(session)
-    assert summary["self_resolution_rate"] == pytest.approx(2 / 3)  # 2 of 3 routed = auxiliary
+    assert summary["self_resolution_rate"] == pytest.approx(1 / 3)  # only the document route
 
     # No eval snapshot -> None; after storing one, the latest is returned.
     assert summary["latest_eval"] is None

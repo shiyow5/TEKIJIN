@@ -14,9 +14,13 @@ from sqlalchemy.orm import Session
 
 from tekijin.models.tables import Answer, Employee, EvalRun, Question, Recommendation
 
-# The 補助経路 (auxiliary) routes that resolve a question without a new live
-# hand-off — the numerator of the self-resolution rate (product-spec 画面5).
-_SELF_RESOLVED_ROUTES = ("prior_answer", "document")
+# Routes that resolve a question WITHOUT contacting a live person — the numerator
+# of the self-resolution rate (product-spec 画面5). Only ``document`` qualifies in
+# the current graph: ``prior_answer`` pins the past responder and still runs
+# through C6/C7 to the ``send`` human interrupt, so it is NOT self-resolved.
+# (Counting a genuinely person-free prior_answer path would need runtime tracking
+# of whether the asker accepted the past answer without asking again — a follow-up.)
+_SELF_RESOLVED_ROUTES = ("document",)
 
 
 def dashboard_summary(
@@ -119,7 +123,11 @@ def _avg_resolution_hours(session: Session) -> float | None:
     """Mean hours from a question to its first answer (画面5 平均解決時間).
 
     ``None`` when no question has an answer yet. Uses the earliest answer per
-    question so a later follow-up answer does not inflate the time.
+    question so a later follow-up answer does not inflate the time. NOTE: this
+    reflects questions that have an ``answers`` row (the seeded / historical Q&A).
+    API hand-offs currently record only ``recommendations.outcome`` (no answer
+    row / resolution timestamp), so runtime resolutions do not yet move this
+    number — capturing a per-question ``resolved_at`` is a tracked follow-up.
     """
 
     first_answer = (
