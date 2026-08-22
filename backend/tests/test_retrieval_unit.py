@@ -88,10 +88,13 @@ def test_rrf_weights_scale_each_ranking_contribution() -> None:
     assert result["a"] > result["b"]
 
 
-def test_rrf_weight_zero_disables_a_ranking() -> None:
-    # A zero-weighted ranking contributes nothing (BM25 fully off).
+def test_rrf_weight_zero_omits_a_ranking_entirely() -> None:
+    # A zero-weighted ranking contributes nothing AND does not introduce its ids
+    # (BM25 fully off must not leak sparse-only hits). "b" appears only in the
+    # zero-weighted list, so it must be absent from the result.
     result = dict(rrf([["a"], ["b"]], k=60, weights=[1.0, 0.0]))
-    assert result["b"] == 0.0
+    assert "b" not in result
+    assert result["a"] == pytest.approx(1.0 / 61)
 
 
 def test_rrf_weights_none_matches_all_ones() -> None:
@@ -105,8 +108,15 @@ def test_rrf_rejects_weight_length_mismatch() -> None:
 
 
 def test_rrf_rejects_negative_weight() -> None:
-    with pytest.raises(ValueError, match="non-negative"):
+    with pytest.raises(ValueError, match="finite and non-negative"):
         rrf([["a"]], weights=[-0.1])
+
+
+def test_rrf_rejects_non_finite_weight() -> None:
+    with pytest.raises(ValueError, match="finite and non-negative"):
+        rrf([["a"]], weights=[float("nan")])
+    with pytest.raises(ValueError, match="finite and non-negative"):
+        rrf([["a"]], weights=[float("inf")])
 
 
 # --------------------------------------------------------------------------- #
@@ -285,6 +295,25 @@ def test_hybrid_retriever_rejects_nonpositive_params(top_k: int, rrf_k: int) -> 
     with pytest.raises(ValueError, match="must be positive"):
         # session is never touched: validation runs first in __init__.
         HybridRetriever(embedder, session=None, top_k=top_k, rrf_k=rrf_k)  # type: ignore[arg-type]
+
+
+def test_hybrid_retriever_rejects_negative_bm25_weight() -> None:
+    from tekijin.retrieval.retriever import HybridRetriever
+
+    embedder = SentenceTransformerEmbedder(model=_FakeModel())
+    with pytest.raises(ValueError, match="bm25_weight must be non-negative"):
+        HybridRetriever(embedder, session=None, bm25_weight=-0.1)  # type: ignore[arg-type]
+
+
+def test_hybrid_retriever_bm25_weight_defaults_from_settings() -> None:
+    from tekijin.retrieval.retriever import HybridRetriever
+
+    embedder = SentenceTransformerEmbedder(model=_FakeModel())
+    # None -> settings; an explicit value wins.
+    default = HybridRetriever(embedder, session=None)  # type: ignore[arg-type]
+    assert default._bm25_weight == get_settings().bm25_weight
+    explicit = HybridRetriever(embedder, session=None, bm25_weight=0.42)  # type: ignore[arg-type]
+    assert explicit._bm25_weight == 0.42
 
 
 @pytest.mark.parametrize("batch_size", [0, -1])

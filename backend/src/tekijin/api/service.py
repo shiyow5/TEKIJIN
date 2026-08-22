@@ -142,6 +142,7 @@ class AgentService:
         draft_model: DraftModel,
         retriever: Any | None = None,
         scorer: Any | None = None,
+        bm25_weight: float | None = None,
         now_factory: Any = _default_now,
         clock: Any = time.monotonic,
     ) -> None:
@@ -156,6 +157,10 @@ class AgentService:
         # fakes so the SSE flow does not depend on retrieval scores.
         self._retriever = retriever
         self._scorer = scorer
+        # C4 BM25 fusion weight from the SUPPLIED settings (via the factory), so a
+        # custom Settings is honored rather than the cached global (#68). None →
+        # the default HybridRetriever reads settings itself.
+        self._bm25_weight = bm25_weight
         self._now_factory = now_factory
         # Monotonic clock for TTL bookkeeping — injectable so ``_sweep`` is
         # deterministic in tests (the process ``time.monotonic`` epoch is the boot
@@ -503,6 +508,7 @@ class AgentService:
             draft_model=self._draft,
             retriever=self._retriever,
             scorer=self._scorer,
+            bm25_weight=self._bm25_weight,
         )
 
     def _run(

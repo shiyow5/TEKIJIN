@@ -524,7 +524,11 @@ def test_build_default_service_forwards_embedding_settings() -> None:
     settings = _settings(
         embedding_trust_remote_code=False,
         embedding_model_revision="pinned123",
+        bm25_weight=0.37,
     )
     service = build_default_service(settings)
     assert service._embedder._trust_remote_code is False
     assert service._embedder._revision == "pinned123"
+    # C4 BM25 weight is forwarded from the supplied settings (#68), so the graph's
+    # retriever uses it rather than the cached global.
+    assert service._bm25_weight == 0.37

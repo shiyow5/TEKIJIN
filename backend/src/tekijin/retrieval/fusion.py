@@ -10,6 +10,7 @@ original Cormack et al. (2009) formulation and the spec.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Hashable, Sequence
 
 
@@ -48,12 +49,19 @@ def rrf(
             raise ValueError(
                 f"weights length {len(weights)} must match rankings length {len(rankings)}"
             )
-        if any(w < 0 for w in weights):
-            raise ValueError(f"weights must be non-negative, got {list(weights)}")
+        # Reject NaN/inf: NaN passes ``< 0`` yet poisons every score, and inf
+        # makes one channel dominate — neither defines a usable ranking.
+        if any(not math.isfinite(w) or w < 0 for w in weights):
+            raise ValueError(f"weights must be finite and non-negative, got {list(weights)}")
 
     scores: dict[Hashable, float] = {}
     for idx, ranking in enumerate(rankings):
         weight = 1.0 if weights is None else weights[idx]
+        # A zero-weight ranking must contribute NOTHING — skip it entirely so its
+        # ids are not even introduced (else a disabled channel could still surface
+        # ids when the weighted channels return fewer than top_k).
+        if weight == 0.0:
+            continue
         for rank, id_ in enumerate(ranking):
             # ``rank`` is 0-based; RRF uses 1-based ranks, hence ``+ 1``.
             scores[id_] = scores.get(id_, 0.0) + weight / (k + rank + 1)

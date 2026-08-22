@@ -36,4 +36,7 @@ def build_default_service(settings: Settings | None = None) -> AgentService:
         intent_model=intent_model,
         sufficiency_model=sufficiency_model,
         draft_model=draft_model,
+        # From THIS settings instance (not the cached global) so a custom Settings
+        # is honored when the graph builds its C4 retriever (#68).
+        bm25_weight=settings.bm25_weight,
     )
