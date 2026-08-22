@@ -9,8 +9,9 @@
 
   out_of_scope / adversarial / pii … C1 が `out_of_scope=true` で弾く。**C2 に届かない**
   insufficient                     … **C2 の担当**。`sufficient=false` が正解
-  no_expert                        … 正解が決まらない。C2 に名簿は見えないので
-                                      「聞き返す」も「通して no_candidate に落とす」も筋が通る
+  no_expert                        … **C6 / `no_candidate` の担当**。C2 に名簿は見えないので、
+                                      「該当者がいない」は C6 のスコアリングが空を返して
+                                      初めて確定する（`graph._after_c6` → `no_candidate`）
   normal                           … 充足の正解ラベルが無い。**聞き返し率をそのまま出す**
 
 **正解率とは呼ばない。** 代わりに、同じ `IntentResult` を `RuleSufficiencyModel`
