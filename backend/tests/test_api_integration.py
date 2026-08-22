@@ -520,10 +520,13 @@ def test_set_recommendation_outcome_is_idempotent(seed_counts, session) -> None:
     assert rec.outcome == "accepted"  # first write wins; second is a no-op
 
 
-def test_resume_rejected_when_outcome_already_recorded(seed_counts, engine, fake_embedder) -> None:
-    # Divergence guard (#38 re-review): if a restart loses the in-memory pending
-    # guard after the outcome was recorded, a second /answer with a DIFFERENT
-    # action must be rejected — never queue a resume that diverges from the DB.
+def test_resume_reconciles_to_stored_outcome_after_restart(
+    seed_counts, engine, fake_embedder
+) -> None:
+    # Divergence + stuck guard (#38 re-review): if a restart loses the in-memory
+    # pending guard after the outcome was recorded, a second /answer with a
+    # DIFFERENT action must neither overwrite the DB nor leave the graph stuck. The
+    # stored outcome wins and the graph is resumed with it (consistent).
     svc = _svc(
         engine,
         fake_embedder,
@@ -532,12 +535,16 @@ def test_resume_rejected_when_outcome_already_recorded(seed_counts, engine, fake
     )
     svc.start_question("dv", 10, GOOD_Q)
     list(svc.stream_events("dv"))  # pause at send
-    svc.submit_resume("dv", outcome="accepted")  # records outcome + queues resume
-    svc._registry.clear()  # simulate restart: the in-memory pending guard is gone
-    with pytest.raises(SessionConflict):
-        svc.submit_resume("dv", outcome="declined")  # DB already accepted -> reject
+    svc.submit_resume("dv", outcome="accepted")  # records accepted + queues resume
+    svc._registry.clear()  # simulate restart: pending guard lost, outcome persisted
+    svc.submit_resume("dv", outcome="declined")  # resubmit a DIFFERENT action
     recs = _recs_for(engine, _latest_question(engine).id)
-    assert recs[0].outcome == "accepted"  # unchanged; graph never told to decline
+    assert recs[0].outcome == "accepted"  # first write wins; never overwritten
+    # The graph advances consistently (resumed with the stored 'accepted'), not
+    # left permanently paused at send.
+    done = [ev.event for ev in svc.stream_events("dv")]
+    assert "done" in done
+    assert _recs_for(engine, _latest_question(engine).id)[0].outcome == "accepted"
 
 
 def test_handoff_unexpected_error_is_generic_500(seed_counts, engine, fake_embedder) -> None:

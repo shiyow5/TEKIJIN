@@ -305,14 +305,14 @@ class AgentService:
             elif node == "send":
                 if outcome is None:
                     raise SessionInvalid("this session expects a responder 'outcome'")
-                resume_value = outcome
-                # DB is the source of truth for "already answered": if the primary
-                # recommendation already carries an outcome (e.g. a restart lost the
-                # in-memory pending guard, and the responder reloaded the form and
-                # chose a different action), reject rather than queue a resume that
-                # would diverge from the recorded outcome.
-                if self._record_outcome(session_id, snapshot.values, outcome) == "already":
-                    raise SessionConflict("this handoff has already been answered")
+                # The DB is the source of truth for the outcome. ``_record_outcome``
+                # writes it first-wins and returns the EFFECTIVE (persisted) value:
+                # on a duplicate submission (e.g. a restart lost the in-memory
+                # pending guard and the responder resubmitted) the stored outcome
+                # wins. We resume the graph with that effective value so the
+                # checkpoint always advances consistently with the DB — never
+                # diverging, and never left permanently paused at ``send``.
+                _status, resume_value = self._record_outcome(session_id, snapshot.values, outcome)
             else:  # pragma: no cover - the graph only ever interrupts at ask/send
                 raise SessionConflict("session cannot be resumed from its current state")
 
@@ -320,13 +320,20 @@ class AgentService:
             ctx.pending = Command(resume=resume_value)
             ctx.touched_at = self._clock()
 
-    def _record_outcome(self, session_id: str, values: dict[str, Any], outcome: str) -> str:
+    def _record_outcome(
+        self, session_id: str, values: dict[str, Any], outcome: str
+    ) -> tuple[str, str]:
         """Record the responder outcome on the durable primary recommendation.
 
-        Returns ``"recorded"`` on a fresh write, ``"already"`` when the primary
-        already carries an outcome (a duplicate submission — the caller rejects it
-        so the graph does not diverge from the DB), or ``"no_target"`` when there
-        is no recommendation to attach the outcome to.
+        Returns ``(status, effective_outcome)`` where ``effective_outcome`` is the
+        value the graph should resume with (the DB is authoritative):
+
+        * ``("recorded", outcome)`` — fresh write of the submitted outcome;
+        * ``("already", stored)`` — the primary already carried ``stored`` (a
+          duplicate submission); the stored value wins, and the caller resumes the
+          graph with it so the checkpoint stays consistent instead of diverging;
+        * ``("no_target", outcome)`` — no recommendation to attach it to; resume
+          with the submitted value (nothing to reconcile against).
         """
 
         primary = values.get("primary_recommendation_id")
@@ -342,11 +349,12 @@ class AgentService:
                     session_id,
                     outcome,
                 )
-                return "no_target"
-            if recommendation_outcome(session, primary) is not None:
-                return "already"
+                return "no_target", outcome
+            existing = recommendation_outcome(session, primary)
+            if existing is not None:
+                return "already", existing
             set_recommendation_outcome(session, primary, outcome)
-            return "recorded"
+            return "recorded", outcome
 
     # -- /handoff : responder-facing view (product-spec 画面4) ------------- #
     def get_handoff(self, session_id: str) -> schemas.HandoffResponse:

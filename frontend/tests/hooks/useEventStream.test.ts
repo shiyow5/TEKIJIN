@@ -199,6 +199,23 @@ describe("useEventStream", () => {
     expect(view.result.current.error).toBeUndefined();
   });
 
+  it("ignores a replayed identical recommend and keeps the draft (send reconnect)", () => {
+    const { view, source } = setup();
+    const rec = {
+      recommendations: [
+        { person_id: "E001", name: "高梨", score: 0.9, confidence: "高", reasons: [] },
+      ],
+    };
+    act(() => source().emit("recommend", rec));
+    act(() => source().emit("draft", { draft: "高梨さんへの依頼文" }));
+    // A send-interrupt reconnect now replays recommend THEN draft; an identical
+    // recommend must not append a second event nor clear the standing draft.
+    act(() => source().emit("recommend", rec));
+
+    expect(view.result.current.events.filter((e) => e.event === "recommend")).toHaveLength(1);
+    expect(view.result.current.draft?.draft).toBe("高梨さんへの依頼文");
+  });
+
   it("clears the previous draft when a new recommendation arrives (reroute)", () => {
     const { view, source } = setup();
     act(() => source().emit("recommend", { recommendations: [{ person_id: "E001" }] }));

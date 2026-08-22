@@ -96,12 +96,29 @@ function isSameFollowup(a: FollowupData | undefined, b: FollowupData): boolean {
   return am.length === bm.length && am.every((v, i) => v === bm[i]);
 }
 
+/** Two recommend payloads are the same when their candidate ids match in order. */
+function isSameRecommend(a: RecommendData | undefined, b: RecommendData): boolean {
+  if (!a) {
+    return false;
+  }
+  const ar = a.recommendations;
+  const br = b.recommendations;
+  return ar.length === br.length && ar.every((r, i) => r.person_id === br[i].person_id);
+}
+
 /** Fold one received event into the state, immutably. */
 function reduceEvent(prev: EventStreamState, name: SseEventName, data: unknown): EventStreamState {
   // The backend re-emits the pending followup on every automatic reconnect while
   // the session stays paused; drop an identical replay so the UI does not treat
   // it as a new question and reopen an already-answered form.
   if (name === "followup" && isSameFollowup(prev.followup, data as FollowupData)) {
+    return prev;
+  }
+  // A session paused at `send` now re-emits the candidates AND the draft on every
+  // reconnect (backend `reconnect_events`). Drop an identical `recommend` replay
+  // so the reconnect stays silent — otherwise it would append an event and clear
+  // the draft on every reconnect, also defeating the identical-draft check below.
+  if (name === "recommend" && isSameRecommend(prev.recommend, data as RecommendData)) {
     return prev;
   }
   // A session paused at the `send` interrupt re-emits the same `draft` on every
