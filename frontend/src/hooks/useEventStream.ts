@@ -104,6 +104,14 @@ function reduceEvent(prev: EventStreamState, name: SseEventName, data: unknown):
   if (name === "followup" && isSameFollowup(prev.followup, data as FollowupData)) {
     return prev;
   }
+  // A session paused at the `send` interrupt re-emits the same `draft` on every
+  // reconnect (see backend `reconnect_event`). Drop an identical replay so the
+  // reconnect stays silent — but the connection is deliberately kept open (see
+  // `onerror`) so this consumer can still advance the graph and receive the
+  // eventual `done` once the responder submits an outcome (#38).
+  if (name === "draft" && prev.draft?.draft === (data as DraftData).draft) {
+    return prev;
+  }
   const events = [...prev.events, { event: name, data } as StreamEvent];
   switch (name) {
     case "understood":
@@ -184,10 +192,13 @@ export function useEventStream(
 
     source.onerror = () => {
       // Native connection error. The browser auto-reconnects transient failures
-      // (readyState CONNECTING) — the backend legitimately closes the HTTP
-      // segment at a followup/send interrupt and the stream resumes on /answer,
-      // so that is NOT fatal. Only a genuinely CLOSED stream is surfaced. Ignore
-      // once terminal, or when an error is already shown.
+      // (readyState CONNECTING) — the backend legitimately ends the HTTP segment
+      // at a followup OR a send interrupt and re-emits the pending event on the
+      // next reconnect (deduped in `reduceEvent`), so that is NOT fatal. Keeping
+      // the connection alive is required: the queued responder outcome is only
+      // consumed by an active /events reader, so this consumer must stay open to
+      // advance the graph and receive `done`. Only a genuinely CLOSED stream is
+      // surfaced. Ignore once terminal, or when an error is already shown.
       setState((prev) => {
         if (prev.terminal || prev.error) {
           return prev;

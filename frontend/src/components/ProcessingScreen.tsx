@@ -12,6 +12,7 @@
  */
 
 import { FollowupForm } from "@/components/FollowupForm";
+import { useOptionalSessionStream } from "@/components/SessionStreamProvider";
 import { ApiError, postAnswer } from "@/lib/api-client";
 import { formatConfidence } from "@/lib/format";
 import { type EventStreamState, useEventStream } from "@/hooks/useEventStream";
@@ -117,12 +118,16 @@ export function ProcessingScreen({
   baseUrl,
 }: ProcessingScreenProps) {
   const router = useRouter();
+  const contextStream = useOptionalSessionStream();
+  // Prefer an injected state (test seam), then the shared provider context
+  // (production, mounted by the route layout), then a self-owned subscription
+  // (kept only for the standalone test seam — disabled when context is present).
   const liveStream = useEventStream(sessionId, {
-    enabled: streamState === undefined,
+    enabled: streamState === undefined && contextStream === null,
     eventSourceFactory,
     baseUrl,
   });
-  const stream = streamState ?? liveStream;
+  const stream = streamState ?? contextStream ?? liveStream;
 
   const [answered, setAnswered] = useState(false);
   const [followupSubmitting, setFollowupSubmitting] = useState(false);

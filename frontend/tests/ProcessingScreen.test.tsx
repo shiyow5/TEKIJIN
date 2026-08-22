@@ -1,4 +1,5 @@
 import { ProcessingScreen } from "@/components/ProcessingScreen";
+import { SessionStreamProvider } from "@/components/SessionStreamProvider";
 import { ApiError } from "@/lib/api-client";
 import type { EventStreamState, StreamEvent } from "@/hooks/useEventStream";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
@@ -183,6 +184,37 @@ describe("ProcessingScreen", () => {
     renderScreen(state({ terminal: true, done: { status: "sent" } }));
     expect(screen.queryByTestId("active-step")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "結果を見る" })).toBeInTheDocument();
+  });
+
+  it("reads the stream from SessionStreamProvider context (no own subscription)", () => {
+    const openedFactories: string[] = [];
+    const factory = (url: string) => {
+      openedFactories.push(url);
+      return {
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        close: () => {},
+        onerror: null,
+        readyState: 1,
+      } as unknown as EventSource;
+    };
+    render(
+      <SessionStreamProvider
+        sessionId="abc-123"
+        streamState={state({
+          recommend: {
+            recommendations: [
+              { person_id: "E001", name: "高梨", score: 0.9, confidence: "high", reasons: [] },
+            ],
+          },
+        })}
+      >
+        <ProcessingScreen sessionId="abc-123" eventSourceFactory={factory} />
+      </SessionStreamProvider>,
+    );
+    // Reads context: shows the recommend step, and its own subscription stays off.
+    expect(screen.getByText("候補を1名見つけました")).toBeInTheDocument();
+    expect(openedFactories).toEqual([]);
   });
 
   it("opens a single EventSource via the live junction when no streamState is injected", () => {
