@@ -3,7 +3,7 @@
         fmt-check fmt-check-backend fmt-check-frontend \
         lint lint-backend lint-frontend \
         test test-backend test-frontend \
-        run-backend serve db-up db-down seed embed \
+        run-backend serve db-up db-down seed embed eval \
         typecheck-frontend check clean
 
 # ============================================================
@@ -119,6 +119,9 @@ seed: ## Seed the database from the synthetic fixtures
 
 embed: ## Compute + store dense embeddings (needs requirements-ml.txt + a real model)
 	PYTHONPATH=$(BACKEND_DIR)/src $(PY) scripts/embed_fixtures.py
+
+eval: ## Run the offline evaluation (Top-1/Recall@3/MRR/route) on a seeded DB
+	cd $(BACKEND_DIR) && PYTHONPATH=src $(PY) -m tekijin.eval
 
 # ============================================================
 # Aggregate
