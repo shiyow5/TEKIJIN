@@ -113,6 +113,25 @@ class AckResponse(BaseModel):
     status: str
 
 
+class EmployeeSummary(BaseModel):
+    """One employee for the current-user switcher (id / name / dept).
+
+    ``id`` is the external ``"E###"`` form (see :func:`format_employee_id`), the
+    same shape accepted back as ``asker_id`` and used as the responder id for the
+    inbox — so the frontend can round-trip the selected user without conversion.
+    """
+
+    id: str  # external "E###" form (see format_employee_id)
+    name: str
+    dept: str | None = None
+
+
+class EmployeeListResponse(BaseModel):
+    """Employee directory for the current-user switcher (no auth in the prototype)."""
+
+    employees: list[EmployeeSummary] = Field(default_factory=list)
+
+
 # --------------------------------------------------------------------------- #
 # domain models (shared by SSE data and final response)
 # --------------------------------------------------------------------------- #

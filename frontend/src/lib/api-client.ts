@@ -11,6 +11,8 @@ import type {
   AckResponse,
   AskRequest,
   DashboardResponse,
+  EmployeeListResponse,
+  EmployeeSummary,
   HandoffResponse,
   ResumeRequest,
 } from "@/lib/api-types";
@@ -126,6 +128,16 @@ export function getHandoff(
  */
 export function getDashboard(options: RequestOptions = {}): Promise<DashboardResponse> {
   return getJson<DashboardResponse>("/dashboard", options);
+}
+
+/**
+ * GET /employees — the employee directory for the current-user switcher. The
+ * prototype has no auth, so the acting user is chosen from this list. Returns the
+ * unwrapped array (ids in the external "E###" form).
+ */
+export async function getEmployees(options: RequestOptions = {}): Promise<EmployeeSummary[]> {
+  const body = await getJson<EmployeeListResponse>("/employees", options);
+  return body.employees;
 }
 
 /**

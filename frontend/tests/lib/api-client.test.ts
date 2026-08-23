@@ -2,6 +2,7 @@ import {
   advanceSession,
   ApiError,
   getDashboard,
+  getEmployees,
   getHandoff,
   postAnswer,
   postAsk,
@@ -242,5 +243,29 @@ describe("getDashboard", () => {
       name: "ApiError",
       status: 500,
     });
+  });
+});
+
+describe("getEmployees", () => {
+  it("GETs /employees and unwraps the employees array", async () => {
+    const employees = [
+      { id: "E001", name: "山田 太郎", dept: "営業部" },
+      { id: "E002", name: "佐藤 花子", dept: "技術部" },
+    ];
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ employees }));
+
+    const result = await getEmployees({ fetchImpl });
+
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe(`${DEFAULT_API_BASE_URL}/employees`);
+    expect(init?.method).toBe("GET");
+    expect(result).toEqual(employees);
+  });
+
+  it("throws ApiError on a non-2xx response", async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonResponse({ detail: "boom" }, { ok: false, status: 503 }));
+    await expect(getEmployees({ fetchImpl })).rejects.toBeInstanceOf(ApiError);
   });
 });

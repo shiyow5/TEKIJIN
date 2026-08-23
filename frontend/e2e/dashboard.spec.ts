@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { API_BASE, DASHBOARD, fulfillJson } from "./support/mocks";
+import { API_BASE, DASHBOARD, fulfillJson, mockEmployees } from "./support/mocks";
 
 /**
  * Dashboard (画面5) smoke test: the page fetches GET /dashboard on mount and
@@ -7,6 +7,7 @@ import { API_BASE, DASHBOARD, fulfillJson } from "./support/mocks";
  * (not the loading/error fallbacks) and shows the privacy notice.
  */
 test("dashboard renders the aggregate view", async ({ page }) => {
+  await mockEmployees(page);
   await page.route(`${API_BASE}/dashboard`, (route) => fulfillJson(route, DASHBOARD));
 
   await page.goto("/dashboard");

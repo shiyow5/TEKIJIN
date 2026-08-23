@@ -50,6 +50,22 @@ export interface AckResponse {
   status: string;
 }
 
+/**
+ * One employee for the current-user switcher (GET /employees). `id` is the
+ * external "E###" form — the same shape accepted back as `asker_id` and used as
+ * the responder id for the inbox, so a selection round-trips without conversion.
+ */
+export interface EmployeeSummary {
+  id: string;
+  name: string;
+  dept?: string | null;
+}
+
+/** GET /employees payload (schemas.py `EmployeeListResponse`). */
+export interface EmployeeListResponse {
+  employees: EmployeeSummary[];
+}
+
 // --------------------------------------------------------------------------- //
 // domain models (shared by SSE data and final response)
 // --------------------------------------------------------------------------- //

@@ -420,6 +420,20 @@ def test_dashboard_route_shape_and_seed_values(seed_counts, engine, fake_embedde
     assert body["latest_eval"] is None  # no eval snapshot stored yet
 
 
+def test_employees_route_lists_directory_for_switcher(seed_counts, engine, fake_embedder) -> None:
+    client = _client(engine, fake_embedder, retriever=_FakeRetriever(), scorer=_FakeScorer([]))
+    body = client.get("/employees").json()
+    people = body["employees"]
+    assert len(people) == 40  # the seeded roster
+    # ids are the external "E###" form (round-trips as asker_id / responder id),
+    # ordered by employee id ascending.
+    ids = [p["id"] for p in people]
+    assert ids[0] == "E001"
+    assert ids == sorted(ids)
+    assert all(p["name"] for p in people)  # every row has a display name
+    assert all(set(p) == {"id", "name", "dept"} for p in people)
+
+
 def test_dashboard_self_resolution_and_latest_eval(seed_counts, session) -> None:
     from sqlalchemy import update
 

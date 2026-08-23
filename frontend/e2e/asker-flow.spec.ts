@@ -6,6 +6,7 @@ import {
   PERSON_ROUTE_FRAMES,
   fulfillJson,
   fulfillSse,
+  mockEmployees,
   sseBody,
 } from "./support/mocks";
 
@@ -17,6 +18,7 @@ import {
  */
 test.describe("asker flow", () => {
   test("質問 → 処理 → 結果（人に聞く）→ 送信", async ({ page }) => {
+    await mockEmployees(page);
     await page.route(`${API_BASE}/ask`, (route) =>
       fulfillJson(route, { session_id: "srv-session", status: "accepted" }),
     );
@@ -54,6 +56,7 @@ test.describe("asker flow", () => {
   });
 
   test("該当者なし → メッセージで終了", async ({ page }) => {
+    await mockEmployees(page);
     await page.route(`${API_BASE}/ask`, (route) =>
       fulfillJson(route, { session_id: "srv-session", status: "accepted" }),
     );

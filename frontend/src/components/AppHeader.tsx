@@ -1,13 +1,21 @@
+"use client";
+
 /**
- * Application header: product identity plus a user-switch placeholder.
+ * Application header: product identity plus the current-user switcher.
  *
- * The user switcher is a static placeholder for the foundation milestone;
- * real user/session wiring lands with later screen work (#35-39).
+ * The prototype has no auth, so the switcher chooses the acting employee from
+ * the directory (`GET /employees`, via {@link useCurrentUser}). Picking a user
+ * updates the shared context, so the asker screen's `asker_id` and the responder
+ * inbox follow the selection. While the directory loads (or if it fails), the
+ * switcher shows a disabled placeholder rather than an empty control.
  */
 
-const PLACEHOLDER_USERS = ["山田 太郎", "佐藤 花子", "鈴木 一郎"] as const;
+import { useCurrentUser } from "@/components/CurrentUserProvider";
 
 export function AppHeader() {
+  const { employees, currentUserId, setCurrentUserId, loading } = useCurrentUser();
+  const ready = employees.length > 0 && currentUserId !== null;
+
   return (
     <header className="flex items-center justify-between gap-md border-outline-variant border-b bg-surface-container-lowest px-margin py-sm">
       <div className="flex items-baseline gap-sm">
@@ -19,14 +27,20 @@ export function AppHeader() {
         <span>ユーザー切替</span>
         <select
           aria-label="ユーザー切替"
-          className="rounded-md border border-outline bg-surface-container-lowest px-sm py-xs text-on-surface text-sm"
-          defaultValue={PLACEHOLDER_USERS[0]}
+          className="rounded-md border border-outline bg-surface-container-lowest px-sm py-xs text-sm disabled:text-on-surface-variant"
+          value={ready ? currentUserId : ""}
+          disabled={!ready}
+          onChange={(e) => setCurrentUserId(e.target.value)}
         >
-          {PLACEHOLDER_USERS.map((user) => (
-            <option key={user} value={user}>
-              {user}
-            </option>
-          ))}
+          {ready ? (
+            employees.map((employee) => (
+              <option key={employee.id} value={employee.id}>
+                {employee.dept ? `${employee.name}（${employee.dept}）` : employee.name}
+              </option>
+            ))
+          ) : (
+            <option value="">{loading ? "読み込み中…" : "利用できません"}</option>
+          )}
         </select>
       </label>
     </header>

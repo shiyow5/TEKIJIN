@@ -21,6 +21,18 @@ vi.mock("@/lib/api-client", () => ({
   },
 }));
 
+// The acting user comes from the current-user context; a fixed "E001" stands in
+// for the header switcher's selection.
+vi.mock("@/components/CurrentUserProvider", () => ({
+  useCurrentUser: () => ({
+    employees: [],
+    currentUserId: "E001",
+    currentUser: null,
+    setCurrentUserId: vi.fn(),
+    loading: false,
+  }),
+}));
+
 describe("QuestionScreen", () => {
   beforeEach(() => {
     pushMock.mockReset();
@@ -68,7 +80,7 @@ describe("QuestionScreen", () => {
     await waitFor(() => expect(postAskMock).toHaveBeenCalledTimes(1));
     const body = postAskMock.mock.calls[0][0];
     expect(body.question).toBe("UTMの移行時の注意点");
-    expect(body.asker_id).toBe(1);
+    expect(body.asker_id).toBe("E001");
     expect(isValidSessionId(body.session_id)).toBe(true);
 
     await waitFor(() => expect(pushMock).toHaveBeenCalledWith(`/session/${body.session_id}`));

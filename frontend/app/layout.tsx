@@ -1,4 +1,5 @@
 import { AppHeader } from "@/components/AppHeader";
+import { CurrentUserProvider } from "@/components/CurrentUserProvider";
 import type { Metadata } from "next";
 import "./globals.css";
 
@@ -19,10 +20,12 @@ export default function RootLayout({
   return (
     <html lang="ja">
       <body className="bg-surface text-on-surface font-sans">
-        <div className="mx-auto flex min-h-screen w-full max-w-content flex-col">
-          <AppHeader />
-          <main className="flex-1 px-margin py-lg">{children}</main>
-        </div>
+        <CurrentUserProvider>
+          <div className="mx-auto flex min-h-screen w-full max-w-content flex-col">
+            <AppHeader />
+            <main className="flex-1 px-margin py-lg">{children}</main>
+          </div>
+        </CurrentUserProvider>
       </body>
     </html>
   );
