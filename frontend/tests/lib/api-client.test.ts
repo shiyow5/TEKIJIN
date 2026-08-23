@@ -2,6 +2,7 @@ import {
   advanceSession,
   ApiError,
   getDashboard,
+  getDocument,
   getEmployees,
   getHandoff,
   getInbox,
@@ -336,5 +337,38 @@ describe("getRecentQuestions", () => {
       .fn<typeof fetch>()
       .mockResolvedValue(jsonResponse({ detail: "bad" }, { ok: false, status: 422 }));
     await expect(getRecentQuestions("nope", { fetchImpl })).rejects.toBeInstanceOf(ApiError);
+  });
+});
+
+describe("getDocument", () => {
+  const DOC = {
+    id: "doc_001",
+    title: "社内IT手順書",
+    body: "PCセットアップ手順…",
+    source: "社内Wiki",
+    updated_at: "2026-08-01T09:00:00",
+  };
+
+  it("GETs /documents/{id} (id encoded) and returns the document", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(DOC));
+
+    const result = await getDocument("doc_001", { fetchImpl });
+
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe(`${DEFAULT_API_BASE_URL}/documents/doc_001`);
+    expect(init?.method).toBe("GET");
+    expect(result).toEqual(DOC);
+  });
+
+  it("throws ApiError with the 404 status for an unknown document", async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        jsonResponse({ detail: "document not found" }, { ok: false, status: 404 }),
+      );
+    await expect(getDocument("nope", { fetchImpl })).rejects.toMatchObject({
+      name: "ApiError",
+      status: 404,
+    });
   });
 });

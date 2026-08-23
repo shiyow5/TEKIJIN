@@ -274,8 +274,12 @@ class AgentNodes:
     def document(self, state: AgentState) -> AgentState:
         docs = (state.get("retrieval") or empty_retrieval())["documents"]
         top = _top_by_score(docs)
-        where = f"（文書ID: {top['doc_id']}）" if top else ""
-        return {"answer": f"社内文書に該当がありそうです{where}。該当箇所をご確認ください。"}
+        doc_id = top["doc_id"] if top else None
+        where = f"（文書ID: {doc_id}）" if doc_id else ""
+        return {
+            "answer": f"社内文書に該当がありそうです{where}。該当箇所をご確認ください。",
+            "document_id": doc_id,
+        }
 
     def no_candidate(self, state: AgentState) -> AgentState:
         return {

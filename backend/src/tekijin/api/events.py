@@ -82,7 +82,12 @@ def node_event(node: str, update: dict[str, Any]) -> ServerSentEvent | None:
     if node in _TERMINAL_STATUS:
         return _sse(
             "message",
-            schemas.MessageData(status=_TERMINAL_STATUS[node], message=update.get("answer") or ""),
+            schemas.MessageData(
+                status=_TERMINAL_STATUS[node],
+                message=update.get("answer") or "",
+                # Only the document terminal carries a doc id; harmless None elsewhere.
+                doc_id=update.get("document_id"),
+            ),
         )
     return None  # internal node: no event
 

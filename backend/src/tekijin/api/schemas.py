@@ -247,6 +247,19 @@ class RecentQuestionsResponse(BaseModel):
 
 
 # --------------------------------------------------------------------------- #
+# document detail (GET /documents/{doc_id}) — the cited internal document (#143)
+# --------------------------------------------------------------------------- #
+class DocumentDetail(BaseModel):
+    """One internal document's full content, for the document viewer."""
+
+    id: str
+    title: str | None = None
+    body: str | None = None
+    source: str | None = None
+    updated_at: str | None = None
+
+
+# --------------------------------------------------------------------------- #
 # SSE event data
 # --------------------------------------------------------------------------- #
 class UnderstoodData(BaseModel):
@@ -284,6 +297,9 @@ class DoneData(BaseModel):
 class MessageData(BaseModel):
     status: str
     message: str
+    # For the ``document`` route: the id of the cited document, so the client can
+    # open it (GET /documents/{doc_id}). ``None`` for every non-document terminal.
+    doc_id: str | None = None
 
 
 class ErrorData(BaseModel):

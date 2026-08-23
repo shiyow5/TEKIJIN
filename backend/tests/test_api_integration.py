@@ -498,6 +498,21 @@ def test_questions_route_rejects_a_bad_asker_id(seed_counts, engine, fake_embedd
     assert client.get("/questions", params={"asker_id": "nope"}).status_code == 422
 
 
+def test_document_route_returns_seeded_document(seed_counts, engine, fake_embedder) -> None:
+    # The document viewer (#143) fetches a cited doc by id; doc_001 is seeded.
+    client = _client(engine, fake_embedder, retriever=_FakeRetriever(), scorer=_FakeScorer([]))
+    resp = client.get("/documents/doc_001")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["id"] == "doc_001"
+    assert body["title"] and body["body"]  # full content present
+
+
+def test_document_route_unknown_id_is_404(seed_counts, engine, fake_embedder) -> None:
+    client = _client(engine, fake_embedder, retriever=_FakeRetriever(), scorer=_FakeScorer([]))
+    assert client.get("/documents/doc_nope").status_code == 404
+
+
 def test_dashboard_self_resolution_and_latest_eval(seed_counts, session) -> None:
     from sqlalchemy import update
 

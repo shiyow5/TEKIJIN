@@ -170,6 +170,7 @@ def test_document_route_is_terminal(seed_counts, session, fake_embedder) -> None
     state = agent.invoke(_init(), cfg)
     assert state["route"] == DOCUMENT
     assert "doc_0007" in state["answer"]
+    assert state["document_id"] == "doc_0007"  # surfaced for the viewer (#143)
     assert not _is_paused(agent, cfg)  # terminal, no interrupt
 
 
