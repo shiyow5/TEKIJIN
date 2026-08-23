@@ -21,7 +21,7 @@ import numpy as np
 BOOTSTRAP = 20000
 SEED = 42
 SPLIT_REPS = 200
-SPLIT_SEED = 0  # 分割検証は別の乱数列。文書の 193/200 はこの seed の値
+SPLIT_SEED = 0  # 分割検証は別の乱数列。文書の 161/200 はこの seed の値
 
 
 def auc(scores, labels):
@@ -188,8 +188,8 @@ def split_half(slots, reps=SPLIT_REPS, seed=SPLIT_SEED):
         scored = [(v, k) for v, k in scored if not np.isnan(v)]
         if not scored:
             continue
-        # 同点は名前順ではなく**くじ**で決める。名前順にすると、たまたま
-        # 文字コードの若いルールが勝ち続けて「一貫して選ばれた」ように見える。
+        # 同点は名前順ではなく**くじ**で決める。`max(tuple)` に任せると
+        # 文字コードの**大きい**名前が勝ち続け、「一貫して選ばれた」ように見える。
         top = max(v for v, _ in scored)
         tied = [k for v, k in scored if v == top]
         if len(tied) > 1:
@@ -226,11 +226,13 @@ def main():
     print(
         f"  → 高 ⟺ 証拠3件以上: {len(ge3) == len(hi) == len({id(x) for x in ge3} & {id(x) for x in hi})}"
     )
-    one = [s for s in slots if s["evidence_count"] == 1]
+    # 「低」は edge_weight<0.4 かつ evidence_count<2。<=1 で数えて 0件 の場合も含める。
+    one = [s for s in slots if s["evidence_count"] <= 1]
     rescued = [s for s in one if s["topic_fit"] >= 0.4]
+    tf = [s["topic_fit"] for s in one]
     print(
-        f"  証拠1件 {len(one)} 件（ラベル {sorted({x['confidence'] for x in one})}）。"
-        f"うち topic_fit>=0.4 が {len(rescued)} 件"
+        f"  証拠1件以下 {len(one)} 件（ラベル {sorted({x['confidence'] for x in one})}、"
+        f"topic_fit {min(tf):.3f}〜{max(tf):.3f}）。うち topic_fit>=0.4 が {len(rescued)} 件"
     )
     print(
         "  → 2段目の edge_weight>=0.4 が無ければ、この "
