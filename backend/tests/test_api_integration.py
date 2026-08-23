@@ -631,6 +631,41 @@ def test_handoff_returns_responder_payload(seed_counts, engine, fake_embedder) -
     # reuse aggregates are present and integral (exact totals covered in the unit).
     assert isinstance(body["reuse_count"], int)
     assert isinstance(body["helpful_answer_count"], int)
+    # generation token for the stale-outcome guard (#94).
+    assert isinstance(body["recommendation_id"], int)
+
+
+def test_stale_outcome_recommendation_id_is_rejected(seed_counts, engine, fake_embedder) -> None:
+    # After a decline→reroute the primary moves on; an outcome carrying the OLD
+    # recommendation id (a competing tab / late submit) must 409, never bind the
+    # accept to the new candidate. The current id still succeeds (#94).
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "stale1"})
+    _events(client, "stale1")
+    old_rid = client.get("/handoff/stale1").json()["recommendation_id"]
+    assert old_rid is not None
+
+    client.post("/answer", json={"session_id": "stale1", "outcome": "declined"})
+    _events(client, "stale1")
+    new_rid = client.get("/handoff/stale1").json()["recommendation_id"]
+    assert new_rid is not None and new_rid != old_rid
+
+    stale = client.post(
+        "/answer",
+        json={"session_id": "stale1", "outcome": "accepted", "recommendation_id": old_rid},
+    )
+    assert stale.status_code == 409
+
+    ok = client.post(
+        "/answer",
+        json={"session_id": "stale1", "outcome": "accepted", "recommendation_id": new_rid},
+    )
+    assert ok.status_code == 200
 
 
 def test_handoff_conflicts_when_awaiting_clarification(seed_counts, engine, fake_embedder) -> None:
