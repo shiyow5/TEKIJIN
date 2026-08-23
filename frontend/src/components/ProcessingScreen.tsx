@@ -15,6 +15,7 @@ import { FollowupForm } from "@/components/FollowupForm";
 import { useOptionalSessionStream } from "@/components/SessionStreamProvider";
 import { ApiError, postAnswer } from "@/lib/api-client";
 import { formatConfidence } from "@/lib/format";
+import { routeLabel } from "@/lib/routes";
 import { type EventStreamState, useEventStream } from "@/hooks/useEventStream";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -67,7 +68,7 @@ function buildSteps(stream: EventStreamState): Step[] {
       id: "route",
       title: "回答の経路を判断しました",
       details: [
-        `経路: ${stream.route.route}`,
+        `経路: ${routeLabel(stream.route.route)}`,
         ...(stream.route.reason ? [stream.route.reason] : []),
       ],
       confidence: stream.route.confidence,
@@ -226,7 +227,7 @@ export function ProcessingScreen({
                   <h2 className="font-bold text-on-surface">{step.title}</h2>
                   {step.confidence !== undefined ? (
                     <span className="rounded-full bg-secondary-container px-sm py-[2px] text-on-secondary-container text-xs">
-                      確信度 {formatConfidence(step.confidence)}
+                      AIの解釈確信度 {formatConfidence(step.confidence)}
                     </span>
                   ) : null}
                 </div>
