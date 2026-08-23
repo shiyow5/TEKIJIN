@@ -1,13 +1,14 @@
 import Link from "next/link";
 
 /**
- * Landing placeholder for the foundation milestone.
- * Links point at routes that later screen work (#35-39) will implement.
+ * Landing hub. Every card links to a real, existing route (#121: the old
+ * ``/results`` / ``/answers`` placeholders were 404s). "マッチング結果" is not a
+ * top-level route (it needs a session id), so it is reached from the question
+ * flow, not the hub.
  */
 const SCREENS = [
   { href: "/questions", label: "質問する", description: "困りごとを投稿する" },
-  { href: "/results", label: "マッチング結果", description: "回答できる人を探す" },
-  { href: "/answers", label: "回答する", description: "届いた質問に答える" },
+  { href: "/inbox", label: "回答する", description: "自分に届いた質問に答える" },
   { href: "/dashboard", label: "ダッシュボード", description: "活動状況を確認する" },
 ] as const;
 
@@ -18,7 +19,7 @@ export default function HomePage() {
         <h1 className="font-bold text-2xl text-on-surface">TEKIJIN（たずねーる）</h1>
         <p className="max-w-2xl text-on-surface-variant">
           社内の「訊きづらさ」を溶かす、質問と回答のマッチング支援ツール。
-          以下は各画面への導線プレースホルダです（画面実装は後続タスクで追加します）。
+          困りごとを質問すると、答えられそうな人へ取り次ぎます。
         </p>
       </div>
 

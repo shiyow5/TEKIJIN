@@ -1,11 +1,16 @@
 import { AppHeader } from "@/components/AppHeader";
 import type { CurrentUserContextValue } from "@/components/CurrentUserProvider";
-import { fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const useCurrentUserMock = vi.fn<() => CurrentUserContextValue>();
 vi.mock("@/components/CurrentUserProvider", () => ({
   useCurrentUser: () => useCurrentUserMock(),
+}));
+
+const pathnameMock = vi.fn<() => string>();
+vi.mock("next/navigation", () => ({
+  usePathname: () => pathnameMock(),
 }));
 
 const EMPLOYEES = [
@@ -13,8 +18,21 @@ const EMPLOYEES = [
   { id: "E002", name: "佐藤 花子", dept: "技術部" },
 ];
 
+const READY: CurrentUserContextValue = {
+  employees: EMPLOYEES,
+  currentUserId: "E001",
+  currentUser: EMPLOYEES[0],
+  setCurrentUserId: () => {},
+  loading: false,
+};
+
+beforeEach(() => {
+  pathnameMock.mockReturnValue("/");
+});
+
 afterEach(() => {
   useCurrentUserMock.mockReset();
+  pathnameMock.mockReset();
 });
 
 describe("AppHeader", () => {
@@ -88,5 +106,41 @@ describe("AppHeader", () => {
     render(<AppHeader />);
     expect(screen.getByRole("combobox", { name: "ユーザー切替" })).toBeDisabled();
     expect(screen.getByText("利用できません")).toBeInTheDocument();
+  });
+
+  it("renders global navigation with a home link and the main destinations", () => {
+    useCurrentUserMock.mockReturnValue(READY);
+    render(<AppHeader />);
+    // The brand links home.
+    expect(screen.getByRole("link", { name: /TEKIJIN/ })).toHaveAttribute("href", "/");
+    const nav = screen.getByRole("navigation", { name: "メインナビゲーション" });
+    expect(within(nav).getByRole("link", { name: "質問する" })).toHaveAttribute(
+      "href",
+      "/questions",
+    );
+    expect(within(nav).getByRole("link", { name: "受信箱" })).toHaveAttribute("href", "/inbox");
+    expect(within(nav).getByRole("link", { name: "ダッシュボード" })).toHaveAttribute(
+      "href",
+      "/dashboard",
+    );
+  });
+
+  it("marks the current section with aria-current", () => {
+    useCurrentUserMock.mockReturnValue(READY);
+    pathnameMock.mockReturnValue("/inbox");
+    render(<AppHeader />);
+    expect(screen.getByRole("link", { name: "受信箱" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "質問する" })).not.toHaveAttribute("aria-current");
+  });
+
+  it("treats a nested route as active for its section", () => {
+    useCurrentUserMock.mockReturnValue(READY);
+    // A child route (e.g. a future /dashboard/detail) keeps its section marked.
+    pathnameMock.mockReturnValue("/dashboard/detail");
+    render(<AppHeader />);
+    expect(screen.getByRole("link", { name: "ダッシュボード" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
   });
 });

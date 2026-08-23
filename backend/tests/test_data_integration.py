@@ -154,6 +154,25 @@ def test_pending_handoffs_dedupes_by_session_keeping_newest(seed_counts, session
     assert items[0]["session_id"] == "s-dup"
 
 
+def test_pending_handoffs_excludes_declined_and_includes_rerouted(seed_counts, session) -> None:
+    # The decline→reroute shape on ONE question/session: responder 8 declined
+    # (outcome set), and it was rerouted to responder 9 as a fresh rank-1 row
+    # with a NULL outcome. Responder 8 must drop out; responder 9 must appear.
+    session.add(
+        Question(id="api_ibx_rr", asker_id=10, body="reroute", topics=[], session_id="s-rr")
+    )
+    session.add(
+        Recommendation(
+            question_id="api_ibx_rr", employee_id=8, rank=1, score=0.9, outcome="declined"
+        )
+    )
+    session.add(Recommendation(question_id="api_ibx_rr", employee_id=9, rank=1, score=0.8))
+    session.flush()
+
+    assert pending_handoffs_for_responder(session, 8) == []
+    assert [i["session_id"] for i in pending_handoffs_for_responder(session, 9)] == ["s-rr"]
+
+
 def test_pending_handoffs_empty_for_responder_without_handoffs(seed_counts, session) -> None:
     assert pending_handoffs_for_responder(session, 1) == []
 
