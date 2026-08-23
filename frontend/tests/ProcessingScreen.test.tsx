@@ -164,7 +164,8 @@ describe("ProcessingScreen", () => {
       }),
     );
     const link = screen.getByRole("link", { name: /文書を見る/ });
-    expect(link).toHaveAttribute("href", "/documents/doc_001");
+    // Carries the session id so the viewer can send the reader back here (#179).
+    expect(link).toHaveAttribute("href", "/documents/doc_001?from=abc-123");
   });
 
   it("shows no document link when a terminal message carries no doc_id", () => {

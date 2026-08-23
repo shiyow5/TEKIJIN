@@ -45,4 +45,18 @@ describe("DocumentViewer", () => {
     render(<DocumentViewer docId="doc_001" />);
     await waitFor(() => expect(screen.getByText(/文書を取得できませんでした/)).toBeInTheDocument());
   });
+
+  it("links back to the originating session's result when fromSessionId is given (#179)", async () => {
+    getDocumentMock.mockResolvedValue(DOC);
+    render(<DocumentViewer docId="doc_001" fromSessionId="sess-9" />);
+    const back = await screen.findByRole("link", { name: "← 結果へ戻る" });
+    expect(back).toHaveAttribute("href", "/session/sess-9/result");
+  });
+
+  it("falls back to the question list when no originating session is known", async () => {
+    getDocumentMock.mockResolvedValue(DOC);
+    render(<DocumentViewer docId="doc_001" />);
+    const back = await screen.findByRole("link", { name: "← 質問一覧へ戻る" });
+    expect(back).toHaveAttribute("href", "/questions");
+  });
 });

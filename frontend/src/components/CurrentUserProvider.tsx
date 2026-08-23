@@ -38,6 +38,10 @@ export interface CurrentUserContextValue {
   setCurrentUserId: (id: string) => void;
   /** True while the directory request is in flight. */
   loading: boolean;
+  /** True when the last directory load failed (and none is loaded). */
+  error: boolean;
+  /** Retry loading the directory (after a failure). */
+  reload: () => void;
 }
 
 const INERT: CurrentUserContextValue = {
@@ -46,6 +50,8 @@ const INERT: CurrentUserContextValue = {
   currentUser: null,
   setCurrentUserId: () => {},
   loading: false,
+  error: false,
+  reload: () => {},
 };
 
 const CurrentUserContext = createContext<CurrentUserContextValue>(INERT);
@@ -74,17 +80,23 @@ export function CurrentUserProvider({ children }: { children: ReactNode }) {
   const [employees, setEmployees] = useState<EmployeeSummary[]>([]);
   const [currentUserId, setCurrentUserIdState] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
 
   const setCurrentUserId = useCallback((id: string) => {
     setCurrentUserIdState(id);
     writeStored(id);
   }, []);
 
-  useEffect(() => {
-    let active = true;
+  // Load (or reload) the directory. Exposed as `reload` so the UI can retry after
+  // a failure instead of leaving the submit permanently gated with no explanation.
+  // ``isActive`` lets the mount effect drop a stale result (React StrictMode double
+  // invoke in dev, or an unmount mid-fetch); the button retry uses the default.
+  const load = useCallback((isActive: () => boolean = () => true) => {
+    setLoading(true);
+    setError(false);
     getEmployees()
       .then((list) => {
-        if (!active) return;
+        if (!isActive()) return;
         setEmployees(list);
         // Restore the remembered user if it still exists, else default to the
         // first employee so the app always has an acting user.
@@ -94,16 +106,22 @@ export function CurrentUserProvider({ children }: { children: ReactNode }) {
         setCurrentUserIdState(initial);
       })
       .catch(() => {
-        // Leave the directory empty; the switcher renders a disabled placeholder
-        // and screens that need an acting user keep their submit gated.
+        if (isActive()) setError(true);
       })
       .finally(() => {
-        if (active) setLoading(false);
+        if (isActive()) setLoading(false);
       });
+  }, []);
+
+  const reload = useCallback(() => load(), [load]);
+
+  useEffect(() => {
+    let active = true;
+    load(() => active);
     return () => {
       active = false;
     };
-  }, []);
+  }, [load]);
 
   const currentUser = useMemo(
     () => employees.find((e) => e.id === currentUserId) ?? null,
@@ -111,8 +129,8 @@ export function CurrentUserProvider({ children }: { children: ReactNode }) {
   );
 
   const value = useMemo<CurrentUserContextValue>(
-    () => ({ employees, currentUserId, currentUser, setCurrentUserId, loading }),
-    [employees, currentUserId, currentUser, setCurrentUserId, loading],
+    () => ({ employees, currentUserId, currentUser, setCurrentUserId, loading, error, reload }),
+    [employees, currentUserId, currentUser, setCurrentUserId, loading, error, reload],
   );
 
   return <CurrentUserContext.Provider value={value}>{children}</CurrentUserContext.Provider>;

@@ -30,7 +30,7 @@ function isActive(pathname: string, href: string): boolean {
 }
 
 export function AppHeader() {
-  const { employees, currentUserId, setCurrentUserId, loading } = useCurrentUser();
+  const { employees, currentUserId, setCurrentUserId, loading, error, reload } = useCurrentUser();
   const ready = employees.length > 0 && currentUserId !== null;
   const pathname = usePathname() ?? "";
 
@@ -66,12 +66,16 @@ export function AppHeader() {
       </div>
 
       <label
-        className="flex items-center gap-sm text-on-surface-variant text-sm"
+        className="flex items-center gap-xs text-on-surface-variant text-xs"
         aria-busy={loading}
+        title="プロトタイプ用の擬似ログイン（認証なし）。動作確認のため利用者を切り替えます。"
       >
-        <span>ユーザー切替</span>
+        <span className="rounded bg-surface-container-high px-xs py-[1px] text-on-surface-variant">
+          デモ用
+        </span>
+        <span>利用者を切替</span>
         <select
-          aria-label="ユーザー切替"
+          aria-label="利用者を切替（デモ用の擬似ログイン）"
           className="rounded-md border border-outline bg-surface-container-lowest px-sm py-xs text-sm disabled:text-on-surface-variant"
           value={ready ? currentUserId : ""}
           disabled={!ready}
@@ -87,6 +91,15 @@ export function AppHeader() {
             <option value="">{loading ? "読み込み中…" : "利用できません"}</option>
           )}
         </select>
+        {error ? (
+          <button
+            type="button"
+            onClick={reload}
+            className="rounded-md border border-outline px-sm py-xs text-primary text-xs transition-colors hover:bg-surface-container-low"
+          >
+            利用者一覧の取得に失敗しました。再試行
+          </button>
+        ) : null}
       </label>
     </header>
   );

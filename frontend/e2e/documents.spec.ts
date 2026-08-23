@@ -26,7 +26,7 @@ test.describe("document viewer", () => {
     await expect(page.getByText(/キッティング手順書/)).toBeVisible();
     await expect(page.getByText("出典: 社内Wiki/IT")).toBeVisible();
     // A way back to asking.
-    await expect(page.getByRole("link", { name: /質問へ戻る/ })).toBeVisible();
+    await expect(page.getByRole("link", { name: /戻る/ })).toBeVisible();
   });
 
   test("shows a not-found state for an unknown document", async ({ page }) => {

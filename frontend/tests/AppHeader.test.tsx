@@ -24,6 +24,8 @@ const READY: CurrentUserContextValue = {
   currentUser: EMPLOYEES[0],
   setCurrentUserId: () => {},
   loading: false,
+  error: false,
+  reload: () => {},
 };
 
 beforeEach(() => {
@@ -43,6 +45,8 @@ describe("AppHeader", () => {
       currentUser: EMPLOYEES[0],
       setCurrentUserId: vi.fn(),
       loading: false,
+      error: false,
+      reload: () => {},
     });
     render(<AppHeader />);
     expect(screen.getByText("TEKIJIN")).toBeInTheDocument();
@@ -56,9 +60,11 @@ describe("AppHeader", () => {
       currentUser: EMPLOYEES[1],
       setCurrentUserId: vi.fn(),
       loading: false,
+      error: false,
+      reload: () => {},
     });
     render(<AppHeader />);
-    const select = screen.getByRole("combobox", { name: "ユーザー切替" }) as HTMLSelectElement;
+    const select = screen.getByRole("combobox", { name: /利用者を切替/ }) as HTMLSelectElement;
     expect(select).toBeEnabled();
     expect(select.querySelectorAll("option")).toHaveLength(2);
     expect(select.value).toBe("E002");
@@ -73,9 +79,11 @@ describe("AppHeader", () => {
       currentUser: EMPLOYEES[0],
       setCurrentUserId,
       loading: false,
+      error: false,
+      reload: () => {},
     });
     render(<AppHeader />);
-    fireEvent.change(screen.getByRole("combobox", { name: "ユーザー切替" }), {
+    fireEvent.change(screen.getByRole("combobox", { name: /利用者を切替/ }), {
       target: { value: "E002" },
     });
     expect(setCurrentUserId).toHaveBeenCalledWith("E002");
@@ -88,9 +96,11 @@ describe("AppHeader", () => {
       currentUser: null,
       setCurrentUserId: vi.fn(),
       loading: true,
+      error: false,
+      reload: () => {},
     });
     render(<AppHeader />);
-    const select = screen.getByRole("combobox", { name: "ユーザー切替" });
+    const select = screen.getByRole("combobox", { name: /利用者を切替/ });
     expect(select).toBeDisabled();
     expect(screen.getByText("読み込み中…")).toBeInTheDocument();
   });
@@ -102,10 +112,29 @@ describe("AppHeader", () => {
       currentUser: null,
       setCurrentUserId: vi.fn(),
       loading: false,
+      error: false,
+      reload: () => {},
     });
     render(<AppHeader />);
-    expect(screen.getByRole("combobox", { name: "ユーザー切替" })).toBeDisabled();
+    expect(screen.getByRole("combobox", { name: /利用者を切替/ })).toBeDisabled();
     expect(screen.getByText("利用できません")).toBeInTheDocument();
+  });
+
+  it("surfaces an inline retry when the directory load failed and calls reload (#179)", () => {
+    const reload = vi.fn();
+    useCurrentUserMock.mockReturnValue({
+      employees: [],
+      currentUserId: null,
+      currentUser: null,
+      setCurrentUserId: vi.fn(),
+      loading: false,
+      error: true,
+      reload,
+    });
+    render(<AppHeader />);
+    const retry = screen.getByRole("button", { name: /取得に失敗しました。再試行/ });
+    fireEvent.click(retry);
+    expect(reload).toHaveBeenCalledTimes(1);
   });
 
   it("renders global navigation with a home link and the main destinations", () => {

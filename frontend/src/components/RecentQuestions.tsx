@@ -31,21 +31,39 @@ function avatarInitial(name: string): string {
   return name.slice(0, 1);
 }
 
-/** The card body for one recent question (status chip + responder/document/pending footer). */
-function QuestionCard({ item }: { item: RecentQuestionItem }) {
+/** The card body for one recent question (status chip + responder/document/pending footer).
+ *
+ * ``clickable`` distinguishes a card that navigates to its session result from a
+ * seeded history row with no session: only the former gets the hover affordance,
+ * and the latter is marked 「履歴のみ」 so it does not look pressable-but-dead (#179).
+ */
+function QuestionCard({ item, clickable }: { item: RecentQuestionItem; clickable: boolean }) {
   return (
-    <article className="flex h-full flex-col rounded-xl border border-outline-variant bg-surface-container-lowest p-md transition-shadow hover:shadow-md">
+    <article
+      className={
+        clickable
+          ? "flex h-full flex-col rounded-xl border border-outline-variant bg-surface-container-lowest p-md transition-shadow hover:shadow-md"
+          : "flex h-full flex-col rounded-xl border border-outline-variant border-dashed bg-surface-container-low p-md"
+      }
+    >
       <div className="mb-sm flex items-start justify-between gap-sm">
         <h3 className="font-bold text-lg text-on-surface">{item.title}</h3>
-        <span
-          className={
-            item.resolved
-              ? "whitespace-nowrap rounded-full bg-secondary-container px-xs py-[2px] text-on-secondary-container text-xs"
-              : "whitespace-nowrap rounded-full border border-outline-variant bg-surface-container-low px-xs py-[2px] text-on-surface-variant text-xs"
-          }
-        >
-          {item.resolved ? "解決済" : "対応中"}
-        </span>
+        <div className="flex items-center gap-xs">
+          {clickable ? null : (
+            <span className="whitespace-nowrap rounded-full bg-surface-container-high px-xs py-[2px] text-on-surface-variant text-xs">
+              履歴のみ
+            </span>
+          )}
+          <span
+            className={
+              item.resolved
+                ? "whitespace-nowrap rounded-full bg-secondary-container px-xs py-[2px] text-on-secondary-container text-xs"
+                : "whitespace-nowrap rounded-full border border-outline-variant bg-surface-container-low px-xs py-[2px] text-on-surface-variant text-xs"
+            }
+          >
+            {item.resolved ? "解決済" : "対応中"}
+          </span>
+        </div>
       </div>
       {item.responder_name ? (
         <div className="mt-auto flex items-center gap-sm border-outline-variant border-t pt-sm">
@@ -114,10 +132,10 @@ export function RecentQuestions() {
                   aria-label={`「${item.title}」（${item.resolved ? "解決済" : "対応中"}）の結果をもう一度見る`}
                   className="block h-full rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 >
-                  <QuestionCard item={item} />
+                  <QuestionCard item={item} clickable={true} />
                 </Link>
               ) : (
-                <QuestionCard item={item} />
+                <QuestionCard item={item} clickable={false} />
               )}
             </li>
           ))}

@@ -21,6 +21,8 @@ function asUser(id: string | null, name?: string): CurrentUserContextValue {
     currentUser: id && name ? { id, name, dept: "技術部" } : null,
     setCurrentUserId: vi.fn(),
     loading: false,
+    error: false,
+    reload: vi.fn(),
   };
 }
 

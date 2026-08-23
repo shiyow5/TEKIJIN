@@ -26,9 +26,23 @@ function hours(value: number | null): string {
   return value === null ? "—" : `${value.toFixed(1)} 時間`;
 }
 
-function MetricCard({ label, value, hint }: { label: string; value: string; hint?: string }) {
+function MetricCard({
+  label,
+  value,
+  hint,
+  title,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  /** Optional hover tooltip explaining a metric in plain language. */
+  title?: string;
+}) {
   return (
-    <div className="flex flex-col gap-xs rounded-xl border border-outline-variant bg-surface-container-lowest p-md shadow-sm">
+    <div
+      className="flex flex-col gap-xs rounded-xl border border-outline-variant bg-surface-container-lowest p-md shadow-sm"
+      title={title}
+    >
       <span className="text-on-surface-variant text-sm">{label}</span>
       <span className="font-bold text-3xl text-on-surface tracking-tight">{value}</span>
       {hint ? <span className="text-on-surface-variant text-xs">{hint}</span> : null}
@@ -105,8 +119,11 @@ export function Dashboard() {
 
   const d = state.data;
   const evalHint = d.latest_eval
-    ? `Recall@3 ${d.latest_eval.recall_at_3 !== null ? pct(d.latest_eval.recall_at_3) : "—"}（オフライン評価）`
-    : "make eval 実行で反映";
+    ? `候補上位3名の的中率 ${d.latest_eval.recall_at_3 !== null ? pct(d.latest_eval.recall_at_3) : "—"}`
+    : "精度評価はまだ実行されていません";
+  const evalTitle =
+    "正解データで測った推薦精度です。最有力＝正解者を1番手に選べた割合、" +
+    "的中率＝正解者が候補上位3名に入った割合。定期的な精度評価の実行時に更新されます。";
   const evalValue =
     d.latest_eval && d.latest_eval.top1_accuracy !== null
       ? pct(d.latest_eval.top1_accuracy)
@@ -137,7 +154,12 @@ export function Dashboard() {
           value={hours(d.avg_resolution_hours)}
           hint="質問→初回回答"
         />
-        <MetricCard label="推薦精度 Top-1" value={evalValue} hint={evalHint} />
+        <MetricCard
+          label="推薦精度（最有力）"
+          value={evalValue}
+          hint={evalHint}
+          title={evalTitle}
+        />
       </div>
 
       <div className="grid grid-cols-1 gap-md sm:grid-cols-3">

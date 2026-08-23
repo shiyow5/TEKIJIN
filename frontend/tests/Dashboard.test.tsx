@@ -64,7 +64,7 @@ describe("Dashboard", () => {
     expect(screen.getByText("18%")).toBeInTheDocument(); // top_responder_share
     expect(screen.getByText("平均解決時間")).toBeInTheDocument();
     expect(screen.getByText("3.5 時間")).toBeInTheDocument();
-    expect(screen.getByText("推薦精度 Top-1")).toBeInTheDocument();
+    expect(screen.getByText("推薦精度（最有力）")).toBeInTheDocument();
     expect(screen.getByText("70%")).toBeInTheDocument(); // eval top1
     // distributions
     expect(screen.getByText("高梨 健太")).toBeInTheDocument();
@@ -81,7 +81,7 @@ describe("Dashboard", () => {
 
     await screen.findByRole("heading", { name: "ダッシュボード" });
     expect(screen.getByText("未計測")).toBeInTheDocument();
-    expect(screen.getByText(/make eval 実行で反映/)).toBeInTheDocument();
+    expect(screen.getByText(/精度評価はまだ実行されていません/)).toBeInTheDocument();
     expect(screen.getByText("—")).toBeInTheDocument(); // avg_resolution_hours null
   });
 

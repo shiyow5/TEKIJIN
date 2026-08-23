@@ -79,11 +79,11 @@ test.describe("navigation", () => {
     await mockChrome(page);
     await page.goto("/questions");
 
-    const select = page.getByRole("combobox", { name: "ユーザー切替" });
+    const select = page.getByRole("combobox", { name: /利用者を切替/ });
     await expect(select).toBeEnabled();
     await select.selectOption("E002");
 
     await page.reload();
-    await expect(page.getByRole("combobox", { name: "ユーザー切替" })).toHaveValue("E002");
+    await expect(page.getByRole("combobox", { name: /利用者を切替/ })).toHaveValue("E002");
   });
 });
