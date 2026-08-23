@@ -1,4 +1,4 @@
-import type { Route } from "@playwright/test";
+import type { Page, Route } from "@playwright/test";
 
 /**
  * Network mocking helpers + fixtures for the E2E suite.
@@ -106,6 +106,23 @@ export const MESSAGE_FRAMES: SseFrame[] = [
     data: { status: "no_result", message: "該当する回答が見つかりませんでした。" },
   },
 ];
+
+/** Directory for the current-user switcher (GET /employees). */
+export const EMPLOYEES = [
+  { id: "E001", name: "山田 太郎", dept: "営業部" },
+  { id: "E002", name: "佐藤 花子", dept: "技術部" },
+];
+
+/**
+ * Mock GET /employees. The header's current-user switcher fetches this on every
+ * page, and the asker's submit is gated on having a current user — so any flow
+ * that renders the app chrome needs it stubbed.
+ */
+export async function mockEmployees(page: Page): Promise<void> {
+  await page.route(`${API_BASE}/employees`, (route) =>
+    fulfillJson(route, { employees: EMPLOYEES }),
+  );
+}
 
 export const HANDOFF = {
   question: "UTM の移行時に気をつけることは？",

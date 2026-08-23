@@ -24,6 +24,7 @@ from tekijin.api.service import (
     SessionInvalid,
 )
 from tekijin.data.dashboard import dashboard_summary
+from tekijin.data.repository import Repository
 
 logger = logging.getLogger(__name__)
 
@@ -108,3 +109,26 @@ def dashboard(request: Request) -> schemas.DashboardResponse:
     with _service(request).session_factory() as session:
         data = dashboard_summary(session)
     return schemas.DashboardResponse(**data)
+
+
+@router.get("/employees", response_model=schemas.EmployeeListResponse)
+def employees(request: Request) -> schemas.EmployeeListResponse:
+    """List employees for the current-user switcher (id / name / dept).
+
+    The prototype has no auth, so the frontend picks the acting user from this
+    directory (used as ``asker_id`` and as the responder id for the inbox). ids
+    are the external ``"E###"`` form to match the rest of the contract.
+    """
+
+    with _service(request).session_factory() as session:
+        rows = Repository(session).list_employees()
+    return schemas.EmployeeListResponse(
+        employees=[
+            schemas.EmployeeSummary(
+                id=schemas.format_employee_id(row.id),
+                name=row.name,
+                dept=row.department,
+            )
+            for row in rows
+        ]
+    )

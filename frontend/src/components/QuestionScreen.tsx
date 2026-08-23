@@ -9,18 +9,13 @@
  * The header/user display is provided globally by `AppHeader` (app/layout.tsx).
  */
 
+import { useCurrentUser } from "@/components/CurrentUserProvider";
 import { RecentQuestions } from "@/components/RecentQuestions";
 import { VoiceInputButton } from "@/components/VoiceInputButton";
 import { ApiError, postAsk } from "@/lib/api-client";
 import { createSessionId } from "@/lib/session";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
-
-/**
- * Asker identity. Real user/session wiring lands with later work (#39); for now
- * the foundation uses a fixed employee id. The API accepts a number or "E###".
- */
-const ASKER_ID = 1;
 
 const SUBMIT_ERROR_MESSAGE = "質問の送信に失敗しました。時間をおいて再度お試しください。";
 
@@ -35,6 +30,9 @@ export interface QuestionScreenProps {
 
 export function QuestionScreen({ onSubmitted }: QuestionScreenProps) {
   const router = useRouter();
+  // The acting user (chosen in the header switcher) is the asker. Until the
+  // directory resolves, `currentUserId` is null and submit stays gated.
+  const { currentUserId } = useCurrentUser();
   const [question, setQuestion] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -44,7 +42,7 @@ export function QuestionScreen({ onSubmitted }: QuestionScreenProps) {
   const [pendingSessionId, setPendingSessionId] = useState<string | null>(null);
 
   const trimmed = question.trim();
-  const canSubmit = trimmed.length > 0 && !submitting;
+  const canSubmit = trimmed.length > 0 && !submitting && currentUserId !== null;
 
   function handleQuestionChange(value: string) {
     setQuestion(value);
@@ -53,7 +51,7 @@ export function QuestionScreen({ onSubmitted }: QuestionScreenProps) {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!canSubmit) {
+    if (!canSubmit || currentUserId === null) {
       return;
     }
 
@@ -71,7 +69,7 @@ export function QuestionScreen({ onSubmitted }: QuestionScreenProps) {
     };
 
     try {
-      await postAsk({ asker_id: ASKER_ID, question: trimmed, session_id: sessionId });
+      await postAsk({ asker_id: currentUserId, question: trimmed, session_id: sessionId });
       proceed();
     } catch (err) {
       // A 409 on a retry means the original /ask was actually accepted (this

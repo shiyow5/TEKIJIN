@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { API_BASE, HANDOFF, fulfillJson } from "./support/mocks";
+import { API_BASE, HANDOFF, fulfillJson, mockEmployees } from "./support/mocks";
 
 /**
  * Responder journey: /answer/{session_id}. On mount the screen loads the handoff
@@ -10,6 +10,7 @@ import { API_BASE, HANDOFF, fulfillJson } from "./support/mocks";
 test("responder answers the handoff", async ({ page }) => {
   const sessionId = "11111111-1111-4111-8111-111111111111";
 
+  await mockEmployees(page);
   await page.route(`${API_BASE}/handoff/**`, (route) =>
     fulfillJson(route, { ...HANDOFF, session_id: sessionId }),
   );
