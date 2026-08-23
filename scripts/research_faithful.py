@@ -101,12 +101,62 @@ def items():
     return rows
 
 
-def build_c1(rows):
+def topic_vocabulary():
+    """C6 が引ける語彙。`skills.topic` と `answers.topic` の和（fixtures では22件）。
+
+    製品では DB から引くべきもの。ここでは fixtures から作って、
+    **「C1 にこの語彙を守らせたら層2 R@3 はどこまで戻るか」**を測る（#116）。
+    """
+    fx = rc.load_all()
+    return sorted(
+        {s["topic"] for s in fx["skills"]}
+        | {a["topic"] for a in fx["answers"] if a.get("topic")}
+    )
+
+
+def _with_topic_enum(body, vocab):
+    """tool 定義の `topics` を語彙の enum に差し替える（案2: guided decoding で縛る）。"""
+    params = body["tools"][0]["function"]["parameters"]
+    params["properties"]["topics"]["items"] = {"type": "string", "enum": list(vocab)}
+    params["properties"]["topics"]["description"] = (
+        "質問の技術トピック。必ず列挙された語彙の中から選ぶ"
+    )
+    return body
+
+
+def _with_topic_list_in_prompt(body, vocab):
+    """system プロンプトに語彙を並べる（案1: 指示だけで縛る）。"""
+    body["messages"][0]["content"] += (
+        "\ntopics は必ず次の一覧から選んでください（一覧に無い語は使わない）: "
+        + "、".join(vocab)
+    )
+    return body
+
+
+C1_VARIANTS = {
+    # 製品のまま。語彙を渡さないので自由記述になる
+    "product": lambda body, vocab: body,
+    # 案1: system プロンプトに語彙を並べるだけ
+    "prompt": _with_topic_list_in_prompt,
+    # 案2: スキーマの enum にして guided decoding で語彙外を出せなくする
+    "enum": lambda body, vocab: _with_topic_enum(body, vocab),
+    # 案1+2
+    "both": lambda body, vocab: _with_topic_enum(
+        _with_topic_list_in_prompt(body, vocab), vocab
+    ),
+}
+
+
+def build_c1(rows, variant="product"):
+    vocab = topic_vocabulary()
+    apply = C1_VARIANTS[variant]
     return [
         {
             **row,
-            "request": as_request(
-                VllmIntentModel.prompt(row["query"], ASKER), IntentSchema
+            "c1_variant": variant,
+            "request": apply(
+                as_request(VllmIntentModel.prompt(row["query"], ASKER), IntentSchema),
+                vocab,
             ),
         }
         for row in rows
@@ -173,13 +223,19 @@ def build_c2(rows, c1_path):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--task", required=True, choices=["c1", "c2"])
+    ap.add_argument(
+        "--c1-variant",
+        default="product",
+        choices=sorted(C1_VARIANTS),
+        help="c1 でトピック語彙をどう縛るか（#116 の直し方の比較）",
+    )
     ap.add_argument("--c1", default=None, help="c2 で使う C1 の実出力")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
 
     rows = items()
     if args.task == "c1":
-        payload = build_c1(rows)
+        payload = build_c1(rows, args.c1_variant)
     else:
         if not args.c1:
             raise SystemExit("--c1 が要る")

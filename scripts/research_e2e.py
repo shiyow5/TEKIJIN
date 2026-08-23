@@ -147,7 +147,7 @@ def task_route(url, out):
     session.get_bind().dispose()
 
 
-def load_c1_topics(path):
+def load_c1_topics(path, topk=0):
     """C1 の実出力を {評価ID: トピック列} に直す（#113）。無ければ None。"""
     if not path:
         return None
@@ -156,7 +156,7 @@ def load_c1_topics(path):
 
     by_eval = {r["id"]: r["eval_id"] for r in rf.items() if r["klass"] == "normal"}
     return {
-        by_eval[i]: list(intent.topics)
+        by_eval[i]: list(intent.topics)[:topk] if topk else list(intent.topics)
         for i, intent in rf.load_c1(path).items()
         if i in by_eval
     }
@@ -376,6 +376,12 @@ def main():
         default=None,
         help="variants で使う C1 の実出力（research_faithful.py --task c1 の結果）",
     )
+    ap.add_argument(
+        "--c1-topk",
+        type=int,
+        default=0,
+        help="C1 のトピックを上位何件だけ使うか（0=全部）。余分なトピックが証拠を薄めるかを見る",
+    )
     args = ap.parse_args()
 
     url = start_db(args.pgdir)
@@ -387,7 +393,7 @@ def main():
     elif args.task == "misrec":
         task_misrec(url, args.out)
     else:
-        task_variants(url, args.out, load_c1_topics(args.c1))
+        task_variants(url, args.out, load_c1_topics(args.c1, args.c1_topk))
 
 
 if __name__ == "__main__":
