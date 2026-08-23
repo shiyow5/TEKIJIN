@@ -43,6 +43,11 @@ C5 `decide_route`（`backend/src/tekijin/agent/route.py`）は、C4 が返す各
 
 結果: **経路精度 0.821（多数決 person 0.696 を上回る）**、1経路への潰れ 0.90（< 0.95）。
 
+> 注（#158）: その後 #84 / #158 で評価セットの制約の付き方を変えたところ、**実 DB での
+> 経路精度は 0.768（43/56）に下がった**（`document` に振られるのが 7件→4件）。
+> 決定そのものは変えないが、**閾値は再較正の余地がある**。→
+> [e2e.md](../benchmarks/e2e.md) §0.3
+
 ## prior_answer が発火しないことの明示
 
 `answer_confidence` は **prior_answer を分離できない**:

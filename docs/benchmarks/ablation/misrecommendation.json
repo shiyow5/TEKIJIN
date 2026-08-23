@@ -1,16 +1,16 @@
 {
   "n_slots": 156,
   "buckets": {
-    "正解": 121,
-    "誤り: gold と同じ部署（証拠あり）": 27,
-    "誤り: 部署も拠点も違う（証拠あり）": 4,
-    "誤り: gold と同じ拠点（部署は違う）": 4
+    "正解": 105,
+    "誤り: gold と同じ部署（証拠あり）": 40,
+    "誤り: 部署も拠点も違う（証拠あり）": 6,
+    "誤り: gold と同じ拠点（部署は違う）": 5
   },
   "confidence": {
-    "高/正解": 94,
-    "中/正解": 27,
-    "高/誤り": 32,
-    "中/誤り": 3
+    "高/正解": 81,
+    "中/正解": 24,
+    "高/誤り": 45,
+    "中/誤り": 6
   },
   "slots": [
     {
@@ -855,7 +855,7 @@
       "query_id": 16,
       "rank": 1,
       "person_id": 15,
-      "hit": true,
+      "hit": false,
       "confidence": "高",
       "score": 0.7845,
       "margin_to_next": 0.1269,
@@ -867,15 +867,15 @@
         "answer": 5
       },
       "same_dept_as_gold": true,
-      "same_branch_as_gold": true,
+      "same_branch_as_gold": false,
       "difficulty": "L2",
-      "n_gold": 4
+      "n_gold": 2
     },
     {
       "query_id": 16,
       "rank": 2,
       "person_id": 25,
-      "hit": true,
+      "hit": false,
       "confidence": "高",
       "score": 0.6576,
       "margin_to_next": 0.0875,
@@ -885,10 +885,10 @@
         "project": 3,
         "answer": 1
       },
-      "same_dept_as_gold": true,
-      "same_branch_as_gold": true,
+      "same_dept_as_gold": false,
+      "same_branch_as_gold": false,
       "difficulty": "L2",
-      "n_gold": 4
+      "n_gold": 2
     },
     {
       "query_id": 16,
@@ -907,7 +907,7 @@
       "same_dept_as_gold": true,
       "same_branch_as_gold": true,
       "difficulty": "L2",
-      "n_gold": 4
+      "n_gold": 2
     },
     {
       "query_id": 17,
@@ -927,13 +927,13 @@
       "same_dept_as_gold": true,
       "same_branch_as_gold": true,
       "difficulty": "L2",
-      "n_gold": 4
+      "n_gold": 2
     },
     {
       "query_id": 17,
       "rank": 2,
       "person_id": 1,
-      "hit": true,
+      "hit": false,
       "confidence": "高",
       "score": 0.7919,
       "margin_to_next": 0.0104,
@@ -945,9 +945,9 @@
         "answer": 3
       },
       "same_dept_as_gold": true,
-      "same_branch_as_gold": true,
+      "same_branch_as_gold": false,
       "difficulty": "L2",
-      "n_gold": 4
+      "n_gold": 2
     },
     {
       "query_id": 17,
@@ -966,13 +966,13 @@
       "same_dept_as_gold": true,
       "same_branch_as_gold": true,
       "difficulty": "L2",
-      "n_gold": 4
+      "n_gold": 2
     },
     {
       "query_id": 18,
       "rank": 1,
       "person_id": 6,
-      "hit": true,
+      "hit": false,
       "confidence": "高",
       "score": 0.6776,
       "margin_to_next": 0.1492,
@@ -983,15 +983,15 @@
         "answer": 3
       },
       "same_dept_as_gold": true,
-      "same_branch_as_gold": true,
+      "same_branch_as_gold": false,
       "difficulty": "L2",
-      "n_gold": 4
+      "n_gold": 1
     },
     {
       "query_id": 18,
       "rank": 2,
       "person_id": 7,
-      "hit": true,
+      "hit": false,
       "confidence": "中",
       "score": 0.5284,
       "margin_to_next": 0.0331,
@@ -1001,9 +1001,9 @@
         "answer": 2
       },
       "same_dept_as_gold": true,
-      "same_branch_as_gold": true,
+      "same_branch_as_gold": false,
       "difficulty": "L2",
-      "n_gold": 4
+      "n_gold": 1
     },
     {
       "query_id": 18,
@@ -1022,7 +1022,7 @@
       "same_dept_as_gold": true,
       "same_branch_as_gold": true,
       "difficulty": "L2",
-      "n_gold": 4
+      "n_gold": 1
     },
     {
       "query_id": 19,
@@ -1042,7 +1042,7 @@
       "same_dept_as_gold": true,
       "same_branch_as_gold": true,
       "difficulty": "L2",
-      "n_gold": 4
+      "n_gold": 2
     },
     {
       "query_id": 19,
@@ -1061,13 +1061,13 @@
       "same_dept_as_gold": true,
       "same_branch_as_gold": true,
       "difficulty": "L2",
-      "n_gold": 4
+      "n_gold": 2
     },
     {
       "query_id": 19,
       "rank": 3,
       "person_id": 16,
-      "hit": true,
+      "hit": false,
       "confidence": "高",
       "score": 0.6281,
       "margin_to_next": 0.099,
@@ -1079,9 +1079,9 @@
         "answer": 1
       },
       "same_dept_as_gold": true,
-      "same_branch_as_gold": true,
+      "same_branch_as_gold": false,
       "difficulty": "L2",
-      "n_gold": 4
+      "n_gold": 2
     },
     {
       "query_id": 20,
@@ -1100,13 +1100,13 @@
       "same_dept_as_gold": true,
       "same_branch_as_gold": true,
       "difficulty": "L2",
-      "n_gold": 4
+      "n_gold": 2
     },
     {
       "query_id": 20,
       "rank": 2,
       "person_id": 21,
-      "hit": true,
+      "hit": false,
       "confidence": "高",
       "score": 0.6853,
       "margin_to_next": 0.0673,
@@ -1118,15 +1118,15 @@
         "answer": 2
       },
       "same_dept_as_gold": true,
-      "same_branch_as_gold": true,
+      "same_branch_as_gold": false,
       "difficulty": "L2",
-      "n_gold": 4
+      "n_gold": 2
     },
     {
       "query_id": 20,
       "rank": 3,
       "person_id": 1,
-      "hit": true,
+      "hit": false,
       "confidence": "高",
       "score": 0.618,
       "margin_to_next": 0.0375,
@@ -1137,15 +1137,15 @@
         "project": 6
       },
       "same_dept_as_gold": true,
-      "same_branch_as_gold": true,
+      "same_branch_as_gold": false,
       "difficulty": "L2",
-      "n_gold": 4
+      "n_gold": 2
     },
     {
       "query_id": 21,
       "rank": 1,
       "person_id": 23,
-      "hit": true,
+      "hit": false,
       "confidence": "高",
       "score": 0.7992,
       "margin_to_next": 0.0055,
@@ -1156,15 +1156,15 @@
         "answer": 3
       },
       "same_dept_as_gold": true,
-      "same_branch_as_gold": true,
+      "same_branch_as_gold": false,
       "difficulty": "L2",
-      "n_gold": 4
+      "n_gold": 2
     },
     {
       "query_id": 21,
       "rank": 2,
       "person_id": 4,
-      "hit": true,
+      "hit": false,
       "confidence": "高",
       "score": 0.7937,
       "margin_to_next": 0.0273,
@@ -1176,9 +1176,9 @@
         "answer": 3
       },
       "same_dept_as_gold": true,
-      "same_branch_as_gold": true,
+      "same_branch_as_gold": false,
       "difficulty": "L2",
-      "n_gold": 4
+      "n_gold": 2
     },
     {
       "query_id": 21,
@@ -1198,13 +1198,13 @@
       "same_dept_as_gold": true,
       "same_branch_as_gold": true,
       "difficulty": "L2",
-      "n_gold": 4
+      "n_gold": 2
     },
     {
       "query_id": 22,
       "rank": 1,
       "person_id": 31,
-      "hit": true,
+      "hit": false,
       "confidence": "高",
       "score": 0.6809,
       "margin_to_next": 0.1723,
@@ -1214,9 +1214,9 @@
         "answer": 3
       },
       "same_dept_as_gold": true,
-      "same_branch_as_gold": true,
+      "same_branch_as_gold": false,
       "difficulty": "L2",
-      "n_gold": 4
+      "n_gold": 2
     },
     {
       "query_id": 22,
@@ -1235,13 +1235,13 @@
       "same_dept_as_gold": true,
       "same_branch_as_gold": true,
       "difficulty": "L2",
-      "n_gold": 4
+      "n_gold": 2
     },
     {
       "query_id": 22,
       "rank": 3,
       "person_id": 12,
-      "hit": true,
+      "hit": false,
       "confidence": "中",
       "score": 0.4896,
       "margin_to_next": 0.1021,
@@ -1251,9 +1251,9 @@
         "answer": 1
       },
       "same_dept_as_gold": true,
-      "same_branch_as_gold": true,
+      "same_branch_as_gold": false,
       "difficulty": "L2",
-      "n_gold": 4
+      "n_gold": 2
     },
     {
       "query_id": 23,
@@ -1272,7 +1272,7 @@
       "same_dept_as_gold": true,
       "same_branch_as_gold": true,
       "difficulty": "L2",
-      "n_gold": 4
+      "n_gold": 2
     },
     {
       "query_id": 23,
@@ -1290,13 +1290,13 @@
       "same_dept_as_gold": true,
       "same_branch_as_gold": true,
       "difficulty": "L2",
-      "n_gold": 4
+      "n_gold": 2
     },
     {
       "query_id": 23,
       "rank": 3,
       "person_id": 19,
-      "hit": true,
+      "hit": false,
       "confidence": "中",
       "score": 0.464,
       "margin_to_next": 0.083,
@@ -1306,15 +1306,15 @@
         "answer": 1
       },
       "same_dept_as_gold": true,
-      "same_branch_as_gold": true,
+      "same_branch_as_gold": false,
       "difficulty": "L2",
-      "n_gold": 4
+      "n_gold": 2
     },
     {
       "query_id": 24,
       "rank": 1,
       "person_id": 25,
-      "hit": true,
+      "hit": false,
       "confidence": "高",
       "score": 0.7376,
       "margin_to_next": 0.059,
@@ -1325,15 +1325,15 @@
         "answer": 3
       },
       "same_dept_as_gold": true,
-      "same_branch_as_gold": true,
+      "same_branch_as_gold": false,
       "difficulty": "L2",
-      "n_gold": 4
+      "n_gold": 2
     },
     {
       "query_id": 24,
       "rank": 2,
       "person_id": 33,
-      "hit": true,
+      "hit": false,
       "confidence": "高",
       "score": 0.6786,
       "margin_to_next": 0.086,
@@ -1343,10 +1343,10 @@
         "project": 5,
         "answer": 2
       },
-      "same_dept_as_gold": true,
-      "same_branch_as_gold": true,
+      "same_dept_as_gold": false,
+      "same_branch_as_gold": false,
       "difficulty": "L2",
-      "n_gold": 4
+      "n_gold": 2
     },
     {
       "query_id": 24,
@@ -1362,10 +1362,10 @@
         "cert": 1,
         "project": 3
       },
-      "same_dept_as_gold": true,
+      "same_dept_as_gold": false,
       "same_branch_as_gold": true,
       "difficulty": "L2",
-      "n_gold": 4
+      "n_gold": 2
     },
     {
       "query_id": 25,
@@ -1384,13 +1384,13 @@
       "same_dept_as_gold": true,
       "same_branch_as_gold": true,
       "difficulty": "L2",
-      "n_gold": 4
+      "n_gold": 2
     },
     {
       "query_id": 25,
       "rank": 2,
       "person_id": 4,
-      "hit": true,
+      "hit": false,
       "confidence": "高",
       "score": 0.7959,
       "margin_to_next": 0.0284,
@@ -1401,9 +1401,9 @@
         "answer": 3
       },
       "same_dept_as_gold": true,
-      "same_branch_as_gold": true,
+      "same_branch_as_gold": false,
       "difficulty": "L2",
-      "n_gold": 4
+      "n_gold": 2
     },
     {
       "query_id": 25,
@@ -1422,7 +1422,7 @@
       "same_dept_as_gold": true,
       "same_branch_as_gold": true,
       "difficulty": "L2",
-      "n_gold": 4
+      "n_gold": 2
     },
     {
       "query_id": 26,

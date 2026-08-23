@@ -442,13 +442,22 @@ def test_run_eval_real_pipeline_over_seed(seed_counts, session, fake_embedder) -
     # primary — if it were 1.0 the scorer would just be reproducing labels.
     assert report.metrics_alt.recall_at_3 < 0.99
     # Regression floors with headroom below the deterministic observed values on
-    # the NON-leaky set (Top-1 0.66 / Recall@3 0.59 / MRR 0.70 / route 0.70).
+    # the NON-leaky set (Top-1 0.54 / Recall@3 0.55 / MRR 0.60 / route 0.70).
     # These catch a real retrieval/scoring regression without pinning the exact
     # numbers (which move when the scorer weights are retuned). Absolute spec
     # targets (§7) need real embeddings on the seed rows; here the fixtures store
     # NULL vectors so BM25 drives retrieval and routing degenerates to the person
     # line (route accuracy == the person fraction among routed queries).
-    assert m.top1_accuracy >= 0.55
-    assert m.recall_at_3 >= 0.50
-    assert m.mrr >= 0.60
+    #
+    # #158 で Top-1 / Recall@3 の床を下げた。**検索やスコアラーの劣化ではない。**
+    # 拠点制約つきを 5 件から 15 件に増やしたことで、10 件の gold が
+    # 4 名から 1〜2 名に絞られた（gold 人数の合計 40 → 19）。該当クエリで
+    # ランダムに 1 名選んだときの Top-1 期待値は 0.100 → 0.048 に半減しており、
+    # 正解集合が小さくなった分だけ当てにくくなるのは設計どおりである。
+    # 実測は Top-1 0.66 → 0.536、Recall@3 0.59 → 0.551 で、
+    # 影響を受けるのは採点対象 56 件中 10 件（最大 10/56 = 0.179 の押し下げ）。
+    # 観測された低下 0.124 はその範囲に収まる。
+    assert m.top1_accuracy >= 0.45
+    assert m.recall_at_3 >= 0.45
+    assert m.mrr >= 0.50
     assert m.route_accuracy >= 0.55

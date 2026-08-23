@@ -1,32 +1,40 @@
 [
   {
     "name": "現状（そのまま）",
-    "recall_at_3": 0.6577380952380952,
-    "top1": 0.6428571428571429,
-    "mrr": 0.6875,
+    "recall_at_3": 0.6964285714285714,
+    "top1": 0.625,
+    "mrr": 0.7068452380952381,
     "by_difficulty": {
-      "L1": 0.5,
-      "L2": 0.7083333333333334,
+      "L1": 0.6666666666666667,
+      "L2": 0.7222222222222222,
       "L3": 0.6333333333333333,
       "L4": 0.0
     },
-    "recall_at_3_with_gold_topics": 0.7083333333333334,
-    "top1_with_gold_topics": 0.6923076923076923,
+    "recall_at_3_with_gold_topics": 0.75,
+    "top1_with_gold_topics": 0.6730769230769231,
     "n_with_gold_topics": 52,
     "per_query": [
       {
         "id": 1,
         "difficulty": "L1",
         "has_gold_topics": true,
-        "hit_at_3": false,
-        "ranked_top3": []
+        "hit_at_3": true,
+        "ranked_top3": [
+          35,
+          36,
+          19
+        ]
       },
       {
         "id": 2,
         "difficulty": "L1",
         "has_gold_topics": true,
-        "hit_at_3": false,
-        "ranked_top3": []
+        "hit_at_3": true,
+        "ranked_top3": [
+          25,
+          33,
+          18
+        ]
       },
       {
         "id": 3,
@@ -123,7 +131,7 @@
         "ranked_top3": [
           2,
           3,
-          1
+          26
         ]
       },
       {
@@ -133,8 +141,8 @@
         "hit_at_3": false,
         "ranked_top3": [
           22,
-          4,
-          8
+          3,
+          4
         ]
       },
       {
@@ -156,7 +164,7 @@
         "ranked_top3": [
           16,
           13,
-          14
+          1
         ]
       },
       {
@@ -167,7 +175,7 @@
         "ranked_top3": [
           15,
           25,
-          33
+          14
         ]
       },
       {
@@ -196,11 +204,11 @@
         "id": 19,
         "difficulty": "L2",
         "has_gold_topics": true,
-        "hit_at_3": false,
+        "hit_at_3": true,
         "ranked_top3": [
-          3,
-          17,
-          2
+          22,
+          15,
+          5
         ]
       },
       {
@@ -210,8 +218,8 @@
         "hit_at_3": true,
         "ranked_top3": [
           3,
-          21,
-          1
+          1,
+          2
         ]
       },
       {
@@ -220,17 +228,21 @@
         "has_gold_topics": true,
         "hit_at_3": true,
         "ranked_top3": [
-          23,
           4,
-          5
+          5,
+          22
         ]
       },
       {
         "id": 22,
         "difficulty": "L2",
         "has_gold_topics": true,
-        "hit_at_3": false,
-        "ranked_top3": []
+        "hit_at_3": true,
+        "ranked_top3": [
+          31,
+          32,
+          12
+        ]
       },
       {
         "id": 23,
@@ -243,7 +255,7 @@
         "id": 24,
         "difficulty": "L2",
         "has_gold_topics": true,
-        "hit_at_3": true,
+        "hit_at_3": false,
         "ranked_top3": [
           25,
           33,
@@ -590,17 +602,17 @@
   },
   {
     "name": "経路の pin を外す（C4 の候補10名）",
-    "recall_at_3": 0.7767857142857143,
-    "top1": 0.7678571428571429,
-    "mrr": 0.8125,
+    "recall_at_3": 0.7678571428571429,
+    "top1": 0.6964285714285714,
+    "mrr": 0.7782738095238095,
     "by_difficulty": {
       "L1": 0.9666666666666666,
-      "L2": 0.7638888888888888,
+      "L2": 0.75,
       "L3": 0.6333333333333333,
       "L4": 0.0
     },
-    "recall_at_3_with_gold_topics": 0.8365384615384616,
-    "top1_with_gold_topics": 0.8269230769230769,
+    "recall_at_3_with_gold_topics": 0.8269230769230769,
+    "top1_with_gold_topics": 0.75,
     "n_with_gold_topics": 52,
     "per_query": [
       {
@@ -732,7 +744,7 @@
         "ranked_top3": [
           2,
           3,
-          1
+          26
         ]
       },
       {
@@ -742,8 +754,8 @@
         "hit_at_3": false,
         "ranked_top3": [
           22,
-          4,
-          8
+          3,
+          4
         ]
       },
       {
@@ -765,7 +777,7 @@
         "ranked_top3": [
           16,
           13,
-          14
+          1
         ]
       },
       {
@@ -776,7 +788,7 @@
         "ranked_top3": [
           15,
           25,
-          33
+          14
         ]
       },
       {
@@ -805,11 +817,11 @@
         "id": 19,
         "difficulty": "L2",
         "has_gold_topics": true,
-        "hit_at_3": false,
+        "hit_at_3": true,
         "ranked_top3": [
-          3,
-          17,
-          2
+          22,
+          15,
+          5
         ]
       },
       {
@@ -819,8 +831,8 @@
         "hit_at_3": true,
         "ranked_top3": [
           3,
-          21,
-          1
+          1,
+          2
         ]
       },
       {
@@ -829,9 +841,9 @@
         "has_gold_topics": true,
         "hit_at_3": true,
         "ranked_top3": [
-          23,
           4,
-          5
+          5,
+          22
         ]
       },
       {
@@ -853,14 +865,14 @@
         "ranked_top3": [
           35,
           36,
-          19
+          12
         ]
       },
       {
         "id": 24,
         "difficulty": "L2",
         "has_gold_topics": true,
-        "hit_at_3": true,
+        "hit_at_3": false,
         "ranked_top3": [
           25,
           33,
@@ -1207,17 +1219,17 @@
   },
   {
     "name": "候補を全社員にする（#87）",
-    "recall_at_3": 0.8363095238095238,
-    "top1": 0.8035714285714286,
-    "mrr": 0.8660714285714286,
+    "recall_at_3": 0.7886904761904762,
+    "top1": 0.7142857142857143,
+    "mrr": 0.8080357142857143,
     "by_difficulty": {
       "L1": 0.9666666666666666,
-      "L2": 0.8194444444444444,
+      "L2": 0.7453703703703703,
       "L3": 0.7666666666666666,
       "L4": 0.0
     },
-    "recall_at_3_with_gold_topics": 0.9006410256410257,
-    "top1_with_gold_topics": 0.8653846153846154,
+    "recall_at_3_with_gold_topics": 0.8493589743589743,
+    "top1_with_gold_topics": 0.7692307692307693,
     "n_with_gold_topics": 52,
     "per_query": [
       {
@@ -1477,7 +1489,7 @@
         "id": 24,
         "difficulty": "L2",
         "has_gold_topics": true,
-        "hit_at_3": true,
+        "hit_at_3": false,
         "ranked_top3": [
           25,
           33,

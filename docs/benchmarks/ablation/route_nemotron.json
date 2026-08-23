@@ -13,29 +13,29 @@
   {
    "id": 1,
    "gold_route": "document",
-   "route": "document",
+   "route": "person",
    "n_candidates": 10,
-   "answer_confidence": 0.393,
-   "document_confidence": 0.449,
-   "people_confidence": 0.376
+   "answer_confidence": 0.328,
+   "document_confidence": 0.369,
+   "people_confidence": 0.402
   },
   {
    "id": 2,
    "gold_route": "document",
-   "route": "document",
+   "route": "person",
    "n_candidates": 10,
-   "answer_confidence": 0.504,
-   "document_confidence": 0.565,
-   "people_confidence": 0.387
+   "answer_confidence": 0.445,
+   "document_confidence": 0.486,
+   "people_confidence": 0.473
   },
   {
    "id": 3,
    "gold_route": "prior_answer",
    "route": "person",
    "n_candidates": 10,
-   "answer_confidence": 0.344,
-   "document_confidence": 0.187,
-   "people_confidence": 0.453
+   "answer_confidence": 0.266,
+   "document_confidence": 0.184,
+   "people_confidence": 0.406
   },
   {
    "id": 4,
@@ -105,135 +105,135 @@
    "gold_route": "document",
    "route": "person",
    "n_candidates": 10,
-   "answer_confidence": 0.242,
-   "document_confidence": 0.168,
-   "people_confidence": 0.263
+   "answer_confidence": 0.26,
+   "document_confidence": 0.178,
+   "people_confidence": 0.257
   },
   {
    "id": 12,
    "gold_route": "person",
    "route": "person",
    "n_candidates": 10,
-   "answer_confidence": 0.296,
-   "document_confidence": 0.15,
-   "people_confidence": 0.245
+   "answer_confidence": 0.288,
+   "document_confidence": 0.176,
+   "people_confidence": 0.293
   },
   {
    "id": 13,
    "gold_route": "person",
    "route": "person",
    "n_candidates": 10,
-   "answer_confidence": 0.263,
-   "document_confidence": 0.154,
-   "people_confidence": 0.292
+   "answer_confidence": 0.179,
+   "document_confidence": 0.127,
+   "people_confidence": 0.192
   },
   {
    "id": 14,
    "gold_route": "prior_answer",
    "route": "person",
    "n_candidates": 10,
-   "answer_confidence": 0.271,
-   "document_confidence": 0.109,
-   "people_confidence": 0.243
+   "answer_confidence": 0.278,
+   "document_confidence": 0.113,
+   "people_confidence": 0.306
   },
   {
    "id": 15,
    "gold_route": "person",
    "route": "person",
    "n_candidates": 10,
-   "answer_confidence": 0.176,
-   "document_confidence": 0.088,
-   "people_confidence": 0.266
+   "answer_confidence": 0.198,
+   "document_confidence": 0.105,
+   "people_confidence": 0.237
   },
   {
    "id": 16,
    "gold_route": "person",
    "route": "person",
    "n_candidates": 10,
-   "answer_confidence": 0.306,
-   "document_confidence": 0.158,
-   "people_confidence": 0.341
+   "answer_confidence": 0.343,
+   "document_confidence": 0.176,
+   "people_confidence": 0.323
   },
   {
    "id": 17,
    "gold_route": "prior_answer",
    "route": "person",
    "n_candidates": 10,
-   "answer_confidence": 0.247,
-   "document_confidence": 0.139,
-   "people_confidence": 0.352
+   "answer_confidence": 0.29,
+   "document_confidence": 0.144,
+   "people_confidence": 0.233
   },
   {
    "id": 18,
    "gold_route": "document",
    "route": "person",
    "n_candidates": 10,
-   "answer_confidence": 0.218,
-   "document_confidence": 0.192,
-   "people_confidence": 0.282
+   "answer_confidence": 0.216,
+   "document_confidence": 0.166,
+   "people_confidence": 0.342
   },
   {
    "id": 19,
    "gold_route": "person",
    "route": "person",
    "n_candidates": 10,
-   "answer_confidence": 0.208,
-   "document_confidence": 0.136,
-   "people_confidence": 0.264
+   "answer_confidence": 0.225,
+   "document_confidence": 0.135,
+   "people_confidence": 0.328
   },
   {
    "id": 20,
    "gold_route": "person",
    "route": "person",
    "n_candidates": 10,
-   "answer_confidence": 0.322,
-   "document_confidence": 0.234,
-   "people_confidence": 0.233
+   "answer_confidence": 0.317,
+   "document_confidence": 0.238,
+   "people_confidence": 0.308
   },
   {
    "id": 21,
    "gold_route": "prior_answer",
    "route": "person",
    "n_candidates": 10,
-   "answer_confidence": 0.211,
-   "document_confidence": 0.099,
-   "people_confidence": 0.13
+   "answer_confidence": 0.193,
+   "document_confidence": 0.11,
+   "people_confidence": 0.254
   },
   {
    "id": 22,
    "gold_route": "document",
-   "route": "document",
+   "route": "person",
    "n_candidates": 10,
-   "answer_confidence": 0.291,
-   "document_confidence": 0.354,
-   "people_confidence": 0.227
+   "answer_confidence": 0.235,
+   "document_confidence": 0.291,
+   "people_confidence": 0.368
   },
   {
    "id": 23,
    "gold_route": "document",
    "route": "document",
    "n_candidates": 10,
-   "answer_confidence": 0.373,
-   "document_confidence": 0.326,
-   "people_confidence": 0.279
+   "answer_confidence": 0.325,
+   "document_confidence": 0.305,
+   "people_confidence": 0.365
   },
   {
    "id": 24,
    "gold_route": "document",
    "route": "person",
    "n_candidates": 10,
-   "answer_confidence": 0.347,
-   "document_confidence": 0.206,
-   "people_confidence": 0.239
+   "answer_confidence": 0.3,
+   "document_confidence": 0.189,
+   "people_confidence": 0.278
   },
   {
    "id": 25,
    "gold_route": "prior_answer",
    "route": "person",
    "n_candidates": 10,
-   "answer_confidence": 0.299,
-   "document_confidence": 0.173,
-   "people_confidence": 0.29
+   "answer_confidence": 0.247,
+   "document_confidence": 0.14,
+   "people_confidence": 0.34
   },
   {
    "id": 26,
