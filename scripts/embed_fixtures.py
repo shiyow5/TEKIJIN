@@ -88,6 +88,7 @@ def main(argv: list[str] | None = None) -> int:
         passage_prefix=settings.embedding_passage_prefix,
         trust_remote_code=settings.embedding_trust_remote_code,
         revision=settings.embedding_model_revision,
+        app_env=settings.app_env,
     )
 
     # Probe the model's output width BEFORE opening any DB connection, so a

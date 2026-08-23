@@ -60,6 +60,7 @@ def main() -> int:
             use_e5_prefix=settings.embedding_use_e5_prefix,
             query_prefix=settings.embedding_query_prefix,
             passage_prefix=settings.embedding_passage_prefix,
+            app_env=settings.app_env,
         )
         ranker = build_pipeline_ranker(session, embedder, now=EVAL_NOW)
         report = run_eval(queries, ranker)

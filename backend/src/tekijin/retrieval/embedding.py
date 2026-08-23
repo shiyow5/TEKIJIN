@@ -83,12 +83,17 @@ class SentenceTransformerEmbedder:
             ``None`` = the repo's default branch) is used verbatim. Pin it in
             production so ``trust_remote_code`` cannot execute code from a moved
             branch.
+        app_env: Deployment env driving the fail-closed check. ``None`` reads
+            ``settings.app_env`` (the global singleton). Callers that build from a
+            custom ``Settings`` MUST forward ``settings.app_env`` from THAT instance,
+            or the guard would consult the global env instead of the hardened one it
+            is protecting (a bypass in exactly the custom-Settings case — #108).
 
     Callers that build from an explicit ``Settings`` (e.g. ``build_default_service``)
-    should pass ``trust_remote_code`` and ``revision`` from THAT instance so a
-    custom (e.g. security-hardened) config is honored rather than the cached global.
-    ``revision`` uses a sentinel so passing ``None`` for a fallback model that wants
-    the default branch is NOT overridden by the global settings' pinned revision.
+    should pass ``trust_remote_code``, ``revision`` AND ``app_env`` from THAT instance
+    so a custom (e.g. security-hardened) config is honored rather than the cached
+    global. ``revision`` uses a sentinel so passing ``None`` for a fallback model that
+    wants the default branch is NOT overridden by the global settings' pinned revision.
     """
 
     def __init__(
@@ -101,6 +106,7 @@ class SentenceTransformerEmbedder:
         passage_prefix: str | None = None,
         trust_remote_code: bool | None = None,
         revision: str | None | _Unset = _UNSET,
+        app_env: str | None = None,
     ) -> None:
         settings = get_settings()
         self._model_name = model_name or settings.embedding_model
@@ -124,11 +130,16 @@ class SentenceTransformerEmbedder:
         # code from a MOVING branch. trust_remote_code=True + revision=None would
         # run whatever the model repo's default branch holds at each cold load, so
         # an upstream change or compromise lands as code execution. Pin a reviewed
-        # revision, or turn trust_remote_code off, before deploying.
-        if settings.app_env != "development" and self._trust_remote_code and self._revision is None:
+        # revision, or turn trust_remote_code off, before deploying. app_env MUST
+        # come from the SAME settings instance that drove trust/revision (forwarded
+        # by callers), not the global singleton, or a hardened custom Settings would
+        # be checked against the wrong env and silently bypass the guard.
+        effective_app_env = settings.app_env if app_env is None else app_env
+        unpinned_remote_code = self._trust_remote_code and self._revision is None
+        if effective_app_env != "development" and unpinned_remote_code:
             raise ValueError(
                 "Refusing to load an embedding model with trust_remote_code=True and "
-                f"no pinned revision outside development (TEKIJIN_APP_ENV={settings.app_env!r}). "
+                f"no pinned revision outside development (app_env={effective_app_env!r}). "
                 "Set TEKIJIN_EMBEDDING_MODEL_REVISION to a reviewed commit SHA/tag, or set "
                 "TEKIJIN_EMBEDDING_TRUST_REMOTE_CODE=false."
             )

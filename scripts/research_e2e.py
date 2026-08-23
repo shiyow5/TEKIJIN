@@ -80,8 +80,14 @@ def build(url):
     from tekijin.scorer.scorer import ExpertiseScorer
 
     session = get_sessionmaker(get_engine(url))()
+    _settings = get_settings()
     embedder = SentenceTransformerEmbedder(
-        use_e5_prefix=get_settings().embedding_use_e5_prefix
+        use_e5_prefix=_settings.embedding_use_e5_prefix,
+        query_prefix=_settings.embedding_query_prefix,
+        passage_prefix=_settings.embedding_passage_prefix,
+        trust_remote_code=_settings.embedding_trust_remote_code,
+        revision=_settings.embedding_model_revision,
+        app_env=_settings.app_env,
     )
     return (
         session,

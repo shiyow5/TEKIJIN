@@ -381,6 +381,28 @@ def test_embedder_production_allows_trust_remote_code_off(
     assert emb.SentenceTransformerEmbedder(model=_FakeModel())._trust_remote_code is False
 
 
+def test_embedder_fail_closed_uses_forwarded_app_env_not_global() -> None:
+    # REGRESSION (#108 review HIGH): the guard must consult the app_env the CALLER
+    # forwards (from its own Settings), not the global singleton. With the global at
+    # the default "development", an explicit production app_env must still trip it —
+    # otherwise a hardened custom Settings is silently bypassed.
+    assert get_settings().app_env == "development", "test assumes the default global env"
+    with pytest.raises(ValueError, match="trust_remote_code"):
+        SentenceTransformerEmbedder(model=_FakeModel(), app_env="production")
+
+
+def test_embedder_explicit_development_app_env_overrides_production_global(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Inverse: a production GLOBAL must not spuriously trip the guard when the caller
+    # forwards a development app_env from its own (e.g. local tooling) Settings.
+    import tekijin.retrieval.embedding as emb
+
+    prod_global = Settings(_env_file=None, app_env="production")  # type: ignore[call-arg]
+    monkeypatch.setattr(emb, "get_settings", lambda: prod_global)
+    emb.SentenceTransformerEmbedder(model=_FakeModel(), app_env="development")  # must not raise
+
+
 def test_embedder_development_allows_unpinned_remote_code() -> None:
     # The default (development) path is unchanged: convenient, no pin required.
     assert get_settings().app_env == "development", "test assumes the default development env"

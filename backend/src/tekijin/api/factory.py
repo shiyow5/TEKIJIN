@@ -30,6 +30,10 @@ def build_default_service(settings: Settings | None = None) -> AgentService:
         passage_prefix=settings.embedding_passage_prefix,
         trust_remote_code=settings.embedding_trust_remote_code,
         revision=settings.embedding_model_revision,
+        # app_env too, so the fail-closed guard checks THIS instance's env rather
+        # than the global singleton (#108) — otherwise a hardened production Settings
+        # built here could be validated against a development global and bypassed.
+        app_env=settings.app_env,
     )
     return AgentService(
         session_factory=session_factory,
