@@ -12,6 +12,7 @@ from sqlalchemy import event, select, text
 
 from tekijin.config import get_settings
 from tekijin.data.db import get_engine, get_sessionmaker, session_scope
+from tekijin.data.inbox import pending_handoffs_for_responder
 from tekijin.data.repository import Repository
 from tekijin.data.seed import _apply_schema_upgrades, apply_migrations, run_seed
 from tekijin.models.tables import (
@@ -90,6 +91,71 @@ def test_project_members_role_check_constraint(engine, seed_counts) -> None:
         session_scope(factory) as sess,
     ):
         sess.add(ProjectMember(project_id=1, employee_id=1, role="observer"))
+
+
+# --------------------------------------------------------------------------- #
+# responder inbox (#123)
+# --------------------------------------------------------------------------- #
+def _add_pending_question(
+    session, *, qid, session_id, asker_id, responder_id, rank=1, outcome=None
+):
+    session.add(
+        Question(
+            id=qid,
+            asker_id=asker_id,
+            body=f"{qid} の本文",
+            topics=["ネットワーク"],
+            status="open",
+            session_id=session_id,
+        )
+    )
+    session.add(
+        Recommendation(
+            question_id=qid, employee_id=responder_id, rank=rank, score=0.9, outcome=outcome
+        )
+    )
+
+
+def test_pending_handoffs_lists_only_pending_rank1_for_the_responder(seed_counts, session) -> None:
+    # A pending rank-1 rec for responder 5 with a session id -> in the inbox.
+    _add_pending_question(session, qid="api_ibx_1", session_id="s-1", asker_id=10, responder_id=5)
+    # Excluded: already answered (outcome set), not rank 1, another responder,
+    # and a pending rec whose question has no session id (seeded history).
+    _add_pending_question(
+        session, qid="api_ibx_2", session_id="s-2", asker_id=10, responder_id=5, outcome="accepted"
+    )
+    _add_pending_question(
+        session, qid="api_ibx_3", session_id="s-3", asker_id=10, responder_id=5, rank=2
+    )
+    _add_pending_question(session, qid="api_ibx_4", session_id="s-4", asker_id=10, responder_id=6)
+    _add_pending_question(session, qid="api_ibx_5", session_id=None, asker_id=10, responder_id=5)
+    session.flush()
+
+    items = pending_handoffs_for_responder(session, 5)
+    assert [i["session_id"] for i in items] == ["s-1"]
+    item = items[0]
+    assert item["question_id"] == "api_ibx_1"
+    assert item["question"] == "api_ibx_1 の本文"
+    assert item["topics"] == ["ネットワーク"]
+    assert item["asker_id"] == 10
+    assert item["asker_name"]  # joined from employees
+    assert item["created_at"] is not None
+
+
+def test_pending_handoffs_dedupes_by_session_keeping_newest(seed_counts, session) -> None:
+    # Two pending rank-1 recs for the same session -> a single inbox item.
+    session.add(Question(id="api_ibx_dup", asker_id=10, body="重複", topics=[], session_id="s-dup"))
+    session.add(Recommendation(question_id="api_ibx_dup", employee_id=7, rank=1, score=0.8))
+    session.add(Recommendation(question_id="api_ibx_dup", employee_id=7, rank=1, score=0.9))
+    session.flush()
+
+    items = pending_handoffs_for_responder(session, 7)
+    assert len(items) == 1
+    assert items[0]["session_id"] == "s-dup"
+
+
+def test_pending_handoffs_empty_for_responder_without_handoffs(seed_counts, session) -> None:
+    assert pending_handoffs_for_responder(session, 1) == []
 
 
 # --------------------------------------------------------------------------- #

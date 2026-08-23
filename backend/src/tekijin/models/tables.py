@@ -179,6 +179,11 @@ class Question(Base):
     body: Mapped[str | None] = mapped_column(Text)
     topics: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
     status: Mapped[str | None] = mapped_column(String(64))
+    # The graph ``thread_id`` (== the client's ``session_id``) for an API-created
+    # question. The pending-handoff view lives in the checkpointer keyed by this,
+    # not in SQL, so the responder inbox joins on it to deep-link into
+    # ``/answer/{session_id}``. NULL for seeded/pre-session questions.
+    session_id: Mapped[str | None] = mapped_column(String(64), index=True)
     # C5 route the run took (person / prior_answer / document). Persisted by the
     # API when C5 emits, so the dashboard can report the self-resolution rate
     # (補助経路で人を介さず解決した割合). NULL for pre-seeded/unrouted questions.

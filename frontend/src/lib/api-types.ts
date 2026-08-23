@@ -66,6 +66,24 @@ export interface EmployeeListResponse {
   employees: EmployeeSummary[];
 }
 
+/**
+ * One pending handoff awaiting the responder (GET /inbox, schemas.py `InboxItem`).
+ * `session_id` deep-links to `/answer/{session_id}`.
+ */
+export interface InboxItem {
+  session_id: string;
+  question_id: string;
+  question: string;
+  topics: string[];
+  asker: HandoffAsker;
+  created_at?: string | null;
+}
+
+/** GET /inbox payload (schemas.py `InboxResponse`). */
+export interface InboxResponse {
+  items: InboxItem[];
+}
+
 // --------------------------------------------------------------------------- //
 // domain models (shared by SSE data and final response)
 // --------------------------------------------------------------------------- //

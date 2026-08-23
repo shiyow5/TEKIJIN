@@ -273,7 +273,9 @@ class AgentService:
             with session_scope(self._session_factory) as session:
                 if not employee_exists(session, asker_id):
                     raise AskerNotFound(f"asker_id {asker_id} is not a known employee")
-                persist_question(session, question_id, asker_id, question, now)
+                persist_question(
+                    session, question_id, asker_id, question, now, session_id=session_id
+                )
             ctx = self._reg_ensure(session_id)
             ctx.pending = {
                 "question": question,

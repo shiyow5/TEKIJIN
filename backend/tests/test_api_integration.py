@@ -434,6 +434,41 @@ def test_employees_route_lists_directory_for_switcher(seed_counts, engine, fake_
     assert all(set(p) == {"id", "name", "dept"} for p in people)
 
 
+def test_inbox_lists_pending_handoff_then_clears_after_answer(
+    seed_counts, engine, fake_embedder
+) -> None:
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2, 3], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2, 3)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "inbox-s1"})
+    _events(client, "inbox-s1")  # run to the send interrupt: persists recs + session_id
+
+    # The primary (rank 1) responder E001 sees the pending handoff, deep-linkable
+    # by its session id; the question and asker are previewed.
+    body = client.get("/inbox", params={"responder_id": "E001"}).json()
+    item = next(i for i in body["items"] if i["session_id"] == "inbox-s1")
+    assert item["asker"]["id"] == "E010"
+    assert item["question"] == GOOD_Q
+    assert item["topics"]  # C1 topics persisted onto the question
+
+    # A non-primary candidate (E002) was not handed off -> nothing pending.
+    assert client.get("/inbox", params={"responder_id": "E002"}).json()["items"] == []
+
+    # Once the responder accepts, the handoff clears from the inbox.
+    client.post("/answer", json={"session_id": "inbox-s1", "outcome": "accepted"})
+    _events(client, "inbox-s1")  # drain so the outcome is recorded
+    after = client.get("/inbox", params={"responder_id": "E001"}).json()
+    assert all(i["session_id"] != "inbox-s1" for i in after["items"])
+
+
+def test_inbox_rejects_a_bad_responder_id(seed_counts, engine, fake_embedder) -> None:
+    client = _client(engine, fake_embedder, retriever=_FakeRetriever(), scorer=_FakeScorer([]))
+    assert client.get("/inbox", params={"responder_id": "not-an-id"}).status_code == 422
+
+
 def test_dashboard_self_resolution_and_latest_eval(seed_counts, session) -> None:
     from sqlalchemy import update
 

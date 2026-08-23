@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from sse_starlette import EventSourceResponse
 
 from tekijin.api import schemas
@@ -24,6 +24,7 @@ from tekijin.api.service import (
     SessionInvalid,
 )
 from tekijin.data.dashboard import dashboard_summary
+from tekijin.data.inbox import pending_handoffs_for_responder
 from tekijin.data.repository import Repository
 
 logger = logging.getLogger(__name__)
@@ -128,6 +129,43 @@ def employees(request: Request) -> schemas.EmployeeListResponse:
                 id=schemas.format_employee_id(row.id),
                 name=row.name,
                 dept=row.department,
+            )
+            for row in rows
+        ]
+    )
+
+
+@router.get("/inbox", response_model=schemas.InboxResponse)
+def inbox(request: Request, responder_id: str = Query(min_length=1)) -> schemas.InboxResponse:
+    """Questions currently awaiting ``responder_id`` (the responder inbox, #123).
+
+    ``responder_id`` accepts an int or the ``"E###"`` form (422 otherwise). Each
+    item deep-links to ``/answer/{session_id}``; seeded history (no session) is
+    excluded — there is no live handoff to open.
+    """
+
+    try:
+        rid = schemas.coerce_employee_id(responder_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422, detail="responder_id must be an int or 'E###'"
+        ) from exc
+
+    with _service(request).session_factory() as session:
+        rows = pending_handoffs_for_responder(session, rid)
+    return schemas.InboxResponse(
+        items=[
+            schemas.InboxItem(
+                session_id=row["session_id"],
+                question_id=row["question_id"],
+                question=row["question"],
+                topics=row["topics"],
+                asker=schemas.HandoffAsker(
+                    id=schemas.format_employee_id(row["asker_id"]),
+                    name=row["asker_name"],
+                    dept=row["asker_dept"],
+                ),
+                created_at=row["created_at"],
             )
             for row in rows
         ]
