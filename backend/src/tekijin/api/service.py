@@ -61,6 +61,7 @@ from tekijin.data.writes import (
     employee_exists,
     insert_shown_recommendations,
     latest_primary_recommendation,
+    mark_question_resolved,
     persist_question,
     recommendation_outcome,
     set_recommendation_outcome,
@@ -362,6 +363,10 @@ class AgentService:
             if existing is not None:
                 return "already", existing
             set_recommendation_outcome(session, primary, outcome)
+            # An accepted hand-off resolves the question — stamp the runtime
+            # resolution time (first-wins) for the dashboard's avg-resolution (#97).
+            if outcome == "accepted" and question_id is not None:
+                mark_question_resolved(session, question_id, self._now_factory())
             return "recorded", outcome
 
     # -- /handoff : responder-facing view (product-spec 画面4) ------------- #
@@ -577,6 +582,10 @@ class AgentService:
             return
         with session_scope(self._session_factory) as session:
             update_question_route(session, question_id, route)
+            # A self-resolving route (document) ends the run with no human hand-off,
+            # so the question is resolved the moment it is routed there (#97).
+            if route == "document":
+                mark_question_resolved(session, question_id, self._now_factory())
 
     def _persist_topics(self, question_id: str | None, data: dict[str, Any] | None) -> None:
         if question_id is None:  # pragma: no cover - question_id always set via /ask

@@ -120,14 +120,12 @@ def _self_resolution_rate(session: Session) -> float:
 
 
 def _avg_resolution_hours(session: Session) -> float | None:
-    """Mean hours from a question to its first answer (画面5 平均解決時間).
+    """Mean hours from a question to its resolution (画面5 平均解決時間).
 
-    ``None`` when no question has an answer yet. Uses the earliest answer per
-    question so a later follow-up answer does not inflate the time. NOTE: this
-    reflects questions that have an ``answers`` row (the seeded / historical Q&A).
-    API hand-offs currently record only ``recommendations.outcome`` (no answer
-    row / resolution timestamp), so runtime resolutions do not yet move this
-    number — capturing a per-question ``resolved_at`` is a tracked follow-up.
+    Resolution time is the runtime ``questions.resolved_at`` when present (a live
+    accept / self-resolution, #97), otherwise the earliest ``answers`` row (the
+    seeded / historical Q&A). The earliest answer is used so a later follow-up
+    answer does not inflate the time. ``None`` when nothing is resolved yet.
     """
 
     first_answer = (
@@ -135,12 +133,14 @@ def _avg_resolution_hours(session: Session) -> float | None:
         .group_by(Answer.question_id)
         .subquery()
     )
-    hours = func.extract("epoch", first_answer.c.solved - Question.created_at) / 3600.0
+    # Runtime resolution wins; fall back to the first answer for seeded history.
+    solved = func.coalesce(Question.resolved_at, first_answer.c.solved)
+    hours = func.extract("epoch", solved - Question.created_at) / 3600.0
     return session.scalar(
         select(func.avg(hours))
         .select_from(Question)
-        .join(first_answer, first_answer.c.qid == Question.id)
-        .where(Question.created_at.isnot(None))
+        .outerjoin(first_answer, first_answer.c.qid == Question.id)
+        .where(Question.created_at.isnot(None), solved.isnot(None))
     )
 
 
