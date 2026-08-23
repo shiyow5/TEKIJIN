@@ -188,7 +188,7 @@ export function ProcessingScreen({
       <header className="text-center">
         <h1 className="flex items-center justify-center gap-sm font-bold text-2xl text-primary">
           {showActiveStep ? (
-            <span aria-hidden="true" className="animate-spin text-xl">
+            <span aria-hidden="true" className="animate-spin text-xl motion-reduce:animate-none">
               ⟳
             </span>
           ) : null}
@@ -240,7 +240,10 @@ export function ProcessingScreen({
               data-testid="active-step"
               className="flex items-center gap-sm rounded-xl border border-primary-fixed bg-surface-container-low p-md"
             >
-              <span aria-label="進行中" className="animate-spin text-lg text-primary">
+              <span
+                aria-label="進行中"
+                className="animate-spin text-lg text-primary motion-reduce:animate-none"
+              >
                 ⟳
               </span>
               <p className="text-on-surface-variant text-sm">分析を続けています…</p>

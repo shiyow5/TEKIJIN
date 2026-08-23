@@ -111,6 +111,16 @@ describe("AnswerScreen", () => {
     expect(await screen.findByRole("heading", { name: /回答/ })).toBeInTheDocument();
   });
 
+  it("links back to the inbox after answering (#126: label matches destination)", async () => {
+    getHandoffMock.mockResolvedValue(HANDOFF);
+    render(<AnswerScreen sessionId="s1" />);
+    await screen.findByText("UTM移行時の注意点について");
+    fireEvent.click(screen.getByRole("button", { name: "回答する" }));
+
+    const back = await screen.findByRole("link", { name: "受信箱へ戻る" });
+    expect(back).toHaveAttribute("href", "/inbox");
+  });
+
   it("sends declined when 今は難しい is clicked", async () => {
     getHandoffMock.mockResolvedValue(HANDOFF);
     render(<AnswerScreen sessionId="s1" />);

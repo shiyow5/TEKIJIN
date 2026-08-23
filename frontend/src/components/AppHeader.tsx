@@ -65,7 +65,10 @@ export function AppHeader() {
         </nav>
       </div>
 
-      <label className="flex items-center gap-sm text-on-surface-variant text-sm">
+      <label
+        className="flex items-center gap-sm text-on-surface-variant text-sm"
+        aria-busy={loading}
+      >
         <span>ユーザー切替</span>
         <select
           aria-label="ユーザー切替"
