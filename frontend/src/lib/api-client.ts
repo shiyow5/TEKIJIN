@@ -11,6 +11,7 @@ import type {
   AckResponse,
   AskRequest,
   DashboardResponse,
+  DocumentDetail,
   EmployeeListResponse,
   EmployeeSummary,
   HandoffResponse,
@@ -170,6 +171,14 @@ export async function getRecentQuestions(
   const query = `?asker_id=${encodeURIComponent(askerId)}`;
   const body = await getJson<RecentQuestionsResponse>(`/questions${query}`, options);
   return body.items;
+}
+
+/** Fetch one internal document's full content for the viewer (GET /documents/{id}, #143). */
+export async function getDocument(
+  docId: string,
+  options: RequestOptions = {},
+): Promise<DocumentDetail> {
+  return getJson<DocumentDetail>(`/documents/${encodeURIComponent(docId)}`, options);
 }
 
 /**

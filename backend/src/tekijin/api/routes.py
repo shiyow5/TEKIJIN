@@ -24,6 +24,7 @@ from tekijin.api.service import (
     SessionInvalid,
 )
 from tekijin.data.dashboard import dashboard_summary
+from tekijin.data.documents import get_document
 from tekijin.data.history import recent_questions_for_asker
 from tekijin.data.inbox import pending_handoffs_for_responder
 from tekijin.data.repository import Repository
@@ -192,3 +193,18 @@ def questions(
     return schemas.RecentQuestionsResponse(
         items=[schemas.RecentQuestionItem(**row) for row in rows]
     )
+
+
+@router.get("/documents/{doc_id}", response_model=schemas.DocumentDetail)
+def document_detail(doc_id: str, request: Request) -> schemas.DocumentDetail:
+    """Full content of one internal document, for the document viewer (#143).
+
+    Read-only: viewing the cited document (from the ``document`` route's terminal
+    message) never advances a run. 404 when ``doc_id`` is unknown.
+    """
+
+    with _service(request).session_factory() as session:
+        row = get_document(session, doc_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="document not found")
+    return schemas.DocumentDetail(**row)

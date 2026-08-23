@@ -127,3 +127,4 @@ class AgentState(TypedDict, total=False):
 
     # -- terminal output ---------------------------------------------------
     answer: str | None
+    document_id: str | None  # document route: the cited doc, surfaced to the client

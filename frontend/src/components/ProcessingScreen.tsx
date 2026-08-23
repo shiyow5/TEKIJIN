@@ -16,6 +16,7 @@ import { useOptionalSessionStream } from "@/components/SessionStreamProvider";
 import { ApiError, postAnswer } from "@/lib/api-client";
 import { formatConfidence } from "@/lib/format";
 import { type EventStreamState, useEventStream } from "@/hooks/useEventStream";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
@@ -266,6 +267,15 @@ export function ProcessingScreen({
             <p className="text-on-surface">
               {stream.message.message || "該当する回答が見つかりませんでした。"}
             </p>
+            {stream.message.doc_id ? (
+              <Link
+                href={`/documents/${encodeURIComponent(stream.message.doc_id)}`}
+                className="mt-sm inline-flex min-h-[44px] items-center gap-xs rounded-full bg-primary px-md py-sm font-bold text-on-primary transition-colors hover:bg-primary-container"
+              >
+                <span aria-hidden="true">📄</span>
+                文書を見る
+              </Link>
+            ) : null}
           </div>
         ) : null}
 

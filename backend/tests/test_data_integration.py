@@ -14,12 +14,14 @@ from sqlalchemy import event, select, text
 
 from tekijin.config import get_settings
 from tekijin.data.db import get_engine, get_sessionmaker, session_scope
+from tekijin.data.documents import get_document
 from tekijin.data.history import recent_questions_for_asker
 from tekijin.data.inbox import pending_handoffs_for_responder
 from tekijin.data.repository import Repository
 from tekijin.data.seed import _apply_schema_upgrades, apply_migrations, run_seed
 from tekijin.models.tables import (
     Answer,
+    Document,
     Employee,
     EmployeeProfile,
     ProjectMember,
@@ -312,6 +314,34 @@ def test_recent_questions_respects_limit(seed_counts, session) -> None:
 
 def test_recent_questions_empty_for_asker_without_questions(seed_counts, session) -> None:
     assert recent_questions_for_asker(session, 9999) == []
+
+
+# --------------------------------------------------------------------------- #
+# document viewer (#143)
+# --------------------------------------------------------------------------- #
+def test_get_document_returns_full_content(seed_counts, session) -> None:
+    session.add(
+        Document(
+            id="doc_view_1",
+            title="社内IT手順書",
+            body="PCセットアップはキッティング手順書を用意する。",
+            source="社内Wiki/IT",
+            updated_at=dt.datetime(2026, 8, 1, 9, 0, 0),
+        )
+    )
+    session.flush()
+
+    doc = get_document(session, "doc_view_1")
+    assert doc is not None
+    assert doc["id"] == "doc_view_1"
+    assert doc["title"] == "社内IT手順書"
+    assert "キッティング" in doc["body"]
+    assert doc["source"] == "社内Wiki/IT"
+    assert doc["updated_at"] == "2026-08-01T09:00:00"
+
+
+def test_get_document_unknown_id_is_none(seed_counts, session) -> None:
+    assert get_document(session, "doc_does_not_exist") is None
 
 
 # --------------------------------------------------------------------------- #

@@ -123,6 +123,28 @@ describe("ProcessingScreen", () => {
     expect(screen.queryByTestId("active-step")).not.toBeInTheDocument();
   });
 
+  it("offers a link to the cited document on the document route (#143)", () => {
+    renderScreen(
+      state({
+        terminal: true,
+        message: {
+          status: "document",
+          message: "社内文書に該当がありそうです。",
+          doc_id: "doc_001",
+        },
+      }),
+    );
+    const link = screen.getByRole("link", { name: /文書を見る/ });
+    expect(link).toHaveAttribute("href", "/documents/doc_001");
+  });
+
+  it("shows no document link when a terminal message carries no doc_id", () => {
+    renderScreen(
+      state({ terminal: true, message: { status: "no_candidate", message: "見つかりません" } }),
+    );
+    expect(screen.queryByRole("link", { name: /文書を見る/ })).not.toBeInTheDocument();
+  });
+
   it("shows a generic error display without leaking detail", () => {
     renderScreen(state({ error: "処理中にエラーが発生しました。" }));
     expect(screen.getByRole("alert")).toHaveTextContent("エラーが発生しました");

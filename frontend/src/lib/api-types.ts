@@ -254,6 +254,17 @@ export interface DoneData {
 export interface MessageData {
   status: string;
   message: string;
+  /** For the "document" route: the cited document's id (GET /documents/{doc_id}). */
+  doc_id?: string | null;
+}
+
+/** GET /documents/{doc_id} payload (schemas.py `DocumentDetail`). */
+export interface DocumentDetail {
+  id: string;
+  title?: string | null;
+  body?: string | null;
+  source?: string | null;
+  updated_at?: string | null;
 }
 
 export interface ErrorData {

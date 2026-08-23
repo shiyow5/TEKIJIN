@@ -158,7 +158,16 @@ def test_node_event_terminals_are_messages() -> None:
     ]:
         sse = _ev(events.node_event(node, {"answer": "終端メッセージ"}))
         assert sse.event == "message"
-        assert _data(sse) == {"status": status, "message": "終端メッセージ"}
+        # No document_id in the update -> doc_id is null (only the document route
+        # with a hit populates it; see the dedicated test below).
+        assert _data(sse) == {"status": status, "message": "終端メッセージ", "doc_id": None}
+
+
+def test_node_event_document_carries_doc_id() -> None:
+    # The document terminal surfaces the cited doc id so the client can open it (#143).
+    sse = _ev(events.node_event("document", {"answer": "社内文書に該当", "document_id": "doc_001"}))
+    assert sse.event == "message"
+    assert _data(sse) == {"status": "document", "message": "社内文書に該当", "doc_id": "doc_001"}
 
 
 def test_node_event_internal_nodes_emit_nothing() -> None:
