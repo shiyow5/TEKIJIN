@@ -14,9 +14,14 @@ from __future__ import annotations
 
 import datetime as dt
 from collections.abc import Sequence
-from typing import Any
+from typing import TypedDict
 
-from tekijin.data.dto import AnswerDTO
+from tekijin.data.dto import (
+    AnswerDTO,
+    CertificationDTO,
+    ProjectMembershipDTO,
+    SkillDTO,
+)
 from tekijin.data.repository import Repository
 from tekijin.scorer.evidence import Evidence, collect_topic_evidence, edge_weight
 from tekijin.scorer.features import (
@@ -34,6 +39,32 @@ from tekijin.scorer.weights import (
     REGION_OF_BRANCH,
     Weights,
 )
+
+
+class ScoredReason(TypedDict):
+    """One explainable contribution to a candidate's score (the UI's evidence)."""
+
+    type: str
+    detail: str
+
+
+class ScoredCandidate(TypedDict):
+    """A ranked candidate. ``person_id`` is the internal int; the API boundary
+    renders it as the external ``"E###"`` form (events.py / schemas)."""
+
+    person_id: int
+    name: str
+    dept: str | None
+    score: float
+    confidence: str
+    reasons: list[ScoredReason]
+
+
+class RankResult(TypedDict):
+    """The scorer's public return: the top-k candidates, best first."""
+
+    recommendations: list[ScoredCandidate]
+
 
 # Fixed order to break reason-contribution ties deterministically. ``self`` is a
 # self-declared skill, ``skill`` an inferred one (distinct provenance wording).
@@ -64,7 +95,7 @@ class ExpertiseScorer:
         now: dt.datetime,
         *,
         top_k: int = 3,
-    ) -> dict[str, Any]:
+    ) -> RankResult:
         """Return ``{"recommendations": [...]}`` — the top-``top_k`` candidates.
 
         ``topics`` may be a single topic or several — for a multi-topic question
@@ -100,9 +131,16 @@ class ExpertiseScorer:
         answers_by_person = self._group_answers_by_person(self._repo.answers_by_topics(topic_list))
         asker_branch = self._asker_branch(asker_id)
 
-        scored: list[tuple[float, int, dict[str, Any]]] = []
+        # Batch every per-candidate evidence lookup into one query each (was O(4·N)
+        # queries in the loop — #58). The scorer reads them via ``.get(id, [])``.
+        employees = self._repo.employees_by_ids(candidates)
+        certs_by_person = self._repo.certifications_for_many(candidates)
+        skills_by_person = self._repo.skills_for_many(candidates)
+        memberships_by_person = self._repo.project_memberships_for_many(candidates)
+
+        scored: list[tuple[float, int, ScoredCandidate]] = []
         for person_id in candidates:
-            employee = self._repo.get_employee(person_id)
+            employee = employees.get(person_id)
             if employee is None:
                 continue
             record, score = self._score_person(
@@ -111,6 +149,9 @@ class ExpertiseScorer:
                 employee_name=employee.name,
                 employee_dept=employee.department,
                 employee_branch=employee.branch,
+                certifications=certs_by_person.get(person_id, []),
+                skills=skills_by_person.get(person_id, []),
+                memberships=memberships_by_person.get(person_id, []),
                 answers=answers_by_person.get(person_id, []),
                 load_count=rec_counts.get(person_id, 0) + ans_counts.get(person_id, 0),
                 asker_branch=asker_branch,
@@ -133,18 +174,16 @@ class ExpertiseScorer:
         employee_name: str,
         employee_dept: str | None,
         employee_branch: str | None,
+        certifications: Sequence[CertificationDTO],
+        skills: Sequence[SkillDTO],
+        memberships: Sequence[ProjectMembershipDTO],
         answers: Sequence[AnswerDTO],
         load_count: int,
         asker_branch: str | None,
         now: dt.datetime,
-    ) -> tuple[dict[str, Any], float]:
-        evidence = collect_topic_evidence(
-            topics,
-            self._repo.certifications_for(employee_id),
-            self._repo.skills_for(employee_id),
-            self._repo.project_memberships_for(employee_id),
-            answers,
-        )
+    ) -> tuple[ScoredCandidate, float]:
+        # Evidence is pre-fetched in a batch by ``rank`` (no per-candidate query, #58).
+        evidence = collect_topic_evidence(topics, certifications, skills, memberships, answers)
         weights = self._weights
 
         topic_fit = edge_weight(evidence)
@@ -177,7 +216,7 @@ class ExpertiseScorer:
             asker_branch=asker_branch,
             now=now,
         )
-        record = {
+        record: ScoredCandidate = {
             "person_id": employee_id,
             "name": employee_name,
             "dept": employee_dept,
@@ -205,10 +244,10 @@ class ExpertiseScorer:
         employee_branch: str | None,
         asker_branch: str | None,
         now: dt.datetime,
-    ) -> list[dict[str, str]]:
+    ) -> list[ScoredReason]:
         weights = self._weights
         base_total = sum(e.base_score for e in evidence)
-        entries: list[tuple[float, dict[str, str]]] = []
+        entries: list[tuple[float, ScoredReason]] = []
 
         def topic_fit_share(source_types: tuple[str, ...]) -> float:
             # Only ever called from a block guarded by matching evidence, so

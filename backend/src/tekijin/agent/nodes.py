@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import datetime as dt
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, cast
 
 from langgraph.types import interrupt
 
@@ -230,7 +230,10 @@ class AgentNodes:
             return {"recommendations": []}
         # All topics feed the scorer (aggregated topic_fit), not just topics[0].
         result = self._scorer.rank(topics, candidates, asker_id, state["now"], top_k=3)
-        return {"recommendations": result["recommendations"]}
+        # The scorer now returns typed ScoredCandidate rows; AgentState keeps the
+        # looser list[dict[str, Any]] (also written as plain dicts elsewhere), so
+        # narrow the TypedDict-invariance gap with a cast — identical at runtime.
+        return {"recommendations": cast("list[dict[str, Any]]", result["recommendations"])}
 
     # -- C7: draft the request (LLM stub) ---------------------------------
     def c7_draft(self, state: AgentState) -> AgentState:

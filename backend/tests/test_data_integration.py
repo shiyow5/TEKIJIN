@@ -415,6 +415,34 @@ def test_certifications_and_skills_fk_consistent(seed_counts, session) -> None:
     assert certs and all(c.employee_id == 1 for c in certs)
     skills = repo.skills_for(1)
     assert all(s.employee_id == 1 for s in skills)
+    memberships = repo.project_memberships_for(1)
+    assert all(m.employee_id == 1 for m in memberships)
+
+
+def test_batch_evidence_lookups_match_singular(seed_counts, session) -> None:
+    # The scorer's N+1 fix (#58): the batch lookups must return exactly what the
+    # per-employee methods do, keyed by employee, so scoring is unchanged.
+    repo = Repository(session)
+    ids = [1, 2, 3]
+
+    employees = repo.employees_by_ids(ids)
+    assert set(employees) <= set(ids)
+    for eid, emp in employees.items():
+        assert emp.id == eid
+
+    certs_many = repo.certifications_for_many(ids)
+    skills_many = repo.skills_for_many(ids)
+    memberships_many = repo.project_memberships_for_many(ids)
+    for eid in ids:
+        assert certs_many.get(eid, []) == repo.certifications_for(eid)
+        assert skills_many.get(eid, []) == repo.skills_for(eid)
+        assert memberships_many.get(eid, []) == repo.project_memberships_for(eid)
+
+    # Empty input short-circuits to {} without a query.
+    assert repo.employees_by_ids([]) == {}
+    assert repo.certifications_for_many([]) == {}
+    assert repo.skills_for_many([]) == {}
+    assert repo.project_memberships_for_many([]) == {}
 
 
 def test_answers_by_topic(seed_counts, session) -> None:
