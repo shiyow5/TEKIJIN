@@ -2,23 +2,23 @@
   "cold_start": [
     {
       "fraction": 0.0,
-      "dense": 0.5595238095238095,
-      "retrieval_topic": 0.3363095238095238,
+      "dense": 0.5595238095238094,
+      "retrieval_topic": 0.35416666666666663,
       "llm_plain_topic": 0.4583333333333333,
       "llm_ctx_topic": 0.5089285714285714,
       "stageA_retrieval_acc1": 0.39285714285714285
     },
     {
       "fraction": 0.1,
-      "dense": 0.550595238095238,
-      "retrieval_topic": 0.36011904761904756,
+      "dense": 0.5505952380952381,
+      "retrieval_topic": 0.3779761904761904,
       "llm_plain_topic": 0.48214285714285715,
       "llm_ctx_topic": 0.5446428571428571,
       "stageA_retrieval_acc1": 0.4107142857142857
     },
     {
       "fraction": 0.25,
-      "dense": 0.6011904761904762,
+      "dense": 0.5833333333333333,
       "retrieval_topic": 0.44642857142857145,
       "llm_plain_topic": 0.5446428571428571,
       "llm_ctx_topic": 0.619047619047619,
@@ -26,24 +26,24 @@
     },
     {
       "fraction": 0.5,
-      "dense": 0.6071428571428571,
-      "retrieval_topic": 0.5446428571428571,
+      "dense": 0.5833333333333333,
+      "retrieval_topic": 0.5267857142857142,
       "llm_plain_topic": 0.6101190476190476,
       "llm_ctx_topic": 0.6875,
-      "stageA_retrieval_acc1": 0.5357142857142857
+      "stageA_retrieval_acc1": 0.5178571428571429
     },
     {
       "fraction": 0.75,
-      "dense": 0.5952380952380952,
-      "retrieval_topic": 0.5684523809523809,
+      "dense": 0.5863095238095238,
+      "retrieval_topic": 0.550595238095238,
       "llm_plain_topic": 0.681547619047619,
       "llm_ctx_topic": 0.7529761904761905,
       "stageA_retrieval_acc1": 0.5535714285714286
     },
     {
       "fraction": 1.0,
-      "dense": 0.6071428571428571,
-      "retrieval_topic": 0.5684523809523809,
+      "dense": 0.5922619047619049,
+      "retrieval_topic": 0.550595238095238,
       "llm_plain_topic": 0.681547619047619,
       "llm_ctx_topic": 0.7589285714285714,
       "stageA_retrieval_acc1": 0.5535714285714286
@@ -121,7 +121,7 @@
         "got": null
       },
       {
-        "id": 13,
+        "id": 12,
         "want": "本社",
         "got": null
       },
@@ -137,11 +137,11 @@
         "got": "大阪"
       },
       {
-        "id": 18,
+        "id": 17,
         "got": "名古屋"
       },
       {
-        "id": 21,
+        "id": 18,
         "got": "東京"
       }
     ]
