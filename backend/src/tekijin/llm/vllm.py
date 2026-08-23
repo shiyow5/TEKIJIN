@@ -56,6 +56,9 @@ def _is_uninformative_intent(out: IntentSchema) -> bool:
     exactly this empty call (#118), so "the model said nothing" must be treated as
     "could not judge" and refused, not waved through. A genuine analysis of a valid
     question yields at least a topic/product or a non-zero confidence.
+
+    ``question_type`` is deliberately excluded: it always carries the ``"製品QA"``
+    default, so it is never a reliable "the model actually answered" signal.
     """
     return not out.topics and not out.products and out.situation is None and out.confidence == 0.0
 
