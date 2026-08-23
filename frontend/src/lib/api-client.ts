@@ -16,6 +16,8 @@ import type {
   HandoffResponse,
   InboxItem,
   InboxResponse,
+  RecentQuestionItem,
+  RecentQuestionsResponse,
   ResumeRequest,
 } from "@/lib/api-types";
 import { getApiBaseUrl } from "@/lib/config";
@@ -153,6 +155,20 @@ export async function getInbox(
 ): Promise<InboxItem[]> {
   const query = `?responder_id=${encodeURIComponent(responderId)}`;
   const body = await getJson<InboxResponse>(`/inbox${query}`, options);
+  return body.items;
+}
+
+/**
+ * GET /questions — the asker's own recent questions with resolution state
+ * (画面1 の "最近あなたが解決した質問"). `askerId` is the external "E###" form.
+ * Returns the unwrapped items array, newest first.
+ */
+export async function getRecentQuestions(
+  askerId: string,
+  options: RequestOptions = {},
+): Promise<RecentQuestionItem[]> {
+  const query = `?asker_id=${encodeURIComponent(askerId)}`;
+  const body = await getJson<RecentQuestionsResponse>(`/questions${query}`, options);
   return body.items;
 }
 

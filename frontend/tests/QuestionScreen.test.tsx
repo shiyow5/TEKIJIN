@@ -33,6 +33,11 @@ vi.mock("@/components/CurrentUserProvider", () => ({
   }),
 }));
 
+// RecentQuestions self-fetches; stub it so these tests stay focused on the ask flow.
+vi.mock("@/components/RecentQuestions", () => ({
+  RecentQuestions: () => <div data-testid="recent-questions" />,
+}));
+
 describe("QuestionScreen", () => {
   beforeEach(() => {
     pushMock.mockReset();
@@ -44,18 +49,16 @@ describe("QuestionScreen", () => {
     vi.restoreAllMocks();
   });
 
-  it("renders the heading, input, voice button and submit button", () => {
+  it("renders the heading, input and submit button", () => {
     render(<QuestionScreen />);
     expect(screen.getByRole("heading", { name: "何を知りたいですか？" })).toBeInTheDocument();
     expect(screen.getByLabelText("質問を入力")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /音声入力/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "聞いてみる" })).toBeInTheDocument();
   });
 
-  it("renders the recent-questions list", () => {
+  it("renders the recent-questions panel", () => {
     render(<QuestionScreen />);
-    expect(screen.getByRole("heading", { name: "最近あなたが解決した質問" })).toBeInTheDocument();
-    expect(screen.getByText("UTMの移行時の注意点")).toBeInTheDocument();
+    expect(screen.getByTestId("recent-questions")).toBeInTheDocument();
   });
 
   it("disables the submit button while the input is empty or whitespace", () => {

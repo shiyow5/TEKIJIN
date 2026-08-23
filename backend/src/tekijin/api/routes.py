@@ -24,6 +24,7 @@ from tekijin.api.service import (
     SessionInvalid,
 )
 from tekijin.data.dashboard import dashboard_summary
+from tekijin.data.history import recent_questions_for_asker
 from tekijin.data.inbox import pending_handoffs_for_responder
 from tekijin.data.repository import Repository
 
@@ -169,4 +170,25 @@ def inbox(request: Request, responder_id: str = Query(min_length=1)) -> schemas.
             )
             for row in rows
         ]
+    )
+
+
+@router.get("/questions", response_model=schemas.RecentQuestionsResponse)
+def questions(
+    request: Request, asker_id: str = Query(min_length=1)
+) -> schemas.RecentQuestionsResponse:
+    """The asker's own recent questions with resolution state (画面1 の一覧, #125).
+
+    ``asker_id`` accepts an int or the ``"E###"`` form (422 otherwise).
+    """
+
+    try:
+        aid = schemas.coerce_employee_id(asker_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="asker_id must be an int or 'E###'") from exc
+
+    with _service(request).session_factory() as session:
+        rows = recent_questions_for_asker(session, aid)
+    return schemas.RecentQuestionsResponse(
+        items=[schemas.RecentQuestionItem(**row) for row in rows]
     )

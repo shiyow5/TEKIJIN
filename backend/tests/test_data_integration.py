@@ -7,11 +7,14 @@ locally, and are skipped when neither is available.
 
 from __future__ import annotations
 
+import datetime as dt
+
 import pytest
 from sqlalchemy import event, select, text
 
 from tekijin.config import get_settings
 from tekijin.data.db import get_engine, get_sessionmaker, session_scope
+from tekijin.data.history import recent_questions_for_asker
 from tekijin.data.inbox import pending_handoffs_for_responder
 from tekijin.data.repository import Repository
 from tekijin.data.seed import _apply_schema_upgrades, apply_migrations, run_seed
@@ -175,6 +178,89 @@ def test_pending_handoffs_excludes_declined_and_includes_rerouted(seed_counts, s
 
 def test_pending_handoffs_empty_for_responder_without_handoffs(seed_counts, session) -> None:
     assert pending_handoffs_for_responder(session, 1) == []
+
+
+# --------------------------------------------------------------------------- #
+# asker recent-questions history (#125)
+# --------------------------------------------------------------------------- #
+def test_recent_questions_orders_newest_first_and_resolves(seed_counts, session) -> None:
+    # Far-future timestamps so these outrank any seeded questions for asker 11.
+    base = dt.datetime(2099, 1, 1, 9, 0, 0)
+    asker = 11
+    session.add(
+        Question(
+            id="api_rh_1", asker_id=asker, body="Q1 open", topics=[], status="open", created_at=base
+        )
+    )
+    session.add(
+        Question(
+            id="api_rh_2",
+            asker_id=asker,
+            body="Q2 accepted",
+            topics=[],
+            status="open",
+            created_at=base + dt.timedelta(hours=1),
+        )
+    )
+    session.add(
+        Question(
+            id="api_rh_3",
+            asker_id=asker,
+            body="Q3 answered",
+            topics=[],
+            status="answered",
+            created_at=base + dt.timedelta(hours=2),
+        )
+    )
+    # A question by a different asker must not leak in.
+    session.add(
+        Question(
+            id="api_rh_x",
+            asker_id=12,
+            body="other",
+            topics=[],
+            status="open",
+            created_at=base + dt.timedelta(hours=3),
+        )
+    )
+    session.flush()  # questions exist before their FK-dependent rows
+
+    # Q2 accepted by employee 5; Q3 answered (seeded-style) by employee 6.
+    session.add(Recommendation(question_id="api_rh_2", employee_id=5, rank=1, outcome="accepted"))
+    session.add(Answer(id="api_ra_3", question_id="api_rh_3", responder_id=6, body="ans"))
+    session.flush()
+
+    items = recent_questions_for_asker(session, asker, limit=10)
+    assert [i["question_id"] for i in items[:3]] == ["api_rh_3", "api_rh_2", "api_rh_1"]
+    q3, q2, q1 = items[0], items[1], items[2]
+    assert q3["resolved"] is True and q3["responder_name"]  # first answerer
+    assert q2["resolved"] is True and q2["responder_name"]  # accepting responder
+    assert q1["resolved"] is False and q1["responder_name"] is None
+    assert all(i["question_id"] != "api_rh_x" for i in items)
+
+
+def test_recent_questions_respects_limit(seed_counts, session) -> None:
+    base = dt.datetime(2099, 2, 1, 9, 0, 0)
+    for i in range(7):
+        session.add(
+            Question(
+                id=f"api_rl_{i}",
+                asker_id=13,
+                body=f"Q{i}",
+                topics=[],
+                status="open",
+                created_at=base + dt.timedelta(minutes=i),
+            )
+        )
+    session.flush()
+
+    items = recent_questions_for_asker(session, 13, limit=5)
+    assert len(items) == 5
+    assert items[0]["question_id"] == "api_rl_6"  # newest
+
+
+def test_recent_questions_empty_for_asker_without_questions(seed_counts, session) -> None:
+    assert recent_questions_for_asker(session, 9999) == []
 
 
 # --------------------------------------------------------------------------- #

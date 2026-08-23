@@ -220,6 +220,25 @@ class InboxResponse(BaseModel):
 
 
 # --------------------------------------------------------------------------- #
+# asker history (GET /questions?asker_id) — "最近あなたが解決した質問" (#125)
+# --------------------------------------------------------------------------- #
+class RecentQuestionItem(BaseModel):
+    """One of the asker's own recent questions, with its resolution state."""
+
+    question_id: str
+    title: str
+    resolved: bool = False
+    responder_name: str | None = None
+    created_at: str | None = None
+
+
+class RecentQuestionsResponse(BaseModel):
+    """The asker's most recent questions (newest first)."""
+
+    items: list[RecentQuestionItem] = Field(default_factory=list)
+
+
+# --------------------------------------------------------------------------- #
 # SSE event data
 # --------------------------------------------------------------------------- #
 class UnderstoodData(BaseModel):

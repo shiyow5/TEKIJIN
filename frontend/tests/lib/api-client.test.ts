@@ -5,6 +5,7 @@ import {
   getEmployees,
   getHandoff,
   getInbox,
+  getRecentQuestions,
   postAnswer,
   postAsk,
 } from "@/lib/api-client";
@@ -305,5 +306,35 @@ describe("getInbox", () => {
       .fn<typeof fetch>()
       .mockResolvedValue(jsonResponse({ detail: "bad" }, { ok: false, status: 422 }));
     await expect(getInbox("nope", { fetchImpl })).rejects.toBeInstanceOf(ApiError);
+  });
+});
+
+describe("getRecentQuestions", () => {
+  const ITEMS = [
+    {
+      question_id: "q1",
+      title: "UTM移行",
+      resolved: true,
+      responder_name: "高梨 健太",
+      created_at: "2026-08-20T10:00:00",
+    },
+  ];
+
+  it("GETs /questions with the asker_id query and unwraps items", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ items: ITEMS }));
+
+    const result = await getRecentQuestions("E001", { fetchImpl });
+
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe(`${DEFAULT_API_BASE_URL}/questions?asker_id=E001`);
+    expect(init?.method).toBe("GET");
+    expect(result).toEqual(ITEMS);
+  });
+
+  it("throws ApiError on a non-2xx response", async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonResponse({ detail: "bad" }, { ok: false, status: 422 }));
+    await expect(getRecentQuestions("nope", { fetchImpl })).rejects.toBeInstanceOf(ApiError);
   });
 });

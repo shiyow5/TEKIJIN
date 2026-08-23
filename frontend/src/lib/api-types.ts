@@ -84,6 +84,24 @@ export interface InboxResponse {
   items: InboxItem[];
 }
 
+/**
+ * One of the asker's own recent questions (GET /questions, schemas.py
+ * `RecentQuestionItem`). `responder_name` is the accepting/answering person, or
+ * null while unresolved.
+ */
+export interface RecentQuestionItem {
+  question_id: string;
+  title: string;
+  resolved: boolean;
+  responder_name?: string | null;
+  created_at?: string | null;
+}
+
+/** GET /questions payload (schemas.py `RecentQuestionsResponse`). */
+export interface RecentQuestionsResponse {
+  items: RecentQuestionItem[];
+}
+
 // --------------------------------------------------------------------------- //
 // domain models (shared by SSE data and final response)
 // --------------------------------------------------------------------------- //
