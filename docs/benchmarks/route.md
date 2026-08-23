@@ -1,5 +1,9 @@
 # 経路判定 C5 の精度（Issue #88）
 
+> **測定時の構成**: Nemotron-3-Embed-1B(2048次元) / 経路閾値 0.80・0.70・0.50。
+> develop はその後 #102（埋め込み）・#115（C4 の RRF 重み）・#120（C5 の閾値較正）で変わっている。
+> **ここの数値は現行構成では再現しない** → #132。
+
 `eval_person.json` には全件に `gold_route`（`person` / `prior_answer` / `document` / `none`）が入っているが、
 **測られていなかった**。C5（`backend/src/tekijin/agent/route.py`）の閾値もコード上
 "All three are cosine-similarity constants, tunable on eval." と書かれたまま調整されていない。
