@@ -65,6 +65,14 @@ python3 scripts/eval_label_agreement.py  # 自動 gold と人手ラベルの一�
 素朴な文字列一致での再現率は **2/5**、誤検出は **3件**
 （`scripts/research_robustness.py` の §4 が毎回測る）。
 
+> **この JSON は `scripts/build_eval_v2.py` の生成物である。**
+> 文面を直したいときは**生成器の側を直すこと**。JSON を手で直しても、
+> 次に生成器を回した時点で消える（#84 で実際にやってしまった）。
+> 言い回しの定義は `_constraint_phrasings` / `_pick_phrasing` / `DECOY_SENTENCES` にある。
+>
+> `_pick_phrasing` は**拠点名を隠す型を優先しつつ、同じ言い回しを二度使わない**。
+> 単純な剰余で配ると拠点名の出る型に偏り、文字列一致で 4/5 拾えてしまう（一度そうなった）。
+
 ### 第2の正解（`gold_experts_alt`）— #73 で追加
 
 主 gold は `projects`（lead 1.0 / member 0.6）+ `daily_reports`（0.15）から作り、

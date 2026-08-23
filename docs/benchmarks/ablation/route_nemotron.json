@@ -114,18 +114,18 @@
    "gold_route": "person",
    "route": "person",
    "n_candidates": 10,
-   "answer_confidence": 0.288,
-   "document_confidence": 0.176,
-   "people_confidence": 0.293
+   "answer_confidence": 0.296,
+   "document_confidence": 0.15,
+   "people_confidence": 0.245
   },
   {
    "id": 13,
    "gold_route": "person",
    "route": "person",
    "n_candidates": 10,
-   "answer_confidence": 0.179,
-   "document_confidence": 0.127,
-   "people_confidence": 0.192
+   "answer_confidence": 0.263,
+   "document_confidence": 0.154,
+   "people_confidence": 0.292
   },
   {
    "id": 14,
@@ -159,18 +159,18 @@
    "gold_route": "prior_answer",
    "route": "person",
    "n_candidates": 10,
-   "answer_confidence": 0.299,
-   "document_confidence": 0.15,
-   "people_confidence": 0.196
+   "answer_confidence": 0.247,
+   "document_confidence": 0.139,
+   "people_confidence": 0.352
   },
   {
    "id": 18,
    "gold_route": "document",
    "route": "person",
    "n_candidates": 10,
-   "answer_confidence": 0.212,
-   "document_confidence": 0.153,
-   "people_confidence": 0.325
+   "answer_confidence": 0.218,
+   "document_confidence": 0.192,
+   "people_confidence": 0.282
   },
   {
    "id": 19,
@@ -195,9 +195,9 @@
    "gold_route": "prior_answer",
    "route": "person",
    "n_candidates": 10,
-   "answer_confidence": 0.156,
-   "document_confidence": 0.095,
-   "people_confidence": 0.205
+   "answer_confidence": 0.211,
+   "document_confidence": 0.099,
+   "people_confidence": 0.13
   },
   {
    "id": 22,

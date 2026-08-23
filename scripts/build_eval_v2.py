@@ -631,6 +631,95 @@ def route_for(topic, experts, corpus):
     return "person"
 
 
+# 拠点制約の言い回し（#84）。以前は全件が
+#     "…できれば{拠点}の拠点で動ける方だと助かります。"
+# という同じ文型で、拠点名の文字列一致だけで 5/5 取れてしまい、
+# 「制約の抽出がどれくらい難しいか」を一切測れていなかった。
+#
+# 地域名で書く型は、その地域に拠点が1つしかないときだけ使える
+# （関東には本社と東京の両方があるので、「関東で」では拠点が定まらない）。
+REGION_OF_BRANCH = {
+    "本社": "関東",
+    "東京": "関東",
+    "名古屋": "中部",
+    "大阪": "関西",
+    "福岡": "九州",
+}
+_REGION_COUNT = Counter(REGION_OF_BRANCH.values())
+# 拠点名を出さずに言い換えられるもの（表記ゆれ）。
+_ALIAS = {"本社": "本部"}
+
+
+def _constraint_phrasings(branch):
+    """その拠点に対して使える言い回しを (ラベル, 生成関数, 拠点名を隠すか) で返す。
+
+    「隠す」= 文中に拠点名がそのまま出てこない。地域名からの解決と言い換えがこれにあたる。
+    """
+    out = []
+    region = REGION_OF_BRANCH.get(branch)
+    if region and _REGION_COUNT[region] == 1:
+        # 地域名から拠点が一意に決まるときだけ使える。
+        out.append(
+            (
+                "region_visit",
+                lambda sym: sym
+                + f"{region}のお客様先に出向くこともあるので、現地で動ける方だと助かります。",
+                True,
+            )
+        )
+        out.append(
+            ("region_direct", lambda sym: sym + f"{region}で対応できる方にお願いしたいです。", True)
+        )
+    if branch in _ALIAS:
+        alias = _ALIAS[branch]
+        out.append(
+            (
+                "alias",
+                lambda sym: sym
+                + f"{alias}に席がある方だと、その場で画面を見てもらえて早いのですが。",
+                True,
+            )
+        )
+    # 拠点名は出すが、末尾定型ではない型。
+    out.append(
+        ("lead", lambda sym: f"{branch}側で一緒に動いてくれる人を探しています。" + sym, False)
+    )
+    out.append(
+        (
+            "reason",
+            lambda sym: sym
+            + f"拠点が離れていると打ち合わせが組みにくいため、{branch}の方でお願いできますか。",
+            False,
+        )
+    )
+    return out
+
+
+def _pick_phrasing(branch, used):
+    """まだ使っていない言い回しを、拠点名を隠す型を優先して選ぶ。
+
+    単純な剰余での割り当てだと拠点名の出る型に偏り、文字列一致で拾えてしまう
+    （#84 の直後に一度そうなった）。全体として隠す型と出す型が混ざるようにする。
+    """
+    options = _constraint_phrasings(branch)
+    for want_hidden in (True, False):
+        for label, fn, hidden in options:
+            if hidden is want_hidden and label not in used:
+                used.add(label)
+                return fn
+    # すべて使い切ったら最後の型を再利用する（拠点が増えたときの保険）。
+    return options[-1][1]
+
+
+# 「制約に見えて制約でない」文（#84）。地名は出るが担当者の拠点を縛っていないので、
+# 地名を見つけただけで制約と決めつける実装はここで落ちる。constraint は None のまま。
+DECOY_SENTENCES = [
+    "大阪の事例があれば参考にしたいです。",
+    "名古屋のお客様の件ですが、対応いただく方の拠点は問いません。",
+    "東京で実施した施策の資料があれば見たいです。",
+]
+
+
 def main():
     employees = load("people/employees.json")
     documents = load("documents/documents.json")
@@ -715,6 +804,8 @@ def main():
     # かつ「近い人に聞きたい」という実際の要求（doc12 の負荷分散・近接性）を測れる。
     emp_by_id = {e["id"]: e for e in employees}
     constrained = 0
+    decoys = 0
+    used_phrasings = set()
     for t in l2_topics:
         base = gold[t]
         applied = None
@@ -726,7 +817,9 @@ def main():
                     break
         if applied:
             experts = [e for e in base if emp_by_id[e]["branch"] == applied]
-            q = SYMPTOM[t] + f"できれば{applied}の拠点で動ける方だと助かります。"
+            # #84: 全件を同じ文型にしない。拠点ごとに使える言い回しを順に配って散らす。
+            q = _pick_phrasing(applied, used_phrasings)(SYMPTOM[t])
+            hidden = applied not in q
             add(
                 q,
                 "L2",
@@ -734,19 +827,27 @@ def main():
                 experts,
                 route_for(t, experts, corpus),
                 "auto:project_daily",
-                f"症状のみ＋拠点制約({applied})。制約を無視すると外れる",
+                f"症状のみ＋拠点制約({applied})。"
+                + ("拠点名を出さずに解決させる" if hidden else "拠点名は出すが末尾定型ではない"),
                 constraint={"branch": applied},
             )
             constrained += 1
         else:
+            # #84: 制約なしの一部に「制約に見えて制約でない」文を混ぜ、
+            # 地名を拾っただけで制約と判定する実装の誤検出を測れるようにする。
+            decoy = DECOY_SENTENCES[decoys] if decoys < len(DECOY_SENTENCES) else None
+            if decoy:
+                decoys += 1
             add(
-                SYMPTOM[t],
+                SYMPTOM[t] + (decoy or ""),
                 "L2",
                 [t],
                 base,
                 route_for(t, base, corpus),
                 "auto:project_daily",
-                "症状のみ。トピック語をクエリから除去済み",
+                "制約なし。地名は出るが拠点制約ではない（誤検出の検出用）"
+                if decoy
+                else "症状のみ。トピック語をクエリから除去済み",
             )
 
     # ---- L2 追加分: 人手ラベル（PR #46）由来の10件 ----

@@ -123,7 +123,7 @@
         "ranked_top3": [
           2,
           3,
-          26
+          1
         ]
       },
       {
@@ -133,8 +133,8 @@
         "hit_at_3": false,
         "ranked_top3": [
           22,
-          3,
-          4
+          4,
+          8
         ]
       },
       {
@@ -187,9 +187,9 @@
         "has_gold_topics": true,
         "hit_at_3": true,
         "ranked_top3": [
+          6,
           25,
-          18,
-          33
+          18
         ]
       },
       {
@@ -732,7 +732,7 @@
         "ranked_top3": [
           2,
           3,
-          26
+          1
         ]
       },
       {
@@ -742,8 +742,8 @@
         "hit_at_3": false,
         "ranked_top3": [
           22,
-          3,
-          4
+          4,
+          8
         ]
       },
       {
@@ -796,9 +796,9 @@
         "has_gold_topics": true,
         "hit_at_3": true,
         "ranked_top3": [
+          6,
           25,
-          18,
-          33
+          18
         ]
       },
       {
