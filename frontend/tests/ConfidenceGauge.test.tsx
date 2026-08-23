@@ -54,4 +54,17 @@ describe("ConfidenceGauge", () => {
     render(<ConfidenceGauge level="不明" />);
     expect(screen.getByRole("img", { name: "適合度 不明" })).toBeInTheDocument();
   });
+
+  it("falls back to the final ring if anime.js fails to load", async () => {
+    setReducedMotion(false);
+    animateMock.mockImplementation(() => {
+      throw new Error("boom");
+    });
+    render(<ConfidenceGauge level="高" />);
+    // 高 == full ring -> final strokeDashoffset 0; the .catch fallback applies it.
+    await waitFor(() => {
+      const arc = document.querySelector("circle[stroke-linecap='round']") as SVGCircleElement;
+      expect(arc.style.strokeDashoffset).toBe("0");
+    });
+  });
 });
