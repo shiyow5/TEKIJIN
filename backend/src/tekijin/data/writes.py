@@ -36,8 +36,14 @@ def persist_question(
     asker_id: int,
     body: str,
     now: dt.datetime,
+    *,
+    session_id: str | None = None,
 ) -> None:
-    """Insert the asked question (``created_at`` from the run's injected ``now``)."""
+    """Insert the asked question (``created_at`` from the run's injected ``now``).
+
+    ``session_id`` is the graph thread_id; stored so the responder inbox (#123)
+    can deep-link a pending handoff back to ``/answer/{session_id}``.
+    """
 
     session.add(
         Question(
@@ -47,6 +53,7 @@ def persist_question(
             topics=[],
             status="open",
             created_at=now,
+            session_id=session_id,
         )
     )
 

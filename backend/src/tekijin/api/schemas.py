@@ -30,6 +30,16 @@ def format_employee_id(employee_id: int) -> str:
     return f"E{int(employee_id):03d}"
 
 
+def coerce_employee_id(value: object) -> int:
+    """Public wrapper: accept an int or the spec's ``"E###"`` employee id.
+
+    Used by query-param endpoints (e.g. ``GET /inbox?responder_id=E017``) that
+    need the same lenient coercion the request bodies apply to ``asker_id``.
+    """
+
+    return _coerce_asker_id(value)
+
+
 def _coerce_asker_id(value: object) -> int:
     """Accept an int employee id or the spec's ``"E###"`` string form.
 
@@ -182,6 +192,31 @@ class HandoffResponse(BaseModel):
     draft: str = ""
     reuse_count: int = 0
     helpful_answer_count: int = 0
+
+
+# --------------------------------------------------------------------------- #
+# inbox (GET /inbox) — responder-facing list of pending handoffs (#123)
+# --------------------------------------------------------------------------- #
+class InboxItem(BaseModel):
+    """One pending handoff awaiting the responder.
+
+    ``session_id`` deep-links to ``/answer/{session_id}``; the payload is just
+    enough to preview the question in the list (the full handoff loads on the
+    answer screen).
+    """
+
+    session_id: str
+    question_id: str
+    question: str
+    topics: list[str] = Field(default_factory=list)
+    asker: HandoffAsker
+    created_at: str | None = None
+
+
+class InboxResponse(BaseModel):
+    """Questions currently awaiting a given responder (newest first)."""
+
+    items: list[InboxItem] = Field(default_factory=list)
 
 
 # --------------------------------------------------------------------------- #

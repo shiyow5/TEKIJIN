@@ -4,6 +4,7 @@ import {
   getDashboard,
   getEmployees,
   getHandoff,
+  getInbox,
   postAnswer,
   postAsk,
 } from "@/lib/api-client";
@@ -267,5 +268,42 @@ describe("getEmployees", () => {
       .fn<typeof fetch>()
       .mockResolvedValue(jsonResponse({ detail: "boom" }, { ok: false, status: 503 }));
     await expect(getEmployees({ fetchImpl })).rejects.toBeInstanceOf(ApiError);
+  });
+});
+
+describe("getInbox", () => {
+  const ITEMS = [
+    {
+      session_id: "sess-1",
+      question_id: "api_q1",
+      question: "UTM 移行の注意点",
+      topics: ["ネットワーク"],
+      asker: { id: "E010", name: "藤田 悠斗", dept: "第3営業部" },
+      created_at: "2026-08-23T09:30:00",
+    },
+  ];
+
+  it("GETs /inbox with the responder_id query and unwraps items", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ items: ITEMS }));
+
+    const result = await getInbox("E001", { fetchImpl });
+
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe(`${DEFAULT_API_BASE_URL}/inbox?responder_id=E001`);
+    expect(init?.method).toBe("GET");
+    expect(result).toEqual(ITEMS);
+  });
+
+  it("url-encodes the responder_id", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ items: [] }));
+    await getInbox("E 1/2", { fetchImpl });
+    expect(fetchImpl.mock.calls[0][0]).toBe(`${DEFAULT_API_BASE_URL}/inbox?responder_id=E%201%2F2`);
+  });
+
+  it("throws ApiError on a non-2xx response", async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonResponse({ detail: "bad" }, { ok: false, status: 422 }));
+    await expect(getInbox("nope", { fetchImpl })).rejects.toBeInstanceOf(ApiError);
   });
 });

@@ -124,6 +124,27 @@ export async function mockEmployees(page: Page): Promise<void> {
   );
 }
 
+/** One pending handoff for the inbox (GET /inbox). */
+export const INBOX_ITEM = {
+  session_id: "11111111-1111-4111-8111-111111111111",
+  question_id: "api_q1",
+  question: "UTM の移行時に気をつけることは？",
+  topics: ["ネットワーク"],
+  asker: { id: "E010", name: "藤田 悠斗", dept: "第3営業部" },
+  created_at: "2026-08-23T09:30:00",
+};
+
+/**
+ * Mock GET /inbox (any responder_id query). The URL carries a query string, so
+ * match by prefix with a predicate rather than a glob.
+ */
+export async function mockInbox(page: Page, items: unknown[] = [INBOX_ITEM]): Promise<void> {
+  await page.route(
+    (url) => url.href.startsWith(`${API_BASE}/inbox`),
+    (route) => fulfillJson(route, { items }),
+  );
+}
+
 export const HANDOFF = {
   question: "UTM の移行時に気をつけることは？",
   asker: { id: 1, name: "山田 太郎", dept: "営業部" },

@@ -14,6 +14,8 @@ import type {
   EmployeeListResponse,
   EmployeeSummary,
   HandoffResponse,
+  InboxItem,
+  InboxResponse,
   ResumeRequest,
 } from "@/lib/api-types";
 import { getApiBaseUrl } from "@/lib/config";
@@ -138,6 +140,20 @@ export function getDashboard(options: RequestOptions = {}): Promise<DashboardRes
 export async function getEmployees(options: RequestOptions = {}): Promise<EmployeeSummary[]> {
   const body = await getJson<EmployeeListResponse>("/employees", options);
   return body.employees;
+}
+
+/**
+ * GET /inbox — the questions currently awaiting `responderId` (the responder
+ * inbox, #123). `responderId` is the external "E###" form. Returns the unwrapped
+ * items array, newest first; each carries a `session_id` for `/answer/{id}`.
+ */
+export async function getInbox(
+  responderId: string,
+  options: RequestOptions = {},
+): Promise<InboxItem[]> {
+  const query = `?responder_id=${encodeURIComponent(responderId)}`;
+  const body = await getJson<InboxResponse>(`/inbox${query}`, options);
+  return body.items;
 }
 
 /**

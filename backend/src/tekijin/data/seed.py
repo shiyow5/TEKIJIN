@@ -158,6 +158,12 @@ def _apply_schema_upgrades(engine: Engine) -> None:
     dim = get_settings().embedding_dim
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE questions ADD COLUMN IF NOT EXISTS route VARCHAR(32)"))
+        # The graph thread_id for an API-created question (responder inbox → handoff
+        # deep link). Added for #123; older DBs get it here, fresh ones via create_all.
+        conn.execute(text("ALTER TABLE questions ADD COLUMN IF NOT EXISTS session_id VARCHAR(64)"))
+        conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_questions_session_id ON questions (session_id)")
+        )
         # Widen embedding columns to the current dim when an older DB is narrower.
         # Table/column names are a hard-coded allow-list spliced via format() —
         # never build them from external input (identifiers can't be bound).
