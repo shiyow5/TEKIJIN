@@ -38,8 +38,8 @@ C5 `decide_route`（`backend/src/tekijin/agent/route.py`）は、C4 が返す各
 | 定数 | 旧 (e5) | 新 (Nemotron) | 根拠 |
 | --- | --- | --- | --- |
 | `PRIOR_ANSWER_SIM` | 0.80 | **0.55** | 観測最大 0.543 の直上＝**意図的に発火させない**（下記） |
-| `DOCUMENT_SIM` | 0.70 | **0.30** | document-gold mean 0.349 vs 他 ~0.14。document recall 7/10 |
-| `PERSON_WEAK_SIM` | 0.50 | **0.40** | people レンジ 0.05-0.45 の内側。document-gold の people_conf 最大 0.387 を通す |
+| `DOCUMENT_SIM` | 0.70 | **0.30** | document-gold mean 0.349 vs 他 ~0.14–0.17。document recall 7/10 |
+| `PERSON_WEAK_SIM` | 0.50 | **0.40** | people レンジ 0.053–0.454 の内側。document-gold の people_conf 最大 0.387 を通す |
 
 結果: **経路精度 0.821（多数決 person 0.696 を上回る）**、1経路への潰れ 0.90（< 0.95）。
 

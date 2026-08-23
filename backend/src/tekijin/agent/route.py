@@ -16,9 +16,9 @@ are heavily compressed (observed range ~0.04–0.57 on the eval corpus, not the
 (routed-set accuracy 0.821 vs 0.696 majority):
 
 * ``DOCUMENT_SIM`` = 0.30 — a document is on-topic enough to be the demotion
-  target (document-gold mean 0.349 vs ~0.14 elsewhere; catches 7/10).
+  target (document-gold mean 0.349 vs ~0.14–0.17 elsewhere; catches 7/10).
 * ``PERSON_WEAK_SIM`` = 0.40 — profile match below this counts as weak, letting a
-  document take over (sits inside the observed 0.05–0.45 people range).
+  document take over (sits inside the observed 0.053–0.454 people range).
 * ``PRIOR_ANSWER_SIM`` = 0.55 — **deliberately above the observed answer-cosine
   max (0.543): prior_answer never fires with Nemotron.** ``answer_confidence``
   cannot separate this route — person-gold rows reach 0.543 while prior_answer
