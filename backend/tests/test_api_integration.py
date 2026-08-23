@@ -1034,6 +1034,117 @@ def test_employees_unexpected_error_is_generic_500(
 
 
 # --------------------------------------------------------------------------- #
+# backpressure: shed NEW questions with 503 when the run pool is saturated (#180)
+# --------------------------------------------------------------------------- #
+def test_run_slot_tracks_active_runs(seed_counts, engine, fake_embedder) -> None:
+    service = _svc(engine, fake_embedder, retriever=_FakeRetriever(), scorer=_FakeScorer([]))
+    assert service._active_runs == 0
+    with service._run_slot():
+        assert service._active_runs == 1
+        with service._run_slot():  # nesting (e.g. a concurrent run)
+            assert service._active_runs == 2
+        assert service._active_runs == 1
+    assert service._active_runs == 0  # released by the finally
+
+
+def test_ask_sheds_with_503_when_saturated(seed_counts, engine, fake_embedder) -> None:
+    service = _svc(engine, fake_embedder, retriever=_FakeRetriever(), scorer=_FakeScorer([]))
+    service._max_concurrent_runs = 1
+    service._active_runs = 1  # a run is already executing → pool full
+    client = TestClient(create_app(agent_service=service))
+    resp = client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "busy1"})
+    assert resp.status_code == 503
+    assert resp.headers.get("Retry-After") == "5"
+    assert "混雑" in resp.text
+
+
+def test_ask_admission_runs_before_db_lookup(seed_counts, engine, fake_embedder) -> None:
+    # Saturation is checked before asker validation and before any persist, so even a
+    # bad asker_id sheds with 503 (not 404) — proving no DB work on a shed request.
+    service = _svc(engine, fake_embedder, retriever=_FakeRetriever(), scorer=_FakeScorer([]))
+    service._max_concurrent_runs = 1
+    service._active_runs = 1
+    client = TestClient(create_app(agent_service=service))
+    resp = client.post("/ask", json={"asker_id": 999999, "question": GOOD_Q, "session_id": "busy2"})
+    assert resp.status_code == 503
+
+
+def test_ask_not_shed_when_backpressure_disabled(seed_counts, engine, fake_embedder) -> None:
+    service = _svc(
+        engine, fake_embedder, retriever=_FakeRetriever(people=[1]), scorer=_FakeScorer(_recs(1))
+    )
+    service._max_concurrent_runs = 0  # 0 disables the gate
+    service._active_runs = 100
+    client = TestClient(create_app(agent_service=service))
+    resp = client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "ok1"})
+    assert resp.status_code == 200
+
+
+def test_active_runs_released_after_a_full_stream(seed_counts, engine, fake_embedder) -> None:
+    # A real ask→events flow must return the slot to zero once the stream completes.
+    service = _svc(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2, 3], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2, 3)),
+    )
+    service._max_concurrent_runs = 4
+    client = TestClient(create_app(agent_service=service))
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "s_bp"})
+    _events(client, "s_bp")  # drain the stream fully
+    assert service._active_runs == 0
+
+
+def test_run_slot_released_when_stream_closed_early(seed_counts, engine, fake_embedder) -> None:
+    # A client that drops mid-stream: closing the generator (GeneratorExit) must run
+    # the finally and release the slot — the disconnect-release path (#180 review).
+    service = _svc(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2, 3], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2, 3)),
+    )
+    service.start_question("s_close", 10, GOOD_Q)
+    gen = service.stream_events("s_close")
+    assert next(gen).event == "understood"  # execution started → slot held
+    assert service._active_runs == 1
+    gen.close()  # simulate a dropped client
+    assert service._active_runs == 0  # finally released the slot
+
+
+def test_run_slot_released_on_exception(seed_counts, engine, fake_embedder) -> None:
+    # The slot's finally must fire on the exception path, not just normal completion.
+    service = _svc(engine, fake_embedder, retriever=_FakeRetriever(), scorer=_FakeScorer([]))
+    with pytest.raises(RuntimeError, match="boom"), service._run_slot():
+        assert service._active_runs == 1
+        raise RuntimeError("boom")
+    assert service._active_runs == 0
+
+
+def test_resume_not_shed_when_saturated(seed_counts, engine, fake_embedder) -> None:
+    # Backpressure gates only NEW questions; a resume reaches submit_resume even while
+    # saturated — a missing paused run is a 409, never a 503 (locks in the semantics).
+    service = _svc(engine, fake_embedder, retriever=_FakeRetriever(), scorer=_FakeScorer([]))
+    service._max_concurrent_runs = 1
+    service._active_runs = 1  # saturated
+    client = TestClient(create_app(agent_service=service))
+    resp = client.post("/answer", json={"session_id": "no_such", "outcome": "accepted"})
+    assert resp.status_code == 409  # SessionConflict, NOT 503
+
+
+def test_ask_admitted_when_below_limit(seed_counts, engine, fake_embedder) -> None:
+    # Enabled but not saturated (active < max) → still admitted.
+    service = _svc(
+        engine, fake_embedder, retriever=_FakeRetriever(people=[1]), scorer=_FakeScorer(_recs(1))
+    )
+    service._max_concurrent_runs = 2
+    service._active_runs = 1  # below the limit
+    client = TestClient(create_app(agent_service=service))
+    resp = client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "under1"})
+    assert resp.status_code == 200
+
+
+# --------------------------------------------------------------------------- #
 # durability: outcome recorded from the DURABLE state (registry-independent)
 # --------------------------------------------------------------------------- #
 def test_outcome_recorded_after_registry_cleared(seed_counts, engine, fake_embedder) -> None:

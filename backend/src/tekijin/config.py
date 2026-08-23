@@ -71,6 +71,17 @@ class Settings(BaseSettings):
     # still falls back to MemorySaver at runtime (see the checkpointer factory).
     checkpointer_backend: Literal["memory", "postgres"] = "memory"
 
+    # Backpressure (#180): a SOFT, best-effort admission gate — NOT a hard concurrency
+    # ceiling. When this many graph runs are already executing, /ask sheds NEW
+    # questions with HTTP 503 (a fast, graceful "混雑中"). Two caveats by design: it is
+    # check-then-run (a burst of near-simultaneous /ask→/events can transiently
+    # overshoot before any slot is taken), and it gates ONLY new questions — resumes /
+    # continuations of paused runs are never shed. The HARD per-GPU bound is vLLM's own
+    # ``max-num-seqs`` scheduler; this just keeps the app from accepting far more than
+    # the model can batch. Defaults to 8 to match a typical ``max-num-seqs``. 0
+    # disables the gate (fine for local/stub dev).
+    max_concurrent_runs: int = 8
+
     # Whether to FAIL-CLOSED on durability (#180): refuse to start on a non-durable
     # checkpointer (``memory``, or a ``postgres`` whose setup fails) instead of
     # silently degrading to in-memory — which would drop every session on the next

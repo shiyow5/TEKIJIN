@@ -45,4 +45,6 @@ def build_default_service(settings: Settings | None = None) -> AgentService:
         # From THIS settings instance (not the cached global) so a custom Settings
         # is honored when the graph builds its C4 retriever (#68).
         bm25_weight=settings.bm25_weight,
+        # Backpressure admission limit (#180) from THIS settings instance.
+        max_concurrent_runs=settings.max_concurrent_runs,
     )

@@ -40,6 +40,33 @@ def test_env_override(monkeypatch) -> None:
     assert settings.app_env == "production"
 
 
+def test_max_concurrent_runs_default_and_override(monkeypatch) -> None:
+    for key in list(os.environ):
+        if key.startswith("TEKIJIN_"):
+            monkeypatch.delenv(key, raising=False)
+    assert Settings(_env_file=None).max_concurrent_runs == 8  # matches vLLM max-num-seqs
+    monkeypatch.setenv("TEKIJIN_MAX_CONCURRENT_RUNS", "3")
+    assert Settings(_env_file=None).max_concurrent_runs == 3
+
+
+def test_durability_enforced_resolution() -> None:
+    # None derives from app_env; an explicit bool overrides it either way (#180).
+    assert Settings(_env_file=None, app_env="development").durability_enforced() is False
+    assert Settings(_env_file=None, app_env="production").durability_enforced() is True
+    assert (
+        Settings(
+            _env_file=None, app_env="development", strict_durability=True
+        ).durability_enforced()
+        is True
+    )
+    assert (
+        Settings(
+            _env_file=None, app_env="production", strict_durability=False
+        ).durability_enforced()
+        is False
+    )
+
+
 def test_get_settings_is_cached() -> None:
     get_settings.cache_clear()
 
