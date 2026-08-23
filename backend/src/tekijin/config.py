@@ -84,6 +84,17 @@ class Settings(BaseSettings):
     # benchmarked — flip this off when switching to a non-prefix model.
     embedding_use_e5_prefix: bool = True
 
+    # Per-kind instruction prefixes, overriding the e5 ``query:``/``passage:`` pair
+    # for that kind. Needed to reproduce an instruction-tuned fallback model's
+    # benchmarked retrieval setup: the #61 Qwen3-Embedding bench prefixes QUERIES
+    # with ``Instruct: <task>\nQuery: `` and PASSAGES with nothing (see
+    # scripts/bench_embeddings.py). ``None`` (default) falls back to
+    # ``embedding_use_e5_prefix`` for that kind; an empty string is a MEANINGFUL
+    # override (= no prefix), distinct from ``None``. Set both when switching to
+    # Qwen so index-time and query-time prefixes match the bench (#108).
+    embedding_query_prefix: str | None = None
+    embedding_passage_prefix: str | None = None
+
     # Whether to allow the embedding model to execute its own (remote) modeling
     # code at load time (``SentenceTransformer(..., trust_remote_code=True)``).
     # REQUIRED by the default Nemotron-3-Embed-1B (it ships custom modeling code);

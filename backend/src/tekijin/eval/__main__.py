@@ -56,7 +56,12 @@ def main() -> int:
                 "警告: 埋め込み索引が未生成です（`make embed`）。dense/route 指標は縮退します。",
                 file=sys.stderr,
             )
-        embedder = SentenceTransformerEmbedder(use_e5_prefix=settings.embedding_use_e5_prefix)
+        embedder = SentenceTransformerEmbedder(
+            use_e5_prefix=settings.embedding_use_e5_prefix,
+            query_prefix=settings.embedding_query_prefix,
+            passage_prefix=settings.embedding_passage_prefix,
+            app_env=settings.app_env,
+        )
         ranker = build_pipeline_ranker(session, embedder, now=EVAL_NOW)
         report = run_eval(queries, ranker)
         # Persist the snapshot so the dashboard (GET /dashboard) can surface the

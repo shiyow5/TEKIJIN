@@ -284,6 +284,131 @@ def test_sentence_transformer_embedder_is_an_embedder() -> None:
     assert isinstance(SentenceTransformerEmbedder(model=_FakeModel()), Embedder)
 
 
+# --- #108 part 2: per-kind instruction prefixes (Qwen reproduction) --------- #
+def test_embedder_per_kind_instruction_prefix_overrides_e5() -> None:
+    # An explicit per-kind prefix (e.g. Qwen's Instruct:...\nQuery: for queries,
+    # nothing for passages) is used verbatim, overriding the e5 query:/passage: pair.
+    model = _FakeModel()
+    embedder = SentenceTransformerEmbedder(
+        model=model,
+        query_prefix="Instruct: タスク\nQuery: ",
+        passage_prefix="",
+    )
+    embedder.encode(["相談"], kind=QUERY)
+    assert model.seen == ["Instruct: タスク\nQuery: 相談"]
+    embedder.encode(["文書"], kind=PASSAGE)
+    assert model.seen == ["文書"]  # empty override = no prefix at all
+
+
+def test_embedder_prefix_override_none_falls_back_to_e5_per_kind() -> None:
+    # None for one kind falls back to the e5 default for THAT kind only; the other
+    # kind still honors its explicit override.
+    model = _FakeModel()
+    embedder = SentenceTransformerEmbedder(model=model, passage_prefix="検索文書: ")
+    embedder.encode(["q"], kind=QUERY)
+    assert model.seen == ["query: q"]  # None -> e5 fallback
+    embedder.encode(["p"], kind=PASSAGE)
+    assert model.seen == ["検索文書: p"]  # explicit override
+
+
+def test_embedder_prefix_override_wins_even_when_e5_disabled() -> None:
+    # An explicit prefix applies regardless of use_e5_prefix; the un-overridden
+    # kind gets no prefix (e5 disabled).
+    model = _FakeModel()
+    embedder = SentenceTransformerEmbedder(model=model, use_e5_prefix=False, query_prefix="Q: ")
+    embedder.encode(["q"], kind=QUERY)
+    assert model.seen == ["Q: q"]
+    embedder.encode(["p"], kind=PASSAGE)
+    assert model.seen == ["p"]
+
+
+def test_embedder_prefixes_default_from_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Omitted prefixes inherit the global settings (so build_default_service /
+    # embed_fixtures forwarding them, or an operator's env, takes effect).
+    import tekijin.retrieval.embedding as emb
+
+    configured = Settings(  # type: ignore[call-arg]
+        _env_file=None,
+        embedding_query_prefix="Instruct: t\nQuery: ",
+        embedding_passage_prefix="",
+    )
+    monkeypatch.setattr(emb, "get_settings", lambda: configured)
+    model = _FakeModel()
+    embedder = emb.SentenceTransformerEmbedder(model=model)
+    embedder.encode(["q"], kind=QUERY)
+    assert model.seen == ["Instruct: t\nQuery: q"]
+    embedder.encode(["p"], kind=PASSAGE)
+    assert model.seen == ["p"]
+
+
+# --- #108 part 1: fail-closed remote-code load outside development ----------- #
+def test_embedder_fail_closed_in_production_without_pinned_revision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # trust_remote_code=True + revision=None outside development would execute the
+    # model repo's MOVING default branch at load; refuse to construct.
+    import tekijin.retrieval.embedding as emb
+
+    prod = Settings(_env_file=None, app_env="production")  # type: ignore[call-arg]
+    monkeypatch.setattr(emb, "get_settings", lambda: prod)
+    with pytest.raises(ValueError, match="trust_remote_code"):
+        emb.SentenceTransformerEmbedder(model=_FakeModel())
+
+
+def test_embedder_production_allows_pinned_revision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import tekijin.retrieval.embedding as emb
+
+    prod = Settings(  # type: ignore[call-arg]
+        _env_file=None, app_env="production", embedding_model_revision="deadbeef"
+    )
+    monkeypatch.setattr(emb, "get_settings", lambda: prod)
+    # Does not raise; the pinned revision fixes the executed code.
+    assert emb.SentenceTransformerEmbedder(model=_FakeModel())._revision == "deadbeef"
+
+
+def test_embedder_production_allows_trust_remote_code_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import tekijin.retrieval.embedding as emb
+
+    prod = Settings(  # type: ignore[call-arg]
+        _env_file=None, app_env="production", embedding_trust_remote_code=False
+    )
+    monkeypatch.setattr(emb, "get_settings", lambda: prod)
+    # No remote code executed, so an unpinned revision is fine.
+    assert emb.SentenceTransformerEmbedder(model=_FakeModel())._trust_remote_code is False
+
+
+def test_embedder_fail_closed_uses_forwarded_app_env_not_global() -> None:
+    # REGRESSION (#108 review HIGH): the guard must consult the app_env the CALLER
+    # forwards (from its own Settings), not the global singleton. With the global at
+    # the default "development", an explicit production app_env must still trip it —
+    # otherwise a hardened custom Settings is silently bypassed.
+    assert get_settings().app_env == "development", "test assumes the default global env"
+    with pytest.raises(ValueError, match="trust_remote_code"):
+        SentenceTransformerEmbedder(model=_FakeModel(), app_env="production")
+
+
+def test_embedder_explicit_development_app_env_overrides_production_global(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Inverse: a production GLOBAL must not spuriously trip the guard when the caller
+    # forwards a development app_env from its own (e.g. local tooling) Settings.
+    import tekijin.retrieval.embedding as emb
+
+    prod_global = Settings(_env_file=None, app_env="production")  # type: ignore[call-arg]
+    monkeypatch.setattr(emb, "get_settings", lambda: prod_global)
+    emb.SentenceTransformerEmbedder(model=_FakeModel(), app_env="development")  # must not raise
+
+
+def test_embedder_development_allows_unpinned_remote_code() -> None:
+    # The default (development) path is unchanged: convenient, no pin required.
+    assert get_settings().app_env == "development", "test assumes the default development env"
+    SentenceTransformerEmbedder(model=_FakeModel())  # must not raise
+
+
 # --- boundary validation (DB-free: raised before any DB access) ------------- #
 
 
@@ -434,6 +559,23 @@ def test_embedding_use_e5_prefix_env_override(monkeypatch: pytest.MonkeyPatch) -
     assert Settings(_env_file=None).embedding_use_e5_prefix is False
 
 
+def test_embedding_per_kind_prefix_defaults_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    for key in list(os.environ):
+        if key.startswith("TEKIJIN_"):
+            monkeypatch.delenv(key, raising=False)
+    settings = Settings(_env_file=None)
+    assert settings.embedding_query_prefix is None
+    assert settings.embedding_passage_prefix is None
+
+
+def test_embedding_per_kind_prefix_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TEKIJIN_EMBEDDING_QUERY_PREFIX", "Instruct: t\nQuery: ")
+    monkeypatch.setenv("TEKIJIN_EMBEDDING_PASSAGE_PREFIX", "")
+    settings = Settings(_env_file=None)
+    assert settings.embedding_query_prefix == "Instruct: t\nQuery: "
+    assert settings.embedding_passage_prefix == ""
+
+
 # --------------------------------------------------------------------------- #
 # fix 7 + fix 3: embed CLI argument handling and prefix wiring
 # --------------------------------------------------------------------------- #
@@ -489,7 +631,7 @@ def test_embed_cli_main_wires_prefix(
 
     class _CapturingEmbedder:
         def __init__(
-            self, *, use_e5_prefix: bool, trust_remote_code: bool = True, revision=None
+            self, *, use_e5_prefix: bool, trust_remote_code: bool = True, revision=None, **_kw
         ) -> None:
             captured["prefix"] = use_e5_prefix
 
@@ -538,7 +680,7 @@ def test_embed_cli_main_rejects_dimension_mismatch(monkeypatch: pytest.MonkeyPat
 
     class _WrongWidthEmbedder:
         def __init__(
-            self, *, use_e5_prefix: bool, trust_remote_code: bool = True, revision=None
+            self, *, use_e5_prefix: bool, trust_remote_code: bool = True, revision=None, **_kw
         ) -> None:
             pass
 

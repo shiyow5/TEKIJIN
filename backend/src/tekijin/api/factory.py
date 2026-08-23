@@ -26,8 +26,14 @@ def build_default_service(settings: Settings | None = None) -> AgentService:
         # All settings-driven from THIS instance (not the cached global), so a
         # custom/hardened Settings passed to build_default_service is honored.
         use_e5_prefix=settings.embedding_use_e5_prefix,
+        query_prefix=settings.embedding_query_prefix,
+        passage_prefix=settings.embedding_passage_prefix,
         trust_remote_code=settings.embedding_trust_remote_code,
         revision=settings.embedding_model_revision,
+        # app_env too, so the fail-closed guard checks THIS instance's env rather
+        # than the global singleton (#108) — otherwise a hardened production Settings
+        # built here could be validated against a development global and bypassed.
+        app_env=settings.app_env,
     )
     return AgentService(
         session_factory=session_factory,

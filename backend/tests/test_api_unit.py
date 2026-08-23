@@ -600,3 +600,20 @@ def test_build_default_service_forwards_embedding_settings() -> None:
     # C4 BM25 weight is forwarded from the supplied settings (#68), so the graph's
     # retriever uses it rather than the cached global.
     assert service._bm25_weight == 0.37
+
+
+def test_build_default_service_fail_closed_uses_supplied_app_env() -> None:
+    """REGRESSION (#108 review HIGH): the embedder fail-closed guard must be checked
+    against the SUPPLIED settings' app_env, not the cached global. A hardened prod
+    Settings with trust_remote_code=True and no revision must refuse to build even
+    when the ambient global env is development."""
+
+    from tekijin.api.factory import build_default_service
+
+    settings = _settings(
+        app_env="production",
+        embedding_trust_remote_code=True,
+        embedding_model_revision=None,
+    )
+    with pytest.raises(ValueError, match="trust_remote_code"):
+        build_default_service(settings)
