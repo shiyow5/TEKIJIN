@@ -356,6 +356,20 @@ def main():
                     "seed": SEED,
                     "unit": "query",
                     "gaps": results,
+                    # 分割検証も保存する。ここが JSON に無いと、文書に書くときに
+                    # コンソールから手で写すことになる（#158 でそれを2度間違えた）。
+                    "split_half": {
+                        "reps": SPLIT_REPS,
+                        "seed": SPLIT_SEED,
+                        "median": float(np.median(held)),
+                        "ci": [
+                            float(np.percentile(held, 2.5)),
+                            float(np.percentile(held, 97.5)),
+                        ],
+                        "positive_rate": float(np.mean(held > 0)),
+                        "picked": dict(picked),
+                        "ties": int(ties),
+                    },
                 },
                 f,
                 ensure_ascii=False,

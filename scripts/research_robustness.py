@@ -228,7 +228,16 @@ def constraints(ctx, base, llm_ctx):
             f"  {label:22s} 制約つき{len(idx)}件={sub:.3f}  全体={r['R@3']:.3f} "
             f"Δ={r['R@3'] - base['R@3']:+.3f} [{lo:+.3f},{hi:+.3f}]"
         )
-        rows.append({"name": label, "constrained": float(sub), "overall": r["R@3"]})
+        # delta / ci も保存する（#158: 区間がコンソールにしか無いと手写しになる）。
+        rows.append(
+            {
+                "name": label,
+                "constrained": float(sub),
+                "overall": r["R@3"],
+                "delta": r["R@3"] - base["R@3"],
+                "ci": [lo, hi],
+            }
+        )
     return rows
 
 
@@ -298,6 +307,7 @@ def main():
     print(f"採点対象 {len(ctx['items'])} 件 / 基準（Dense 集約）= {base['R@3']:.3f}\n")
 
     result = {
+        "base": {"R@3": base["R@3"]},
         "cold_start": cold_start(ctx, args.model, ctopics, llm_plain, llm_ctx),
         "l3_fusion": l3_fusion(ctx, base, llm_ctx),
         "constraints": constraints(ctx, base, llm_ctx),
