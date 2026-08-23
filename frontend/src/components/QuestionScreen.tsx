@@ -11,7 +11,6 @@
 
 import { useCurrentUser } from "@/components/CurrentUserProvider";
 import { RecentQuestions } from "@/components/RecentQuestions";
-import { VoiceInputButton } from "@/components/VoiceInputButton";
 import { ApiError, postAsk } from "@/lib/api-client";
 import { createSessionId } from "@/lib/session";
 import { useRouter } from "next/navigation";
@@ -103,7 +102,6 @@ export function QuestionScreen({ onSubmitted }: QuestionScreenProps) {
               placeholder="質問を入力してください..."
               className="w-full bg-transparent px-sm py-2 text-on-surface outline-none placeholder:text-on-surface-variant"
             />
-            <VoiceInputButton />
           </div>
 
           <button

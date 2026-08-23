@@ -469,6 +469,35 @@ def test_inbox_rejects_a_bad_responder_id(seed_counts, engine, fake_embedder) ->
     assert client.get("/inbox", params={"responder_id": "not-an-id"}).status_code == 422
 
 
+def test_questions_route_reflects_asker_history_and_resolution(
+    seed_counts, engine, fake_embedder
+) -> None:
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2, 3], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2, 3)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "rh-s1"})
+    _events(client, "rh-s1")  # reach the send interrupt: question persisted, not yet accepted
+
+    body = client.get("/questions", params={"asker_id": "E010"}).json()
+    mine = next(i for i in body["items"] if i["title"] == GOOD_Q)
+    assert mine["resolved"] is False and mine["responder_name"] is None
+
+    # After acceptance the same question shows resolved with the responder's name.
+    client.post("/answer", json={"session_id": "rh-s1", "outcome": "accepted"})
+    _events(client, "rh-s1")
+    after = client.get("/questions", params={"asker_id": "E010"}).json()
+    mine_after = next(i for i in after["items"] if i["title"] == GOOD_Q)
+    assert mine_after["resolved"] is True and mine_after["responder_name"]
+
+
+def test_questions_route_rejects_a_bad_asker_id(seed_counts, engine, fake_embedder) -> None:
+    client = _client(engine, fake_embedder, retriever=_FakeRetriever(), scorer=_FakeScorer([]))
+    assert client.get("/questions", params={"asker_id": "nope"}).status_code == 422
+
+
 def test_dashboard_self_resolution_and_latest_eval(seed_counts, session) -> None:
     from sqlalchemy import update
 

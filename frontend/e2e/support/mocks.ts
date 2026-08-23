@@ -145,6 +145,17 @@ export async function mockInbox(page: Page, items: unknown[] = [INBOX_ITEM]): Pr
   );
 }
 
+/**
+ * Mock GET /questions (any asker_id query) — the question screen's recent-history
+ * panel. Defaults to empty so the asker flow is unaffected by history.
+ */
+export async function mockRecentQuestions(page: Page, items: unknown[] = []): Promise<void> {
+  await page.route(
+    (url) => url.href.startsWith(`${API_BASE}/questions`),
+    (route) => fulfillJson(route, { items }),
+  );
+}
+
 export const HANDOFF = {
   question: "UTM の移行時に気をつけることは？",
   asker: { id: 1, name: "山田 太郎", dept: "営業部" },
