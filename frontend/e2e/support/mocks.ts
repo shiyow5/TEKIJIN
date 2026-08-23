@@ -85,6 +85,48 @@ export const PERSON_ROUTE_FRAMES: SseFrame[] = [
   { event: "draft", data: { draft: PERSON_ROUTE_DRAFT } },
 ];
 
+/** Non-terminal prior_answer stream → ResultScreen shows the PriorAnswerView. */
+export const PRIOR_ANSWER_FRAMES: SseFrame[] = [
+  {
+    event: "understood",
+    data: {
+      topics: ["ネットワーク"],
+      products: ["UTM"],
+      situation: "移行作業",
+      question_type: "how",
+      confidence: 0.88,
+    },
+  },
+  {
+    event: "route",
+    data: {
+      route: "prior_answer",
+      reason: "同様の質問に過去に回答した方がいます。",
+      confidence: 0.8,
+    },
+  },
+  { event: "recommend", data: { recommendations: [RECOMMENDATION] } },
+  { event: "draft", data: { draft: PERSON_ROUTE_DRAFT } },
+];
+
+/** Clarification stream → ProcessingScreen shows the FollowupForm (逆質問). */
+export const FOLLOWUP_FRAMES: SseFrame[] = [
+  {
+    event: "understood",
+    data: {
+      topics: ["ネットワーク"],
+      products: [],
+      situation: null,
+      question_type: "how",
+      confidence: 0.5,
+    },
+  },
+  {
+    event: "followup",
+    data: { question: "現在お使いの機器を教えてください。", missing: ["現行製品"] },
+  },
+];
+
 /** Terminal no-result stream → ProcessingScreen "回答をお届けします" + message. */
 export const MESSAGE_FRAMES: SseFrame[] = [
   {
@@ -144,6 +186,24 @@ export async function mockInbox(page: Page, items: unknown[] = [INBOX_ITEM]): Pr
     (route) => fulfillJson(route, { items }),
   );
 }
+
+/** Sample asker history for the "最近のあなたの質問" panel. */
+export const RECENT_QUESTIONS = [
+  {
+    question_id: "api_rq1",
+    title: "UTMの移行時の注意点",
+    resolved: true,
+    responder_name: "高梨 健太",
+    created_at: "2026-08-20T10:00:00",
+  },
+  {
+    question_id: "api_rq2",
+    title: "社内Wi-Fiの申請方法",
+    resolved: false,
+    responder_name: null,
+    created_at: "2026-08-21T10:00:00",
+  },
+];
 
 /**
  * Mock GET /questions (any asker_id query) — the question screen's recent-history
