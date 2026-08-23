@@ -16,6 +16,7 @@ import type { HandoffAction } from "@/hooks/useHandoff";
 import { useHandoff } from "@/hooks/useHandoff";
 import type { HandoffResponse, Reason } from "@/lib/api-types";
 import { reasonLabel } from "@/lib/reasons";
+import Link from "next/link";
 
 export interface AnswerScreenProps {
   sessionId: string;
@@ -37,14 +38,16 @@ function Centered({ children }: { children: React.ReactNode }) {
 }
 
 function BackLink() {
+  // The responder came from their inbox, so return there (label matches the
+  // destination — #126). Client-side navigation via next/link.
   return (
     <div className="flex justify-center">
-      <a
-        href="/questions"
+      <Link
+        href="/inbox"
         className="min-h-[48px] rounded-full bg-primary px-lg py-sm font-bold text-on-primary shadow-md transition-colors hover:bg-primary-container"
       >
-        質問一覧へ
-      </a>
+        受信箱へ戻る
+      </Link>
     </div>
   );
 }
