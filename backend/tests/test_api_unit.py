@@ -270,7 +270,7 @@ def test_make_checkpointer_memory_rejected_in_production() -> None:
     # In production, in-memory sessions would vanish on the next restart — refuse.
     import tekijin.api.checkpointer as ck
 
-    with pytest.raises(RuntimeError, match="not allowed in production"):
+    with pytest.raises(RuntimeError, match="not allowed when durability is enforced"):
         ck.make_checkpointer(_settings(app_env="production", checkpointer_backend="memory"))
 
 
@@ -282,8 +282,35 @@ def test_make_checkpointer_postgres_failure_raises_in_production(monkeypatch) ->
         raise RuntimeError("no database")
 
     monkeypatch.setattr(ck, "make_postgres_checkpointer", _boom)
-    with pytest.raises(RuntimeError, match="production"):
+    with pytest.raises(RuntimeError, match="durability enforced"):
         ck.make_checkpointer(_settings(app_env="production", checkpointer_backend="postgres"))
+
+
+def test_make_checkpointer_strict_durability_enforces_even_in_development() -> None:
+    # #180 review HIGH: the DGX host runs app_env=development (for #108/#173), so
+    # durability must be enable-able independently — memory is then rejected.
+    import tekijin.api.checkpointer as ck
+
+    with pytest.raises(RuntimeError, match="not allowed when durability is enforced"):
+        ck.make_checkpointer(
+            _settings(app_env="development", strict_durability=True, checkpointer_backend="memory")
+        )
+
+
+def test_make_checkpointer_strict_durability_false_is_escape_hatch(monkeypatch) -> None:
+    # Explicit opt-out: even in a prod-flavored env, false allows the memory fallback.
+    from langgraph.checkpoint.memory import MemorySaver
+
+    import tekijin.api.checkpointer as ck
+
+    def _boom(_url: str):
+        raise RuntimeError("no database")
+
+    monkeypatch.setattr(ck, "make_postgres_checkpointer", _boom)
+    cp = ck.make_checkpointer(
+        _settings(app_env="production", strict_durability=False, checkpointer_backend="postgres")
+    )
+    assert isinstance(cp, MemorySaver)
 
 
 def test_make_checkpointer_postgres_success_in_production(monkeypatch) -> None:

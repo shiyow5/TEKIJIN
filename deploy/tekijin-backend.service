@@ -5,43 +5,60 @@
 # and starts it on boot.
 #
 # Install (on the GPU host, as the deploy user — adjust User/paths to match):
-#   1. Copy this file, substituting your user/paths:
+#   1. Copy this file, substituting your user + repo path:
 #        sed 's/%DEPLOY_USER%/team_a/; s#%APP_DIR%#/home/team_a/TEKIJIN#' \
 #          deploy/tekijin-backend.service | sudo tee /etc/systemd/system/tekijin-backend.service
-#   2. sudo systemctl daemon-reload
-#   3. sudo systemctl enable --now tekijin-backend
-#   4. systemctl status tekijin-backend   # verify
+#   2. Set TEKIJIN_VENV_PY below to your venv's python.
+#   3. sudo systemctl daemon-reload
+#   4. sudo systemctl enable --now tekijin-backend
+#   5. systemctl status tekijin-backend   # verify
 #      journalctl -u tekijin-backend -f   # follow logs
 #
-# This supervises the BACKEND only. The vLLM / Postgres / frontend containers
-# should carry their own restart policy instead: run them with
-#   docker run --restart unless-stopped ...
-# (or `docker update --restart unless-stopped <name>` for already-running ones),
-# so the whole stack survives a host reboot.
+# ExecStart uses the repo-committed deploy/start_backend.sh (foreground `exec`), so
+# a freshly provisioned host works without an ad-hoc script. It runs uvicorn on
+# :18000 by default (override via TEKIJIN_PORT).
 #
-# NOTE (#180 task 1): production requires a durable checkpointer. This unit sets
-# TEKIJIN_CHECKPOINTER_BACKEND=postgres; the backend now refuses to start in a
-# non-development env with an in-memory checkpointer, so a misconfigured restart
-# fails loudly here rather than silently losing sessions.
+# Requires an out-of-repo `.env` at %APP_DIR%/.env (kept out of git) with
+# TEKIJIN_DATABASE_URL, TEKIJIN_LLM_BASE_URL, TEKIJIN_EMBEDDING_MODEL, etc. — the
+# backend loads it from the repo root regardless of WorkingDirectory.
+#
+# This unit supervises the BACKEND only. Run vLLM / Postgres / frontend containers
+# with `docker run --restart unless-stopped ...` (or `docker update --restart
+# unless-stopped <name>`) so the whole stack survives a host reboot.
+#
+# DURABILITY (#180): TEKIJIN_STRICT_DURABILITY=true forces the backend to REFUSE to
+# start on a non-durable checkpointer (memory, or a failed Postgres) rather than
+# silently degrading. This is set explicitly here — not via app_env — because the
+# DGX host must run TEKIJIN_APP_ENV=development for an unrelated embedding reason
+# (#108/#173), so app_env alone would leave durability unenforced.
+#
+# NOTE on cold boot: Postgres runs as a separate Docker container with no systemd
+# ordering to this unit, and durability is now a hard-fail — so on a host reboot the
+# backend may briefly lose the DB race. The restart budget below is deliberately
+# generous (up to 20 attempts over 10 min) so it keeps retrying until Postgres is
+# ready instead of giving up and needing a manual `systemctl reset-failed`.
 
 [Unit]
 Description=TEKIJIN backend (FastAPI/uvicorn)
-After=network-online.target
+After=network-online.target docker.service
 Wants=network-online.target
 
 [Service]
 Type=exec
 User=%DEPLOY_USER%
 WorkingDirectory=%APP_DIR%/backend
-# start_backend.sh cd's into backend/ and exec's uvicorn on :18000.
-ExecStart=%APP_DIR%/start_backend.sh
+ExecStart=%APP_DIR%/deploy/start_backend.sh
 Environment=TEKIJIN_LLM_BACKEND=vllm
 Environment=TEKIJIN_CHECKPOINTER_BACKEND=postgres
-# Restart on any non-clean exit, with a small backoff; don't hammer on a boot loop.
+Environment=TEKIJIN_STRICT_DURABILITY=true
+# Set this to your venv's python (the backend + deps live there).
+Environment=TEKIJIN_VENV_PY=%APP_DIR%/../tekijin-bench/.venv/bin/python
+# Restart on any non-clean exit with a short backoff. Budget is wide enough to
+# outlast a slow Postgres container coming up after a host reboot.
 Restart=always
-RestartSec=3
-StartLimitIntervalSec=60
-StartLimitBurst=5
+RestartSec=5
+StartLimitIntervalSec=600
+StartLimitBurst=20
 # Give in-flight SSE streams a moment to drain on stop/restart.
 TimeoutStopSec=15
 

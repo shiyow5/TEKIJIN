@@ -2,12 +2,15 @@
 
 ``memory`` (default) is safe for local dev and needs no DB. ``postgres`` persists
 sessions across restarts via ``langgraph-checkpoint-postgres`` over a connection
-pool, and its schema is created once with ``.setup()``. In development, if the
-postgres checkpointer cannot be set up (no DB, missing dep, connection error) the
-factory logs and falls back to MemorySaver so the API always starts. In production
-(``app_env != development``) persistence is REQUIRED: a ``memory`` backend, or a
-postgres setup that fails, is a hard error rather than a silent degrade (#180) —
-in-memory sessions would be lost on the next restart.
+pool, and its schema is created once with ``.setup()``.
+
+When durability is NOT enforced (local dev), a ``memory`` backend — or a postgres
+setup that fails — degrades to MemorySaver so the API always starts.
+When it IS enforced (``settings.durability_enforced()``; see ``strict_durability``)
+both are a hard error instead of a silent degrade (#180): in-memory sessions would
+be lost on the next restart. Enforcement derives from ``app_env`` by default but is
+a separate ``TEKIJIN_STRICT_DURABILITY`` knob, so it can be turned on where
+``app_env`` must stay ``development`` for other reasons (#108/#173).
 
 Imports of the postgres/psycopg stack are function-local so the default memory
 path pulls none of them.
@@ -66,26 +69,29 @@ def make_checkpointer(settings: Settings | None = None) -> Any:
     """
 
     settings = settings or get_settings()
-    is_production = settings.app_env != "development"
+    # Decoupled from app_env on purpose (#180 review): the DGX host runs
+    # app_env=development for an unrelated embedding reason (#108/#173), so tie
+    # durability enforcement to its own knob instead.
+    enforced = settings.durability_enforced()
 
     if settings.checkpointer_backend == "postgres":
         try:
             return make_postgres_checkpointer(settings.database_url)
         except Exception as exc:  # broad: any setup failure
-            if is_production:
+            if enforced:
                 raise RuntimeError(
-                    f"PostgresSaver setup failed in production (app_env={settings.app_env!r}): "
-                    f"{exc}. Sessions must persist — fix the database connection, or set "
-                    "TEKIJIN_APP_ENV=development to allow the in-memory fallback."
+                    f"PostgresSaver setup failed with durability enforced: {exc}. Sessions must "
+                    "persist — fix the database connection, or set TEKIJIN_STRICT_DURABILITY=false "
+                    "to allow the in-memory fallback."
                 ) from exc
             logger.warning("PostgresSaver unavailable (%s); using MemorySaver", exc)
-    elif is_production:
-        # backend == "memory" outside development: a restart would drop every
+    elif enforced:
+        # backend == "memory" with durability enforced: a restart would drop every
         # in-flight session (durability regression for a multi-user deployment).
         raise RuntimeError(
-            f"checkpointer_backend='memory' is not allowed in production "
-            f"(app_env={settings.app_env!r}); sessions would be lost on restart. Set "
-            "TEKIJIN_CHECKPOINTER_BACKEND=postgres, or TEKIJIN_APP_ENV=development for local use."
+            "checkpointer_backend='memory' is not allowed when durability is enforced; "
+            "sessions would be lost on restart. Set TEKIJIN_CHECKPOINTER_BACKEND=postgres, or "
+            "TEKIJIN_STRICT_DURABILITY=false to allow the in-memory fallback."
         )
 
     from langgraph.checkpoint.memory import MemorySaver
