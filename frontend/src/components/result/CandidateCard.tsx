@@ -8,6 +8,7 @@
  * ranks show compact reason labels.
  */
 
+import { ConfidenceGauge } from "@/components/result/ConfidenceGauge";
 import type { Recommendation } from "@/lib/api-types";
 import { reasonLabel } from "@/lib/reasons";
 
@@ -32,25 +33,29 @@ export function CandidateCard({
 }: CandidateCardProps) {
   return (
     <article
-      className={`relative flex h-full flex-col rounded-xl border bg-surface-container-lowest p-md shadow-sm transition-colors ${
+      className={`flex h-full flex-col rounded-xl border bg-surface-container-lowest p-md shadow-sm transition-colors ${
         selected ? "border-primary" : "border-outline-variant"
       }`}
     >
-      <div className="absolute top-0 right-0 rounded-bl-lg bg-secondary-container px-sm py-xs font-bold text-on-secondary-container text-xs">
-        適合度: {candidate.confidence}
-      </div>
-
       <div className="mb-sm flex items-center gap-sm">
         <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-surface-variant font-bold text-lg text-on-surface-variant">
           {avatarInitial(candidate.name)}
         </div>
-        <div className="flex flex-col">
-          <h2 className="font-bold text-lg text-on-surface leading-tight">
+        <div className="flex min-w-0 flex-col">
+          <h2 className="truncate font-bold text-lg text-on-surface leading-tight">
             {rank === 1 ? `${candidate.name}（最有力）` : candidate.name}
           </h2>
-          <p className="text-on-surface-variant text-xs">
+          <p className="truncate text-on-surface-variant text-xs">
             {[candidate.dept, candidate.person_id].filter(Boolean).join(" / ")}
           </p>
+        </div>
+        {/* Confidence gauge in normal flex flow (shrink-0) so it can never overlap
+            the name — the label is aria-hidden since the gauge already labels it. */}
+        <div className="ml-auto flex shrink-0 items-center gap-xs">
+          <span aria-hidden="true" className="text-on-surface-variant text-xs">
+            適合度
+          </span>
+          <ConfidenceGauge level={candidate.confidence} />
         </div>
       </div>
 

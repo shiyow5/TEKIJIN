@@ -118,8 +118,9 @@ describe("ResultScreen — main line (person)", () => {
     expect(screen.getByText("田中")).toBeInTheDocument();
     // 4th candidate is truncated (max 3)
     expect(screen.queryByText("山田")).not.toBeInTheDocument();
-    // fit signal is the Japanese confidence label, not a raw score percentage
-    expect(screen.getByText("適合度: 高")).toBeInTheDocument();
+    // fit signal is the Japanese confidence label (now an animated gauge, #139),
+    // never a raw score percentage.
+    expect(screen.getByRole("img", { name: "適合度 高" })).toBeInTheDocument();
     expect(screen.queryByText(/%/)).not.toBeInTheDocument();
     // reason labels (expanded top card shows detail)
     expect(screen.getByText("関連資格")).toBeInTheDocument();
