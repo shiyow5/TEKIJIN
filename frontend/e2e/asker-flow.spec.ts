@@ -30,6 +30,10 @@ test.describe("asker flow", () => {
     await page.route(`${API_BASE}/events/**`, (route) =>
       fulfillSse(route, sseBody(PERSON_ROUTE_FRAMES)),
     );
+    // Confirming the hand-off persists the (possibly edited) draft (#174).
+    await page.route(`${API_BASE}/handoff/draft`, (route) =>
+      fulfillJson(route, { session_id: "srv-session", status: "draft_saved" }),
+    );
 
     await page.goto("/questions");
     await expect(page.getByRole("heading", { name: "何を知りたいですか？" })).toBeVisible();
@@ -55,9 +59,9 @@ test.describe("asker flow", () => {
     // The draft event pre-fills the editor verbatim, so sending is enabled at once.
     const draft = page.getByRole("textbox", { name: "聞き方の下書き" });
     await expect(draft).toHaveValue(PERSON_ROUTE_DRAFT);
-    await page.getByRole("button", { name: "この方に送る" }).click();
+    await page.getByRole("button", { name: "この内容で依頼する" }).click();
 
-    await expect(page.getByRole("heading", { name: "送信しました" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "依頼を送りました" })).toBeVisible();
   });
 
   test("該当者なし → メッセージで終了", async ({ page }) => {

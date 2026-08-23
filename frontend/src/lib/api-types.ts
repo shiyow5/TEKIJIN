@@ -51,6 +51,16 @@ export interface AckResponse {
 }
 
 /**
+ * POST /handoff/draft body — persist the asker's edited hand-off draft (画面3) so
+ * the responder (画面4) reads the edited text. Draft-only; it never changes the
+ * recommendation or the accept/decline outcome (#174).
+ */
+export interface HandoffDraftRequest {
+  session_id: string;
+  draft: string;
+}
+
+/**
  * One employee for the current-user switcher (GET /employees). `id` is the
  * external "E###" form — the same shape accepted back as `asker_id` and used as
  * the responder id for the inbox, so a selection round-trips without conversion.

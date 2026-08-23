@@ -525,6 +525,39 @@ class AgentService:
             recommendation_id=values.get("primary_recommendation_id"),
         )
 
+    def save_handoff_draft(self, session_id: str, draft: str) -> None:
+        """Persist the asker's edited hand-off ``draft`` (画面3 → 画面4) (#174).
+
+        Only the durable ``draft`` value is updated, never the recommendation ids
+        or the accept/decline outcome, so the responder-side lifecycle (#94) is
+        untouched. Validation mirrors :meth:`get_handoff` under the per-session
+        lock: the run must be paused at ``send`` and not already answered, so an
+        edit cannot be saved against a finished run, a clarification, or a
+        hand-off whose outcome was already queued.
+        """
+
+        text = draft.strip()
+        if not text:  # defense in depth; the request schema already rejects blanks
+            raise SessionInvalid("draft must be a non-empty string")
+        with self._lock(session_id):
+            session = self._session_factory()
+            try:
+                graph = self._graph(session)
+                config = self._config(session_id)
+                # Snapshot + write share one graph/session under the lock, so the
+                # validated state cannot change before update_state runs.
+                next_nodes = tuple(graph.get_state(config).next)
+                if not next_nodes:
+                    raise HandoffNotFound("no responder handoff for this session")
+                if next_nodes[0] != "send":
+                    raise SessionConflict("session is not awaiting a responder outcome")
+                ctx = self._reg_get(session_id)
+                if ctx is not None and ctx.pending is not None:
+                    raise HandoffNotFound("this handoff has already been answered")
+                graph.update_state(config, {"draft": text})
+            finally:
+                session.close()
+
     # -- /events : stream ------------------------------------------------- #
     def is_streamable(self, session_id: str) -> bool:
         """True if there is a queued run, a paused run, or a replayable terminal.

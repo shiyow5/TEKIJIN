@@ -18,6 +18,9 @@ import { type EventStreamState, useEventStream } from "@/hooks/useEventStream";
 import { type ReactNode, createContext, useContext } from "react";
 
 const SessionStreamContext = createContext<EventStreamState | null>(null);
+// The session id is exposed separately so a screen can POST for this session
+// (e.g. confirming the hand-off draft, #174) without threading it through props.
+const SessionIdContext = createContext<string | null>(null);
 
 export interface SessionStreamProviderProps {
   sessionId: string;
@@ -43,12 +46,21 @@ export function SessionStreamProvider({
     baseUrl,
   });
   const value = streamState ?? live;
-  return <SessionStreamContext.Provider value={value}>{children}</SessionStreamContext.Provider>;
+  return (
+    <SessionIdContext.Provider value={sessionId}>
+      <SessionStreamContext.Provider value={value}>{children}</SessionStreamContext.Provider>
+    </SessionIdContext.Provider>
+  );
 }
 
 /** Read the session stream, or `null` when rendered outside a provider. */
 export function useOptionalSessionStream(): EventStreamState | null {
   return useContext(SessionStreamContext);
+}
+
+/** Read the current session id, or `null` when rendered outside a provider. */
+export function useOptionalSessionId(): string | null {
+  return useContext(SessionIdContext);
 }
 
 /** Read the session stream; throws if used outside a {@link SessionStreamProvider}. */

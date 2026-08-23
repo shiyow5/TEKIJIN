@@ -3,47 +3,79 @@
 /**
  * Main-line result (route === "person"): the person is the answer, so this
  * leads with the candidate cards and a sendable draft. Up to three candidates
- * are shown (top-ranked expanded). "この方に送る" confirms the hand-off — a
- * UI-only transition (the responder's accept/decline is 画面4 / #38); it never
- * dead-ends.
+ * are shown; the top pick is the recipient. "この内容で依頼する" persists the
+ * asker's (possibly edited) draft to the pending hand-off (POST /handoff/draft),
+ * so the responder reads the edited text — it is a real send, not a UI-only
+ * transition (#174). Recipient reselection is intentionally not offered: the
+ * hand-off targets the top pick, so a reselect control the send does not honour
+ * would misdirect (#174 / recipient routing is #76).
  */
 
 import { CandidateCard } from "@/components/result/CandidateCard";
 import { DraftEditor } from "@/components/result/DraftEditor";
+import { updateHandoffDraft } from "@/lib/api-client";
 import type { Recommendation } from "@/lib/api-types";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export interface PersonRouteViewProps {
   recommendations: Recommendation[];
   reason?: string;
   draft: string;
+  /** Session id for the confirm POST; null when rendered outside a session. */
+  sessionId: string | null;
 }
 
 const MAX_CANDIDATES = 3;
+const SEND_ERROR = "送信に失敗しました。時間をおいて、もう一度お試しください。";
 
-export function PersonRouteView({ recommendations, reason, draft }: PersonRouteViewProps) {
+export function PersonRouteView({
+  recommendations,
+  reason,
+  draft,
+  sessionId,
+}: PersonRouteViewProps) {
   const candidates = recommendations.slice(0, MAX_CANDIDATES);
-  const [selectedId, setSelectedId] = useState(candidates[0]?.person_id ?? "");
-  const [sentTo, setSentTo] = useState<string | null>(null);
-
   const topCandidate = candidates[0];
-  const selected = candidates.find((c) => c.person_id === selectedId) ?? topCandidate;
-  // The draft is generated for the top candidate. Warn when a different
-  // recipient is selected so the user edits it before sending (no misdirected
-  // send). Per-recipient regeneration lands with the send wiring (#38).
-  const draftMismatch = Boolean(selected) && selected?.person_id !== topCandidate?.person_id;
+  const [sending, setSending] = useState(false);
+  const [sentTo, setSentTo] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  function handleSend() {
-    // Send to the currently selected candidate (not always the top one).
-    setSentTo(selected?.name ?? "選択した担当者");
+  // A decline→reroute remounts this view (keyed by the top candidate in
+  // ResultScreen) while a confirm POST may still be in flight. Drop the post-await
+  // state updates if that happened, matching the project's async-guard convention.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  async function handleSend(text: string) {
+    if (!sessionId) {
+      setError(SEND_ERROR);
+      return;
+    }
+    setSending(true);
+    setError(null);
+    try {
+      await updateHandoffDraft({ session_id: sessionId, draft: text });
+      if (mounted.current) setSentTo(topCandidate?.name ?? "ご担当者");
+    } catch {
+      // 404 = the hand-off was already answered/closed; 409 = a clarification is
+      // owed; either way the send can't land, so surface a retryable error.
+      if (mounted.current) setError(SEND_ERROR);
+    } finally {
+      if (mounted.current) setSending(false);
+    }
   }
 
   if (sentTo !== null) {
     return (
       <section className="mx-auto flex w-full max-w-2xl flex-col gap-md py-lg text-center">
-        <h1 className="font-bold text-2xl text-primary">送信しました</h1>
+        <h1 className="font-bold text-2xl text-primary">依頼を送りました</h1>
         <p className="text-on-surface-variant">
-          {sentTo}さんに依頼を送りました。返信があると通知でお知らせします。
+          {sentTo}さんに、この内容でお繋ぎしました。返信があるとお知らせします。
         </p>
         <div className="flex justify-center">
           <a
@@ -74,8 +106,7 @@ export function PersonRouteView({ recommendations, reason, draft }: PersonRouteV
               candidate={candidate}
               rank={index + 1}
               expanded={index === 0}
-              selected={candidate.person_id === selected?.person_id}
-              onSelect={setSelectedId}
+              selected={index === 0}
             />
           ))}
         </div>
@@ -88,20 +119,16 @@ export function PersonRouteView({ recommendations, reason, draft }: PersonRouteV
         </p>
       )}
 
-      {draftMismatch && topCandidate ? (
-        <p className="rounded-lg border border-tertiary-container bg-surface-container-low p-sm text-on-surface-variant text-sm">
-          下書きは最有力の{topCandidate.name}
-          さん向けです。宛先を変える場合は本文を編集してください。
+      {error ? (
+        <p
+          role="alert"
+          className="rounded-lg border border-error-container bg-error-container p-sm text-on-error-container text-sm"
+        >
+          {error}
         </p>
       ) : null}
 
-      {/*
-       * Recipient changes remount this whole view (keyed by the top candidate in
-       * ResultScreen), so DraftEditor is reset on a reroute without its own key.
-       * A same-recipient late draft keeps the mount; edits are preserved by
-       * DraftEditor's dirty guard.
-       */}
-      <DraftEditor initialDraft={draft} onSend={handleSend} />
+      <DraftEditor initialDraft={draft} disabled={sending} onSend={handleSend} />
     </section>
   );
 }

@@ -14,6 +14,7 @@ import type {
   DocumentDetail,
   EmployeeListResponse,
   EmployeeSummary,
+  HandoffDraftRequest,
   HandoffResponse,
   InboxItem,
   InboxResponse,
@@ -112,6 +113,19 @@ export function postAnswer(
   options: RequestOptions = {},
 ): Promise<AckResponse> {
   return postJson<AckResponse>("/answer", request, options);
+}
+
+/**
+ * POST /handoff/draft — persist the asker's edited hand-off draft so the
+ * responder sees the edited text (#174). Draft-only. Throws {@link ApiError}
+ * with 404 (no hand-off pending / already answered) or 409 (awaiting a
+ * clarification instead).
+ */
+export function updateHandoffDraft(
+  request: HandoffDraftRequest,
+  options: RequestOptions = {},
+): Promise<AckResponse> {
+  return postJson<AckResponse>("/handoff/draft", request, options);
 }
 
 /**
