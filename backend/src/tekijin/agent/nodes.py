@@ -23,6 +23,7 @@ from tekijin.agent.protocols import (
     SufficiencyModel,
 )
 from tekijin.agent.route import PRIOR_ANSWER, decide_route
+from tekijin.agent.safety import scan_disallowed
 from tekijin.agent.state import AgentState, empty_retrieval
 from tekijin.agent.stubs import MAX_FOLLOWUPS
 from tekijin.retrieval.embedding import QUERY, Embedder
@@ -114,6 +115,19 @@ class AgentNodes:
 
     # -- C1: intent understanding (LLM stub) ------------------------------
     def c1_intent(self, state: AgentState) -> AgentState:
+        # Deterministic safety net BEFORE trusting the (prompt-dependent) model:
+        # clear PII/secret solicitation or prompt injection is refused regardless of
+        # which intent model is wired, so a model swap cannot regress it (#155). It
+        # only ADDS rejections; softer out_of_scope cases stay the model's call.
+        if scan_disallowed(state["question"]) is not None:
+            return {
+                "topics": [],
+                "products": [],
+                "situation": None,
+                "question_type": _QUESTION_TYPE_DEFAULT,
+                "out_of_scope": True,
+                "intent_confidence": 0.0,
+            }
         result = self._intent.analyze(state["question"], state.get("asker"))
         return {
             "topics": result.topics,
