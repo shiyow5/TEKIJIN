@@ -112,7 +112,7 @@ const STEPS: { n: string; title: string; body: string }[] = [
 export default function HomePage() {
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-lg py-lg">
-      <section className="flex flex-col items-center gap-md rounded-2xl border border-outline-variant bg-surface-container-low px-margin py-lg text-center">
+      <section className="flex flex-col items-center gap-md rounded-xl border border-outline-variant bg-surface-container-low px-margin py-lg text-center">
         <span className="rounded-full bg-secondary-container px-sm py-xs font-bold text-on-secondary-container text-xs">
           回答の出所は、常に人。
         </span>
