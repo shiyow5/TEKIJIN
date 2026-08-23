@@ -12,6 +12,8 @@
 > （同条件で gold トピックなら 0.836）。**上位3名が全クエリで同一**（47件中44件が同じ3名）。
 > 聞き返し後の2周目の C1 は測っていないので、**これは製品の上限値ではない**。
 > 現状そのままの実測は 0.140 → 0.134。
+> **直し方は実測済み**: C1 に語彙を守らせ上位1件だけ使うと R@3 **0.788**（gold 配置 0.901 の87%、
+> いずれも `gold_topics` がある52件で測った値）。[llm_faithful.md](llm_faithful.md) §4.6。
 > あわせて thinking が ON のままで **C1+C2 の p50 が 83秒**（仕様は端から端まで p50 1.5秒）。
 > → **[llm_faithful.md](llm_faithful.md)**（#113 / #116）。
 > [c2.md](c2.md)（#111）の結論は取り下げ済み。
@@ -44,6 +46,8 @@
 | `ablation/{payload_,}c1_faithful.json` / `{payload_,}c2_faithful.json` | **製品のリクエストをそのまま再現した C1/C2 の入出力**。[llm_faithful.md](llm_faithful.md) |
 | `ablation/e2e_variants_c1.json` | C1 の実トピックで測った層2 R@3。[llm_faithful.md](llm_faithful.md) |
 | `ablation/c1_nothink.json` / `e2e_variants_c1_nothink.json` | `enable_thinking=false` を足しただけの反実仮想。同上 §4.5 |
+| `ablation/{payload_,}c1_{prompt,enum,both}.json` | C1 にトピック語彙を守らせる2案の比較。同上 §4.6（#116） |
+| `ablation/e2e_variants_c1_{prompt,enum,both}{,_top1,_top2}.json` | 上記の層2 R@3。**1問ごとの当落 `per_query` 入り** |
 
 ## 埋め込み（層2 Recall@3 が主指標）
 

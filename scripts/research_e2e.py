@@ -149,14 +149,14 @@ def task_route(url, out):
 
 def load_c1_topics(path, topk=0):
     """C1 の実出力を {評価ID: トピック列} に直す（#113）。無ければ None。"""
+    if topk < 0:
+        raise SystemExit("--c1-topk に負数は指定できない")
     if not path:
         return None
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import research_faithful as rf
 
     by_eval = {r["id"]: r["eval_id"] for r in rf.items() if r["klass"] == "normal"}
-    if topk < 0:
-        raise SystemExit("--c1-topk に負数は指定できない")
     return {
         by_eval[i]: list(intent.topics)[:topk] if topk else list(intent.topics)
         for i, intent in rf.load_c1(path).items()

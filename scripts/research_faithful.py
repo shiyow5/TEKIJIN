@@ -102,7 +102,7 @@ def items():
 
 
 def topic_vocabulary():
-    """C6 が引ける語彙。`skills.topic` と `answers.topic` の和（fixtures では22件）。
+    """C6 が引ける語彙。`skills.topic` ∪ `answers.topic` ∪ `questions.topics`（fixtures では22件）。
 
     製品では DB から引くべきもの。ここでは fixtures から作って、
     **「C1 にこの語彙を守らせたら層2 R@3 はどこまで戻るか」**を測る（#116）。
