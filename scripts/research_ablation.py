@@ -57,6 +57,10 @@ def build_context(emb_paths, include_daily_default=False, gold_key="gold_experts
     chunk_tokens = [tok(t) for _, t in chunks_all]
     bm25_base = rr.BM25(chunk_tokens[:n_base])
     bm25_all = rr.BM25(chunk_tokens)
+    # Per-chunk token SETS for the production-aligned lexical-overlap filter
+    # (see bm25_chunk_rank). Mirrors backend/.../retrieval/sparse.py, which only
+    # surfaces chunks sharing >=1 token with the query.
+    chunk_token_sets = [set(t) for t in chunk_tokens]
 
     employee_ids = [e["id"] for e in fx["employees"]]
     trans, pidx = rr.build_person_graph(fx, employee_ids)
@@ -71,6 +75,7 @@ def build_context(emb_paths, include_daily_default=False, gold_key="gold_experts
         "models": models,
         "tok": tok,
         "bm25": {"base": bm25_base, "all": bm25_all},
+        "chunk_token_sets": {"all": chunk_token_sets, "base": chunk_token_sets[:n_base]},
         "person_ids": employee_ids,  # build_person_docs と同じ並び（fx["employees"] 順）
         "trans": trans,
         "pidx": pidx,
@@ -93,12 +98,26 @@ def dense_chunk_rank(ctx, model, qi, include_daily, depth=64):
 
 
 def bm25_chunk_rank(ctx, query_text, include_daily, depth=64):
-    idx = ctx["bm25"]["all" if include_daily else "base"]
+    key = "all" if include_daily else "base"
+    idx = ctx["bm25"][key]
+    qtok = set(ctx["tok"](query_text))
+    token_sets = ctx["chunk_token_sets"][key]
     s = idx.scores(ctx["tok"](query_text))
-    order = np.argsort(-s)[:depth]
-    return [ctx["chunk_ids"][j] for j in order], {
-        ctx["chunk_ids"][j]: float(s[j]) for j in order
-    }
+    # PRODUCTION-ALIGNED (#68): only surface chunks that share >=1 token with the
+    # query (lexical overlap), exactly like retrieval/sparse.py — NOT the top-`depth`
+    # by score. The old unfiltered version fused zero-overlap noise the product never
+    # sees, overstating how much equal-weight RRF hurt (codex on #68).
+    ids: list = []
+    sims: dict = {}
+    for j in np.argsort(-s):
+        if not (qtok & token_sets[j]):
+            continue
+        cid = ctx["chunk_ids"][j]
+        ids.append(cid)
+        sims[cid] = float(s[j])
+        if len(ids) >= depth:
+            break
+    return ids, sims
 
 
 def person_dense_rank(ctx, model, qi, full=False):
