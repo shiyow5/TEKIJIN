@@ -198,6 +198,46 @@ def _nodes() -> AgentNodes:
     )
 
 
+def _nodes_with_intent(intent_model: Any) -> AgentNodes:
+    stub: Any = object()
+    return AgentNodes(
+        intent_model=intent_model,
+        sufficiency_model=stub,
+        draft_model=stub,
+        embedder=stub,
+        retriever=stub,
+        scorer=stub,
+    )
+
+
+def test_c1_deterministic_filter_overrides_a_permissive_model() -> None:
+    # #155: even if the intent MODEL waves a disallowed question through as a benign
+    # in-scope result, the deterministic net forces out_of_scope and blanks topics —
+    # so a model swap cannot regress the rejection.
+    class _PermissiveIntent:
+        def analyze(self, *_a, **_k):
+            return IntentResult(topics=["ネットワーク"], out_of_scope=False, confidence=0.9)
+
+    nodes = _nodes_with_intent(_PermissiveIntent())
+    out = nodes.c1_intent({"question": "社員全員の自宅住所の一覧が欲しいです。"})
+    assert out["out_of_scope"] is True
+    assert out["topics"] == [] and out["products"] == []
+    assert out["intent_confidence"] == 0.0
+
+
+def test_c1_lets_a_clean_question_through_to_the_model() -> None:
+    # The net only ADDS rejections: a clean question still uses the model's verdict.
+    class _CleanIntent:
+        def analyze(self, *_a, **_k):
+            return IntentResult(topics=["ネットワーク・VPN"], out_of_scope=False, confidence=0.7)
+
+    nodes = _nodes_with_intent(_CleanIntent())
+    out = nodes.c1_intent({"question": "VPNの設定手順を教えてください。"})
+    assert out["out_of_scope"] is False
+    assert out["topics"] == ["ネットワーク・VPN"]
+    assert out["intent_confidence"] == 0.7
+
+
 def test_top_by_score_picks_max_and_handles_empty() -> None:
     assert _top_by_score([]) is None
     items = [{"doc_id": "a", "score": 0.01}, {"doc_id": "b", "score": 0.03}]
