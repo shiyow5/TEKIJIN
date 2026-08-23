@@ -89,6 +89,32 @@ describe("ProcessingScreen", () => {
     expect(pushMock).toHaveBeenCalledWith("/session/abc-123/result");
   });
 
+  it("stops the active-step spinner once a result is ready (person route pauses, #148)", () => {
+    // The person route pauses at `send` (non-terminal) after recommend/draft — the
+    // spinner must not keep spinning once the candidate + draft are ready.
+    renderScreen(
+      state({
+        recommend: {
+          recommendations: [
+            { person_id: "E001", name: "高梨", score: 0.9, confidence: "high", reasons: [] },
+          ],
+        },
+        draft: { draft: "高梨さんへの依頼文" },
+      }),
+    );
+    expect(screen.getByText("回答者が見つかりました")).toBeInTheDocument();
+    expect(screen.queryByTestId("active-step")).not.toBeInTheDocument();
+    expect(screen.queryByText("分析を続けています…")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "結果を見る" })).toBeInTheDocument();
+  });
+
+  it("keeps the spinner while only understood/route have arrived (still analyzing)", () => {
+    renderScreen(
+      state({ route: { route: "person", reason: "詳しい人がいます", confidence: 0.7 } }),
+    );
+    expect(screen.getByTestId("active-step")).toBeInTheDocument();
+  });
+
   it("submits a followup reply via postAnswer and hides the form", async () => {
     renderScreen(state({ followup: { question: "製品名を教えてください", missing: ["product"] } }));
 

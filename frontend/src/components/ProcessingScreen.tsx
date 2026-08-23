@@ -150,7 +150,10 @@ export function ProcessingScreen({
   // stream has advanced past the followup (ack-loss recovery).
   const showFollowup =
     Boolean(stream.followup) && !answered && !stream.terminal && !isFollowupSuperseded(stream);
-  const showActiveStep = !stream.terminal && !stream.error && !showFollowup;
+  // Stop the "分析を続けています…" spinner once a result is ready: the person route
+  // pauses (non-terminal) at the `send` interrupt, so without this the spinner
+  // spins forever even though analysis is done and the result is waiting (#148).
+  const showActiveStep = !stream.terminal && !stream.error && !showFollowup && !hasResult;
 
   async function handleReply(reply: string) {
     setFollowupSubmitting(true);
