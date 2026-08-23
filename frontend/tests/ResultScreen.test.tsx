@@ -302,6 +302,42 @@ describe("ResultScreen — main line (person)", () => {
     expect(screen.queryByText("依頼を送りました")).not.toBeInTheDocument();
   });
 
+  it("drops the send confirmation if a reroute remounts the view mid-POST (#174 review)", async () => {
+    // The POST is in flight when the current responder declines and the reroute
+    // remounts PersonRouteView (new key). The resolved POST must not paint a stale
+    // "sent" confirmation onto the new candidate's view.
+    let resolvePost: (v: unknown) => void = () => {};
+    updateHandoffDraftMock.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolvePost = resolve;
+      }),
+    );
+    const first = state({
+      route: { route: "person", reason: "", confidence: 0.9 },
+      recommend: { recommendations: [rec({ person_id: "E001", name: "高梨" })] },
+      draft: { draft: "高梨さん向け" },
+    });
+    const { rerender } = render(<ResultScreen sessionId="s1" streamState={first} />);
+    fireEvent.click(screen.getByRole("button", { name: "この内容で依頼する" }));
+
+    // Reroute to a new top candidate BEFORE the POST resolves -> remount.
+    rerender(
+      <ResultScreen
+        sessionId="s1"
+        streamState={state({
+          route: { route: "person", reason: "", confidence: 0.9 },
+          recommend: { recommendations: [rec({ person_id: "E002", name: "鈴木" })] },
+          draft: { draft: "鈴木さん向け" },
+        })}
+      />,
+    );
+    resolvePost({ session_id: "s1", status: "draft_saved" });
+    await Promise.resolve();
+
+    expect(screen.queryByText("依頼を送りました")).not.toBeInTheDocument();
+    expect(screen.getByText("鈴木（最有力）")).toBeInTheDocument();
+  });
+
   it("defaults to the main line when the route is unset but candidates exist", () => {
     renderResult(
       state({ recommend: { recommendations: THREE_CANDIDATES }, draft: { draft: "x" } }),

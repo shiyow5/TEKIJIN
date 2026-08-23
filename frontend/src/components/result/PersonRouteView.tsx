@@ -15,7 +15,7 @@ import { CandidateCard } from "@/components/result/CandidateCard";
 import { DraftEditor } from "@/components/result/DraftEditor";
 import { updateHandoffDraft } from "@/lib/api-client";
 import type { Recommendation } from "@/lib/api-types";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export interface PersonRouteViewProps {
   recommendations: Recommendation[];
@@ -40,6 +40,17 @@ export function PersonRouteView({
   const [sentTo, setSentTo] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // A decline→reroute remounts this view (keyed by the top candidate in
+  // ResultScreen) while a confirm POST may still be in flight. Drop the post-await
+  // state updates if that happened, matching the project's async-guard convention.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
   async function handleSend(text: string) {
     if (!sessionId) {
       setError(SEND_ERROR);
@@ -49,13 +60,13 @@ export function PersonRouteView({
     setError(null);
     try {
       await updateHandoffDraft({ session_id: sessionId, draft: text });
-      setSentTo(topCandidate?.name ?? "ご担当者");
+      if (mounted.current) setSentTo(topCandidate?.name ?? "ご担当者");
     } catch {
       // 404 = the hand-off was already answered/closed; 409 = a clarification is
       // owed; either way the send can't land, so surface a retryable error.
-      setError(SEND_ERROR);
+      if (mounted.current) setError(SEND_ERROR);
     } finally {
-      setSending(false);
+      if (mounted.current) setSending(false);
     }
   }
 

@@ -540,19 +540,21 @@ class AgentService:
         if not text:  # defense in depth; the request schema already rejects blanks
             raise SessionInvalid("draft must be a non-empty string")
         with self._lock(session_id):
-            snapshot = self._snapshot(session_id)
-            next_nodes = tuple(snapshot.next)
-            if not next_nodes:
-                raise HandoffNotFound("no responder handoff for this session")
-            if next_nodes[0] != "send":
-                raise SessionConflict("session is not awaiting a responder outcome")
-            ctx = self._reg_get(session_id)
-            if ctx is not None and ctx.pending is not None:
-                raise HandoffNotFound("this handoff has already been answered")
             session = self._session_factory()
             try:
                 graph = self._graph(session)
-                graph.update_state(self._config(session_id), {"draft": text})
+                config = self._config(session_id)
+                # Snapshot + write share one graph/session under the lock, so the
+                # validated state cannot change before update_state runs.
+                next_nodes = tuple(graph.get_state(config).next)
+                if not next_nodes:
+                    raise HandoffNotFound("no responder handoff for this session")
+                if next_nodes[0] != "send":
+                    raise SessionConflict("session is not awaiting a responder outcome")
+                ctx = self._reg_get(session_id)
+                if ctx is not None and ctx.pending is not None:
+                    raise HandoffNotFound("this handoff has already been answered")
+                graph.update_state(config, {"draft": text})
             finally:
                 session.close()
 
