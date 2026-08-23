@@ -40,6 +40,25 @@ function ResultPending() {
  * replays only the stored `done` / `message` event (no route/recommend/draft to
  * hydrate), so branch on it here instead of dead-ending on the pending state.
  */
+/**
+ * Terminal heading by the `message` event's status (off_topic / document /
+ * unresolved / no_candidate). Only `document` self-resolves with an answer, so
+ * only it keeps "回答をお届けします"; the others must not promise a delivered
+ * answer when the body says the request was out of scope or unmatched (#178).
+ */
+function terminalHeading(status: string): string {
+  switch (status) {
+    case "off_topic":
+      return "対象外のご質問です";
+    case "no_candidate":
+      return "担当者が見つかりませんでした";
+    case "unresolved":
+      return "ご質問を特定できませんでした";
+    default:
+      return "回答をお届けします";
+  }
+}
+
 function ResultTerminal({
   done,
   message,
@@ -47,7 +66,7 @@ function ResultTerminal({
   done?: EventStreamState["done"];
   message?: EventStreamState["message"];
 }) {
-  const heading = message ? "回答をお届けします" : "依頼は送信済みです";
+  const heading = message ? terminalHeading(message.status) : "依頼は送信済みです";
   const body =
     message?.message ||
     done?.answer ||

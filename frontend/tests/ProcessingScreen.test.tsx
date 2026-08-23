@@ -62,15 +62,18 @@ describe("ProcessingScreen", () => {
     expect(screen.getByText("質問を理解しました")).toBeInTheDocument();
     expect(screen.getByText("領域: ネットワーク / UTM")).toBeInTheDocument();
     expect(screen.getByText("状況: 他社製品からの移行")).toBeInTheDocument();
-    expect(screen.getByText("確信度 85%")).toBeInTheDocument();
+    expect(screen.getByText("AIの解釈確信度 85%")).toBeInTheDocument();
   });
 
-  it("renders the route step and confidence", () => {
+  it("renders the route step with a labelled route (not the raw enum) and confidence", () => {
     renderScreen(
       state({ route: { route: "person", reason: "詳しい人がいます", confidence: 0.7 } }),
     );
     expect(screen.getByText("回答の経路を判断しました")).toBeInTheDocument();
-    expect(screen.getByText("確信度 70%")).toBeInTheDocument();
+    // The raw enum "person" must not leak; it is rendered as a Japanese label.
+    expect(screen.getByText("経路: 人に聞く")).toBeInTheDocument();
+    expect(screen.queryByText("経路: person")).not.toBeInTheDocument();
+    expect(screen.getByText("AIの解釈確信度 70%")).toBeInTheDocument();
   });
 
   it("renders the recommend step and a link to the result screen", () => {

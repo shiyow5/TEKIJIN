@@ -64,7 +64,24 @@ describe("ResultScreen — terminal-only replay (hard reload)", () => {
       }),
     );
     expect(screen.getByText("該当者が見つかりませんでした")).toBeInTheDocument();
+    // The heading must reflect the no-candidate outcome, not promise a delivery.
+    expect(
+      screen.getByRole("heading", { level: 1, name: "担当者が見つかりませんでした" }),
+    ).toBeInTheDocument();
     expect(screen.queryByText("結果を準備中…")).not.toBeInTheDocument();
+  });
+
+  it("heads an unresolved terminal with a could-not-identify title", () => {
+    renderResult(
+      state({
+        terminal: true,
+        message: { status: "unresolved", message: "ご質問の内容を特定できませんでした" },
+      }),
+    );
+    expect(
+      screen.getByRole("heading", { level: 1, name: "ご質問を特定できませんでした" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("回答をお届けします")).not.toBeInTheDocument();
   });
 
   it("prioritises a live terminal outcome over a retained route (all declined)", () => {
@@ -81,6 +98,28 @@ describe("ResultScreen — terminal-only replay (hard reload)", () => {
     );
     expect(screen.getByText("対応できる担当者が見つかりませんでした")).toBeInTheDocument();
     expect(screen.queryByText("結果を準備中…")).not.toBeInTheDocument();
+  });
+
+  it("heads an off_topic terminal with an out-of-scope title, not a delivery promise", () => {
+    renderResult(
+      state({ terminal: true, message: { status: "off_topic", message: "業務外のご質問です" } }),
+    );
+    expect(
+      screen.getByRole("heading", { level: 1, name: "対象外のご質問です" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("回答をお届けします")).not.toBeInTheDocument();
+  });
+
+  it("heads a document terminal with a delivery title (it self-resolves)", () => {
+    renderResult(
+      state({
+        terminal: true,
+        message: { status: "document", message: "社内文書に該当があります", doc_id: "d1" },
+      }),
+    );
+    expect(
+      screen.getByRole("heading", { level: 1, name: "回答をお届けします" }),
+    ).toBeInTheDocument();
   });
 });
 
