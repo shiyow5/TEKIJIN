@@ -273,7 +273,7 @@ export function ProcessingScreen({
             </p>
             {stream.message.doc_id ? (
               <Link
-                href={`/documents/${encodeURIComponent(stream.message.doc_id)}`}
+                href={`/documents/${encodeURIComponent(stream.message.doc_id)}?from=${encodeURIComponent(sessionId)}`}
                 className="mt-sm inline-flex min-h-[44px] items-center gap-xs rounded-full bg-primary px-md py-sm font-bold text-on-primary transition-colors hover:bg-primary-container"
               >
                 <span aria-hidden="true">📄</span>

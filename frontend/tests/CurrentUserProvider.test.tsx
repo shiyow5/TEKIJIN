@@ -15,15 +15,20 @@ const EMPLOYEES = [
 const STORAGE_KEY = "tekijin.currentUserId";
 
 function Consumer() {
-  const { currentUserId, currentUser, employees, loading, setCurrentUserId } = useCurrentUser();
+  const { currentUserId, currentUser, employees, loading, error, reload, setCurrentUserId } =
+    useCurrentUser();
   return (
     <div>
       <span data-testid="loading">{String(loading)}</span>
+      <span data-testid="error">{String(error)}</span>
       <span data-testid="count">{employees.length}</span>
       <span data-testid="current">{currentUserId ?? "none"}</span>
       <span data-testid="name">{currentUser?.name ?? "none"}</span>
       <button type="button" onClick={() => setCurrentUserId("E002")}>
         switch
+      </button>
+      <button type="button" onClick={reload}>
+        reload
       </button>
     </div>
   );
@@ -94,6 +99,23 @@ describe("CurrentUserProvider", () => {
     await waitFor(() => expect(screen.getByTestId("loading")).toHaveTextContent("false"));
     expect(screen.getByTestId("count")).toHaveTextContent("0");
     expect(screen.getByTestId("current")).toHaveTextContent("none");
+    expect(screen.getByTestId("error")).toHaveTextContent("true");
+  });
+
+  it("recovers when reload() is called after a failure (#179)", async () => {
+    getEmployeesMock.mockRejectedValueOnce(new Error("network"));
+    renderProvider();
+    await waitFor(() => expect(screen.getByTestId("error")).toHaveTextContent("true"));
+
+    // The retry succeeds this time -> directory loads and the error clears.
+    getEmployeesMock.mockResolvedValueOnce(EMPLOYEES);
+    act(() => {
+      screen.getByRole("button", { name: "reload" }).click();
+    });
+
+    await waitFor(() => expect(screen.getByTestId("current")).toHaveTextContent("E001"));
+    expect(screen.getByTestId("error")).toHaveTextContent("false");
+    expect(screen.getByTestId("count")).toHaveTextContent("2");
   });
 
   it("provides an inert default outside a provider", () => {

@@ -21,6 +21,8 @@ function asUser(id: string | null): CurrentUserContextValue {
     currentUser: null,
     setCurrentUserId: vi.fn(),
     loading: false,
+    error: false,
+    reload: vi.fn(),
   };
 }
 
@@ -108,6 +110,8 @@ describe("RecentQuestions", () => {
     expect(
       screen.queryByRole("link", { name: /「社内PCのセットアップ手順」/ }),
     ).not.toBeInTheDocument();
+    // ...and it is marked 「履歴のみ」 so it does not look pressable-but-dead (#179).
+    expect(screen.getByText("履歴のみ")).toBeInTheDocument();
   });
 
   it("shows an empty state when there is no history", async () => {

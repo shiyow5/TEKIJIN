@@ -27,8 +27,18 @@ function formatUpdatedAt(iso: string | null | undefined): string | null {
   return iso.slice(0, 10);
 }
 
-export function DocumentViewer({ docId }: { docId: string }) {
+export function DocumentViewer({
+  docId,
+  fromSessionId,
+}: {
+  docId: string;
+  fromSessionId?: string;
+}) {
   const [state, setState] = useState<ViewerState>({ phase: "loading" });
+  // Return to the originating session's result when we know it; otherwise the
+  // question list is the only safe fallback (#179).
+  const backHref = fromSessionId ? `/session/${fromSessionId}/result` : "/questions";
+  const backLabel = fromSessionId ? "← 結果へ戻る" : "← 質問一覧へ戻る";
 
   useEffect(() => {
     let active = true;
@@ -49,8 +59,8 @@ export function DocumentViewer({ docId }: { docId: string }) {
 
   return (
     <section className="mx-auto flex w-full max-w-3xl flex-col gap-lg py-lg">
-      <Link href="/questions" className="text-primary text-sm hover:underline">
-        ← 質問へ戻る
+      <Link href={backHref} className="text-primary text-sm hover:underline">
+        {backLabel}
       </Link>
 
       {state.phase === "loading" ? (
