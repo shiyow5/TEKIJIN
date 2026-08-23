@@ -442,22 +442,31 @@ def test_run_eval_real_pipeline_over_seed(seed_counts, session, fake_embedder) -
     # primary — if it were 1.0 the scorer would just be reproducing labels.
     assert report.metrics_alt.recall_at_3 < 0.99
     # Regression floors with headroom below the deterministic observed values on
-    # the NON-leaky set (Top-1 0.54 / Recall@3 0.55 / MRR 0.60 / route 0.70).
-    # These catch a real retrieval/scoring regression without pinning the exact
-    # numbers (which move when the scorer weights are retuned). Absolute spec
-    # targets (§7) need real embeddings on the seed rows; here the fixtures store
-    # NULL vectors so BM25 drives retrieval and routing degenerates to the person
-    # line (route accuracy == the person fraction among routed queries).
+    # the NON-leaky set. These catch a real retrieval/scoring regression without
+    # pinning the exact numbers (which move when the scorer weights are retuned).
+    # Absolute spec targets (§7) need real embeddings on the seed rows; here the
+    # fixtures store NULL vectors so BM25 drives retrieval and routing degenerates
+    # to the person line (route accuracy == the person fraction among routed queries).
     #
-    # #158 で Top-1 / Recall@3 の床を下げた。**検索やスコアラーの劣化ではない。**
-    # 拠点制約つきを 5 件から 15 件に増やしたことで、10 件の gold が
-    # 4 名から 1〜2 名に絞られた（gold 人数の合計 40 → 19）。該当クエリで
-    # ランダムに 1 名選んだときの Top-1 期待値は 0.100 → 0.048 に半減しており、
-    # 正解集合が小さくなった分だけ当てにくくなるのは設計どおりである。
-    # 実測は Top-1 0.66 → 0.536、Recall@3 0.59 → 0.551 で、
-    # 影響を受けるのは採点対象 56 件中 10 件（最大 10/56 = 0.179 の押し下げ）。
-    # 観測された低下 0.124 はその範囲に収まる。
+    # #158 の直前（develop 2ae8a10）と直後を実測して比べた:
+    #
+    #     指標        直前     直後     差
+    #     Top-1      0.643   0.536   -0.107
+    #     Recall@3   0.545   0.551   +0.006   ← 下がっていない
+    #     MRR        0.670   0.598   -0.072
+    #     route      0.696   0.696    0.000
+    #
+    # **Top-1 と MRR の低下は検索やスコアラーの劣化ではない。** 拠点制約つきを
+    # 5 件から 15 件に増やしたことで 10 件の gold が 4 名から 1〜2 名に絞られ
+    # （gold 人数の合計 40 → 19）、該当クエリでランダムに 1 名選んだときの
+    # Top-1 期待値は 0.100 → 0.048 に半減した。正解集合が小さくなった分だけ
+    # 当てにくくなるのは設計どおりで、影響は採点対象 56 件中 10 件
+    # （最大 10/56 = 0.179 の押し下げ）。観測された 0.107 はその範囲に収まる。
+    #
+    # したがって床を下げるのは Top-1 と MRR だけにする。
+    # **Recall@3 は上がっているので 0.50 のまま据え置く**（下げると回帰検出の
+    # 余裕を理由なく捨てることになる）。
     assert m.top1_accuracy >= 0.45
-    assert m.recall_at_3 >= 0.45
-    assert m.mrr >= 0.50
+    assert m.recall_at_3 >= 0.50
+    assert m.mrr >= 0.55
     assert m.route_accuracy >= 0.55
