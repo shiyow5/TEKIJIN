@@ -5,8 +5,10 @@
  *
  * The responder receives the question already filled in with the asker's context
  * and the reasons they were chosen, plus the generated draft (下書き機能の受益者).
- * Three equal-size choices keep declining a first-class option (F-09): 回答する /
- * 今は難しい / 別の人を薦める. The reuse count at the bottom is the 見返り (F-13).
+ * Three equal-size choices keep declining a first-class option (F-09): 引き受ける /
+ * 今は難しい / 自分より適任がいる. The app records the accept/decline (not the answer
+ * text), so the labels/copy say "引き受ける"/"お繋ぎします", never "回答をお届け"
+ * (#176). The reuse count at the bottom is the 見返り (F-13).
  *
  * Data + actions come from {@link useHandoff}; this component is presentation and
  * wiring only. A `sessionId` is the single input (from the route param).
@@ -77,15 +79,19 @@ function ReasonList({ reasons }: { reasons: Reason[] }) {
 }
 
 const DONE_HEADING: Record<HandoffAction, string> = {
-  answer: "回答ありがとうございます",
+  answer: "お引き受けありがとうございます",
   defer: "承知しました",
   refer: "承知しました",
 };
 
+// The app captures the accept/decline, not the answer text itself, so the copy
+// must not promise a delivered answer. "引き受ける" connects the asker to this
+// person; "今は難しい"/"自分より適任がいる" both reroute to the next candidate
+// automatically (a named referral is #76) (#176).
 const DONE_BODY: Record<HandoffAction, string> = {
-  answer: "質問者に回答をお届けします。ご協力ありがとうございました。",
-  defer: "別の方へ自動でお繋ぎします。無理のない範囲でご協力ください。",
-  refer: "別の候補者へお繋ぎします。ご対応ありがとうございました。",
+  answer: "質問者にあなたをお繋ぎします。この後、直接ご回答ください。ご協力ありがとうございます。",
+  defer: "別の候補者を自動でお探しします。無理のない範囲でご協力ください。",
+  refer: "別の候補者を自動でお探しします。ご対応ありがとうございました。",
 };
 
 export function AnswerScreen({ sessionId }: AnswerScreenProps) {
@@ -190,7 +196,7 @@ export function AnswerScreen({ sessionId }: AnswerScreenProps) {
           disabled={submitting}
           onClick={() => submit("answer")}
         >
-          回答する
+          引き受ける
         </button>
         <button
           type="button"
@@ -206,7 +212,7 @@ export function AnswerScreen({ sessionId }: AnswerScreenProps) {
           disabled={submitting}
           onClick={() => submit("refer")}
         >
-          別の人を薦める
+          自分より適任がいる
         </button>
       </div>
 

@@ -3,7 +3,7 @@ import { API_BASE, HANDOFF, fulfillJson, mockEmployees, mockInbox } from "./supp
 
 /**
  * Responder journey (#134): /answer/{session_id}. On mount the screen loads the
- * handoff (GET /handoff/{id}); the three choices (回答する / 今は難しい / 別の人を薦める)
+ * handoff (GET /handoff/{id}); the three choices (引き受ける / 今は難しい / 自分より適任がいる)
  * each POST /answer, and the screen deep-links back to the inbox afterwards. Also
  * covers the "no live handoff" (404) terminal state.
  */
@@ -17,7 +17,7 @@ function mockHandoff(page: Parameters<typeof mockEmployees>[0]) {
 }
 
 test.describe("responder flow", () => {
-  test("回答する で受諾する", async ({ page }) => {
+  test("引き受ける で受諾する", async ({ page }) => {
     await mockEmployees(page);
     await mockHandoff(page);
     let answerBody: unknown = null;
@@ -33,8 +33,10 @@ test.describe("responder flow", () => {
     await expect(page.getByRole("heading", { name: "あなたに届いた質問" })).toBeVisible();
     await expect(page.getByRole("heading", { name: HANDOFF.question })).toBeVisible();
 
-    await page.getByRole("button", { name: "回答する" }).click();
-    await expect(page.getByRole("heading", { name: "回答ありがとうございます" })).toBeVisible();
+    await page.getByRole("button", { name: "引き受ける" }).click();
+    await expect(
+      page.getByRole("heading", { name: "お引き受けありがとうございます" }),
+    ).toBeVisible();
     expect(answerBody).toEqual({ session_id: SESSION_ID, outcome: "accepted" });
   });
 
@@ -68,7 +70,7 @@ test.describe("responder flow", () => {
     // getByText, not getByRole("alert") — Next.js's hidden route announcer also
     // has role="alert" (strict-mode ambiguity).
     await expect(page.getByText(/受付を終了/)).toBeVisible();
-    await expect(page.getByRole("button", { name: "回答する" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "引き受ける" })).toHaveCount(0);
   });
 
   test("受諾後に受信箱へ戻れる", async ({ page }) => {
@@ -83,8 +85,10 @@ test.describe("responder flow", () => {
     );
 
     await page.goto(`/answer/${SESSION_ID}`);
-    await page.getByRole("button", { name: "回答する" }).click();
-    await expect(page.getByRole("heading", { name: "回答ありがとうございます" })).toBeVisible();
+    await page.getByRole("button", { name: "引き受ける" }).click();
+    await expect(
+      page.getByRole("heading", { name: "お引き受けありがとうございます" }),
+    ).toBeVisible();
 
     await page.getByRole("link", { name: "受信箱へ戻る" }).click();
     await page.waitForURL(/\/inbox$/);
