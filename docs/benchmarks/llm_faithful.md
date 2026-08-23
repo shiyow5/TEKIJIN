@@ -300,6 +300,9 @@ human メッセージは製品と同一である（`payload_c1_*.json` を突き
 
 ### C1 の出力そのもの
 
+※ この節の「製品のまま」は **`enable_thinking=false` を入れた製品プロンプト**（§4.5 の版）を指す。
+§1・§4.5 の「製品のまま」（thinking ON、R@3 0.131）とは別物なので注意。
+
 | | 構造化出力 | 語彙に載ったトピック | **gold 的中（全部）** | **gold 的中（上位1件）** | p50 | p95<sup>※</sup> |
 |---|---|---|---|---|---|---|
 | 製品のまま | 76/76 | **5/243** | **5/56** | — | 1.38s | 1.57s |
@@ -349,7 +352,7 @@ gold を使う行では `scorer.rank` が何も返せず**構造上0点**にな�
 だったので結果的に成り立っているが、
 **契約ではない**。上位1件だけを使う実装にするなら、順序を要求する文言を足すべきである。
 
-### 分かったこと2: 3案の差は n=56 では区別できない
+### 分かったこと2: 3案の差は、この評価セットの大きさでは区別できない
 
 上位1件の条件で、**当落が違う問題数**はこれだけしかない。
 
@@ -385,8 +388,9 @@ gold を使う行では `scorer.rank` が何も返せず**構造上0点**にな�
 > 検索を通らず埋め込みに依存しない**（`rank(q, all_ids, …)` は `res`/`route` を使わない）。
 > 埋め込みを変えても、この節の数字は動かない。
 > **「候補を全社員にする（gold トピック）」も同じ理由で埋め込みに依存しない。**
-> 検索を通るのは「現状（そのまま）」と「経路の pin を外す」の2行だけで、
-> そちらは e5-large の条件である。
+> 検索を通るのは「現状（そのまま）」「経路の pin を外す」
+> 「[切り分け] C1 の実トピック＋現状の経路」の**3行**で、そちらは e5-large の条件である
+> （最後の行は §1 の表の5行目 = 0.134。**製品が今そのまま動いたときの数字は埋め込みに依存する**）。
 
 ## 5. 再現
 
@@ -421,7 +425,7 @@ python scripts/research_e2e.py --task variants --pgdir <pgdata> --c1 c1_faithful
 | `{payload_,}c2_faithful.json` / `c2_faithful_results.json` | 同上の C2（§4） |
 | `c1_nothink.json` | `--payload payload_c1_faithful.json --raw-extra '{"chat_template_kwargs":{"enable_thinking":false}}'`（§4.5） |
 | `{payload_,}c1_{prompt,enum,both}.json` | `--c1-variant {prompt,enum,both}` + 同じ `--raw-extra`（§4.6） |
-| ⚠ `c1_*.json` の中身には変種名も `--raw-extra` も入っていない | 出所の記録は後から足したので、**既存の成果物にはこの表が唯一の出所**。以降の実行では行に残る |
+| ⚠ `c1_*.json` の中身には `--raw-extra` が入っていない | 出所の記録は後から足した。変種名は `payload_c1_*.json` 側に `c1_variant` として入っているが、**`--raw-extra` はどこにも残っていない**ので、この表が唯一の出所。以降の実行では出力行に残る |
 | `e2e_variants_c1{,_nothink,_prompt,_enum,_both}.json` | 上記を `--task variants` に渡したもの |
 | `e2e_variants_c1_{prompt,enum,both}_top1.json` / `_both_top2.json` | 同上 + `--c1-topk 1` / `2` |
 
