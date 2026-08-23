@@ -117,24 +117,41 @@ def collect_known_values(question: str, question_type: str, products: list[str])
     """Concrete values for the required slots that are actually filled (C7 input).
 
     Mirrors :meth:`RuleSufficiencyModel._slot_present` so a slot appears here iff
-    it would count as present there — but the ``現行製品`` value is re-scanned from
-    ``question`` when ``products`` is empty, so a product the user supplies in the
-    C2 clarification (which C1 does not re-analyse) is still captured. C7 uses this
-    both to inject the filled values into the draft and to drop those slots from a
-    now-stale ``missing`` list (model-definition C7: ``known_values`` input).
+    it would count as present there. C7 feeds these to the draft so the hand-off
+    shows the *filled* value (model-definition C7: ``known_values`` input) rather
+    than re-asking it. The ``現行製品`` branch also re-scans ``question`` when
+    ``products`` is empty — a defensive fallback for a caller/model that leaves
+    ``products`` unset while the name is in the text (the stub's C1 already
+    populates it, so this is belt-and-suspenders, not the primary path).
     """
 
     values: dict[str, str] = {}
     for slot in _REQUIRED_SLOTS.get(question_type, ()):
         if slot == "現行製品":
-            found = products or [p for p in PRODUCT_KEYWORDS if _keyword_matches(p, question)]
-            if found:
-                values[slot] = found[0]
+            matched = products or [p for p in PRODUCT_KEYWORDS if _keyword_matches(p, question)]
+            if matched:
+                # Prefer the product mentioned earliest in the text (not the fixed
+                # keyword-table order): this value is shown to the responder as a
+                # confirmed premise, so "CRMとVPN" should surface CRM, not VPN.
+                lowered = question.lower()
+                values[slot] = min(matched, key=lambda p: _mention_index(lowered, p))
         elif slot == "対象拠点数":  # pragma: no branch - only two slots defined
             match = _SITE_COUNT_RE.search(question)
             if match:
                 values[slot] = match.group(0)
     return values
+
+
+def _mention_index(lowered_question: str, product: str) -> int:
+    """Position of ``product`` in the (already lower-cased) question, or +inf-ish.
+
+    A product not literally found (only possible for an externally supplied
+    ``products`` value that is not a substring) sorts last rather than winning at
+    index -1.
+    """
+
+    index = lowered_question.find(product.lower())
+    return index if index >= 0 else len(lowered_question)
 
 
 class KeywordIntentModel:

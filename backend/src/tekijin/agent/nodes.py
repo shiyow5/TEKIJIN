@@ -255,9 +255,11 @@ class AgentNodes:
         question_type = state.get("question_type", _QUESTION_TYPE_DEFAULT)
         products = state.get("products") or []
         known_values = collect_known_values(state["question"], question_type, products)
-        # Drop any slot that is now actually filled: after a C2 clarification the
-        # user may have supplied a value C1 never re-analysed, leaving `missing`
-        # stale. Re-deriving from `known_values` keeps C7 from re-asking it (#175).
+        # A slot must never appear as both a filled premise and an open gap: drop
+        # from `missing` anything we now surface under known_values, so the draft
+        # cannot show the same slot as "確認済み" and "補足いただきたい" at once
+        # (defensive dedup — C2 already recomputes `missing` on the re-understood
+        # question via the ask->c1_intent edge, so they normally agree) (#175).
         missing = [slot for slot in (state.get("missing") or []) if slot not in known_values]
         draft = self._draft.draft(
             state["question"],
