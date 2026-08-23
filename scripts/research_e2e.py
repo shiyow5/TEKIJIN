@@ -303,7 +303,7 @@ def task_misrec(url, out):
     from sqlalchemy import select
     from tekijin.eval.dataset import load_eval_queries
     from tekijin.models.tables import Employee
-    from tekijin.scorer.evidence import collect_topic_evidence
+    from tekijin.scorer.evidence import collect_topic_evidence, edge_weight
 
     session, _retriever, scorer = build(url)
     employees = {
@@ -312,44 +312,84 @@ def task_misrec(url, out):
     all_ids = list(employees)
     repo = scorer._repo
 
-    def evidence_count(person_id, topic):
+    def evidence_for(person_id, topics):
+        """スコアラーと同じ集め方で、その人のトピック証拠を集める。
+
+        `ExpertiseScorer._score_person` はトピック**集合**で集めるので、ここも
+        `answers_by_topics` を使って和で引く（`answers_by_topic` の単数版で
+        トピックごとに max を取ると、集合で見たときの証拠数と食い違う）。
+        """
         answers = [
             a
-            for a in repo.answers_by_topic(topic)
-            if a.responder_id == person_id and (a.topic == topic or a.topic is None)
+            for a in repo.answers_by_topics(list(topics))
+            if a.responder_id == person_id
         ]
-        return len(
-            collect_topic_evidence(
-                topic,
-                repo.certifications_for(person_id),
-                repo.skills_for(person_id),
-                repo.project_memberships_for(person_id),
-                answers,
-            )
+        return collect_topic_evidence(
+            topics,
+            repo.certifications_for(person_id),
+            repo.skills_for(person_id),
+            repo.project_memberships_for(person_id),
+            answers,
         )
+
+    def evidence_count(person_id, topic):
+        return len(evidence_for(person_id, [topic]))
 
     buckets = collections.Counter()
     by_conf = collections.Counter()
     total_slots = 0
+    slots = []
     for q in load_eval_queries():
         if not q.gold_experts or not q.gold_topics:
             continue
         # 候補は全社員（#87）。現状のまま測ると #103 で候補が1名しか出ず、外し方を見られない。
-        ranked = scorer.rank(q.gold_topics, all_ids, None, NOW, top_k=3)[
+        # 4位まで取るのは、3位と4位のスコア差（margin）を素性に残すため。
+        ranked = scorer.rank(q.gold_topics, all_ids, None, NOW, top_k=4)[
             "recommendations"
         ]
         gold = set(q.gold_experts)
         gold_depts = {employees[g].department for g in gold if g in employees}
         gold_branches = {employees[g].branch for g in gold if g in employees}
-        for rec in ranked:
+        for i, rec in enumerate(ranked[:3]):
             total_slots += 1
             pid = rec["person_id"]
             hit = pid in gold
             by_conf[(rec["confidence"], "正解" if hit else "誤り")] += 1
+            emp = employees.get(pid)
+            # 確信度ラベルを較正し直せるよう、素性を1スロットずつ残す（#110）。
+            ev = evidence_for(pid, q.gold_topics)
+            nxt = ranked[i + 1]["score"] if i + 1 < len(ranked) else None
+            slots.append(
+                {
+                    "query_id": q.id,
+                    "rank": i + 1,
+                    "person_id": pid,
+                    "hit": hit,
+                    "confidence": rec["confidence"],
+                    "score": rec["score"],
+                    "margin_to_next": (
+                        round(rec["score"] - nxt, 4) if nxt is not None else None
+                    ),
+                    # confidence_label が見ている2つの素性
+                    "topic_fit": round(edge_weight(ev), 4),
+                    "evidence_count": len(ev),
+                    # 証拠の内訳。「量」ではなく「種類」で効くかを見るため
+                    "evidence_sources": dict(
+                        collections.Counter(e.source_type for e in ev)
+                    ),
+                    "same_dept_as_gold": bool(
+                        emp is not None and emp.department in gold_depts
+                    ),
+                    "same_branch_as_gold": bool(
+                        emp is not None and emp.branch in gold_branches
+                    ),
+                    "difficulty": q.difficulty,
+                    "n_gold": len(gold),
+                }
+            )
             if hit:
                 buckets["正解"] += 1
                 continue
-            emp = employees.get(pid)
             n_ev = max(evidence_count(pid, t) for t in q.gold_topics)
             if n_ev == 0:
                 buckets["誤り: そのトピックの証拠ゼロ"] += 1
@@ -374,9 +414,12 @@ def task_misrec(url, out):
         with open(out, "w", encoding="utf-8") as f:
             json.dump(
                 {
-                    "slots": total_slots,
+                    # 旧版は "slots" が件数だった。素性つきの一覧を足したので、
+                    # 件数は "n_slots" に移した（読む側は両方を見ないこと）。
+                    "n_slots": total_slots,
                     "buckets": dict(buckets),
                     "confidence": {f"{k[0]}/{k[1]}": v for k, v in by_conf.items()},
+                    "slots": slots,
                 },
                 f,
                 ensure_ascii=False,

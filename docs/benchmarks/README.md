@@ -27,6 +27,10 @@
 > ⚠️ **下表の層2 Recall@3 は評価セット拡張（#73）より前の 45件で測ったもの。**
 > 採点対象が 56件になったので、埋め込みの順位は測り直しが要る（`bench_emb.json` も同様）。
 
+> ⚠️ **製品レベルの数値（0.140 / 0.732 / 0.836 / 0.134）は e5-large + 旧経路閾値 + 等重み RRF の条件。**
+> develop はその後 #102・#115・#120 で変わっており、**現行構成では再現しない** → **#132**。
+> 検索を通らない数値（`llm_faithful.md` §4.6、`confidence.md`）は影響を受けない。
+
 ## 結論
 
 | 役割 | 採用 | 根拠 |
@@ -47,6 +51,8 @@
 | `ablation/c2_qwen36_{product,scoped}.json` | C2 充足判定の生出力（#111。**結論は取り下げ済み**） |
 | `ablation/{payload_,}c1_faithful.json` / `{payload_,}c2_faithful.json` | **製品のリクエストをそのまま再現した C1/C2 の入出力**。[llm_faithful.md](llm_faithful.md) |
 | `ablation/e2e_variants_c1.json` | C1 の実トピックで測った層2 R@3。[llm_faithful.md](llm_faithful.md) |
+| `ablation/misrecommendation.json` | 誤推薦の分類と、**1スロットごとの確信度素性**。[confidence.md](confidence.md)（#110） |
+| `ablation/confidence_stats.json` | 確信度ラベル案ごとの差と区間（問題単位・20000回）。同上 |
 | `ablation/c1_nothink.json` / `e2e_variants_c1_nothink.json` | `enable_thinking=false` を足しただけの反実仮想。同上 §4.5 |
 | `ablation/{payload_,}c1_{prompt,enum,both}.json` | C1 にトピック語彙を守らせる2案の比較。同上 §4.6（#116） |
 | `ablation/e2e_variants_c1_{prompt,enum,both}{,_top1}.json` と `_both_top2.json` | 上記の層2 R@3。**1問ごとの当落 `per_query` 入り** |
