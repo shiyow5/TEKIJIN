@@ -84,6 +84,8 @@ def main(argv: list[str] | None = None) -> int:
 
     embedder = SentenceTransformerEmbedder(
         use_e5_prefix=use_e5_prefix,
+        query_prefix=settings.embedding_query_prefix,
+        passage_prefix=settings.embedding_passage_prefix,
         trust_remote_code=settings.embedding_trust_remote_code,
         revision=settings.embedding_model_revision,
     )

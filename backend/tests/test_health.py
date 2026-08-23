@@ -30,6 +30,10 @@ def test_health_returns_ok(monkeypatch) -> None:
 
 def test_health_env_reflects_settings(monkeypatch) -> None:
     monkeypatch.setenv("TEKIJIN_APP_ENV", "staging")
+    # Outside development the embedder is fail-closed against unpinned remote code
+    # (#108): building the real service would refuse trust_remote_code=True + no
+    # revision. This test only cares about the env echo, so disable remote code.
+    monkeypatch.setenv("TEKIJIN_EMBEDDING_TRUST_REMOTE_CODE", "false")
     get_settings.cache_clear()
 
     client = TestClient(create_app())
