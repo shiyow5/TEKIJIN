@@ -195,6 +195,7 @@ export const RECENT_QUESTIONS = [
     resolved: true,
     resolution: "person",
     responder_name: "高梨 健太",
+    session_id: "sess-rq1",
     created_at: "2026-08-20T10:00:00",
   },
   {
@@ -203,6 +204,7 @@ export const RECENT_QUESTIONS = [
     resolved: false,
     resolution: "pending",
     responder_name: null,
+    session_id: "sess-rq2",
     created_at: "2026-08-21T10:00:00",
   },
   {
@@ -211,6 +213,7 @@ export const RECENT_QUESTIONS = [
     resolved: true,
     resolution: "document",
     responder_name: null,
+    session_id: null,
     created_at: "2026-08-22T10:00:00",
   },
 ];

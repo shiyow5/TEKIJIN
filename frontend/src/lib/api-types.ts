@@ -102,6 +102,8 @@ export interface RecentQuestionItem {
   resolved: boolean;
   resolution: QuestionResolution;
   responder_name?: string | null;
+  /** Deep-link target for re-viewing the result (/session/{session_id}); null for seeded history. */
+  session_id?: string | null;
   created_at?: string | null;
 }
 
