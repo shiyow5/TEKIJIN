@@ -230,9 +230,10 @@ def main():
     one = [s for s in slots if s["evidence_count"] <= 1]
     rescued = [s for s in one if s["topic_fit"] >= 0.4]
     tf = [s["topic_fit"] for s in one]
+    rng_txt = f"topic_fit {min(tf):.3f}〜{max(tf):.3f}" if tf else "該当なし"
     print(
         f"  証拠1件以下 {len(one)} 件（ラベル {sorted({x['confidence'] for x in one})}、"
-        f"topic_fit {min(tf):.3f}〜{max(tf):.3f}）。うち topic_fit>=0.4 が {len(rescued)} 件"
+        f"{rng_txt}）。うち topic_fit>=0.4 が {len(rescued)} 件"
     )
     print(
         "  → 2段目の edge_weight>=0.4 が無ければ、この "
