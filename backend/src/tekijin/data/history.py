@@ -33,7 +33,7 @@ def recent_questions_for_asker(
     """
 
     q_rows = session.execute(
-        select(Question.id, Question.body, Question.status, Question.created_at)
+        select(Question.id, Question.body, Question.status, Question.route, Question.created_at)
         .where(Question.asker_id == asker_id)
         .order_by(Question.created_at.desc(), Question.id.desc())
         .limit(limit)
@@ -71,14 +71,24 @@ def recent_questions_for_asker(
         answered.setdefault(qid, name)
 
     items: list[dict[str, Any]] = []
-    for qid, body, status, created_at in q_rows:
+    for qid, body, status, route, created_at in q_rows:
         responder = accepted.get(qid) or answered.get(qid)
-        resolved = qid in accepted or qid in answered or status == "answered"
+        by_person = qid in accepted or qid in answered or status == "answered"
+        # A person resolution wins; else the document route is a self-resolution
+        # (no human), per Question.route's self_resolution_rate semantics; else it
+        # is still awaiting a hand-off.
+        if by_person:
+            resolution = "person"
+        elif route == "document":
+            resolution = "document"
+        else:
+            resolution = "pending"
         items.append(
             {
                 "question_id": qid,
                 "title": body or "",
-                "resolved": resolved,
+                "resolved": resolution != "pending",
+                "resolution": resolution,
                 "responder_name": responder,
                 "created_at": created_at.isoformat() if created_at is not None else None,
             }

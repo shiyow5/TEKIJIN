@@ -86,6 +86,11 @@ export function RecentQuestions() {
                       <span className="text-on-surface text-sm">{item.responder_name}</span>
                     </div>
                   </div>
+                ) : item.resolution === "document" ? (
+                  <div className="mt-auto flex items-center gap-sm border-outline-variant border-t pt-sm text-on-surface-variant text-sm">
+                    <span aria-hidden="true">📄</span>
+                    <span>社内文書で回答</span>
+                  </div>
                 ) : (
                   <div className="mt-auto border-outline-variant border-t pt-sm text-on-surface-variant text-xs">
                     取り次ぎ先を調整中です。
