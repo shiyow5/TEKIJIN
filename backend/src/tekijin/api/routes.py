@@ -147,6 +147,29 @@ def handoff(session_id: str, request: Request) -> schemas.HandoffResponse:
         raise HTTPException(status_code=500, detail="内部エラーが発生しました") from exc
 
 
+@router.post("/handoff/draft", response_model=schemas.AckResponse)
+def handoff_draft(req: schemas.HandoffDraftRequest, request: Request) -> schemas.AckResponse:
+    """Persist the asker's edited hand-off draft (画面3) so the responder (画面4)
+    reads the edited text (#174).
+
+    Draft-only: never touches the recommendation/outcome state. 404 when no
+    hand-off is pending (unknown / finished / already answered); 409 when the
+    session is awaiting a clarification instead. A blank draft is rejected by the
+    request schema (422) before it reaches the service.
+    """
+
+    try:
+        _service(request).save_handoff_draft(req.session_id, req.draft)
+    except HandoffNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SessionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:  # unexpected: log detail, return a generic 500
+        logger.exception("POST /handoff/draft failed for session %s", req.session_id)
+        raise HTTPException(status_code=500, detail="内部エラーが発生しました") from exc
+    return schemas.AckResponse(session_id=req.session_id, status="draft_saved")
+
+
 @router.get("/dashboard", response_model=schemas.DashboardResponse)
 def dashboard(request: Request) -> schemas.DashboardResponse:
     """Aggregate load / topic mix / recent activity for the dashboard."""

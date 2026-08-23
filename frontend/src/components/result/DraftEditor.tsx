@@ -2,9 +2,10 @@
 
 /**
  * Editable "聞き方の下書き" for the main-line result. The AI-generated draft
- * seeds a local, editable textarea; "この方に送る" hands the current text to the
- * parent, which confirms the send (UI-only; the responder's accept/decline is
- *画面4 / #38).
+ * seeds a local, editable textarea; "この内容で依頼する" hands the current text to
+ * the parent, which persists it to the pending hand-off so the responder reads
+ * the edited version (POST /handoff/draft — #174; the responder's accept/decline
+ * is 画面4 / #38).
  */
 
 import { useEffect, useState } from "react";
@@ -52,7 +53,7 @@ export function DraftEditor({ initialDraft, disabled = false, onSend }: DraftEdi
           onClick={() => onSend(text.trim())}
           className="inline-flex min-h-[48px] items-center gap-sm rounded-lg bg-primary px-lg py-3 font-bold text-on-primary shadow-sm transition-colors hover:bg-primary-container disabled:cursor-not-allowed disabled:opacity-50"
         >
-          この方に送る
+          この内容で依頼する
         </button>
       </div>
     </div>

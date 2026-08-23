@@ -20,6 +20,7 @@ from tekijin.api.service import (
     AgentService,
     HandoffNotFound,
     SessionConflict,
+    SessionInvalid,
     _SessionCtx,
 )
 from tekijin.app import create_app
@@ -709,6 +710,120 @@ def test_handoff_gone_once_outcome_queued(seed_counts, engine, fake_embedder) ->
     svc.submit_resume("hq", outcome="accepted")  # queues the resume (not yet drained)
     with pytest.raises(HandoffNotFound):
         svc.get_handoff("hq")
+
+
+# --------------------------------------------------------------------------- #
+# POST /handoff/draft : persist the asker's edited hand-off draft (#174)
+# --------------------------------------------------------------------------- #
+def test_handoff_draft_persists_edited_text_for_the_responder(
+    seed_counts, engine, fake_embedder
+) -> None:
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "hd1"})
+    _events(client, "hd1")  # pause at send (draft ready)
+    before = client.get("/handoff/hd1").json()
+    rec_id_before = before["recommendation_id"]
+
+    edited = "社員1さん、お忙しいところ恐れ入ります。VPNの移行の件でご相談です。"
+    saved = client.post("/handoff/draft", json={"session_id": "hd1", "draft": edited})
+    assert saved.status_code == 200
+    assert saved.json()["status"] == "draft_saved"
+
+    # The responder now reads the edited draft — and the outcome token is untouched.
+    after = client.get("/handoff/hd1").json()
+    assert after["draft"] == edited
+    assert after["recommendation_id"] == rec_id_before
+    # The accept/decline path still works after a draft edit.
+    assert (
+        client.post("/answer", json={"session_id": "hd1", "outcome": "accepted"}).status_code == 200
+    )
+
+
+def test_handoff_draft_rejects_blank(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine, fake_embedder, retriever=_FakeRetriever(people=[1]), scorer=_FakeScorer(_recs(1))
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "hd2"})
+    _events(client, "hd2")
+    assert (
+        client.post("/handoff/draft", json={"session_id": "hd2", "draft": "   "}).status_code == 422
+    )
+
+
+def test_handoff_draft_404_when_no_pending_handoff(seed_counts, engine, fake_embedder) -> None:
+    client = _client(engine, fake_embedder, retriever=_FakeRetriever(), scorer=_FakeScorer([]))
+    resp = client.post("/handoff/draft", json={"session_id": "nope", "draft": "本文"})
+    assert resp.status_code == 404
+
+
+def test_handoff_draft_409_when_awaiting_clarification(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine, fake_embedder, retriever=_FakeRetriever(people=[1]), scorer=_FakeScorer(_recs(1))
+    )
+    client.post(
+        "/ask", json={"asker_id": 10, "question": "ネットワークの技術相談です", "session_id": "hd3"}
+    )
+    _events(client, "hd3")  # paused at ``ask`` (a clarification is owed to the asker)
+    resp = client.post("/handoff/draft", json={"session_id": "hd3", "draft": "本文"})
+    assert resp.status_code == 409
+
+
+def test_handoff_draft_404_after_answered(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine, fake_embedder, retriever=_FakeRetriever(people=[1]), scorer=_FakeScorer(_recs(1))
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "hd4"})
+    _events(client, "hd4")
+    client.post("/answer", json={"session_id": "hd4", "outcome": "accepted"})
+    _events(client, "hd4")  # completed
+    resp = client.post("/handoff/draft", json={"session_id": "hd4", "draft": "本文"})
+    assert resp.status_code == 404
+
+
+def test_save_handoff_draft_rejects_blank_at_the_service(
+    seed_counts, engine, fake_embedder
+) -> None:
+    # Defense in depth: a direct caller (bypassing the request schema) still cannot
+    # persist a blank draft.
+    svc = _svc(
+        engine, fake_embedder, retriever=_FakeRetriever(people=[1]), scorer=_FakeScorer(_recs(1))
+    )
+    svc.start_question("hd5", 10, GOOD_Q)
+    list(svc.stream_events("hd5"))  # pause at send
+    with pytest.raises(SessionInvalid):
+        svc.save_handoff_draft("hd5", "   ")
+
+
+def test_save_handoff_draft_gone_once_outcome_queued(seed_counts, engine, fake_embedder) -> None:
+    # Mirrors get_handoff: an outcome queued (not yet drained) leaves next==("send",)
+    # but the hand-off is no longer editable.
+    svc = _svc(
+        engine, fake_embedder, retriever=_FakeRetriever(people=[1]), scorer=_FakeScorer(_recs(1))
+    )
+    svc.start_question("hd6", 10, GOOD_Q)
+    list(svc.stream_events("hd6"))  # pause at send
+    svc.submit_resume("hd6", outcome="accepted")  # queue the resume (not drained)
+    with pytest.raises(HandoffNotFound):
+        svc.save_handoff_draft("hd6", "編集後の本文")
+
+
+def test_handoff_draft_unexpected_error_is_generic_500(seed_counts, engine, fake_embedder) -> None:
+    service = _svc(engine, fake_embedder, retriever=_FakeRetriever(), scorer=_FakeScorer([]))
+
+    def _boom(*_a, **_k):
+        raise RuntimeError("secret internal detail at 10.0.0.1")
+
+    service.save_handoff_draft = _boom  # type: ignore[method-assign]
+    client = TestClient(create_app(agent_service=service))
+    resp = client.post("/handoff/draft", json={"session_id": "anything", "draft": "本文"})
+    assert resp.status_code == 500
+    assert "内部エラー" in resp.text
+    assert "secret internal" not in resp.text  # detail logged, never leaked
 
 
 def test_set_recommendation_outcome_is_idempotent(seed_counts, session) -> None:

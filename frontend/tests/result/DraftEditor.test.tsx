@@ -9,13 +9,13 @@ describe("DraftEditor", () => {
 
     const textarea = screen.getByLabelText<HTMLTextAreaElement>("聞き方の下書き");
     expect(textarea.value).toBe("  お世話になっております。  ");
-    fireEvent.click(screen.getByRole("button", { name: "この方に送る" }));
+    fireEvent.click(screen.getByRole("button", { name: "この内容で依頼する" }));
     expect(onSend).toHaveBeenCalledWith("お世話になっております。");
   });
 
   it("disables send while the draft is empty or whitespace-only", () => {
     render(<DraftEditor initialDraft="   " onSend={vi.fn()} />);
-    expect(screen.getByRole("button", { name: "この方に送る" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "この内容で依頼する" })).toBeDisabled();
   });
 
   it("reflects a later draft that arrives over SSE while untouched", () => {
@@ -43,6 +43,6 @@ describe("DraftEditor", () => {
 
   it("honours an explicit disabled prop", () => {
     render(<DraftEditor initialDraft="本文" disabled onSend={vi.fn()} />);
-    expect(screen.getByRole("button", { name: "この方に送る" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "この内容で依頼する" })).toBeDisabled();
   });
 });

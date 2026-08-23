@@ -16,8 +16,14 @@ export interface CandidateCardProps {
   candidate: Recommendation;
   rank: number;
   expanded: boolean;
+  /** Highlight this card (the confirmed recipient / top pick). */
   selected: boolean;
-  onSelect: (personId: string) => void;
+  /**
+   * Optional recipient-selection handler. When omitted the card is display-only
+   * (no "選択する" button) — the main line confirms to the top pick, so exposing a
+   * reselect control that the send does not honour is a misdirection (#174).
+   */
+  onSelect?: (personId: string) => void;
 }
 
 function avatarInitial(name: string): string {
@@ -80,18 +86,24 @@ export function CandidateCard({
         <p className="mb-md text-on-surface-variant text-sm">根拠を確認中…</p>
       )}
 
-      <button
-        type="button"
-        onClick={() => onSelect(candidate.person_id)}
-        aria-pressed={selected}
-        className={`mt-auto min-h-[40px] rounded-lg px-md py-2 font-medium text-sm transition-colors ${
-          selected
-            ? "bg-primary text-on-primary"
-            : "border border-primary text-primary hover:bg-surface-container-low"
-        }`}
-      >
-        {selected ? "選択中" : "選択する"}
-      </button>
+      {onSelect ? (
+        <button
+          type="button"
+          onClick={() => onSelect(candidate.person_id)}
+          aria-pressed={selected}
+          className={`mt-auto min-h-[40px] rounded-lg px-md py-2 font-medium text-sm transition-colors ${
+            selected
+              ? "bg-primary text-on-primary"
+              : "border border-primary text-primary hover:bg-surface-container-low"
+          }`}
+        >
+          {selected ? "選択中" : "選択する"}
+        </button>
+      ) : rank === 1 ? (
+        <span className="mt-auto rounded-lg bg-secondary-container px-md py-2 text-center font-medium text-on-secondary-container text-sm">
+          この方に依頼します
+        </span>
+      ) : null}
     </article>
   );
 }

@@ -2,8 +2,18 @@ import { ResultScreen } from "@/components/ResultScreen";
 import { SessionStreamProvider } from "@/components/SessionStreamProvider";
 import type { Recommendation } from "@/lib/api-types";
 import type { EventStreamState } from "@/hooks/useEventStream";
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const updateHandoffDraftMock = vi.fn();
+vi.mock("@/lib/api-client", () => ({
+  updateHandoffDraft: (...args: unknown[]) => updateHandoffDraftMock(...args),
+}));
+
+beforeEach(() => {
+  updateHandoffDraftMock.mockReset();
+  updateHandoffDraftMock.mockResolvedValue({ session_id: "s1", status: "draft_saved" });
+});
 
 // Fixtures use the REAL backend shapes: `confidence` is the Japanese fit signal
 // 高/中/低 (scorer.confidence_label), and `reasons[].detail` carries the verbatim
@@ -18,8 +28,8 @@ function state(partial: Partial<EventStreamState>): EventStreamState {
   return { events: [], terminal: false, ...partial };
 }
 
-function renderResult(stream: EventStreamState) {
-  return render(<ResultScreen streamState={stream} />);
+function renderResult(stream: EventStreamState, sessionId = "s1") {
+  return render(<ResultScreen streamState={stream} sessionId={sessionId} />);
 }
 
 const THREE_CANDIDATES: Recommendation[] = [
@@ -210,9 +220,10 @@ describe("ResultScreen — main line (person)", () => {
     );
   });
 
-  it("clears a stale send confirmation when a reroute changes the recipient", () => {
+  it("clears a stale send confirmation when a reroute changes the recipient", async () => {
     const { rerender } = render(
       <ResultScreen
+        sessionId="s1"
         streamState={state({
           route: { route: "person", reason: "", confidence: 0.9 },
           recommend: { recommendations: [rec({ person_id: "E001", name: "高梨" })] },
@@ -220,13 +231,14 @@ describe("ResultScreen — main line (person)", () => {
         })}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "この方に送る" }));
-    expect(screen.getByText("送信しました")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "この内容で依頼する" }));
+    expect(await screen.findByText("依頼を送りました")).toBeInTheDocument();
 
     // The recipient declines → reroute to a new person. The stale success
     // confirmation must not persist and block the new candidate's route view.
     rerender(
       <ResultScreen
+        sessionId="s1"
         streamState={state({
           route: { route: "person", reason: "", confidence: 0.9 },
           recommend: { recommendations: [rec({ person_id: "E002", name: "鈴木" })] },
@@ -234,27 +246,34 @@ describe("ResultScreen — main line (person)", () => {
         })}
       />,
     );
-    expect(screen.queryByText("送信しました")).not.toBeInTheDocument();
+    expect(screen.queryByText("依頼を送りました")).not.toBeInTheDocument();
     expect(screen.getByText("鈴木（最有力）")).toBeInTheDocument();
   });
 
-  it("confirms the send to the selected candidate", () => {
+  it("confirms the send: POSTs the edited draft to the pending hand-off (#174)", async () => {
     renderResult(
       state({
         route: { route: "person", reason: "", confidence: 0.9 },
         recommend: { recommendations: THREE_CANDIDATES },
-        draft: { draft: "本文" },
+        draft: { draft: "元の下書き" },
       }),
     );
-    // select the 2nd candidate, then send
-    fireEvent.click(screen.getAllByRole("button", { name: "選択する" })[0]);
-    fireEvent.click(screen.getByRole("button", { name: "この方に送る" }));
-    expect(screen.getByText("送信しました")).toBeInTheDocument();
-    expect(screen.getByText(/鈴木さんに依頼を送りました/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "新しい質問をする" })).toBeInTheDocument();
+    const textarea = screen.getByLabelText<HTMLTextAreaElement>("聞き方の下書き");
+    fireEvent.change(textarea, { target: { value: "編集後の依頼文" } });
+    fireEvent.click(screen.getByRole("button", { name: "この内容で依頼する" }));
+
+    // The edited text is persisted for this session, and the top pick is the recipient.
+    await waitFor(() =>
+      expect(updateHandoffDraftMock).toHaveBeenCalledWith({
+        session_id: "s1",
+        draft: "編集後の依頼文",
+      }),
+    );
+    expect(await screen.findByText("依頼を送りました")).toBeInTheDocument();
+    expect(screen.getByText(/高梨さんに、この内容でお繋ぎしました/)).toBeInTheDocument();
   });
 
-  it("warns before sending when a non-top candidate is selected (draft mismatch)", () => {
+  it("does not offer recipient reselection — only the top pick is confirmable (#174)", () => {
     renderResult(
       state({
         route: { route: "person", reason: "", confidence: 0.9 },
@@ -262,11 +281,25 @@ describe("ResultScreen — main line (person)", () => {
         draft: { draft: "本文" },
       }),
     );
-    // No warning while the top candidate is selected.
-    expect(screen.queryByText(/宛先を変える場合は本文を編集/)).not.toBeInTheDocument();
-    // Selecting the 2nd candidate surfaces the mismatch warning.
-    fireEvent.click(screen.getAllByRole("button", { name: "選択する" })[0]);
-    expect(screen.getByText(/下書きは最有力の高梨/)).toBeInTheDocument();
+    // The old per-candidate "選択する" reselect control is gone (it misdirected).
+    expect(screen.queryByRole("button", { name: "選択する" })).not.toBeInTheDocument();
+    // The top pick is shown as the recipient.
+    expect(screen.getByText("この方に依頼します")).toBeInTheDocument();
+  });
+
+  it("surfaces a retryable error when the confirm POST fails", async () => {
+    updateHandoffDraftMock.mockRejectedValueOnce(new Error("boom"));
+    renderResult(
+      state({
+        route: { route: "person", reason: "", confidence: 0.9 },
+        recommend: { recommendations: THREE_CANDIDATES },
+        draft: { draft: "本文" },
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "この内容で依頼する" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("送信に失敗しました");
+    // Still on the route view (not the sent-confirmation), so the asker can retry.
+    expect(screen.queryByText("依頼を送りました")).not.toBeInTheDocument();
   });
 
   it("defaults to the main line when the route is unset but candidates exist", () => {
@@ -284,7 +317,7 @@ describe("ResultScreen — main line (person)", () => {
     expect(screen.getByText(/宛先候補を再取得しています/)).toBeInTheDocument();
     // reason fallback text
     expect(screen.getByText(/直近で同様の案件を担当した方/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "この方に送る" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "この内容で依頼する" })).toBeEnabled();
   });
 
   it("renders a candidate with no department and no reason detail", () => {

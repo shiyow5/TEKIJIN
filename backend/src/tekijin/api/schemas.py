@@ -123,6 +123,27 @@ class ResumeRequest(BaseModel):
         return self.outcome if self.outcome is not None else (self.reply or "")
 
 
+class HandoffDraftRequest(BaseModel):
+    """Persist the asker's edited hand-off draft for a session paused at ``send``.
+
+    The asker reviews/edits the generated draft on 画面3 and confirms; this saves
+    the edited text into the durable state so the responder (画面4, GET /handoff)
+    reads the edited version rather than the original generation. Draft-only —
+    it never touches the recommendation ids or the accept/decline outcome (#174).
+    """
+
+    session_id: str = Field(pattern=_SESSION_ID_PATTERN)
+    draft: str = Field(min_length=1)
+
+    @field_validator("draft")
+    @classmethod
+    def _trim_nonempty(cls, value: str) -> str:
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("draft must not be blank")
+        return trimmed
+
+
 # --------------------------------------------------------------------------- #
 # responses
 # --------------------------------------------------------------------------- #

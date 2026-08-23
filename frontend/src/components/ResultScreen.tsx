@@ -15,13 +15,15 @@
 
 import { PersonRouteView } from "@/components/result/PersonRouteView";
 import { PriorAnswerView } from "@/components/result/PriorAnswerView";
-import { useOptionalSessionStream } from "@/components/SessionStreamProvider";
+import { useOptionalSessionId, useOptionalSessionStream } from "@/components/SessionStreamProvider";
 import type { EventStreamState } from "@/hooks/useEventStream";
 import { useState } from "react";
 
 export interface ResultScreenProps {
   /** Test seam: provide a fixed stream state instead of reading context. */
   streamState?: EventStreamState;
+  /** Test seam: provide the session id instead of reading it from context. */
+  sessionId?: string;
 }
 
 const EMPTY_STREAM: EventStreamState = { events: [], terminal: false };
@@ -117,9 +119,11 @@ function ResultError() {
   );
 }
 
-export function ResultScreen({ streamState }: ResultScreenProps) {
+export function ResultScreen({ streamState, sessionId }: ResultScreenProps) {
   const contextStream = useOptionalSessionStream();
+  const contextSessionId = useOptionalSessionId();
   const stream = streamState ?? contextStream ?? EMPTY_STREAM;
+  const effectiveSessionId = sessionId ?? contextSessionId;
 
   const [forceMainLine, setForceMainLine] = useState(false);
 
@@ -166,6 +170,7 @@ export function ResultScreen({ streamState }: ResultScreenProps) {
         recommendations={recommendations}
         reason={stream.route?.reason}
         draft={draft}
+        sessionId={effectiveSessionId}
       />
     );
   }

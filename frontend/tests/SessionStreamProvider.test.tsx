@@ -1,5 +1,6 @@
 import {
   SessionStreamProvider,
+  useOptionalSessionId,
   useOptionalSessionStream,
   useSessionStream,
 } from "@/components/SessionStreamProvider";
@@ -37,6 +38,17 @@ describe("SessionStreamProvider", () => {
   it("useOptionalSessionStream returns null outside a provider", () => {
     const { result } = renderHook(() => useOptionalSessionStream());
     expect(result.current).toBeNull();
+  });
+
+  it("exposes the session id via useOptionalSessionId (null outside a provider)", () => {
+    expect(renderHook(() => useOptionalSessionId()).result.current).toBeNull();
+
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <SessionStreamProvider sessionId="sess-42" streamState={state({})}>
+        {children}
+      </SessionStreamProvider>
+    );
+    expect(renderHook(() => useOptionalSessionId(), { wrapper }).result.current).toBe("sess-42");
   });
 
   it("opens exactly one EventSource for the live subscription", () => {
