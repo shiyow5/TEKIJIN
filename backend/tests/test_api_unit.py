@@ -151,7 +151,12 @@ def test_node_event_route_recommend_draft_done() -> None:
     assert draft.event == "draft" and _data(draft)["draft"] == "文面"
 
     done = _ev(events.node_event("c8_update", {"answer": "取り次ぎました"}))
-    assert done.event == "done" and _data(done) == {"status": "sent", "answer": "取り次ぎました"}
+    assert done.event == "done"
+    assert _data(done) == {"status": "sent", "answer": "取り次ぎました", "latency_ms": None}
+
+    # #177: the terminal carries the segment's processing latency when supplied.
+    timed = _ev(events.node_event("c8_update", {"answer": "取り次ぎました"}, latency_ms=1234))
+    assert _data(timed)["latency_ms"] == 1234
 
 
 def test_node_event_terminals_are_messages() -> None:
@@ -165,14 +170,24 @@ def test_node_event_terminals_are_messages() -> None:
         assert sse.event == "message"
         # No document_id in the update -> doc_id is null (only the document route
         # with a hit populates it; see the dedicated test below).
-        assert _data(sse) == {"status": status, "message": "終端メッセージ", "doc_id": None}
+        assert _data(sse) == {
+            "status": status,
+            "message": "終端メッセージ",
+            "doc_id": None,
+            "latency_ms": None,
+        }
 
 
 def test_node_event_document_carries_doc_id() -> None:
     # The document terminal surfaces the cited doc id so the client can open it (#143).
     sse = _ev(events.node_event("document", {"answer": "社内文書に該当", "document_id": "doc_001"}))
     assert sse.event == "message"
-    assert _data(sse) == {"status": "document", "message": "社内文書に該当", "doc_id": "doc_001"}
+    assert _data(sse) == {
+        "status": "document",
+        "message": "社内文書に該当",
+        "doc_id": "doc_001",
+        "latency_ms": None,
+    }
 
 
 def test_node_event_internal_nodes_emit_nothing() -> None:
@@ -470,6 +485,25 @@ def test_interrupt_payload_extracts_value_and_defaults() -> None:
     assert _interrupt_payload(()) == {}
 
 
+def test_segment_latency_ms_sums_stage_durations() -> None:
+    import datetime as dt
+
+    from tekijin.api.service import _segment_latency_ms
+
+    assert _segment_latency_ms([]) == 0  # nothing recorded yet
+    base = dt.datetime(2026, 1, 1, 12, 0, 0)
+    rows = [
+        ("c1_intent", base, base + dt.timedelta(milliseconds=200), None),
+        (
+            "c3_embed",
+            base + dt.timedelta(milliseconds=200),
+            base + dt.timedelta(milliseconds=500),
+            None,
+        ),
+    ]
+    assert _segment_latency_ms(rows) == 500
+
+
 def test_vllm_draft_adapter_reads_content_or_str() -> None:
     class _Msg:
         content = "高梨さん、ご相談です。"
@@ -596,6 +630,14 @@ def _service(*, intent=None, checkpointer=None, session_factory=None, clock=None
         now_factory=lambda: _NOW,
         **({"clock": clock} if clock is not None else {}),
     )
+
+
+def test_persist_events_is_a_noop_without_id_or_rows() -> None:
+    # #177: the guard returns before opening a session, so a missing question_id or
+    # an empty segment records nothing (and never touches the DB).
+    svc = _service()
+    svc._persist_events(None, [("c1_intent", _NOW, _NOW, None)])  # no question_id
+    svc._persist_events("q", [])  # no rows
 
 
 def test_service_sweep_evicts_stale_sessions_with_injected_clock() -> None:

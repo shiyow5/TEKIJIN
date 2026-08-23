@@ -15,7 +15,10 @@ from typing import Any
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from tekijin.models.tables import Employee, EvalRun, Question, Recommendation
+from tekijin.models.tables import Employee, EvalRun, Event, Question, Recommendation
+
+# One recorded run stage: (stage name, started_at, ended_at, meta).
+EventRow = tuple[str, dt.datetime, dt.datetime, dict[str, Any] | None]
 
 
 def employee_exists(session: Session, employee_id: int) -> bool:
@@ -68,6 +71,30 @@ def update_question_route(session: Session, question_id: str, route: str) -> Non
     """Record the C5 route on the question (drives the dashboard 自己解決率)."""
 
     session.execute(update(Question).where(Question.id == question_id).values(route=route))
+
+
+def record_events(session: Session, question_id: str, rows: list[EventRow]) -> None:
+    """Persist per-stage run timing (technical-spec §7) — the latency KPI source.
+
+    One ``events`` row per graph stage with its ``started_at``/``ended_at``; the
+    dashboard sums these per question for p50/p95 processing latency (#177). Batch
+    ``add_all`` in the caller's transaction; a no-op on an empty list. Human-wait
+    gaps (followup/send interrupts) are excluded because each run *segment* records
+    only its own stages, so the sum is compute time, not wall-clock.
+    """
+
+    if not rows:
+        return
+    session.add_all(
+        Event(
+            question_id=question_id,
+            stage=stage,
+            started_at=started_at,
+            ended_at=ended_at,
+            meta=meta,
+        )
+        for stage, started_at, ended_at, meta in rows
+    )
 
 
 def mark_question_resolved(session: Session, question_id: str, resolved_at: dt.datetime) -> None:

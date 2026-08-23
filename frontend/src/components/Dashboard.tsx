@@ -26,6 +26,12 @@ function hours(value: number | null): string {
   return value === null ? "—" : `${value.toFixed(1)} 時間`;
 }
 
+/** ms → a compact human string ("820ms" / "2.9s"), or "—" when unmeasured. */
+function latency(value: number | null): string {
+  if (value === null) return "—";
+  return value < 1000 ? `${value}ms` : `${(value / 1000).toFixed(1)}s`;
+}
+
 function MetricCard({
   label,
   value,
@@ -159,6 +165,19 @@ export function Dashboard() {
           value={evalValue}
           hint={evalHint}
           title={evalTitle}
+        />
+        <MetricCard
+          label="応答速度（中央値）"
+          value={latency(d.processing_latency.p50_ms)}
+          hint={
+            d.processing_latency.sample_size > 0
+              ? `95%タイル ${latency(d.processing_latency.p95_ms)}・${d.processing_latency.sample_size}件`
+              : "まだ計測データがありません"
+          }
+          title={
+            "AIが質問を理解し取り次ぎ先を決めるまでの処理時間です（人の返信待ち時間は含みません）。" +
+            "中央値=半数がこれより速い、95%タイル=95%がこれより速い。"
+          }
         />
       </div>
 

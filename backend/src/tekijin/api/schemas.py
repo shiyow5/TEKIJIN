@@ -330,6 +330,9 @@ class DraftData(BaseModel):
 class DoneData(BaseModel):
     status: str
     answer: str | None = None
+    # This run segment's processing time in ms (technical-spec §7 / #177). None
+    # when unavailable (e.g. a replayed terminal has no live timing).
+    latency_ms: int | None = None
 
 
 class MessageData(BaseModel):
@@ -338,6 +341,8 @@ class MessageData(BaseModel):
     # For the ``document`` route: the id of the cited document, so the client can
     # open it (GET /documents/{doc_id}). ``None`` for every non-document terminal.
     doc_id: str | None = None
+    # This run segment's processing time in ms (#177); None on a replay.
+    latency_ms: int | None = None
 
 
 class ErrorData(BaseModel):
@@ -376,6 +381,19 @@ class EvalSnapshot(BaseModel):
     created_at: str | None = None
 
 
+class ProcessingLatency(BaseModel):
+    """p50/p95 of per-question AI processing time in ms (product-spec §9 / #177).
+
+    Computed from the ``events`` table (sum of stage durations per question, so
+    human-wait gaps are excluded). ``sample_size`` is the number of questions with
+    recorded timing; p50/p95 are None until there is any.
+    """
+
+    p50_ms: int | None = None
+    p95_ms: int | None = None
+    sample_size: int = 0
+
+
 class DashboardResponse(BaseModel):
     """Aggregate-only view (counts / distributions / ratios).
 
@@ -394,6 +412,7 @@ class DashboardResponse(BaseModel):
     self_resolution_rate: float = 0.0  # 補助経路で解決した割合（route 記録から）
     avg_resolution_hours: float | None = None  # 平均解決時間（未解決なら None）
     top_responder_share: float = 0.0  # 上位1名集中率（負荷分散）
+    processing_latency: ProcessingLatency = Field(default_factory=ProcessingLatency)  # p50/p95 (ms)
     latest_eval: EvalSnapshot | None = None  # 推薦精度（未計測なら None）
     answers_per_responder: list[ResponderLoad] = Field(default_factory=list)
     topic_distribution: list[TopicCount] = Field(default_factory=list)
