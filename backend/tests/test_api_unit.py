@@ -490,6 +490,33 @@ def test_vllm_draft_adapter_reads_content_or_str() -> None:
     )
 
 
+def test_vllm_draft_prompt_threads_structured_context() -> None:
+    # #175: the C1 situation/topics + filled slot values reach the model prompt so
+    # the draft reflects what the system already knows and does not re-ask them.
+    prompt = VllmDraftModel.prompt(
+        "VPNの相談です",
+        {"name": "高梨"},
+        None,
+        ["対象拠点数"],
+        situation="拠点間接続が不安定",
+        topics=["ネットワーク・VPN"],
+        known_values={"現行製品": "VPN"},
+    )
+    human = prompt[-1][1]
+    assert "背景: 拠点間接続が不安定" in human
+    assert "トピック: ネットワーク・VPN" in human
+    assert "確認済み: 現行製品=VPN" in human
+    assert "未確認: 対象拠点数" in human
+
+
+def test_vllm_draft_prompt_omits_empty_context() -> None:
+    prompt = VllmDraftModel.prompt("q", {"name": "高梨"}, None, [])
+    human = prompt[-1][1]
+    assert "背景:" not in human
+    assert "確認済み:" not in human
+    assert "未確認項目なし" in human
+
+
 # --------------------------------------------------------------------------- #
 # AgentService internals (no DB): close, TTL sweep, stream error handling
 # --------------------------------------------------------------------------- #

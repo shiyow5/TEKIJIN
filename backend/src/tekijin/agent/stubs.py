@@ -109,6 +109,34 @@ def _contains_any(text: str, keywords: tuple[str, ...]) -> bool:
     return any(_keyword_matches(k, text) for k in keywords)
 
 
+# Site-count slot values look like "5拠点" / "3店舗": a number glued to a unit.
+_SITE_COUNT_RE = re.compile(r"\d+\s*(?:拠点|箇所|店舗|事業所)")
+
+
+def collect_known_values(question: str, question_type: str, products: list[str]) -> dict[str, str]:
+    """Concrete values for the required slots that are actually filled (C7 input).
+
+    Mirrors :meth:`RuleSufficiencyModel._slot_present` so a slot appears here iff
+    it would count as present there — but the ``現行製品`` value is re-scanned from
+    ``question`` when ``products`` is empty, so a product the user supplies in the
+    C2 clarification (which C1 does not re-analyse) is still captured. C7 uses this
+    both to inject the filled values into the draft and to drop those slots from a
+    now-stale ``missing`` list (model-definition C7: ``known_values`` input).
+    """
+
+    values: dict[str, str] = {}
+    for slot in _REQUIRED_SLOTS.get(question_type, ()):
+        if slot == "現行製品":
+            found = products or [p for p in PRODUCT_KEYWORDS if _keyword_matches(p, question)]
+            if found:
+                values[slot] = found[0]
+        elif slot == "対象拠点数":  # pragma: no branch - only two slots defined
+            match = _SITE_COUNT_RE.search(question)
+            if match:
+                values[slot] = match.group(0)
+    return values
+
+
 class KeywordIntentModel:
     """C1 stub: extract topics/products and classify by keyword tables."""
 
@@ -193,7 +221,7 @@ class RuleSufficiencyModel:
         if slot == "現行製品":
             return bool(intent.products)  # a concrete, known product name
         if slot == "対象拠点数":  # pragma: no branch - only two slots defined
-            return re.search(r"\d+\s*(?:拠点|箇所|店舗|事業所)", question) is not None
+            return _SITE_COUNT_RE.search(question) is not None
         return True  # pragma: no cover - defensive; unknown slots count as present
 
 
@@ -206,6 +234,10 @@ class TemplateDraftModel:
         responder: dict[str, Any],
         asker: dict[str, Any] | None,
         missing: list[str],
+        *,
+        situation: str | None = None,
+        topics: list[str] | None = None,
+        known_values: dict[str, str] | None = None,
     ) -> str:
         name = responder.get("name") or "ご担当者"
         dept = responder.get("dept") or responder.get("department") or ""
@@ -213,8 +245,17 @@ class TemplateDraftModel:
         lines = [
             header,
             "お世話になっております。下記の件でご相談させてください。",
-            f"【相談内容】\n{question}",
         ]
+        # C1 の状況理解を背景として先頭に添える（依頼文が質問の意味とずれない）。
+        if situation:
+            lines.append(f"【背景】\n{situation}")
+        lines.append(f"【相談内容】\n{question}")
+        # 確定済みスロット値は「埋まった前提」として明示し、回答者が確認しやすくする。
+        if known_values:
+            filled = "、".join(f"{slot}：{value}" for slot, value in known_values.items())
+            lines.append(f"【確認済みの前提】\n{filled}")
+        if topics:
+            lines.append("【関連トピック】\n" + "、".join(topics))
         if missing:
             lines.append("【補足いただきたい点】\n" + "、".join(missing))
         lines.append("お手数ですが、ご確認いただけますと幸いです。")

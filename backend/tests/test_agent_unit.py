@@ -30,6 +30,7 @@ from tekijin.agent.stubs import (
     KeywordIntentModel,
     RuleSufficiencyModel,
     TemplateDraftModel,
+    collect_known_values,
 )
 
 
@@ -441,3 +442,73 @@ def test_draft_handles_missing_name_and_dept() -> None:
     draft = TemplateDraftModel().draft("質問です", {}, None, [])
     assert "ご担当者さん" in draft
     assert "補足" not in draft  # no missing slots -> no supplement section
+
+
+def test_collect_known_values_from_products_and_site_count() -> None:
+    # #175: a slot's concrete value is surfaced iff it is actually filled.
+    values = collect_known_values("VPNの技術相談です。5拠点あります", "技術相談", ["VPN"])
+    assert values == {"現行製品": "VPN", "対象拠点数": "5拠点"}
+
+
+def test_collect_known_values_rescans_question_when_products_empty() -> None:
+    # After a C2 clarification C1 does not re-run, so products stays empty — the
+    # product supplied in the follow-up must still be recovered from the text.
+    values = collect_known_values("見積もりです CRM を使っています", "見積", [])
+    assert values["現行製品"] == "CRM"
+    assert "対象拠点数" not in values  # not mentioned -> stays unfilled
+
+
+def test_collect_known_values_empty_for_types_without_slots() -> None:
+    assert collect_known_values("こんにちは", "雑談", []) == {}
+
+
+def test_draft_injects_situation_and_known_values() -> None:
+    draft = TemplateDraftModel().draft(
+        "VPNの相談です",
+        {"name": "高梨", "dept": "技術部"},
+        None,
+        [],
+        situation="拠点間接続が不安定",
+        topics=["ネットワーク・VPN"],
+        known_values={"現行製品": "VPN", "対象拠点数": "5拠点"},
+    )
+    assert "【背景】" in draft and "拠点間接続が不安定" in draft
+    assert "現行製品：VPN" in draft
+    assert "対象拠点数：5拠点" in draft
+    assert "ネットワーク・VPN" in draft
+
+
+def _nodes_with_draft(draft_model: Any) -> AgentNodes:
+    stub: Any = object()
+    return AgentNodes(
+        intent_model=stub,
+        sufficiency_model=stub,
+        draft_model=draft_model,
+        embedder=stub,
+        retriever=stub,
+        scorer=stub,
+    )
+
+
+def test_c7_draft_injects_known_values_and_drops_stale_missing() -> None:
+    # #175: the user answered the C2 clarification ("SMILE V を…、3拠点"), but C1 did
+    # not re-run so `missing` still lists both slots. C7 must re-derive the filled
+    # values, inject them, and NOT re-ask the now-answered slots.
+    nodes = _nodes_with_draft(TemplateDraftModel())
+    state: AgentState = {
+        "question": "技術相談です。CRM を使っていて 3拠点 あります",
+        "question_type": "技術相談",
+        "products": [],  # C1 saw none in the original question
+        "situation": "移行を検討中",
+        "topics": ["CRM・営業支援"],
+        "missing": ["現行製品", "対象拠点数"],
+        "recommendations": [{"person_id": 7, "name": "田中", "dept": "営業"}],
+        "asker": None,
+    }
+    out = nodes.c7_draft(state)
+    draft = out["draft"]
+    assert "現行製品：CRM" in draft
+    assert "対象拠点数：3拠点" in draft
+    assert "移行を検討中" in draft
+    # both slots are now filled -> no "補足いただきたい点" section
+    assert "補足いただきたい点" not in draft
