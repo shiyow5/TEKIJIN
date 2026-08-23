@@ -29,6 +29,7 @@ const ITEMS: RecentQuestionItem[] = [
     question_id: "q1",
     title: "UTMの移行時の注意点",
     resolved: true,
+    resolution: "person",
     responder_name: "高梨 健太",
     created_at: "2026-08-20T10:00:00",
   },
@@ -36,8 +37,17 @@ const ITEMS: RecentQuestionItem[] = [
     question_id: "q2",
     title: "社内Wi-Fiの申請方法",
     resolved: false,
+    resolution: "pending",
     responder_name: null,
     created_at: "2026-08-21T10:00:00",
+  },
+  {
+    question_id: "q3",
+    title: "社内PCのセットアップ手順",
+    resolved: true,
+    resolution: "document",
+    responder_name: null,
+    created_at: "2026-08-22T10:00:00",
   },
 ];
 
@@ -65,11 +75,15 @@ describe("RecentQuestions", () => {
 
     await waitFor(() => expect(getRecentQuestionsMock).toHaveBeenCalledWith("E001"));
     expect(screen.getByText("UTMの移行時の注意点")).toBeInTheDocument();
-    expect(screen.getByText("解決済")).toBeInTheDocument();
+    // Two items are resolved (person + document), so there are two 解決済 chips.
+    expect(screen.getAllByText("解決済")).toHaveLength(2);
     expect(screen.getByText("高梨 健太")).toBeInTheDocument();
     // Unresolved item: 対応中 + a "adjusting" note instead of a responder.
     expect(screen.getByText("対応中")).toBeInTheDocument();
     expect(screen.getByText("取り次ぎ先を調整中です。")).toBeInTheDocument();
+    // Document-route item is self-resolved: shows a document note, not "adjusting" (#142).
+    expect(screen.getByText("社内文書で回答")).toBeInTheDocument();
+    expect(screen.getByText("社内PCのセットアップ手順")).toBeInTheDocument();
   });
 
   it("shows an empty state when there is no history", async () => {

@@ -223,11 +223,19 @@ class InboxResponse(BaseModel):
 # asker history (GET /questions?asker_id) — "最近あなたが解決した質問" (#125)
 # --------------------------------------------------------------------------- #
 class RecentQuestionItem(BaseModel):
-    """One of the asker's own recent questions, with its resolution state."""
+    """One of the asker's own recent questions, with its resolution state.
+
+    ``resolution`` says HOW it was resolved (or that it is still pending):
+    ``"person"`` a responder took it (accepted rec / answer row),
+    ``"document"`` the document route self-resolved it (no human),
+    ``"pending"`` still awaiting a hand-off. ``resolved`` is the boolean shortcut
+    ``resolution != "pending"``.
+    """
 
     question_id: str
     title: str
     resolved: bool = False
+    resolution: Literal["person", "document", "pending"] = "pending"
     responder_name: str | None = None
     created_at: str | None = None
 

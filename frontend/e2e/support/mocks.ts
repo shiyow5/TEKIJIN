@@ -193,6 +193,7 @@ export const RECENT_QUESTIONS = [
     question_id: "api_rq1",
     title: "UTMの移行時の注意点",
     resolved: true,
+    resolution: "person",
     responder_name: "高梨 健太",
     created_at: "2026-08-20T10:00:00",
   },
@@ -200,8 +201,17 @@ export const RECENT_QUESTIONS = [
     question_id: "api_rq2",
     title: "社内Wi-Fiの申請方法",
     resolved: false,
+    resolution: "pending",
     responder_name: null,
     created_at: "2026-08-21T10:00:00",
+  },
+  {
+    question_id: "api_rq3",
+    title: "社内PCのセットアップ手順",
+    resolved: true,
+    resolution: "document",
+    responder_name: null,
+    created_at: "2026-08-22T10:00:00",
   },
 ];
 

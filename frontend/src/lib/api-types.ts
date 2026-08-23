@@ -89,10 +89,18 @@ export interface InboxResponse {
  * `RecentQuestionItem`). `responder_name` is the accepting/answering person, or
  * null while unresolved.
  */
+/**
+ * How a question was resolved (or that it is still pending): "person" a responder
+ * took it, "document" the document route self-resolved it (no human), "pending"
+ * still awaiting a hand-off.
+ */
+export type QuestionResolution = "person" | "document" | "pending";
+
 export interface RecentQuestionItem {
   question_id: string;
   title: string;
   resolved: boolean;
+  resolution: QuestionResolution;
   responder_name?: string | null;
   created_at?: string | null;
 }

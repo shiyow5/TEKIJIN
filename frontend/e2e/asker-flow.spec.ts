@@ -141,7 +141,10 @@ test.describe("asker flow", () => {
 
     await expect(page.getByRole("heading", { name: "最近のあなたの質問" })).toBeVisible();
     await expect(page.getByText("UTMの移行時の注意点")).toBeVisible();
-    await expect(page.getByText("解決済")).toBeVisible();
+    await expect(page.getByText("解決済").first()).toBeVisible();
     await expect(page.getByText("対応中")).toBeVisible();
+    // A document-route question is self-resolved, not "取り次ぎ先を調整中" (#142).
+    await expect(page.getByText("社内文書で回答")).toBeVisible();
+    await expect(page.getByText("取り次ぎ先を調整中です。")).toBeVisible(); // only the pending one
   });
 });

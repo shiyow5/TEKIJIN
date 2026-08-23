@@ -234,9 +234,35 @@ def test_recent_questions_orders_newest_first_and_resolves(seed_counts, session)
     assert [i["question_id"] for i in items[:3]] == ["api_rh_3", "api_rh_2", "api_rh_1"]
     q3, q2, q1 = items[0], items[1], items[2]
     assert q3["resolved"] is True and q3["responder_name"]  # first answerer
+    assert q3["resolution"] == "person"
     assert q2["resolved"] is True and q2["responder_name"]  # accepting responder
+    assert q2["resolution"] == "person"
     assert q1["resolved"] is False and q1["responder_name"] is None
+    assert q1["resolution"] == "pending"
     assert all(i["question_id"] != "api_rh_x" for i in items)
+
+
+def test_recent_questions_document_route_is_self_resolved(seed_counts, session) -> None:
+    # A document-routed question has no person responder, but is self-resolved
+    # (Question.route == "document") — it must not read as "取り次ぎ先を調整中" (#142).
+    session.add(
+        Question(
+            id="api_rh_doc",
+            asker_id=15,
+            body="社内PCのセットアップ手順は?",
+            topics=[],
+            status="open",
+            route="document",
+            created_at=dt.datetime(2099, 4, 1, 9, 0, 0),
+        )
+    )
+    session.flush()
+
+    items = recent_questions_for_asker(session, 15)
+    doc = next(i for i in items if i["question_id"] == "api_rh_doc")
+    assert doc["resolution"] == "document"
+    assert doc["resolved"] is True
+    assert doc["responder_name"] is None  # no human took it
 
 
 def test_recent_questions_accepted_responder_tiebreak_is_deterministic(
