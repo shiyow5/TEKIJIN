@@ -6,11 +6,18 @@ run streams over ``/events/{session_id}``. Resume-vs-new-question and the pendin
 interrupt kind are validated against the durable checkpointer state (409/422), so
 a stray /ask cannot overwrite a paused run and an outcome cannot be mis-delivered
 to a clarification.
+
+Read endpoints (dashboard/employees/inbox/questions/documents) have NO auth in the
+prototype (all data is synthetic) and uniformly mask unexpected errors as a generic
+500 via ``_generic_500`` — see docs/adr/0005-read-endpoint-auth-and-error-wrapping.md
+for the auth seam (``require_reader``) and error policy (#146).
 """
 
 from __future__ import annotations
 
+import contextlib
 import logging
+from collections.abc import Iterator
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from sse_starlette import EventSourceResponse
@@ -36,6 +43,26 @@ router = APIRouter()
 
 def _service(request: Request) -> AgentService:
     return request.app.state.agent_service
+
+
+@contextlib.contextmanager
+def _generic_500(route: str) -> Iterator[None]:
+    """Log-and-mask an unexpected error as a generic 500 (no internal detail leaked).
+
+    A deliberate :class:`HTTPException` (404/422/…) raised inside passes through
+    unchanged; any OTHER exception is logged with a stack trace and reduced to a
+    generic 500. This unifies the read endpoints (dashboard/employees/inbox/
+    questions/documents) with the inline handling already on /ask, /answer and
+    /handoff, so no read endpoint can surface an internal message (#146).
+    """
+
+    try:
+        yield
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("%s failed", route)
+        raise HTTPException(status_code=500, detail="内部エラーが発生しました") from exc
 
 
 @router.post("/ask", response_model=schemas.AckResponse)
@@ -114,9 +141,10 @@ def handoff(session_id: str, request: Request) -> schemas.HandoffResponse:
 def dashboard(request: Request) -> schemas.DashboardResponse:
     """Aggregate load / topic mix / recent activity for the dashboard."""
 
-    with _service(request).session_factory() as session:
-        data = dashboard_summary(session)
-    return schemas.DashboardResponse(**data)
+    with _generic_500("GET /dashboard"):
+        with _service(request).session_factory() as session:
+            data = dashboard_summary(session)
+        return schemas.DashboardResponse(**data)
 
 
 @router.get("/employees", response_model=schemas.EmployeeListResponse)
@@ -128,18 +156,19 @@ def employees(request: Request) -> schemas.EmployeeListResponse:
     are the external ``"E###"`` form to match the rest of the contract.
     """
 
-    with _service(request).session_factory() as session:
-        rows = Repository(session).list_employees()
-    return schemas.EmployeeListResponse(
-        employees=[
-            schemas.EmployeeSummary(
-                id=schemas.format_employee_id(row.id),
-                name=row.name,
-                dept=row.department,
-            )
-            for row in rows
-        ]
-    )
+    with _generic_500("GET /employees"):
+        with _service(request).session_factory() as session:
+            rows = Repository(session).list_employees()
+        return schemas.EmployeeListResponse(
+            employees=[
+                schemas.EmployeeSummary(
+                    id=schemas.format_employee_id(row.id),
+                    name=row.name,
+                    dept=row.department,
+                )
+                for row in rows
+            ]
+        )
 
 
 @router.get("/inbox", response_model=schemas.InboxResponse)
@@ -151,32 +180,33 @@ def inbox(request: Request, responder_id: str = Query(min_length=1)) -> schemas.
     excluded — there is no live handoff to open.
     """
 
-    try:
-        rid = schemas.coerce_employee_id(responder_id)
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=422, detail="responder_id must be an int or 'E###'"
-        ) from exc
+    with _generic_500("GET /inbox"):
+        try:
+            rid = schemas.coerce_employee_id(responder_id)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422, detail="responder_id must be an int or 'E###'"
+            ) from exc
 
-    with _service(request).session_factory() as session:
-        rows = pending_handoffs_for_responder(session, rid)
-    return schemas.InboxResponse(
-        items=[
-            schemas.InboxItem(
-                session_id=row["session_id"],
-                question_id=row["question_id"],
-                question=row["question"],
-                topics=row["topics"],
-                asker=schemas.HandoffAsker(
-                    id=schemas.format_employee_id(row["asker_id"]),
-                    name=row["asker_name"],
-                    dept=row["asker_dept"],
-                ),
-                created_at=row["created_at"],
-            )
-            for row in rows
-        ]
-    )
+        with _service(request).session_factory() as session:
+            rows = pending_handoffs_for_responder(session, rid)
+        return schemas.InboxResponse(
+            items=[
+                schemas.InboxItem(
+                    session_id=row["session_id"],
+                    question_id=row["question_id"],
+                    question=row["question"],
+                    topics=row["topics"],
+                    asker=schemas.HandoffAsker(
+                        id=schemas.format_employee_id(row["asker_id"]),
+                        name=row["asker_name"],
+                        dept=row["asker_dept"],
+                    ),
+                    created_at=row["created_at"],
+                )
+                for row in rows
+            ]
+        )
 
 
 @router.get("/questions", response_model=schemas.RecentQuestionsResponse)
@@ -188,16 +218,19 @@ def questions(
     ``asker_id`` accepts an int or the ``"E###"`` form (422 otherwise).
     """
 
-    try:
-        aid = schemas.coerce_employee_id(asker_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail="asker_id must be an int or 'E###'") from exc
+    with _generic_500("GET /questions"):
+        try:
+            aid = schemas.coerce_employee_id(asker_id)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422, detail="asker_id must be an int or 'E###'"
+            ) from exc
 
-    with _service(request).session_factory() as session:
-        rows = recent_questions_for_asker(session, aid)
-    return schemas.RecentQuestionsResponse(
-        items=[schemas.RecentQuestionItem(**row) for row in rows]
-    )
+        with _service(request).session_factory() as session:
+            rows = recent_questions_for_asker(session, aid)
+        return schemas.RecentQuestionsResponse(
+            items=[schemas.RecentQuestionItem(**row) for row in rows]
+        )
 
 
 @router.get("/documents/{doc_id}", response_model=schemas.DocumentDetail)
@@ -208,8 +241,9 @@ def document_detail(doc_id: str, request: Request) -> schemas.DocumentDetail:
     message) never advances a run. 404 when ``doc_id`` is unknown.
     """
 
-    with _service(request).session_factory() as session:
-        row = get_document(session, doc_id)
-    if row is None:
-        raise HTTPException(status_code=404, detail="document not found")
-    return schemas.DocumentDetail(**row)
+    with _generic_500("GET /documents"):
+        with _service(request).session_factory() as session:
+            row = get_document(session, doc_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="document not found")
+        return schemas.DocumentDetail(**row)
