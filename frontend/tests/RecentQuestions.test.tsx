@@ -96,12 +96,14 @@ describe("RecentQuestions", () => {
 
     await waitFor(() => expect(screen.getByText("UTMの移行時の注意点")).toBeInTheDocument());
     // q1 / q2 have a session_id -> clickable link to /session/{id}.
-    expect(
-      screen.getByRole("link", { name: /「UTMの移行時の注意点」の結果をもう一度見る/ }),
-    ).toHaveAttribute("href", "/session/sess-q1");
-    expect(
-      screen.getByRole("link", { name: /「社内Wi-Fiの申請方法」の結果をもう一度見る/ }),
-    ).toHaveAttribute("href", "/session/sess-q2");
+    expect(screen.getByRole("link", { name: /「UTMの移行時の注意点」/ })).toHaveAttribute(
+      "href",
+      "/session/sess-q1",
+    );
+    expect(screen.getByRole("link", { name: /「社内Wi-Fiの申請方法」/ })).toHaveAttribute(
+      "href",
+      "/session/sess-q2",
+    );
     // q3 has no session_id (seeded history) -> not a link.
     expect(
       screen.queryByRole("link", { name: /「社内PCのセットアップ手順」/ }),

@@ -157,7 +157,7 @@ test.describe("asker flow", () => {
     );
 
     await page.goto("/questions");
-    await page.getByRole("link", { name: /「UTMの移行時の注意点」の結果をもう一度見る/ }).click();
+    await page.getByRole("link", { name: /「UTMの移行時の注意点」/ }).click();
 
     await page.waitForURL(/\/session\/sess-rq1$/);
     // The replayed result renders (candidate + draft on the processing screen).

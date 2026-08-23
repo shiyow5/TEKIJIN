@@ -111,7 +111,7 @@ export function RecentQuestions() {
               {item.session_id ? (
                 <Link
                   href={`/session/${encodeURIComponent(item.session_id)}`}
-                  aria-label={`「${item.title}」の結果をもう一度見る`}
+                  aria-label={`「${item.title}」（${item.resolved ? "解決済" : "対応中"}）の結果をもう一度見る`}
                   className="block h-full rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 >
                   <QuestionCard item={item} />
