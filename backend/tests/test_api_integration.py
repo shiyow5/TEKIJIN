@@ -1095,6 +1095,55 @@ def test_active_runs_released_after_a_full_stream(seed_counts, engine, fake_embe
     assert service._active_runs == 0
 
 
+def test_run_slot_released_when_stream_closed_early(seed_counts, engine, fake_embedder) -> None:
+    # A client that drops mid-stream: closing the generator (GeneratorExit) must run
+    # the finally and release the slot — the disconnect-release path (#180 review).
+    service = _svc(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2, 3], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2, 3)),
+    )
+    service.start_question("s_close", 10, GOOD_Q)
+    gen = service.stream_events("s_close")
+    assert next(gen).event == "understood"  # execution started → slot held
+    assert service._active_runs == 1
+    gen.close()  # simulate a dropped client
+    assert service._active_runs == 0  # finally released the slot
+
+
+def test_run_slot_released_on_exception(seed_counts, engine, fake_embedder) -> None:
+    # The slot's finally must fire on the exception path, not just normal completion.
+    service = _svc(engine, fake_embedder, retriever=_FakeRetriever(), scorer=_FakeScorer([]))
+    with pytest.raises(RuntimeError, match="boom"), service._run_slot():
+        assert service._active_runs == 1
+        raise RuntimeError("boom")
+    assert service._active_runs == 0
+
+
+def test_resume_not_shed_when_saturated(seed_counts, engine, fake_embedder) -> None:
+    # Backpressure gates only NEW questions; a resume reaches submit_resume even while
+    # saturated — a missing paused run is a 409, never a 503 (locks in the semantics).
+    service = _svc(engine, fake_embedder, retriever=_FakeRetriever(), scorer=_FakeScorer([]))
+    service._max_concurrent_runs = 1
+    service._active_runs = 1  # saturated
+    client = TestClient(create_app(agent_service=service))
+    resp = client.post("/answer", json={"session_id": "no_such", "outcome": "accepted"})
+    assert resp.status_code == 409  # SessionConflict, NOT 503
+
+
+def test_ask_admitted_when_below_limit(seed_counts, engine, fake_embedder) -> None:
+    # Enabled but not saturated (active < max) → still admitted.
+    service = _svc(
+        engine, fake_embedder, retriever=_FakeRetriever(people=[1]), scorer=_FakeScorer(_recs(1))
+    )
+    service._max_concurrent_runs = 2
+    service._active_runs = 1  # below the limit
+    client = TestClient(create_app(agent_service=service))
+    resp = client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "under1"})
+    assert resp.status_code == 200
+
+
 # --------------------------------------------------------------------------- #
 # durability: outcome recorded from the DURABLE state (registry-independent)
 # --------------------------------------------------------------------------- #

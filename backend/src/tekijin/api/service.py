@@ -227,10 +227,14 @@ class AgentService:
         """Count one in-flight graph run for the duration of its execution.
 
         Held only while ``graph.stream`` actually runs (LLM/GPU work), so a run that
-        pauses at an interrupt or finishes releases its slot; the closing generator's
-        ``finally`` runs on normal completion AND on client disconnect, so slots are
-        not leaked. Only NEW questions are shed (see ``start_question``); resumes and
-        mid-run continuations still occupy a slot but are never rejected.
+        pauses at an interrupt or finishes releases its slot. The ``finally`` runs on
+        normal completion, on an exception, and when the generator is closed
+        (``GeneratorExit``). On a client DISCONNECT the release therefore depends on
+        the ASGI layer finalizing this generator — the same generator finalization the
+        per-session lock and ``session.close()`` already rely on; CPython does it
+        promptly via refcounting, but it is not a hard contract. Only NEW questions are
+        shed (see ``start_question``); resumes / continuations occupy a slot but are
+        never rejected.
         """
 
         with self._runs_lock:
@@ -313,7 +317,9 @@ class AgentService:
         with self._lock(session_id):
             self._sweep()
             # Backpressure: shed a NEW question when the LLM run pool is saturated,
-            # before persisting anything, so the caller gets a fast 503 (#180).
+            # before persisting anything, so the caller gets a fast 503 (#180). Soft
+            # check-then-run gate (may transiently overshoot under bursts); the hard
+            # bound is vLLM's max-num-seqs. See Settings.max_concurrent_runs.
             self._reject_if_saturated()
             ctx = self._reg_get(session_id)
             if ctx is not None and ctx.pending is not None:
