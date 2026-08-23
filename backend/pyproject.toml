@@ -21,7 +21,13 @@ quote-style = "double"
 minversion = "8.0"
 testpaths = ["tests"]
 pythonpath = ["src"]
-addopts = "-ra --cov=tekijin --cov-report=term-missing --cov-fail-under=90"
+addopts = "-ra --cov=tekijin --cov-report=term-missing --cov-fail-under=90 -m 'not model'"
+markers = [
+    # 実モデルを読む重いテスト。既定では走らせない（CI を軽く保つため）。
+    # 実機で `pytest -m model --no-cov` として回す。#137 のような
+    # 「依存の pin では既定モデルを読めない」を CI 以外で検出するための枠。
+    "model: downloads/loads the real embedding model (run on a GPU host)",
+]
 
 [tool.coverage.run]
 source = ["tekijin"]
