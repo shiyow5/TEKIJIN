@@ -8,15 +8,29 @@ threshold against it is meaningless. Cosine similarity is comparable, so the
 thresholds below are real "how close is it?" gates. This also resolves the
 dense-similarity floor deferred from #29.
 
-Threshold rationale (cosine, good sentence embedding): a near-duplicate is
-~0.85-0.95, strongly related ~0.75-0.85, topically related ~0.6-0.75, weak <0.5.
-``PRIOR_ANSWER_SIM`` sits at 0.80 — the top of the "strongly related" band, i.e.
-only a very close prior QA short-circuits; ``DOCUMENT_SIM`` at 0.70 is "strongly
-related"; ``PERSON_WEAK_SIM`` at 0.50 is the "weak" ceiling.
+Threshold rationale is **model-specific** — cosine absolute values depend on the
+embedding. These constants are calibrated to Nemotron-3-Embed-1B, whose cosines
+are heavily compressed (observed range ~0.04–0.57 on the eval corpus, not the
+0.6–0.95 spread of e5/BERT-style encoders). See ``docs/adr/0004`` and
+``fixtures/synthetic/eval/route_calibration.json`` (#90). Calibrated bands
+(routed-set accuracy 0.821 vs 0.696 majority):
+
+* ``DOCUMENT_SIM`` = 0.30 — a document is on-topic enough to be the demotion
+  target (document-gold mean 0.349 vs ~0.14–0.17 elsewhere; catches 7/10).
+* ``PERSON_WEAK_SIM`` = 0.40 — profile match below this counts as weak, letting a
+  document take over (sits inside the observed 0.053–0.454 people range).
+* ``PRIOR_ANSWER_SIM`` = 0.55 — **deliberately above the observed answer-cosine
+  max (0.543): prior_answer never fires with Nemotron.** ``answer_confidence``
+  cannot separate this route — person-gold rows reach 0.543 while prior_answer
+  gold tops out at 0.410, so any firing threshold mislabels person first. Prior-
+  answer detection is therefore disabled here and moved to corpus-count routing
+  (answers.reuse_count / answer existence), tracked in #119. This is a #90
+  stopgap, not the intended design.
 
 Routes:
-* ``prior_answer`` — a past QA is *very* close (near-duplicate): present who
-  answered before, then hand off to that responder (flowchart PA → C6).
+* ``prior_answer`` — a past QA is *very* close: present who answered before, then
+  hand off to that responder (flowchart PA → C6). **Dormant under Nemotron** —
+  see the PRIOR_ANSWER_SIM note above (#119).
 * ``document`` — the person signal is weak but a document is strongly on-topic:
   point at where it lives (答えは作らない).
 * ``person`` — the main line and the default/fallback.
@@ -32,13 +46,18 @@ from tekijin.agent.state import Route
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from tekijin.agent.state import RetrievalResult
 
-# A past QA must be a near-duplicate to short-circuit to prior_answer.
-PRIOR_ANSWER_SIM = 0.80
-# A document must be strongly on-topic to be the demotion target.
-DOCUMENT_SIM = 0.70
+# Calibrated to Nemotron-3-Embed-1B (#90). See the module docstring for the
+# rationale behind each band and why prior_answer is dormant.
+#
+# Above the observed answer-cosine max (0.543): prior_answer never fires with
+# Nemotron because answer_confidence cannot separate it. Corpus-count routing is
+# the real fix (#119).
+PRIOR_ANSWER_SIM = 0.55
+# A document must be on-topic enough to be the demotion target.
+DOCUMENT_SIM = 0.30
 # Below this profile similarity the person signal counts as weak (a document may
 # then take over). All three are cosine-similarity constants, tunable on eval.
-PERSON_WEAK_SIM = 0.50
+PERSON_WEAK_SIM = 0.40
 
 PERSON: Route = "person"
 PRIOR_ANSWER: Route = "prior_answer"

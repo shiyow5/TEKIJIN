@@ -1,9 +1,15 @@
-"""C5 の閾値が実データの分布と噛み合っているかを見張る（Issue #105）。
+"""C5 の閾値が実データの分布と噛み合っているかを見張る（Issue #105 / #90）。
 
 #103 は「**実装は動き、単体テストも通り、数字だけが壊れている**」形の不具合だった。
 `decide_route` 自体は仕様どおり動く。壊れていたのは**閾値と実際のコサイン分布の関係**で、
 e5-large では `answer_confidence` の最小値(0.816)が `PRIOR_ANSWER_SIM`(0.80) を超えるため、
 全71件が `prior_answer` に倒れて層2 Recall@3 が 0.592 落ちていた。
+
+#90 で埋め込みを Nemotron-3-Embed-1B に替え、閾値をその実測分布に較正した
+（DOCUMENT_SIM=0.30 / PERSON_WEAK_SIM=0.40 は分布内、経路精度 0.821 > 多数決 0.696、
+1経路への潰れ 0.90 < 0.95）。ただし `answer_confidence` は prior_answer を分離できず
+（person gold が prior_answer gold より高い）、PRIOR_ANSWER_SIM=0.55 は観測最大 0.543 の
+直上に置いて意図的に無効化している。prior_answer の本筋復活はコーパス集計ルーティング(#119)。
 
 既存の単体テストは「閾値を超えたら prior_answer を返すか」を見ている。
 ここで見るのは「**その閾値は実際のデータで超えられるのか / 常に超えてしまわないか**」。
@@ -42,7 +48,7 @@ _REMEASURE = (
     "--out fixtures/synthetic/eval/route_calibration.json"
 )
 _FIXED_HINT = (
-    "#103 が直ったら、このテストの xfail マーカーを削除すること"
+    "コーパス集計ルーティング(#119)で prior_answer が復活したら、この xfail を削除すること"
     "（strict=True なので xpass すると CI が落ちて気づける）"
 )
 
@@ -82,16 +88,32 @@ def test_calibration_matches_the_configured_embedding_model(calibration: dict) -
 @pytest.mark.parametrize(
     ("channel", "threshold", "name"),
     [
-        ("answer_confidence", PRIOR_ANSWER_SIM, "PRIOR_ANSWER_SIM"),
+        pytest.param(
+            "answer_confidence",
+            PRIOR_ANSWER_SIM,
+            "PRIOR_ANSWER_SIM",
+            marks=pytest.mark.xfail(
+                reason=(
+                    "#119: prior_answer は Nemotron のコサインでは分離できない"
+                    "（answer_confidence は person 側が prior_answer gold より高い）。"
+                    "PRIOR_ANSWER_SIM は観測最大(0.543)の直上に置いて意図的に無効化している。"
+                    f"{_FIXED_HINT}"
+                ),
+                strict=True,
+            ),
+        ),
         ("document_confidence", DOCUMENT_SIM, "DOCUMENT_SIM"),
         ("people_confidence", PERSON_WEAK_SIM, "PERSON_WEAK_SIM"),
     ],
 )
-@pytest.mark.xfail(reason=f"#103: 閾値が e5-large の分布の外にある。{_FIXED_HINT}", strict=True)
 def test_threshold_sits_inside_the_observed_distribution(
     rows: list[dict], channel: str, threshold: float, name: str
 ) -> None:
-    """閾値が観測範囲の外にあると、その分岐は定数述語になる（常に真か常に偽）。"""
+    """閾値が観測範囲の外にあると、その分岐は定数述語になる（常に真か常に偽）。
+
+    #90 で DOCUMENT_SIM / PERSON_WEAK_SIM は Nemotron 分布内に較正済み。
+    PRIOR_ANSWER_SIM だけは意図的に分布の外（発火しない側）に置いているので xfail のまま。
+    """
 
     values = [r[channel] for r in rows]
     lo, hi = min(values), max(values)
@@ -101,7 +123,6 @@ def test_threshold_sits_inside_the_observed_distribution(
     )
 
 
-@pytest.mark.xfail(reason=f"#103: 全件 prior_answer に倒れている。{_FIXED_HINT}", strict=True)
 def test_routes_do_not_collapse_to_a_single_branch(rows: list[dict]) -> None:
     """経路が1つに潰れていないこと。潰れていると候補が固定され、推薦が成立しない。"""
 
@@ -124,7 +145,6 @@ def test_routes_do_not_collapse_to_a_single_branch(rows: list[dict]) -> None:
     )
 
 
-@pytest.mark.xfail(reason=f"#103: 経路精度が多数決を下回る。{_FIXED_HINT}", strict=True)
 def test_route_accuracy_beats_the_majority_baseline(rows: list[dict]) -> None:
     """多数決（常に person）を下回るなら、経路判定は害にしかなっていない。"""
 
