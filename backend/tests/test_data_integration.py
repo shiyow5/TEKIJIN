@@ -241,7 +241,30 @@ def test_recent_questions_orders_newest_first_and_resolves(seed_counts, session)
     assert q2["resolution"] == "person"
     assert q1["resolved"] is False and q1["responder_name"] is None
     assert q1["resolution"] == "pending"
+    # These questions carry no session_id (seeded-style) -> not deep-linkable (#150).
+    assert all(i["session_id"] is None for i in (q1, q2, q3))
     assert all(i["question_id"] != "api_rh_x" for i in items)
+
+
+def test_recent_questions_exposes_session_id_for_deep_link(seed_counts, session) -> None:
+    # A question started via /ask carries a session_id, surfaced so the history
+    # card can deep-link to /session/{session_id} for re-viewing the result (#150).
+    session.add(
+        Question(
+            id="api_rh_sess",
+            asker_id=16,
+            body="session linkable",
+            topics=[],
+            status="open",
+            session_id="sess-abc",
+            created_at=dt.datetime(2099, 5, 1, 9, 0, 0),
+        )
+    )
+    session.flush()
+
+    items = recent_questions_for_asker(session, 16)
+    item = next(i for i in items if i["question_id"] == "api_rh_sess")
+    assert item["session_id"] == "sess-abc"
 
 
 def test_recent_questions_document_route_is_self_resolved(seed_counts, session) -> None:

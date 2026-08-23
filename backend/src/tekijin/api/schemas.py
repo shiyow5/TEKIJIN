@@ -237,6 +237,9 @@ class RecentQuestionItem(BaseModel):
     resolved: bool = False
     resolution: Literal["person", "document", "pending"] = "pending"
     responder_name: str | None = None
+    # Deep-link target for re-viewing the result (/session/{session_id} replays
+    # the run over /events). ``None`` for seeded history with no live session.
+    session_id: str | None = None
     created_at: str | None = None
 
 

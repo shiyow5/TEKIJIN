@@ -31,6 +31,7 @@ const ITEMS: RecentQuestionItem[] = [
     resolved: true,
     resolution: "person",
     responder_name: "高梨 健太",
+    session_id: "sess-q1",
     created_at: "2026-08-20T10:00:00",
   },
   {
@@ -39,6 +40,7 @@ const ITEMS: RecentQuestionItem[] = [
     resolved: false,
     resolution: "pending",
     responder_name: null,
+    session_id: "sess-q2",
     created_at: "2026-08-21T10:00:00",
   },
   {
@@ -47,6 +49,7 @@ const ITEMS: RecentQuestionItem[] = [
     resolved: true,
     resolution: "document",
     responder_name: null,
+    session_id: null, // seeded history: no live session -> not clickable
     created_at: "2026-08-22T10:00:00",
   },
 ];
@@ -84,6 +87,25 @@ describe("RecentQuestions", () => {
     // Document-route item is self-resolved: shows a document note, not "adjusting" (#142).
     expect(screen.getByText("社内文書で回答")).toBeInTheDocument();
     expect(screen.getByText("社内PCのセットアップ手順")).toBeInTheDocument();
+  });
+
+  it("links questions with a session_id to their session for re-viewing (#150)", async () => {
+    useCurrentUserMock.mockReturnValue(asUser("E001"));
+    getRecentQuestionsMock.mockResolvedValue(ITEMS);
+    render(<RecentQuestions />);
+
+    await waitFor(() => expect(screen.getByText("UTMの移行時の注意点")).toBeInTheDocument());
+    // q1 / q2 have a session_id -> clickable link to /session/{id}.
+    expect(
+      screen.getByRole("link", { name: /「UTMの移行時の注意点」の結果をもう一度見る/ }),
+    ).toHaveAttribute("href", "/session/sess-q1");
+    expect(
+      screen.getByRole("link", { name: /「社内Wi-Fiの申請方法」の結果をもう一度見る/ }),
+    ).toHaveAttribute("href", "/session/sess-q2");
+    // q3 has no session_id (seeded history) -> not a link.
+    expect(
+      screen.queryByRole("link", { name: /「社内PCのセットアップ手順」/ }),
+    ).not.toBeInTheDocument();
   });
 
   it("shows an empty state when there is no history", async () => {

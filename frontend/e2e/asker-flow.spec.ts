@@ -147,4 +147,20 @@ test.describe("asker flow", () => {
     await expect(page.getByText("社内文書で回答")).toBeVisible();
     await expect(page.getByText("取り次ぎ先を調整中です。")).toBeVisible(); // only the pending one
   });
+
+  test("履歴の項目をクリックすると結果セッションを再表示できる (#150)", async ({ page }) => {
+    await mockEmployees(page);
+    await mockRecentQuestions(page, RECENT_QUESTIONS);
+    // The re-viewed session replays a (person-route) result over /events.
+    await page.route(`${API_BASE}/events/**`, (route) =>
+      fulfillSse(route, sseBody(PERSON_ROUTE_FRAMES)),
+    );
+
+    await page.goto("/questions");
+    await page.getByRole("link", { name: /「UTMの移行時の注意点」の結果をもう一度見る/ }).click();
+
+    await page.waitForURL(/\/session\/sess-rq1$/);
+    // The replayed result renders (candidate + draft on the processing screen).
+    await expect(page.getByText("回答者が見つかりました")).toBeVisible();
+  });
 });

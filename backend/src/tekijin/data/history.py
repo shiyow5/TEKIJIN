@@ -33,7 +33,14 @@ def recent_questions_for_asker(
     """
 
     q_rows = session.execute(
-        select(Question.id, Question.body, Question.status, Question.route, Question.created_at)
+        select(
+            Question.id,
+            Question.body,
+            Question.status,
+            Question.route,
+            Question.session_id,
+            Question.created_at,
+        )
         .where(Question.asker_id == asker_id)
         .order_by(Question.created_at.desc(), Question.id.desc())
         .limit(limit)
@@ -71,7 +78,7 @@ def recent_questions_for_asker(
         answered.setdefault(qid, name)
 
     items: list[dict[str, Any]] = []
-    for qid, body, status, route, created_at in q_rows:
+    for qid, body, status, route, session_id, created_at in q_rows:
         responder = accepted.get(qid) or answered.get(qid)
         by_person = qid in accepted or qid in answered or status == "answered"
         # A person resolution wins; else the document route is a self-resolution
@@ -90,6 +97,9 @@ def recent_questions_for_asker(
                 "resolved": resolution != "pending",
                 "resolution": resolution,
                 "responder_name": responder,
+                # Deep-link target for re-viewing the result via /events replay.
+                # NULL for seeded history (no live session) -> not linkable.
+                "session_id": session_id,
                 "created_at": created_at.isoformat() if created_at is not None else None,
             }
         )
