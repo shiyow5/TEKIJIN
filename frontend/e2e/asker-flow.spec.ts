@@ -1,9 +1,12 @@
 import { expect, test } from "@playwright/test";
 import {
   API_BASE,
+  FOLLOWUP_FRAMES,
   MESSAGE_FRAMES,
   PERSON_ROUTE_DRAFT,
   PERSON_ROUTE_FRAMES,
+  PRIOR_ANSWER_FRAMES,
+  RECENT_QUESTIONS,
   fulfillJson,
   fulfillSse,
   mockEmployees,
@@ -75,5 +78,70 @@ test.describe("asker flow", () => {
     await expect(page.getByRole("heading", { name: "回答をお届けします" })).toBeVisible();
     await expect(page.getByText("該当する回答が見つかりませんでした。")).toBeVisible();
     await expect(page.getByRole("link", { name: "新しい質問をする" })).toBeVisible();
+  });
+
+  test("逆質問（followup）→ 補足を回答", async ({ page }) => {
+    await mockEmployees(page);
+    await mockRecentQuestions(page);
+    await page.route(`${API_BASE}/ask`, (route) =>
+      fulfillJson(route, { session_id: "srv-session", status: "accepted" }),
+    );
+    await page.route(`${API_BASE}/events/**`, (route) =>
+      fulfillSse(route, sseBody(FOLLOWUP_FRAMES)),
+    );
+    let answerBody: { reply?: string } | null = null;
+    await page.route(`${API_BASE}/answer`, async (route) => {
+      answerBody = route.request().postDataJSON();
+      await fulfillJson(route, { session_id: "srv-session", status: "accepted" });
+    });
+
+    await page.goto("/questions");
+    await page.getByRole("textbox", { name: "質問を入力" }).fill("ネットワークの相談です");
+    await page.getByRole("button", { name: "聞いてみる" }).click();
+    await page.waitForURL(/\/session\/[^/]+$/);
+
+    // The AI asks a clarifying question; the reply box appears.
+    await expect(page.getByText("確認させてください")).toBeVisible();
+    await page.getByRole("textbox", { name: "補足の回答" }).fill("現行はVPN機器で3拠点です");
+    await page.getByRole("button", { name: "回答する" }).click();
+
+    await expect.poll(() => answerBody?.reply).toBe("現行はVPN機器で3拠点です");
+  });
+
+  test("prior_answer 経路 → 詳しい人の提示 → 解決", async ({ page }) => {
+    await mockEmployees(page);
+    await mockRecentQuestions(page);
+    await page.route(`${API_BASE}/ask`, (route) =>
+      fulfillJson(route, { session_id: "srv-session", status: "accepted" }),
+    );
+    await page.route(`${API_BASE}/events/**`, (route) =>
+      fulfillSse(route, sseBody(PRIOR_ANSWER_FRAMES)),
+    );
+
+    await page.goto("/questions");
+    await page.getByRole("textbox", { name: "質問を入力" }).fill("VPNの設定について");
+    await page.getByRole("button", { name: "聞いてみる" }).click();
+    await page.waitForURL(/\/session\/[^/]+$/);
+
+    await expect(page.getByRole("heading", { name: "回答者が見つかりました" })).toBeVisible();
+    await page.getByRole("button", { name: "結果を見る" }).click();
+    await page.waitForURL(/\/session\/[^/]+\/result$/);
+
+    // The prior-answer view presents the expert as evidence, not the answer.
+    await expect(page.getByRole("heading", { name: /詳しそうです/ })).toBeVisible();
+    await page.getByRole("button", { name: "解決した" }).click();
+    await expect(page.getByRole("heading", { name: "解決しました" })).toBeVisible();
+  });
+
+  test("「最近のあなたの質問」パネルが履歴を表示する", async ({ page }) => {
+    await mockEmployees(page);
+    await mockRecentQuestions(page, RECENT_QUESTIONS);
+
+    await page.goto("/questions");
+
+    await expect(page.getByRole("heading", { name: "最近のあなたの質問" })).toBeVisible();
+    await expect(page.getByText("UTMの移行時の注意点")).toBeVisible();
+    await expect(page.getByText("解決済")).toBeVisible();
+    await expect(page.getByText("対応中")).toBeVisible();
   });
 });
