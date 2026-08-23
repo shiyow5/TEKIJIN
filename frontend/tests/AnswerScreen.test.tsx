@@ -45,7 +45,7 @@ const HANDOFF: HandoffResponse = {
   helpful_answer_count: 5,
 };
 
-const THREE_BUTTONS = ["回答する", "今は難しい", "別の人を薦める"];
+const THREE_BUTTONS = ["引き受ける", "今は難しい", "自分より適任がいる"];
 
 describe("AnswerScreen", () => {
   beforeEach(() => {
@@ -98,24 +98,28 @@ describe("AnswerScreen", () => {
     expect(refer.className).toBe(defer.className);
   });
 
-  it("sends accepted and shows a confirmation when 回答する is clicked", async () => {
+  it("sends accepted and shows a confirmation when 引き受ける is clicked", async () => {
     getHandoffMock.mockResolvedValue(HANDOFF);
     render(<AnswerScreen sessionId="s1" />);
     await screen.findByText("UTM移行時の注意点について");
 
-    fireEvent.click(screen.getByRole("button", { name: "回答する" }));
+    fireEvent.click(screen.getByRole("button", { name: "引き受ける" }));
 
     await waitFor(() =>
       expect(postAnswerMock).toHaveBeenCalledWith({ session_id: "s1", outcome: "accepted" }),
     );
-    expect(await screen.findByRole("heading", { name: /回答/ })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: /お引き受け/ })).toBeInTheDocument();
+    // #176: the app captures the accept, not the answer text, so the copy must
+    // connect the asker to this person — never promise a delivered answer.
+    expect(screen.getByText(/お繋ぎします/)).toBeInTheDocument();
+    expect(screen.queryByText(/回答をお届け/)).not.toBeInTheDocument();
   });
 
   it("links back to the inbox after answering (#126: label matches destination)", async () => {
     getHandoffMock.mockResolvedValue(HANDOFF);
     render(<AnswerScreen sessionId="s1" />);
     await screen.findByText("UTM移行時の注意点について");
-    fireEvent.click(screen.getByRole("button", { name: "回答する" }));
+    fireEvent.click(screen.getByRole("button", { name: "引き受ける" }));
 
     const back = await screen.findByRole("link", { name: "受信箱へ戻る" });
     expect(back).toHaveAttribute("href", "/inbox");
@@ -133,12 +137,12 @@ describe("AnswerScreen", () => {
     );
   });
 
-  it("sends declined when 別の人を薦める is clicked (interim mapping)", async () => {
+  it("sends declined when 自分より適任がいる is clicked (interim mapping)", async () => {
     getHandoffMock.mockResolvedValue(HANDOFF);
     render(<AnswerScreen sessionId="s1" />);
     await screen.findByText("UTM移行時の注意点について");
 
-    fireEvent.click(screen.getByRole("button", { name: "別の人を薦める" }));
+    fireEvent.click(screen.getByRole("button", { name: "自分より適任がいる" }));
 
     await waitFor(() =>
       expect(postAnswerMock).toHaveBeenCalledWith({ session_id: "s1", outcome: "declined" }),
@@ -151,7 +155,7 @@ describe("AnswerScreen", () => {
     render(<AnswerScreen sessionId="s1" />);
 
     expect(await screen.findByRole("alert")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "回答する" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "引き受ける" })).toBeNull();
   });
 
   it("shows a load-failure message (not 'gone') for a generic load error", async () => {
@@ -179,7 +183,7 @@ describe("AnswerScreen", () => {
     expect(screen.getByText("質問者さん")).toBeInTheDocument(); // name fallback
     expect(screen.getByText("根拠を確認中…")).toBeInTheDocument(); // empty reasons
     // still fully actionable even without candidate metadata.
-    expect(screen.getByRole("button", { name: "回答する" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "引き受ける" })).toBeEnabled();
   });
 
   it("surfaces a retryable error when the outcome submit fails", async () => {
@@ -188,10 +192,10 @@ describe("AnswerScreen", () => {
     render(<AnswerScreen sessionId="s1" />);
     await screen.findByText("UTM移行時の注意点について");
 
-    fireEvent.click(screen.getByRole("button", { name: "回答する" }));
+    fireEvent.click(screen.getByRole("button", { name: "引き受ける" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/失敗|お試し/);
     // still interactive (retryable), not dead-ended.
-    expect(screen.getByRole("button", { name: "回答する" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "引き受ける" })).toBeEnabled();
   });
 });

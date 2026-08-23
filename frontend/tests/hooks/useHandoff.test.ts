@@ -98,7 +98,7 @@ describe("useHandoff", () => {
     expect(result.current.action).toBe("defer");
   });
 
-  it("submits a declined outcome for the 'refer' action (別の人を薦める, interim)", async () => {
+  it("submits a declined outcome for the 'refer' action (自分より適任がいる, interim)", async () => {
     getHandoffMock.mockResolvedValue(HANDOFF);
     const { result } = renderHook(() => useHandoff("s1"));
     await waitFor(() => expect(result.current.phase).toBe("ready"));

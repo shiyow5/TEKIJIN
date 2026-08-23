@@ -6,10 +6,12 @@
  * Loads GET /handoff/{session_id} on mount, then lets the responder act via one
  * of three choices — all resolved to a POST /answer outcome:
  *
- *   answer (回答する)      -> outcome "accepted"
- *   defer  (今は難しい)    -> outcome "declined"  (F-09: the asker is rerouted)
- *   refer  (別の人を薦める) -> outcome "declined"  (interim; a dedicated backend
- *                                                 transition is tracked in #76)
+ *   answer (引き受ける)       -> outcome "accepted"
+ *   defer  (今は難しい)       -> outcome "declined"  (F-09: the asker is rerouted)
+ *   refer  (自分より適任がいる) -> outcome "declined"  (interim: same reroute as
+ *                                                   defer; a named referral /
+ *                                                   redirect_to backend transition
+ *                                                   is tracked in #76)
  *
  * A 404/409 on load means the session is no longer awaiting a responder (already
  * answered, expired, or awaiting a clarification instead) — surfaced as "gone"
