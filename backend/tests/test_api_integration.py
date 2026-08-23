@@ -211,6 +211,14 @@ def test_decline_reroutes_then_accept(seed_counts, engine, fake_embedder) -> Non
     done = _events(client, "s3")
     assert done[0][0] == "done"
 
+    # The decline never stamped resolved_at; the final accept does, once (#97).
+    check = get_sessionmaker(engine)()
+    try:
+        q = check.query(Question).filter(Question.session_id == "s3").first()
+        assert q is not None and q.resolved_at is not None
+    finally:
+        check.close()
+
 
 # --------------------------------------------------------------------------- #
 # dispatch guards: 409 on busy/paused, 422 on wrong resume kind
@@ -343,6 +351,35 @@ def test_flow_persists_question_and_recommendation(seed_counts, engine, fake_emb
         # "shown" rows with outcome=NULL.
         assert recs[0].outcome == "accepted"
         assert recs[1].outcome is None
+        # An accepted hand-off stamps the runtime resolution time (#97).
+        assert q.resolved_at is not None
+    finally:
+        check.close()
+
+
+def test_document_route_stamps_resolved_at(seed_counts, engine, fake_embedder) -> None:
+    # A self-resolving document route records resolved_at even though no responder
+    # ever accepts — so it counts toward the dashboard's avg resolution time (#97).
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(
+            documents=[{"doc_id": "doc_001", "score": 0.05}],
+            document_confidence=0.8,  # strongly on-topic document
+            people_confidence=0.2,  # weak person signal -> document wins
+            people=[1, 2, 3],
+        ),
+        scorer=_FakeScorer(_recs(1, 2, 3)),
+    )
+    client.post("/ask", json={"asker_id": 8, "question": GOOD_Q, "session_id": "docres"})
+    names = [e for e, _ in _events(client, "docres")]
+    assert "message" in names  # terminal document message, no hand-off
+
+    check = get_sessionmaker(engine)()
+    try:
+        q = check.query(Question).filter(Question.session_id == "docres").first()
+        assert q is not None and q.route == "document"
+        assert q.resolved_at is not None
     finally:
         check.close()
 

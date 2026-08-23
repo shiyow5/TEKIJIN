@@ -188,6 +188,11 @@ class Question(Base):
     # API when C5 emits, so the dashboard can report the self-resolution rate
     # (補助経路で人を介さず解決した割合). NULL for pre-seeded/unrouted questions.
     route: Mapped[str | None] = mapped_column(String(32))
+    # When the question was resolved at runtime — a responder accepted the hand-off
+    # (C8) or a self-resolving terminal (document) was reached. Set first-wins by
+    # the API so the dashboard's average resolution time reflects live traffic, not
+    # only seeded ``answers`` rows (#97). NULL while unresolved / pre-seeded.
+    resolved_at: Mapped[dt.datetime | None] = mapped_column(DateTime)
     created_at: Mapped[dt.datetime | None] = mapped_column(DateTime)
     embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM))
 

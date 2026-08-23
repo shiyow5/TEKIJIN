@@ -70,6 +70,21 @@ def update_question_route(session: Session, question_id: str, route: str) -> Non
     session.execute(update(Question).where(Question.id == question_id).values(route=route))
 
 
+def mark_question_resolved(session: Session, question_id: str, resolved_at: dt.datetime) -> None:
+    """Stamp the runtime resolution time on the question, first-wins (#97).
+
+    Only sets ``resolved_at`` when it is still NULL, so a decline→reroute→accept
+    or a duplicate/replayed terminal cannot move an already-recorded resolution
+    time. Drives the dashboard's average resolution time from live traffic.
+    """
+
+    session.execute(
+        update(Question)
+        .where(Question.id == question_id, Question.resolved_at.is_(None))
+        .values(resolved_at=resolved_at)
+    )
+
+
 def insert_eval_run(session: Session, metrics: dict[str, Any]) -> int:
     """Persist an offline-evaluation snapshot; returns its row id.
 

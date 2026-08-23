@@ -13,12 +13,14 @@ import pytest
 from sqlalchemy import event, select, text
 
 from tekijin.config import get_settings
+from tekijin.data.dashboard import _avg_resolution_hours
 from tekijin.data.db import get_engine, get_sessionmaker, session_scope
 from tekijin.data.documents import get_document
 from tekijin.data.history import recent_questions_for_asker
 from tekijin.data.inbox import pending_handoffs_for_responder
 from tekijin.data.repository import Repository
 from tekijin.data.seed import _apply_schema_upgrades, apply_migrations, run_seed
+from tekijin.data.writes import mark_question_resolved
 from tekijin.models.tables import (
     Answer,
     Document,
@@ -627,3 +629,53 @@ def test_apply_migrations_is_non_destructive(engine, seed_counts) -> None:
     with factory() as sess:
         after = len(Repository(sess).list_employees())
     assert before == after == 40
+
+
+# --------------------------------------------------------------------------- #
+# runtime resolution tracking (#97)
+# --------------------------------------------------------------------------- #
+def test_mark_question_resolved_is_first_wins(seed_counts, session) -> None:
+    # A decline→reroute→accept or a replayed terminal must not move an already
+    # recorded resolution time — mark_question_resolved only sets a NULL value.
+    session.add(
+        Question(
+            id="api_res_fw",
+            asker_id=17,
+            body="resolve once",
+            topics=[],
+            status="open",
+            created_at=dt.datetime(2099, 6, 1, 9, 0, 0),
+        )
+    )
+    session.flush()
+
+    first = dt.datetime(2099, 6, 1, 11, 0, 0)
+    later = dt.datetime(2099, 6, 1, 15, 0, 0)
+    mark_question_resolved(session, "api_res_fw", first)
+    mark_question_resolved(session, "api_res_fw", later)  # must be ignored
+    session.flush()
+
+    q = session.get(Question, "api_res_fw")
+    assert q.resolved_at == first
+
+
+def test_avg_resolution_includes_resolved_at_without_answer(seed_counts, session) -> None:
+    # A question resolved at runtime (resolved_at set) but with NO answers row must
+    # still count toward the average resolution time (#97). A large gap makes the
+    # mean move upward unambiguously.
+    before = _avg_resolution_hours(session)
+    assert before is not None
+    session.add(
+        Question(
+            id="api_res_only",
+            asker_id=18,
+            body="runtime resolved, no answer row",
+            topics=[],
+            status="open",
+            created_at=dt.datetime(2099, 7, 1, 0, 0, 0),
+            resolved_at=dt.datetime(2099, 7, 1, 0, 0, 0) + dt.timedelta(hours=1000),
+        )
+    )
+    session.flush()
+    after = _avg_resolution_hours(session)
+    assert after is not None and after > before
