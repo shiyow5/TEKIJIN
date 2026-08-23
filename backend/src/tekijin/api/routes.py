@@ -27,6 +27,7 @@ from tekijin.api.service import (
     AgentService,
     AskerNotFound,
     HandoffNotFound,
+    ServiceBusy,
     SessionConflict,
     SessionInvalid,
 )
@@ -71,6 +72,15 @@ def ask(req: schemas.AskRequest, request: Request) -> schemas.AckResponse:
 
     try:
         _service(request).start_question(req.session_id, req.asker_id, req.question)
+    except ServiceBusy as exc:
+        # Backpressure (#180): the LLM run pool is full — shed with a graceful 503 +
+        # Retry-After so the client can back off instead of hammering the GPU.
+        logger.info("shedding /ask for session %s (busy): %s", req.session_id, exc)
+        raise HTTPException(
+            status_code=503,
+            detail="現在混雑しています。少し待ってから、もう一度お試しください。",
+            headers={"Retry-After": "5"},
+        ) from exc
     except SessionConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except AskerNotFound as exc:

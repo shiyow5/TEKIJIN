@@ -32,6 +32,7 @@ in-process); that is documented on the Makefile ``serve-prod`` target.
 
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
 import logging
 import threading
@@ -97,6 +98,16 @@ class HandoffNotFound(Exception):
     """No responder handoff is available for this session (maps to HTTP 404)."""
 
 
+class ServiceBusy(Exception):
+    """Too many runs are executing on the (single-GPU) LLM (maps to HTTP 503).
+
+    Backpressure (#180): the app sheds NEW questions when at capacity rather than
+    piling more concurrent graph runs onto vLLM and risking OOM / a host stall. The
+    hard per-GPU bound is still vLLM's own ``max-num-seqs``; this is the app-level
+    admission gate so callers get a fast, graceful "混雑中" instead of a stuck run.
+    """
+
+
 def _default_now() -> dt.datetime:
     # Naive (no tzinfo) to match stored ``created_at`` and the scorer's contract.
     return dt.datetime.now()  # noqa: DTZ005 - naive is intentional
@@ -144,6 +155,7 @@ class AgentService:
         retriever: Any | None = None,
         scorer: Any | None = None,
         bm25_weight: float | None = None,
+        max_concurrent_runs: int = 0,
         now_factory: Any = _default_now,
         clock: Any = time.monotonic,
     ) -> None:
@@ -162,6 +174,13 @@ class AgentService:
         # custom Settings is honored rather than the cached global (#68). None →
         # the default HybridRetriever reads settings itself.
         self._bm25_weight = bm25_weight
+        # Backpressure (#180): max graph runs executing at once before /ask sheds new
+        # questions with 503. 0 (default) disables it — set from settings via the
+        # factory in production. Guarded by its own lock; independent of the per-
+        # session locks so admission is a cheap global check.
+        self._max_concurrent_runs = max_concurrent_runs
+        self._active_runs = 0
+        self._runs_lock = threading.Lock()
         self._now_factory = now_factory
         # Monotonic clock for TTL bookkeeping — injectable so ``_sweep`` is
         # deterministic in tests (the process ``time.monotonic`` epoch is the boot
@@ -189,6 +208,38 @@ class AgentService:
         engine = self._session_factory.kw.get("bind")
         if engine is not None:
             engine.dispose()
+
+    # -- backpressure (#180) ---------------------------------------------- #
+    def _reject_if_saturated(self) -> None:
+        """Raise :class:`ServiceBusy` when the LLM run pool is full (admission gate)."""
+
+        if self._max_concurrent_runs <= 0:
+            return
+        with self._runs_lock:
+            if self._active_runs >= self._max_concurrent_runs:
+                raise ServiceBusy(
+                    f"{self._active_runs} runs already executing "
+                    f"(max {self._max_concurrent_runs}); try again shortly"
+                )
+
+    @contextlib.contextmanager
+    def _run_slot(self) -> Iterator[None]:
+        """Count one in-flight graph run for the duration of its execution.
+
+        Held only while ``graph.stream`` actually runs (LLM/GPU work), so a run that
+        pauses at an interrupt or finishes releases its slot; the closing generator's
+        ``finally`` runs on normal completion AND on client disconnect, so slots are
+        not leaked. Only NEW questions are shed (see ``start_question``); resumes and
+        mid-run continuations still occupy a slot but are never rejected.
+        """
+
+        with self._runs_lock:
+            self._active_runs += 1
+        try:
+            yield
+        finally:
+            with self._runs_lock:
+                self._active_runs -= 1
 
     # -- locking ---------------------------------------------------------- #
     def _lock(self, session_id: str) -> threading.Lock:
@@ -261,6 +312,9 @@ class AgentService:
 
         with self._lock(session_id):
             self._sweep()
+            # Backpressure: shed a NEW question when the LLM run pool is saturated,
+            # before persisting anything, so the caller gets a fast 503 (#180).
+            self._reject_if_saturated()
             ctx = self._reg_get(session_id)
             if ctx is not None and ctx.pending is not None:
                 raise SessionConflict("a run is already queued for this session")
@@ -559,24 +613,27 @@ class AgentService:
         question_id = self._run_question_id(graph, config, agent_input)
         rec_ids: list[int] | None = None
         terminal: ServerSentEvent | None = None
-        for update in graph.stream(agent_input, config, stream_mode="updates"):
-            for node, data in update.items():
-                if node == "c1_intent":
-                    self._persist_topics(question_id, data)
-                elif node == "c5_route":
-                    self._persist_route(question_id, data)
-                elif node == "c6_score":
-                    rec_ids = self._persist_recommendations(question_id, data)
-                event = (
-                    interrupt_event(_interrupt_payload(data))
-                    if node == "__interrupt__"
-                    else node_event(node, data)
-                )
-                if event is not None:
-                    if event.event in TERMINAL_EVENTS:
-                        terminal = event
-                    yield event
-        self._persist_run_state(graph, config, rec_ids, terminal)
+        # Occupy a backpressure slot only while the graph actually executes (#180);
+        # released by the finally on completion or client disconnect.
+        with self._run_slot():
+            for update in graph.stream(agent_input, config, stream_mode="updates"):
+                for node, data in update.items():
+                    if node == "c1_intent":
+                        self._persist_topics(question_id, data)
+                    elif node == "c5_route":
+                        self._persist_route(question_id, data)
+                    elif node == "c6_score":
+                        rec_ids = self._persist_recommendations(question_id, data)
+                    event = (
+                        interrupt_event(_interrupt_payload(data))
+                        if node == "__interrupt__"
+                        else node_event(node, data)
+                    )
+                    if event is not None:
+                        if event.event in TERMINAL_EVENTS:
+                            terminal = event
+                        yield event
+            self._persist_run_state(graph, config, rec_ids, terminal)
 
     def _persist_run_state(
         self,
