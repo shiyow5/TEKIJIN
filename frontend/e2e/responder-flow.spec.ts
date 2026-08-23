@@ -34,7 +34,9 @@ test.describe("responder flow", () => {
     await expect(page.getByRole("heading", { name: HANDOFF.question })).toBeVisible();
 
     await page.getByRole("button", { name: "引き受ける" }).click();
-    await expect(page.getByRole("heading", { name: "お引き受けありがとうございます" })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "お引き受けありがとうございます" }),
+    ).toBeVisible();
     expect(answerBody).toEqual({ session_id: SESSION_ID, outcome: "accepted" });
   });
 
@@ -84,7 +86,9 @@ test.describe("responder flow", () => {
 
     await page.goto(`/answer/${SESSION_ID}`);
     await page.getByRole("button", { name: "引き受ける" }).click();
-    await expect(page.getByRole("heading", { name: "お引き受けありがとうございます" })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "お引き受けありがとうございます" }),
+    ).toBeVisible();
 
     await page.getByRole("link", { name: "受信箱へ戻る" }).click();
     await page.waitForURL(/\/inbox$/);

@@ -147,6 +147,9 @@ describe("AnswerScreen", () => {
     await waitFor(() =>
       expect(postAnswerMock).toHaveBeenCalledWith({ session_id: "s1", outcome: "declined" }),
     );
+    // #176: refer == defer's auto reroute; the copy must not promise a named referral.
+    expect(await screen.findByText(/別の候補者を自動でお探しします/)).toBeInTheDocument();
+    expect(screen.queryByText(/別の候補者へお繋ぎします/)).not.toBeInTheDocument();
   });
 
   it("shows a 'gone' message when the session is no longer awaiting a response", async () => {
