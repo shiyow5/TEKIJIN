@@ -440,6 +440,12 @@ def main():
         default=DEFAULT_PGDIR,
         help="pgserver のデータディレクトリ（使い回す）",
     )
+    ap.add_argument(
+        "--db-url",
+        default=None,
+        help="外部の PostgreSQL を使う（指定すると pgserver を起動しない）。"
+        "pgserver のホイールが無い環境（aarch64 など）で pgvector コンテナを使うため",
+    )
     ap.add_argument("--out", default=None)
     ap.add_argument(
         "--c1",
@@ -454,7 +460,14 @@ def main():
     )
     args = ap.parse_args()
 
-    url = start_db(args.pgdir)
+    if args.db_url:
+        # start_db と同じく psycopg ドライバを明示する（素の postgresql:// だと
+        # SQLAlchemy が psycopg2 を探しに行って落ちる）
+        url = args.db_url.replace("postgresql://", "postgresql+psycopg://", 1)
+        os.environ["TEKIJIN_DATABASE_URL"] = url
+        sys.path.insert(0, SRC)
+    else:
+        url = start_db(args.pgdir)
     print(f"DB: {url}")
     if args.task == "prepare":
         prepare(url)
