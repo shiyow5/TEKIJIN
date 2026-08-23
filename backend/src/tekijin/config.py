@@ -97,7 +97,7 @@ class Settings(BaseSettings):
     embedding_dim: int = 2048
 
     # RRF weight for the BM25 (sparse) channel in C4 hybrid search; the dense
-    # channels stay at 1.0. Equal-weight RRF cost -0.200 層2 R@3 on eval_person v2
+    # channels stay at 1.0. Equal-weight RRF cost -0.170 層2 R@3 on eval_person v2
     # (queries are symptom-worded, so lexical BM25 ranks are noisy — #68 /
     # docs/benchmarks/ablation.md §3). Down-weighting BM25 to ~0.2 recovers dense
     # -only accuracy. A fixed low weight under-serves product-name / model-number /
