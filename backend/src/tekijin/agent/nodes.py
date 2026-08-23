@@ -25,7 +25,7 @@ from tekijin.agent.protocols import (
 from tekijin.agent.route import PRIOR_ANSWER, decide_route
 from tekijin.agent.safety import scan_disallowed
 from tekijin.agent.state import AgentState, empty_retrieval
-from tekijin.agent.stubs import MAX_FOLLOWUPS
+from tekijin.agent.stubs import MAX_FOLLOWUPS, collect_known_values
 from tekijin.retrieval.embedding import QUERY, Embedder
 from tekijin.scorer.scorer import ExpertiseScorer
 
@@ -252,8 +252,23 @@ class AgentNodes:
     # -- C7: draft the request (LLM stub) ---------------------------------
     def c7_draft(self, state: AgentState) -> AgentState:
         top = (state.get("recommendations") or [])[0]
+        question_type = state.get("question_type", _QUESTION_TYPE_DEFAULT)
+        products = state.get("products") or []
+        known_values = collect_known_values(state["question"], question_type, products)
+        # A slot must never appear as both a filled premise and an open gap: drop
+        # from `missing` anything we now surface under known_values, so the draft
+        # cannot show the same slot as "確認済み" and "補足いただきたい" at once
+        # (defensive dedup — C2 already recomputes `missing` on the re-understood
+        # question via the ask->c1_intent edge, so they normally agree) (#175).
+        missing = [slot for slot in (state.get("missing") or []) if slot not in known_values]
         draft = self._draft.draft(
-            state["question"], top, state.get("asker"), state.get("missing") or []
+            state["question"],
+            top,
+            state.get("asker"),
+            missing,
+            situation=state.get("situation"),
+            topics=state.get("topics") or [],
+            known_values=known_values,
         )
         return {"draft": draft}
 

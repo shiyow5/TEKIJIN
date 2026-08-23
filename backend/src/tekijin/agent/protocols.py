@@ -62,6 +62,10 @@ class DraftModel(Protocol):
         responder: dict[str, Any],
         asker: dict[str, Any] | None,
         missing: list[str],
+        *,
+        situation: str | None = None,
+        topics: list[str] | None = None,
+        known_values: dict[str, str] | None = None,
     ) -> str: ...
 
 

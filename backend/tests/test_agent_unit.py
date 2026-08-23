@@ -30,6 +30,7 @@ from tekijin.agent.stubs import (
     KeywordIntentModel,
     RuleSufficiencyModel,
     TemplateDraftModel,
+    collect_known_values,
 )
 
 
@@ -441,3 +442,97 @@ def test_draft_handles_missing_name_and_dept() -> None:
     draft = TemplateDraftModel().draft("質問です", {}, None, [])
     assert "ご担当者さん" in draft
     assert "補足" not in draft  # no missing slots -> no supplement section
+
+
+def test_collect_known_values_from_products_and_site_count() -> None:
+    # #175: a slot's concrete value is surfaced iff it is actually filled.
+    values = collect_known_values("VPNの技術相談です。5拠点あります", "技術相談", ["VPN"])
+    assert values == {"現行製品": "VPN", "対象拠点数": "5拠点"}
+
+
+def test_collect_known_values_rescans_question_when_products_empty() -> None:
+    # Defensive fallback: if `products` is left empty but a known product name is
+    # in the text, the value is still recovered from the question.
+    values = collect_known_values("見積もりです CRM を使っています", "見積", [])
+    assert values["現行製品"] == "CRM"
+    assert "対象拠点数" not in values  # not mentioned -> stays unfilled
+
+
+def test_collect_known_values_prefers_earliest_mentioned_product() -> None:
+    # The value is shown to the responder as a confirmed premise, so pick the
+    # product mentioned first in the text, not the keyword-table order (VPN<CRM).
+    values = collect_known_values("技術相談です。CRMとVPNを併用しています", "技術相談", [])
+    assert values["現行製品"] == "CRM"
+
+
+def test_collect_known_values_empty_for_types_without_slots() -> None:
+    assert collect_known_values("こんにちは", "雑談", []) == {}
+
+
+def test_draft_injects_situation_and_known_values() -> None:
+    draft = TemplateDraftModel().draft(
+        "VPNの相談です",
+        {"name": "高梨", "dept": "技術部"},
+        None,
+        [],
+        situation="拠点間接続が不安定",
+        topics=["ネットワーク・VPN"],
+        known_values={"現行製品": "VPN", "対象拠点数": "5拠点"},
+    )
+    assert "【背景】" in draft and "拠点間接続が不安定" in draft
+    assert "現行製品：VPN" in draft
+    assert "対象拠点数：5拠点" in draft
+    assert "ネットワーク・VPN" in draft
+
+
+def _nodes_with_draft(draft_model: Any) -> AgentNodes:
+    stub: Any = object()
+    return AgentNodes(
+        intent_model=stub,
+        sufficiency_model=stub,
+        draft_model=draft_model,
+        embedder=stub,
+        retriever=stub,
+        scorer=stub,
+    )
+
+
+def test_c7_draft_injects_structured_context_into_the_draft() -> None:
+    # #175 (the real fix): C7 passes situation/topics + the filled slot values to
+    # the draft, so the hand-off reflects the system's structured understanding
+    # (question and premises), not a thin echo of the raw question.
+    nodes = _nodes_with_draft(TemplateDraftModel())
+    state: AgentState = {
+        "question": "技術相談です。CRM を使っていて 3拠点 あります",
+        "question_type": "技術相談",
+        "products": ["CRM"],
+        "situation": "移行を検討中",
+        "topics": ["CRM・営業支援"],
+        "missing": [],
+        "recommendations": [{"person_id": 7, "name": "田中", "dept": "営業"}],
+        "asker": None,
+    }
+    draft = nodes.c7_draft(state)["draft"]
+    assert "現行製品：CRM" in draft
+    assert "対象拠点数：3拠点" in draft
+    assert "移行を検討中" in draft
+    assert "CRM・営業支援" in draft
+
+
+def test_c7_draft_never_double_lists_a_filled_slot() -> None:
+    # Defensive dedup: even if `missing` still names a slot we now surface as a
+    # known value, the draft must not show it as both 確認済み and 補足 (they
+    # normally agree, since C2 recomputes `missing` on the re-understood question).
+    nodes = _nodes_with_draft(TemplateDraftModel())
+    state: AgentState = {
+        "question": "技術相談です。CRM を使っていて 3拠点 あります",
+        "question_type": "技術相談",
+        "products": ["CRM"],
+        "missing": ["現行製品", "対象拠点数"],  # stale/contradictory on purpose
+        "recommendations": [{"person_id": 7, "name": "田中", "dept": "営業"}],
+        "asker": None,
+    }
+    draft = nodes.c7_draft(state)["draft"]
+    assert "現行製品：CRM" in draft
+    # both slots are surfaced as known values -> no 補足いただきたい点 section
+    assert "補足いただきたい点" not in draft

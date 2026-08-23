@@ -42,7 +42,7 @@ export function DraftEditor({ initialDraft, disabled = false, onSend }: DraftEdi
         aria-label="聞き方の下書き"
         value={text}
         onChange={(e) => handleChange(e.target.value)}
-        placeholder="質問の背景や詳細を記載してください..."
+        placeholder="この方に伝える依頼内容です。背景や補足を追記・修正できます..."
         className="h-32 w-full resize-none rounded-lg border border-outline-variant bg-surface p-sm text-on-surface outline-none focus:border-primary"
       />
       <div className="mt-md flex justify-end">

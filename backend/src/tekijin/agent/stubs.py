@@ -109,6 +109,51 @@ def _contains_any(text: str, keywords: tuple[str, ...]) -> bool:
     return any(_keyword_matches(k, text) for k in keywords)
 
 
+# Site-count slot values look like "5拠点" / "3店舗": a number glued to a unit.
+_SITE_COUNT_RE = re.compile(r"\d+\s*(?:拠点|箇所|店舗|事業所)")
+
+
+def collect_known_values(question: str, question_type: str, products: list[str]) -> dict[str, str]:
+    """Concrete values for the required slots that are actually filled (C7 input).
+
+    Mirrors :meth:`RuleSufficiencyModel._slot_present` so a slot appears here iff
+    it would count as present there. C7 feeds these to the draft so the hand-off
+    shows the *filled* value (model-definition C7: ``known_values`` input) rather
+    than re-asking it. The ``現行製品`` branch also re-scans ``question`` when
+    ``products`` is empty — a defensive fallback for a caller/model that leaves
+    ``products`` unset while the name is in the text (the stub's C1 already
+    populates it, so this is belt-and-suspenders, not the primary path).
+    """
+
+    values: dict[str, str] = {}
+    for slot in _REQUIRED_SLOTS.get(question_type, ()):
+        if slot == "現行製品":
+            matched = products or [p for p in PRODUCT_KEYWORDS if _keyword_matches(p, question)]
+            if matched:
+                # Prefer the product mentioned earliest in the text (not the fixed
+                # keyword-table order): this value is shown to the responder as a
+                # confirmed premise, so "CRMとVPN" should surface CRM, not VPN.
+                lowered = question.lower()
+                values[slot] = min(matched, key=lambda p: _mention_index(lowered, p))
+        elif slot == "対象拠点数":  # pragma: no branch - only two slots defined
+            match = _SITE_COUNT_RE.search(question)
+            if match:
+                values[slot] = match.group(0)
+    return values
+
+
+def _mention_index(lowered_question: str, product: str) -> int:
+    """Position of ``product`` in the (already lower-cased) question, or +inf-ish.
+
+    A product not literally found (only possible for an externally supplied
+    ``products`` value that is not a substring) sorts last rather than winning at
+    index -1.
+    """
+
+    index = lowered_question.find(product.lower())
+    return index if index >= 0 else len(lowered_question)
+
+
 class KeywordIntentModel:
     """C1 stub: extract topics/products and classify by keyword tables."""
 
@@ -193,7 +238,7 @@ class RuleSufficiencyModel:
         if slot == "現行製品":
             return bool(intent.products)  # a concrete, known product name
         if slot == "対象拠点数":  # pragma: no branch - only two slots defined
-            return re.search(r"\d+\s*(?:拠点|箇所|店舗|事業所)", question) is not None
+            return _SITE_COUNT_RE.search(question) is not None
         return True  # pragma: no cover - defensive; unknown slots count as present
 
 
@@ -206,6 +251,10 @@ class TemplateDraftModel:
         responder: dict[str, Any],
         asker: dict[str, Any] | None,
         missing: list[str],
+        *,
+        situation: str | None = None,
+        topics: list[str] | None = None,
+        known_values: dict[str, str] | None = None,
     ) -> str:
         name = responder.get("name") or "ご担当者"
         dept = responder.get("dept") or responder.get("department") or ""
@@ -213,8 +262,17 @@ class TemplateDraftModel:
         lines = [
             header,
             "お世話になっております。下記の件でご相談させてください。",
-            f"【相談内容】\n{question}",
         ]
+        # C1 の状況理解を背景として先頭に添える（依頼文が質問の意味とずれない）。
+        if situation:
+            lines.append(f"【背景】\n{situation}")
+        lines.append(f"【相談内容】\n{question}")
+        # 確定済みスロット値は「埋まった前提」として明示し、回答者が確認しやすくする。
+        if known_values:
+            filled = "、".join(f"{slot}：{value}" for slot, value in known_values.items())
+            lines.append(f"【確認済みの前提】\n{filled}")
+        if topics:
+            lines.append("【関連トピック】\n" + "、".join(topics))
         if missing:
             lines.append("【補足いただきたい点】\n" + "、".join(missing))
         lines.append("お手数ですが、ご確認いただけますと幸いです。")
