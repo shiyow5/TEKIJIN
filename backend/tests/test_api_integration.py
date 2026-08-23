@@ -211,6 +211,14 @@ def test_decline_reroutes_then_accept(seed_counts, engine, fake_embedder) -> Non
     done = _events(client, "s3")
     assert done[0][0] == "done"
 
+    # The decline never stamped resolved_at; the final accept does, once (#97).
+    check = get_sessionmaker(engine)()
+    try:
+        q = check.query(Question).filter(Question.session_id == "s3").first()
+        assert q is not None and q.resolved_at is not None
+    finally:
+        check.close()
+
 
 # --------------------------------------------------------------------------- #
 # dispatch guards: 409 on busy/paused, 422 on wrong resume kind

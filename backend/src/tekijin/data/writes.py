@@ -70,7 +70,7 @@ def update_question_route(session: Session, question_id: str, route: str) -> Non
     session.execute(update(Question).where(Question.id == question_id).values(route=route))
 
 
-def mark_question_resolved(session: Session, question_id: str, resolved_at: Any) -> None:
+def mark_question_resolved(session: Session, question_id: str, resolved_at: dt.datetime) -> None:
     """Stamp the runtime resolution time on the question, first-wins (#97).
 
     Only sets ``resolved_at`` when it is still NULL, so a decline→reroute→accept
