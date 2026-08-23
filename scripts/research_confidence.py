@@ -20,6 +20,8 @@ import numpy as np
 
 BOOTSTRAP = 20000
 SEED = 42
+SPLIT_REPS = 200
+SPLIT_SEED = 0  # 分割検証は別の乱数列。文書に書く 147/200 はこの seed の値
 
 
 def auc(scores, labels):
@@ -106,6 +108,37 @@ def has(s, src):
     return src in s["evidence_sources"]
 
 
+def within_query_auc_ci(slots, key, sign=1, reps=5000, seed=SEED):
+    """同一問題内 AUC の区間。**問題単位**で再標本化する。
+
+    点推定だけ載せると、52対しか無いことが読み手に伝わらない。
+    """
+    rng = np.random.default_rng(seed)
+    by_q = collections.defaultdict(list)
+    for s in slots:
+        by_q[s["query_id"]].append(s)
+    qs = sorted(by_q)
+    draws = []
+    for _ in range(reps):
+        pick = rng.choice(qs, size=len(qs), replace=True)
+        data = [s for q in pick for s in by_q[q]]
+        v, _ = within_query_auc(data, key, sign)
+        if not np.isnan(v):
+            draws.append(v)
+    draws = np.array(draws)
+    return float(np.percentile(draws, 2.5)), float(np.percentile(draws, 97.5))
+
+
+# 実行時には使えない。**評価セットの gold 人数をどれだけ代理しているか**を測るためだけの
+# 参照ルール。これと提案ルールの差が、提案ルールに含まれる「問題の難しさ」の分になる。
+def _oracle_n_gold(s):
+    if s["n_gold"] >= 4 and s["rank"] <= 2:
+        return "高"
+    if s["n_gold"] <= 2 and s["rank"] == 3:
+        return "低"
+    return "中"
+
+
 RULES = {
     "現行": lambda s: s["confidence"],
     "順位だけ": lambda s: (
@@ -119,7 +152,45 @@ RULES = {
         if not has(s, "answer")
         else ("高" if (s["rank"] <= 2 and not has(s, "project")) else "中")
     ),
+    "【参照】gold人数を直接使う（実行時には使えない）": _oracle_n_gold,
 }
+
+# 分割検証で選ばせる候補。**現行は「低」が出ないため差を測れず、実質3案**である。
+SPLIT_CANDIDATES = ("順位だけ", "証拠の種類だけ", "順位＋証拠の種類")
+
+
+def split_half(slots, reps=SPLIT_REPS, seed=SPLIT_SEED):
+    """問題単位で半分に割り、学習半分でルールを選び、残り半分で測る。
+
+    **検証できるのは「候補から選ぶ」ところだけ**で、候補そのものを
+    全データを見て設計した部分は検証できない（文書にもそう書くこと）。
+    """
+    rng = np.random.default_rng(seed)
+    by_q = collections.defaultdict(list)
+    for s in slots:
+        by_q[s["query_id"]].append(s)
+    qs = sorted(by_q)
+
+    def spread(rule, data):
+        a = [s["hit"] for s in data if rule(s) == "高"]
+        b = [s["hit"] for s in data if rule(s) == "低"]
+        return (np.mean(a) - np.mean(b)) if a and b else np.nan
+
+    held, picked = [], collections.Counter()
+    for _ in range(reps):
+        perm = rng.permutation(qs)
+        tr = [s for q in perm[: len(qs) // 2] for s in by_q[q]]
+        te = [s for q in perm[len(qs) // 2 :] for s in by_q[q]]
+        scored = [(spread(RULES[k], tr), k) for k in SPLIT_CANDIDATES]
+        scored = [(v, k) for v, k in scored if not np.isnan(v)]
+        if not scored:
+            continue
+        best = max(scored)[1]
+        picked[best] += 1
+        v = spread(RULES[best], te)
+        if not np.isnan(v):
+            held.append(v)
+    return np.array(held), picked
 
 
 def main():
@@ -136,7 +207,12 @@ def main():
     print(
         "  ※ 全体 = 問題をまたいで比べた値。同一問題内 = 同じ問題の3枠だけで比べた値。"
     )
-    print(f"  {'素性':22s}{'全体':>8s}{'同一問題内':>12s}{'対の数':>8s}")
+    print(
+        "  ※ 同一問題内は問題単位の再標本化5000回で区間も出す（対が52しかないため）。"
+    )
+    print(
+        f"  {'素性':22s}{'全体':>8s}{'同一問題内':>12s}{'95%区間':>18s}{'対の数':>6s}"
+    )
     for key, sign, name in [
         ("topic_fit", 1, "topic_fit"),
         ("evidence_count", 1, "証拠数"),
@@ -144,10 +220,14 @@ def main():
         ("rank", -1, "順位（上位ほど良い）"),
         ("margin_to_next", 1, "次点とのスコア差"),
     ]:
-        vals = [sign * s[key] for s in slots if s[key] is not None]
-        labs = [s["hit"] for s in slots if s[key] is not None]
-        w, n = within_query_auc([s for s in slots if s[key] is not None], key, sign)
-        print(f"  {name:22s}{auc(vals, labs):8.3f}{w:12.3f}{n:8d}")
+        usable = [s for s in slots if s[key] is not None]
+        vals = [sign * s[key] for s in usable]
+        labs = [s["hit"] for s in usable]
+        w, n = within_query_auc(usable, key, sign)
+        lo, hi = within_query_auc_ci(usable, key, sign)
+        print(
+            f"  {name:22s}{auc(vals, labs):8.3f}{w:12.3f}  [{lo:.3f}, {hi:.3f}]{n:6d}"
+        )
 
     # 「その問題が簡単か」が効いているので、層別に見ないと素性の効果を取り違える
     table(slots, lambda s: s["n_gold"], "2. gold の人数ごと（問題の難しさの代理）")
@@ -217,6 +297,19 @@ def main():
                     "ci": [lo_, hi_],
                     "p_gt0": pos,
                 }
+
+    print("\n== 9. 分割検証（候補から選ぶ部分だけを検証する）==")
+    held, picked = split_half(slots)
+    print(f"  問題単位で半分に分割、{SPLIT_REPS}回、seed {SPLIT_SEED}")
+    print(f"  学習半分で選ばれたルール: {dict(picked)}")
+    print(
+        f"  検証半分での 高−低: 中央 {np.median(held):+.3f}"
+        f"  95%区間 [{np.percentile(held, 2.5):+.3f}, {np.percentile(held, 97.5):+.3f}]"
+        f"  正の割合 {np.mean(held > 0):.3f}"
+    )
+    print(
+        "  ※ 検証しているのは「候補から選ぶ」部分だけ。候補そのものは全データを見て設計している。"
+    )
 
     if args.out:
         with open(args.out, "w", encoding="utf-8") as f:
