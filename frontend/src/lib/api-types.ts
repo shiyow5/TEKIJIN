@@ -41,8 +41,8 @@ export type Outcome = "accepted" | "declined";
  * makes the wrong field a compile error rather than a runtime 422.
  */
 export type ResumeRequest =
-  | { session_id: string; outcome: Outcome; reply?: never }
-  | { session_id: string; reply: string; outcome?: never };
+  | { session_id: string; outcome: Outcome; recommendation_id?: number | null; reply?: never }
+  | { session_id: string; reply: string; outcome?: never; recommendation_id?: never };
 
 /** Acknowledgement returned by /ask and /answer (the stream flows over /events). */
 export interface AckResponse {
@@ -161,6 +161,8 @@ export interface HandoffResponse {
   draft: string;
   reuse_count: number;
   helpful_answer_count: number;
+  /** Generation token echoed back on POST /answer so a stale outcome 409s (#94). */
+  recommendation_id?: number | null;
 }
 
 // --------------------------------------------------------------------------- //

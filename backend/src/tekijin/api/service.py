@@ -288,12 +288,23 @@ class AgentService:
 
     # -- /answer : resume a paused run ------------------------------------ #
     def submit_resume(
-        self, session_id: str, *, outcome: str | None = None, reply: str | None = None
+        self,
+        session_id: str,
+        *,
+        outcome: str | None = None,
+        reply: str | None = None,
+        recommendation_id: int | None = None,
     ) -> None:
         """Queue a resume, validating it matches the pending interrupt kind.
 
         The outcome target (``primary_recommendation_id``) is read from the durable
         state, not from memory — so it is recorded even after an eviction/restart.
+
+        ``recommendation_id`` is an optional generation token: when supplied with an
+        ``outcome`` it must equal the session's current primary, else the outcome is
+        stale (a reroute moved the hand-off on, or a competing tab) and is rejected
+        with :class:`SessionConflict` (409) — so it never binds to a new candidate
+        (#94). ``None`` skips the check for older clients / clarification replies.
         """
 
         with self._lock(session_id):
@@ -314,6 +325,20 @@ class AgentService:
             elif node == "send":
                 if outcome is None:
                     raise SessionInvalid("this session expects a responder 'outcome'")
+                # Stale-outcome guard (#94): if the client echoed the recommendation
+                # id it was shown and the session has since moved to a different
+                # primary (reroute / competing tab), reject so the outcome cannot
+                # bind to the new candidate. A missing/None current primary can't be
+                # validated, so we let it through (degrade to prior behavior).
+                current_primary = snapshot.values.get("primary_recommendation_id")
+                if (
+                    recommendation_id is not None
+                    and current_primary is not None
+                    and recommendation_id != current_primary
+                ):
+                    raise SessionConflict(
+                        "this hand-off has moved to a different candidate; reload and try again"
+                    )
                 # The DB is the source of truth for the outcome. ``_record_outcome``
                 # writes it first-wins and returns the EFFECTIVE (persisted) value:
                 # on a duplicate submission (e.g. a restart lost the in-memory
@@ -437,6 +462,7 @@ class AgentService:
             draft=values.get("draft") or "",
             reuse_count=reuse["reuse_count"],
             helpful_answer_count=reuse["helpful_answer_count"],
+            recommendation_id=values.get("primary_recommendation_id"),
         )
 
     # -- /events : stream ------------------------------------------------- #

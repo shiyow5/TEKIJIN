@@ -98,6 +98,12 @@ class ResumeRequest(BaseModel):
     session_id: str = Field(pattern=_SESSION_ID_PATTERN)
     outcome: Outcome | None = None
     reply: str | None = None
+    # Generation token for the outcome: the recommendation id the responder was
+    # shown (from GET /handoff). If it no longer matches the session's current
+    # primary (a decline→reroute moved the hand-off on, or a competing tab), the
+    # outcome is stale and rejected with 409 so it cannot bind to a new candidate
+    # (#94). ``None`` skips the check (older clients / clarification replies).
+    recommendation_id: int | None = None
 
     @model_validator(mode="after")
     def _exactly_one(self) -> ResumeRequest:
@@ -106,6 +112,10 @@ class ResumeRequest(BaseModel):
             raise ValueError("provide exactly one of 'outcome' or 'reply'")
         if self.reply is not None and not self.reply.strip():
             raise ValueError("'reply' must be non-empty")
+        # The generation token only qualifies an outcome; it is meaningless on a
+        # clarification reply (matches the frontend's discriminated union) (#94).
+        if self.reply is not None and self.recommendation_id is not None:
+            raise ValueError("'recommendation_id' is only valid with an 'outcome'")
         return self
 
     @property
@@ -192,6 +202,10 @@ class HandoffResponse(BaseModel):
     draft: str = ""
     reuse_count: int = 0
     helpful_answer_count: int = 0
+    # The primary recommendation's id — a generation token the client echoes back
+    # on POST /answer so a stale outcome (after a reroute / from a competing tab)
+    # is rejected instead of binding to a new candidate (#94). None if no primary.
+    recommendation_id: int | None = None
 
 
 # --------------------------------------------------------------------------- #

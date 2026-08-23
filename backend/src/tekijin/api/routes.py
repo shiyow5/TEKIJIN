@@ -59,7 +59,12 @@ def answer(req: schemas.ResumeRequest, request: Request) -> schemas.AckResponse:
     """Resume a paused run: a responder outcome or a clarification reply."""
 
     try:
-        _service(request).submit_resume(req.session_id, outcome=req.outcome, reply=req.reply)
+        _service(request).submit_resume(
+            req.session_id,
+            outcome=req.outcome,
+            reply=req.reply,
+            recommendation_id=req.recommendation_id,
+        )
     except SessionConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except SessionInvalid as exc:

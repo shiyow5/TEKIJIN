@@ -85,6 +85,10 @@ def test_resume_request_exactly_one_of_outcome_or_reply() -> None:
         schemas.ResumeRequest(session_id="s", reply="   ")  # empty reply
     with pytest.raises(ValueError):
         schemas.ResumeRequest(session_id="s", outcome="maybe")  # type: ignore[arg-type]
+    # The generation token qualifies an outcome, not a clarification reply (#94).
+    assert schemas.ResumeRequest(session_id="s", outcome="accepted", recommendation_id=7)
+    with pytest.raises(ValueError):
+        schemas.ResumeRequest(session_id="s", reply="x", recommendation_id=7)
 
 
 # --------------------------------------------------------------------------- #

@@ -40,6 +40,7 @@ const HANDOFF: HandoffResponse = {
   draft: "高梨さんへの依頼文",
   reuse_count: 7,
   helpful_answer_count: 5,
+  recommendation_id: 42,
 };
 
 describe("useHandoff", () => {
@@ -73,7 +74,11 @@ describe("useHandoff", () => {
     act(() => result.current.submit("answer"));
 
     await waitFor(() => expect(result.current.phase).toBe("done"));
-    expect(postAnswerMock).toHaveBeenCalledWith({ session_id: "s1", outcome: "accepted" });
+    expect(postAnswerMock).toHaveBeenCalledWith({
+      session_id: "s1",
+      outcome: "accepted",
+      recommendation_id: 42,
+    });
     expect(result.current.action).toBe("answer");
   });
 
@@ -85,7 +90,11 @@ describe("useHandoff", () => {
     act(() => result.current.submit("defer"));
 
     await waitFor(() => expect(result.current.phase).toBe("done"));
-    expect(postAnswerMock).toHaveBeenCalledWith({ session_id: "s1", outcome: "declined" });
+    expect(postAnswerMock).toHaveBeenCalledWith({
+      session_id: "s1",
+      outcome: "declined",
+      recommendation_id: 42,
+    });
     expect(result.current.action).toBe("defer");
   });
 
@@ -97,7 +106,11 @@ describe("useHandoff", () => {
     act(() => result.current.submit("refer"));
 
     await waitFor(() => expect(result.current.phase).toBe("done"));
-    expect(postAnswerMock).toHaveBeenCalledWith({ session_id: "s1", outcome: "declined" });
+    expect(postAnswerMock).toHaveBeenCalledWith({
+      session_id: "s1",
+      outcome: "declined",
+      recommendation_id: 42,
+    });
     expect(result.current.action).toBe("refer");
   });
 

@@ -54,6 +54,9 @@ export function useHandoff(sessionId: string): UseHandoffResult {
   // postAnswer (the second would 409 and could clobber the successful state).
   const inFlight = useRef(false);
   const mounted = useRef(true);
+  // The recommendation id we were shown, captured on load so the submit callback
+  // (deps: [sessionId]) reads a current value, not a stale closure (#94).
+  const recommendationId = useRef<number | null | undefined>(undefined);
 
   useEffect(() => {
     mounted.current = true;
@@ -67,7 +70,9 @@ export function useHandoff(sessionId: string): UseHandoffResult {
     setState({ phase: "loading" });
     getHandoff(sessionId)
       .then((handoff) => {
-        if (active) setState({ phase: "ready", handoff });
+        if (!active) return;
+        recommendationId.current = handoff.recommendation_id;
+        setState({ phase: "ready", handoff });
       })
       .catch((err: unknown) => {
         if (!active) return;
@@ -99,7 +104,13 @@ export function useHandoff(sessionId: string): UseHandoffResult {
         });
       };
 
-      postAnswer({ session_id: sessionId, outcome: OUTCOME_BY_ACTION[action] })
+      // Echo the recommendation id we were shown so a stale outcome (the hand-off
+      // moved to another candidate, or a competing tab) is rejected with 409 (#94).
+      postAnswer({
+        session_id: sessionId,
+        outcome: OUTCOME_BY_ACTION[action],
+        recommendation_id: recommendationId.current,
+      })
         .then(finish)
         .catch((err: unknown) => {
           // A 409 means the session is no longer accepting THIS submission: the
