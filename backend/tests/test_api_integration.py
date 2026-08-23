@@ -984,6 +984,55 @@ def test_answer_unexpected_error_is_generic_500(seed_counts, engine, fake_embedd
     assert "secret internal" not in resp.text
 
 
+@pytest.mark.parametrize(
+    ("path", "symbol"),
+    [
+        ("/dashboard", "dashboard_summary"),
+        ("/inbox?responder_id=1", "pending_handoffs_for_responder"),
+        ("/questions?asker_id=1", "recent_questions_for_asker"),
+        ("/documents/doc_anything", "get_document"),
+    ],
+)
+def test_read_endpoint_unexpected_error_is_generic_500(
+    path, symbol, seed_counts, engine, fake_embedder, monkeypatch
+) -> None:
+    # #146: read endpoints must mask an unexpected error as a generic 500 (logged,
+    # never leaked), matching /ask, /answer, /handoff. A VALID id is passed so the
+    # request reaches the data call rather than short-circuiting on 422.
+    import tekijin.api.routes as routes
+
+    def _boom(*_a, **_k):
+        raise RuntimeError("secret internal detail at 10.0.0.1")
+
+    monkeypatch.setattr(routes, symbol, _boom)
+    client = _client(engine, fake_embedder, retriever=_FakeRetriever(), scorer=_FakeScorer([]))
+    resp = client.get(path)
+    assert resp.status_code == 500
+    assert "内部エラー" in resp.text
+    assert "secret internal" not in resp.text  # detail logged, never leaked
+
+
+def test_employees_unexpected_error_is_generic_500(
+    seed_counts, engine, fake_embedder, monkeypatch
+) -> None:
+    # /employees builds its repo inline, so boom via a fake Repository (#146).
+    import tekijin.api.routes as routes
+
+    class _BoomRepo:
+        def __init__(self, *_a, **_k) -> None:
+            pass
+
+        def list_employees(self):
+            raise RuntimeError("secret internal detail at 10.0.0.1")
+
+    monkeypatch.setattr(routes, "Repository", _BoomRepo)
+    client = _client(engine, fake_embedder, retriever=_FakeRetriever(), scorer=_FakeScorer([]))
+    resp = client.get("/employees")
+    assert resp.status_code == 500
+    assert "内部エラー" in resp.text
+    assert "secret internal" not in resp.text
+
+
 # --------------------------------------------------------------------------- #
 # durability: outcome recorded from the DURABLE state (registry-independent)
 # --------------------------------------------------------------------------- #
