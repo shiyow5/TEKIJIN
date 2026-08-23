@@ -55,6 +55,17 @@ class Repository:
         row = self._session.get(Employee, employee_id)
         return EmployeeDTO.from_row(row) if row is not None else None
 
+    def employees_by_ids(self, employee_ids: Sequence[int]) -> dict[int, EmployeeDTO]:
+        """Resolve several employees in one query (scorer N+1 fix, #58).
+
+        Keyed by id; unknown ids are simply absent. Empty ids → ``{}`` (no query).
+        """
+
+        if not employee_ids:
+            return {}
+        rows = self._session.scalars(select(Employee).where(Employee.id.in_(employee_ids)))
+        return {row.id: EmployeeDTO.from_row(row) for row in rows}
+
     def get_profile(self, employee_id: int) -> ProfileDTO | None:
         row = self._session.get(EmployeeProfile, employee_id)
         return ProfileDTO.from_row(row) if row is not None else None
@@ -78,9 +89,46 @@ class Repository:
         )
         return [CertificationDTO.from_row(r) for r in self._session.scalars(stmt)]
 
+    def certifications_for_many(
+        self, employee_ids: Sequence[int]
+    ) -> dict[int, list[CertificationDTO]]:
+        """Certifications for several employees in one query (scorer N+1 fix, #58).
+
+        Grouped by ``employee_id``; each list keeps the same ``id`` order as the
+        per-employee :meth:`certifications_for`. Empty ids → ``{}`` (no query);
+        employees with none are simply absent (callers use ``.get(id, [])``).
+        """
+
+        if not employee_ids:
+            return {}
+        stmt = (
+            select(Certification)
+            .where(Certification.employee_id.in_(employee_ids))
+            .order_by(Certification.employee_id, Certification.id)
+        )
+        out: dict[int, list[CertificationDTO]] = {}
+        for row in self._session.scalars(stmt):
+            out.setdefault(row.employee_id, []).append(CertificationDTO.from_row(row))
+        return out
+
     def skills_for(self, employee_id: int) -> list[SkillDTO]:
         stmt = select(Skill).where(Skill.employee_id == employee_id).order_by(Skill.id)
         return [SkillDTO.from_row(r) for r in self._session.scalars(stmt)]
+
+    def skills_for_many(self, employee_ids: Sequence[int]) -> dict[int, list[SkillDTO]]:
+        """Skills for several employees in one query (scorer N+1 fix, #58)."""
+
+        if not employee_ids:
+            return {}
+        stmt = (
+            select(Skill)
+            .where(Skill.employee_id.in_(employee_ids))
+            .order_by(Skill.employee_id, Skill.id)
+        )
+        out: dict[int, list[SkillDTO]] = {}
+        for row in self._session.scalars(stmt):
+            out.setdefault(row.employee_id, []).append(SkillDTO.from_row(row))
+        return out
 
     # -- questions & answers --------------------------------------------- #
     def list_questions(self) -> list[QuestionDTO]:
@@ -166,6 +214,28 @@ class Repository:
             .order_by(ProjectMember.project_id)
         )
         return [ProjectMembershipDTO.from_member(m) for m in self._session.scalars(stmt)]
+
+    def project_memberships_for_many(
+        self, employee_ids: Sequence[int]
+    ) -> dict[int, list[ProjectMembershipDTO]]:
+        """Project memberships for several employees in one query (scorer N+1 fix, #58).
+
+        Grouped by ``employee_id``; each list keeps the ``project_id`` order of the
+        per-employee :meth:`project_memberships_for`. Empty ids → ``{}`` (no query).
+        """
+
+        if not employee_ids:
+            return {}
+        stmt = (
+            select(ProjectMember)
+            .options(joinedload(ProjectMember.project))
+            .where(ProjectMember.employee_id.in_(employee_ids))
+            .order_by(ProjectMember.employee_id, ProjectMember.project_id)
+        )
+        out: dict[int, list[ProjectMembershipDTO]] = {}
+        for member in self._session.scalars(stmt):
+            out.setdefault(member.employee_id, []).append(ProjectMembershipDTO.from_member(member))
+        return out
 
     # -- load (recency windows) ------------------------------------------ #
     def recent_recommendation_counts(
