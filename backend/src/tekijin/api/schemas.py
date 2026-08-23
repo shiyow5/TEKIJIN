@@ -112,6 +112,10 @@ class ResumeRequest(BaseModel):
             raise ValueError("provide exactly one of 'outcome' or 'reply'")
         if self.reply is not None and not self.reply.strip():
             raise ValueError("'reply' must be non-empty")
+        # The generation token only qualifies an outcome; it is meaningless on a
+        # clarification reply (matches the frontend's discriminated union) (#94).
+        if self.reply is not None and self.recommendation_id is not None:
+            raise ValueError("'recommendation_id' is only valid with an 'outcome'")
         return self
 
     @property
