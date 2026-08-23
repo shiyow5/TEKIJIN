@@ -10,11 +10,19 @@ original Cormack et al. (2009) formulation and the spec.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Hashable, Sequence
 
 
-def rrf(rankings: Sequence[Sequence[Hashable]], k: int = 60) -> list[tuple[Hashable, float]]:
+def rrf(
+    rankings: Sequence[Sequence[Hashable]],
+    k: int = 60,
+    weights: Sequence[float] | None = None,
+) -> list[tuple[Hashable, float]]:
     """Fuse ranked id lists into a single ranking via Reciprocal Rank Fusion.
+
+    ``score(d) = Σ_r w_r / (k + rank_r(d))`` over every list ``r`` that contains
+    ``d`` (1-based rank).
 
     Args:
         rankings: One ranked list per retrieval system. Each is ordered
@@ -23,6 +31,11 @@ def rrf(rankings: Sequence[Sequence[Hashable]], k: int = 60) -> list[tuple[Hasha
             a single list.
         k: The RRF constant. Larger ``k`` flattens the contribution of rank, so
             top ranks matter less. Must be positive.
+        weights: Optional per-ranking weight ``w_r`` (same length/order as
+            ``rankings``). ``None`` weights every list at 1.0 (classic RRF). Used
+            to down-weight a channel whose ranking is unreliable for the query
+            style — e.g. BM25 on symptom-worded queries (#68). Weights must be
+            non-negative; a length mismatch is rejected.
 
     Returns:
         ``(id, score)`` pairs sorted by descending fused score. Ties are broken
@@ -31,11 +44,26 @@ def rrf(rankings: Sequence[Sequence[Hashable]], k: int = 60) -> list[tuple[Hasha
 
     if k <= 0:
         raise ValueError(f"k must be positive, got {k}")
+    if weights is not None:
+        if len(weights) != len(rankings):
+            raise ValueError(
+                f"weights length {len(weights)} must match rankings length {len(rankings)}"
+            )
+        # Reject NaN/inf: NaN passes ``< 0`` yet poisons every score, and inf
+        # makes one channel dominate — neither defines a usable ranking.
+        if any(not math.isfinite(w) or w < 0 for w in weights):
+            raise ValueError(f"weights must be finite and non-negative, got {list(weights)}")
 
     scores: dict[Hashable, float] = {}
-    for ranking in rankings:
+    for idx, ranking in enumerate(rankings):
+        weight = 1.0 if weights is None else weights[idx]
+        # A zero-weight ranking must contribute NOTHING — skip it entirely so its
+        # ids are not even introduced (else a disabled channel could still surface
+        # ids when the weighted channels return fewer than top_k).
+        if weight == 0.0:
+            continue
         for rank, id_ in enumerate(ranking):
             # ``rank`` is 0-based; RRF uses 1-based ranks, hence ``+ 1``.
-            scores[id_] = scores.get(id_, 0.0) + 1.0 / (k + rank + 1)
+            scores[id_] = scores.get(id_, 0.0) + weight / (k + rank + 1)
 
     return sorted(scores.items(), key=lambda pair: (-pair[1], str(pair[0])))

@@ -79,6 +79,46 @@ def test_rrf_rejects_nonpositive_k() -> None:
         rrf([["a"]], k=0)
 
 
+def test_rrf_weights_scale_each_ranking_contribution() -> None:
+    # Two singleton lists, each rank-0. Weighting the second below the first makes
+    # the first-list id outrank it despite the identical rank (#68).
+    result = dict(rrf([["a"], ["b"]], k=60, weights=[1.0, 0.2]))
+    assert result["a"] == pytest.approx(1.0 / 61)
+    assert result["b"] == pytest.approx(0.2 / 61)
+    assert result["a"] > result["b"]
+
+
+def test_rrf_weight_zero_omits_a_ranking_entirely() -> None:
+    # A zero-weighted ranking contributes nothing AND does not introduce its ids
+    # (BM25 fully off must not leak sparse-only hits). "b" appears only in the
+    # zero-weighted list, so it must be absent from the result.
+    result = dict(rrf([["a"], ["b"]], k=60, weights=[1.0, 0.0]))
+    assert "b" not in result
+    assert result["a"] == pytest.approx(1.0 / 61)
+
+
+def test_rrf_weights_none_matches_all_ones() -> None:
+    rankings = [["a", "b"], ["b", "c"]]
+    assert rrf(rankings) == rrf(rankings, weights=[1.0, 1.0])
+
+
+def test_rrf_rejects_weight_length_mismatch() -> None:
+    with pytest.raises(ValueError, match="weights length"):
+        rrf([["a"], ["b"]], weights=[1.0])
+
+
+def test_rrf_rejects_negative_weight() -> None:
+    with pytest.raises(ValueError, match="finite and non-negative"):
+        rrf([["a"]], weights=[-0.1])
+
+
+def test_rrf_rejects_non_finite_weight() -> None:
+    with pytest.raises(ValueError, match="finite and non-negative"):
+        rrf([["a"]], weights=[float("nan")])
+    with pytest.raises(ValueError, match="finite and non-negative"):
+        rrf([["a"]], weights=[float("inf")])
+
+
 # --------------------------------------------------------------------------- #
 # sparse / BM25 (real SudachiPy)
 # --------------------------------------------------------------------------- #
@@ -257,6 +297,25 @@ def test_hybrid_retriever_rejects_nonpositive_params(top_k: int, rrf_k: int) -> 
         HybridRetriever(embedder, session=None, top_k=top_k, rrf_k=rrf_k)  # type: ignore[arg-type]
 
 
+def test_hybrid_retriever_rejects_negative_bm25_weight() -> None:
+    from tekijin.retrieval.retriever import HybridRetriever
+
+    embedder = SentenceTransformerEmbedder(model=_FakeModel())
+    with pytest.raises(ValueError, match="bm25_weight must be non-negative"):
+        HybridRetriever(embedder, session=None, bm25_weight=-0.1)  # type: ignore[arg-type]
+
+
+def test_hybrid_retriever_bm25_weight_defaults_from_settings() -> None:
+    from tekijin.retrieval.retriever import HybridRetriever
+
+    embedder = SentenceTransformerEmbedder(model=_FakeModel())
+    # None -> settings; an explicit value wins.
+    default = HybridRetriever(embedder, session=None)  # type: ignore[arg-type]
+    assert default._bm25_weight == get_settings().bm25_weight
+    explicit = HybridRetriever(embedder, session=None, bm25_weight=0.42)  # type: ignore[arg-type]
+    assert explicit._bm25_weight == 0.42
+
+
 @pytest.mark.parametrize("batch_size", [0, -1])
 def test_embed_corpus_rejects_nonpositive_batch_size(batch_size: int) -> None:
     from tekijin.retrieval.indexing import embed_corpus
@@ -307,11 +366,23 @@ def test_question_mapped_answer_ids_ranks_by_question_similarity() -> None:
     assert ranked == ["a2", "a3"]
 
 
-def test_fuse_accepts_three_rankings() -> None:
+def test_fuse_accepts_dense_rankings_and_sparse() -> None:
     retriever = _retriever_without_db(top_k=5)
     # "x" is rank 1 in all three lists; agreement lifts it above each list's #0.
-    fused = retriever._fused_ids(["a", "x"], ["b", "x"], ["c", "x"])
+    fused = retriever._fused_ids([["a", "x"], ["b", "x"]], ["c", "x"])
     assert fused[0] == "x"
+
+
+def test_fuse_downweights_the_bm25_channel() -> None:
+    # A dense #0 and a sparse #0 tie on rank, but the sparse channel is weighted
+    # below 1.0, so the dense hit must win (guards the #68 fix). With equal weight
+    # (bm25_weight=1.0) they'd tie and str-order would decide instead.
+    weighted = _retriever_without_db(top_k=5)
+    weighted._bm25_weight = 0.2
+    fused = weighted._fuse([["dense_hit"]], ["sparse_hit"])
+    scores = dict(fused)
+    assert scores["dense_hit"] > scores["sparse_hit"]
+    assert fused[0][0] == "dense_hit"
 
 
 # --------------------------------------------------------------------------- #

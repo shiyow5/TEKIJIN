@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any
 
 from sqlalchemy.orm import Session
 
+from tekijin.config import get_settings
 from tekijin.data.repository import Repository
 from tekijin.retrieval import dense
 from tekijin.retrieval.embedding import QUERY, Embedder
@@ -51,6 +52,9 @@ class HybridRetriever:
         session: Active session for dense pgvector search and repository reads.
         top_k: Max hits per result section.
         rrf_k: RRF constant (spec default 60).
+        bm25_weight: RRF weight for the sparse (BM25) channel; dense channels stay
+            at 1.0. ``None`` reads ``settings.bm25_weight`` (default 0.2). Equal
+            weight (1.0) over-trusts BM25 on symptom-worded queries — see #68.
     """
 
     def __init__(
@@ -60,25 +64,36 @@ class HybridRetriever:
         *,
         top_k: int = 10,
         rrf_k: int = 60,
+        bm25_weight: float | None = None,
     ) -> None:
         if top_k <= 0:
             raise ValueError(f"top_k must be positive, got {top_k}")
         if rrf_k <= 0:
             raise ValueError(f"rrf_k must be positive, got {rrf_k}")
+        resolved_weight = get_settings().bm25_weight if bm25_weight is None else bm25_weight
+        if resolved_weight < 0:
+            raise ValueError(f"bm25_weight must be non-negative, got {resolved_weight}")
         self._embedder = embedder
         self._session = session
         self._repo = Repository(session)
         self._top_k = top_k
         self._rrf_k = rrf_k
+        self._bm25_weight = resolved_weight
         # Per-channel retrieval depth before fusion (see CANDIDATE_POOL).
         self._pool = max(top_k * 5, CANDIDATE_POOL)
 
-    def _fuse(self, *rankings: list[Any]) -> list[tuple[Any, float]]:
+    def _fuse(
+        self, dense_rankings: list[list[Any]], sparse_ranking: list[Any]
+    ) -> list[tuple[Any, float]]:
+        # Dense channels weighted 1.0; the BM25 sparse channel is down-weighted so
+        # its noisier ranks (on symptom-worded queries) cannot swamp dense (#68).
         # RRF over the full channel pools; truncate to top_k only afterwards.
-        return rrf(list(rankings), k=self._rrf_k)[: self._top_k]
+        rankings = [*dense_rankings, sparse_ranking]
+        weights = [1.0] * len(dense_rankings) + [self._bm25_weight]
+        return rrf(rankings, k=self._rrf_k, weights=weights)[: self._top_k]
 
-    def _fused_ids(self, *rankings: list[Any]) -> list[Any]:
-        return [id_ for id_, _ in self._fuse(*rankings)]
+    def _fused_ids(self, dense_rankings: list[list[Any]], sparse_ranking: list[Any]) -> list[Any]:
+        return [id_ for id_, _ in self._fuse(dense_rankings, sparse_ranking)]
 
     def _dense_hits(self, query_vec: Sequence[float], target: str) -> list[tuple[Any, float]]:
         """``(id, cosine_similarity)`` for ``target``, best-first."""
@@ -188,7 +203,7 @@ class HybridRetriever:
         sparse_answers = [id_ for id_, _ in answer_index.search(query, self._pool)]
         dense_answers = [id_ for id_, _ in answer_hits]
         question_answers = self._question_mapped_answer_ids(question_hits, answers_by_question)
-        fused_answers = self._fuse(dense_answers, question_answers, sparse_answers)
+        fused_answers = self._fuse([dense_answers, question_answers], sparse_answers)
         past_answers: list[PastAnswer] = [
             {"qa_id": id_, "score": score, "responder_id": responder_of.get(id_)}
             for id_, score in fused_answers
@@ -196,7 +211,7 @@ class HybridRetriever:
 
         # --- documents ----------------------------------------------------- #
         sparse_docs = [id_ for id_, _ in document_index.search(query, self._pool)]
-        fused_docs = self._fuse([id_ for id_, _ in document_hits], sparse_docs)
+        fused_docs = self._fuse([[id_ for id_, _ in document_hits]], sparse_docs)
         documents_out: list[DocumentHit] = [
             {"doc_id": id_, "score": score} for id_, score in fused_docs
         ]
@@ -204,7 +219,7 @@ class HybridRetriever:
         # --- candidate people ---------------------------------------------- #
         dense_people = [id_ for id_, _ in people_hits]
         sparse_people = [id_ for id_, _ in profile_index.search(query, self._pool)]
-        fused_people = self._fused_ids(dense_people, sparse_people)
+        fused_people = self._fused_ids([dense_people], sparse_people)
         candidate_people = self._aggregate_people(past_answers, fused_people)
 
         return {

@@ -78,6 +78,7 @@ def build_agent(
     checkpointer: Any | None = None,
     retriever_top_k: int = 10,
     rrf_k: int = 60,
+    bm25_weight: float | None = None,
 ):
     """Compile and return the C1-C8 agent graph.
 
@@ -98,7 +99,9 @@ def build_agent(
         draft_model=draft_model or TemplateDraftModel(),
         embedder=embedder,
         retriever=retriever
-        or HybridRetriever(embedder, session, top_k=retriever_top_k, rrf_k=rrf_k),
+        or HybridRetriever(
+            embedder, session, top_k=retriever_top_k, rrf_k=rrf_k, bm25_weight=bm25_weight
+        ),
         scorer=scorer or ExpertiseScorer(Repository(session), weights=weights),
     )
 
