@@ -8,9 +8,7 @@ export default function Loading() {
       className="mx-auto flex w-full max-w-3xl items-center justify-center py-lg"
       aria-busy="true"
     >
-      <p role="status" className="text-on-surface-variant">
-        読み込み中…
-      </p>
+      <output className="text-on-surface-variant">読み込み中…</output>
     </div>
   );
 }

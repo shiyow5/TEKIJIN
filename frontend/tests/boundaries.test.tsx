@@ -16,13 +16,15 @@ describe("route boundaries (#126)", () => {
     expect(screen.getByRole("link", { name: "ホームへ戻る" })).toHaveAttribute("href", "/");
   });
 
-  it("error boundary retries via reset and never leaks the error detail", () => {
+  it("error boundary logs the error, retries via reset, and never leaks the detail", () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     const reset = vi.fn();
     const secret = new Error("DB password is hunter2");
     render(<ErrorBoundary error={secret} reset={reset} />);
 
     expect(screen.getByRole("alert")).toHaveTextContent("エラーが発生しました");
-    expect(screen.queryByText(/hunter2/)).toBeNull(); // no sensitive leakage
+    expect(screen.queryByText(/hunter2/)).toBeNull(); // no sensitive leakage to the DOM
+    expect(consoleError).toHaveBeenCalledWith(secret); // but logged for diagnosis
 
     fireEvent.click(screen.getByRole("button", { name: "再読み込み" }));
     expect(reset).toHaveBeenCalledTimes(1);

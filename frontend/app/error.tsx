@@ -1,14 +1,22 @@
 "use client";
 
+import { useEffect } from "react";
+
 /**
  * Route-level error boundary (#126). Catches render/data errors in a segment and
  * offers a retry, instead of an unhandled crash. The underlying error detail is
- * never shown to the user (no sensitive leakage); `reset()` re-renders the
- * segment.
+ * never shown to the user (no sensitive leakage) but IS logged to the console so
+ * it is not silently swallowed; `reset()` re-renders the segment.
  */
-export default function Error({
+export default function ErrorBoundary({
+  error,
   reset,
 }: { error: Error & { digest?: string }; reset: () => void }) {
+  useEffect(() => {
+    // Log for diagnosis (no monitoring backend yet); never surfaced in the UI.
+    console.error(error);
+  }, [error]);
+
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col items-center gap-md py-lg text-center">
       <h1 className="font-bold text-2xl text-on-surface">問題が発生しました</h1>
