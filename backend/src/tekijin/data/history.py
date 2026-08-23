@@ -44,18 +44,21 @@ def recent_questions_for_asker(
     qids = [r[0] for r in q_rows]
 
     # Accepting responder (the /answer accept path): rank-1, outcome accepted.
-    accepted: dict[str, str] = {
-        qid: name
-        for qid, name in session.execute(
-            select(Recommendation.question_id, Employee.name)
-            .join(Employee, Employee.id == Recommendation.employee_id)
-            .where(
-                Recommendation.question_id.in_(qids),
-                Recommendation.rank == 1,
-                Recommendation.outcome == "accepted",
-            )
-        ).all()
-    }
+    # A decline+reroute can leave several rank-1 rows per question, so order
+    # newest-first and keep the first match — deterministic, mirroring
+    # ``pending_handoffs_for_responder`` (data/inbox.py).
+    accepted: dict[str, str] = {}
+    for qid, name in session.execute(
+        select(Recommendation.question_id, Employee.name)
+        .join(Employee, Employee.id == Recommendation.employee_id)
+        .where(
+            Recommendation.question_id.in_(qids),
+            Recommendation.rank == 1,
+            Recommendation.outcome == "accepted",
+        )
+        .order_by(Recommendation.created_at.desc(), Recommendation.id.desc())
+    ).all():
+        accepted.setdefault(qid, name)
 
     # First answerer (seeded history path), oldest answer wins.
     answered: dict[str, str] = {}

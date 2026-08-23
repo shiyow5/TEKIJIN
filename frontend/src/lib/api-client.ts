@@ -160,7 +160,7 @@ export async function getInbox(
 
 /**
  * GET /questions — the asker's own recent questions with resolution state
- * (画面1 の "最近あなたが解決した質問"). `askerId` is the external "E###" form.
+ * (画面1 の "最近のあなたの質問"). `askerId` is the external "E###" form.
  * Returns the unwrapped items array, newest first.
  */
 export async function getRecentQuestions(

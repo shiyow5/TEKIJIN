@@ -239,6 +239,31 @@ def test_recent_questions_orders_newest_first_and_resolves(seed_counts, session)
     assert all(i["question_id"] != "api_rh_x" for i in items)
 
 
+def test_recent_questions_accepted_responder_tiebreak_is_deterministic(
+    seed_counts, session
+) -> None:
+    # If a question has more than one accepted rank-1 rec (decline+reroute edge),
+    # the newest one wins deterministically (mirrors the inbox dedup).
+    session.add(
+        Question(
+            id="api_rt",
+            asker_id=14,
+            body="tie",
+            topics=[],
+            status="open",
+            created_at=dt.datetime(2099, 3, 1, 9, 0, 0),
+        )
+    )
+    session.flush()
+    session.add(Recommendation(question_id="api_rt", employee_id=5, rank=1, outcome="accepted"))
+    session.add(Recommendation(question_id="api_rt", employee_id=6, rank=1, outcome="accepted"))
+    session.flush()
+
+    items = recent_questions_for_asker(session, 14)
+    newest = session.get(Employee, 6)  # higher id → inserted last → newest
+    assert items[0]["responder_name"] == newest.name
+
+
 def test_recent_questions_respects_limit(seed_counts, session) -> None:
     base = dt.datetime(2099, 2, 1, 9, 0, 0)
     for i in range(7):
