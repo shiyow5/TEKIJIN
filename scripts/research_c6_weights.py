@@ -232,7 +232,7 @@ def main():
 
         return run
 
-    results = {}
+    results = {"base": {"R@3": base["R@3"], "MRR": base["MRR"], "Top1": base["Top1"]}}
 
     def show(label, sys_fn, store=None):
         r = A.evaluate(ctx, sys_fn)
@@ -242,8 +242,17 @@ def main():
             f"[{lo:+.3f},{hi:+.3f}] MRR={r['MRR']:.3f} Top1={r['Top1']:.3f}"
         )
         if store is not None:
+            # delta / ci も保存する。これが無いと「区間はコンソールにしか無い」ので、
+            # 文書に書くときに手で写すことになり、実際に2度書き間違えた（#158）。
             results.setdefault(store, []).append(
-                {"name": label, "R@3": r["R@3"], "MRR": r["MRR"], "Top1": r["Top1"]}
+                {
+                    "name": label,
+                    "R@3": r["R@3"],
+                    "delta": r["R@3"] - base["R@3"],
+                    "ci": [lo, hi],
+                    "MRR": r["MRR"],
+                    "Top1": r["Top1"],
+                }
             )
         return r
 

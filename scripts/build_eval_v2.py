@@ -695,20 +695,31 @@ def _constraint_phrasings(branch):
     return out
 
 
-def _pick_phrasing(branch, used):
-    """まだ使っていない言い回しを、拠点名を隠す型を優先して選ぶ。
+def _pick_phrasing(branch, state):
+    """まだ使っていない言い回しを、隠す型と出す型が半々になるように選ぶ。
 
-    単純な剰余での割り当てだと拠点名の出る型に偏り、文字列一致で拾えてしまう
-    （#84 の直後に一度そうなった）。全体として隠す型と出す型が混ざるようにする。
+    `state` は `{"used": Counter(), "hidden": int, "shown": int}`。
+
+    - **隠す型に偏らせない**: 全部隠すと「拠点名の文字列一致では 0/N」になってしまい、
+      素朴な実装が「全部取り逃す」しか言えなくなる。混ざっているから分解能が出る。
+    - **出す型に偏らせない**: 単純な剰余で配ったら出す型に偏り、文字列一致で 4/5
+      拾えてしまった（#84 の直後に一度そうなった）。
+    - 同じラベルは**使用回数が少ないものから**選ぶので、件数が増えても分散する。
+
+    なお `東京` は関東に本社と並ぶため地域名が使えず、言い換えも無いので隠す型が無い。
+    その場合は出す型にフォールバックする。
     """
     options = _constraint_phrasings(branch)
-    for want_hidden in (True, False):
-        for label, fn, hidden in options:
-            if hidden is want_hidden and label not in used:
-                used.add(label)
-                return fn
-    # すべて使い切ったら最後の型を再利用する（拠点が増えたときの保険）。
-    return options[-1][1]
+    want_hidden = state["hidden"] <= state["shown"]
+    for pref in (want_hidden, not want_hidden):
+        cands = [o for o in options if o[2] is pref]
+        if not cands:
+            continue
+        label, fn, hidden = min(cands, key=lambda o: (state["used"][o[0]], o[0]))
+        state["used"][label] += 1
+        state["hidden" if hidden else "shown"] += 1
+        return fn
+    raise AssertionError(f"言い回しが1つも無い: {branch}")
 
 
 # 「制約に見えて制約でない」文（#84）。地名は出るが担当者の拠点を縛っていないので、
@@ -786,16 +797,22 @@ def main():
             }
         )
 
+    # #158: L2 は全件を制約つきにしたので、デコイ（制約に見えて制約でない文）は L1 に置く。
+    # L1 はトピック語を明示する層で、地名を1文足しても役割は変わらない。
+    # constraint は None のままなので gold も動かない。
     for i, t in enumerate(l1_topics):
         q = EXPLICIT_FRAMES[i % len(EXPLICIT_FRAMES)].format(topic=t, sym=SYMPTOM[t])
+        decoy = DECOY_SENTENCES[i] if i < len(DECOY_SENTENCES) else None
         add(
-            q,
+            q + (decoy or ""),
             "L1",
             [t],
             gold[t],
             route_for(t, gold[t], corpus),
             "auto:project_daily",
-            "トピック語を明示。易しい床（回帰検出用）",
+            "トピック語を明示＋地名（拠点制約ではない。誤検出の検出用）"
+            if decoy
+            else "トピック語を明示。易しい床（回帰検出用）",
         )
 
     # L2 のうち数件に「拠点」の制約を付ける。
@@ -804,12 +821,11 @@ def main():
     # かつ「近い人に聞きたい」という実際の要求（doc12 の負荷分散・近接性）を測れる。
     emp_by_id = {e["id"]: e for e in employees}
     constrained = 0
-    decoys = 0
-    used_phrasings = set()
+    phrasing_state = {"used": Counter(), "hidden": 0, "shown": 0}
     for t in l2_topics:
         base = gold[t]
         applied = None
-        if constrained < 5 and len(base) >= 3:
+        if len(base) >= 3:
             branches = Counter(emp_by_id[e]["branch"] for e in base)
             for br, cnt in branches.most_common():
                 if 1 <= cnt < len(base):
@@ -818,7 +834,7 @@ def main():
         if applied:
             experts = [e for e in base if emp_by_id[e]["branch"] == applied]
             # #84: 全件を同じ文型にしない。拠点ごとに使える言い回しを順に配って散らす。
-            q = _pick_phrasing(applied, used_phrasings)(SYMPTOM[t])
+            q = _pick_phrasing(applied, phrasing_state)(SYMPTOM[t])
             hidden = applied not in q
             add(
                 q,
@@ -833,21 +849,14 @@ def main():
             )
             constrained += 1
         else:
-            # #84: 制約なしの一部に「制約に見えて制約でない」文を混ぜ、
-            # 地名を拾っただけで制約と判定する実装の誤検出を測れるようにする。
-            decoy = DECOY_SENTENCES[decoys] if decoys < len(DECOY_SENTENCES) else None
-            if decoy:
-                decoys += 1
             add(
-                SYMPTOM[t] + (decoy or ""),
+                SYMPTOM[t],
                 "L2",
                 [t],
                 base,
                 route_for(t, base, corpus),
                 "auto:project_daily",
-                "制約なし。地名は出るが拠点制約ではない（誤検出の検出用）"
-                if decoy
-                else "症状のみ。トピック語をクエリから除去済み",
+                "症状のみ。トピック語をクエリから除去済み",
             )
 
     # ---- L2 追加分: 人手ラベル（PR #46）由来の10件 ----
