@@ -164,7 +164,7 @@ def test_enough_independent_samples(person):
 
 def test_difficulty_layers_present(person):
     dist = Counter(q["difficulty"] for q in person)
-    assert dist == {"L1": 10, "L2": 36, "L3": 10, "L4": 15}, dist
+    assert dist == {"L1": 10, "L2": 36, "L3": 20, "L4": 15}, dist
 
 
 def test_l4_expects_abstain(person):

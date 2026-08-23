@@ -1,16 +1,16 @@
 {
-  "n_slots": 156,
+  "n_slots": 186,
   "buckets": {
-    "正解": 105,
-    "誤り: gold と同じ部署（証拠あり）": 40,
+    "正解": 126,
+    "誤り: gold と同じ部署（証拠あり）": 49,
     "誤り: 部署も拠点も違う（証拠あり）": 6,
     "誤り: gold と同じ拠点（部署は違う）": 5
   },
   "confidence": {
-    "高/正解": 81,
+    "高/正解": 102,
     "中/正解": 24,
-    "高/誤り": 45,
-    "中/誤り": 6
+    "高/誤り": 53,
+    "中/誤り": 7
   },
   "slots": [
     {
@@ -2953,6 +2953,591 @@
       "same_branch_as_gold": true,
       "difficulty": "L3",
       "n_gold": 2
+    },
+    {
+      "query_id": 57,
+      "rank": 1,
+      "person_id": 23,
+      "hit": true,
+      "confidence": "高",
+      "score": 0.7993,
+      "margin_to_next": 0.005,
+      "topic_fit": 1.0,
+      "evidence_count": 13,
+      "evidence_sources": {
+        "project": 10,
+        "answer": 3
+      },
+      "same_dept_as_gold": true,
+      "same_branch_as_gold": true,
+      "difficulty": "L3",
+      "n_gold": 4
+    },
+    {
+      "query_id": 57,
+      "rank": 2,
+      "person_id": 4,
+      "hit": true,
+      "confidence": "高",
+      "score": 0.7943,
+      "margin_to_next": 0.0279,
+      "topic_fit": 0.9992,
+      "evidence_count": 11,
+      "evidence_sources": {
+        "self": 1,
+        "project": 7,
+        "answer": 3
+      },
+      "same_dept_as_gold": true,
+      "same_branch_as_gold": true,
+      "difficulty": "L3",
+      "n_gold": 4
+    },
+    {
+      "query_id": 57,
+      "rank": 3,
+      "person_id": 5,
+      "hit": false,
+      "confidence": "高",
+      "score": 0.7664,
+      "margin_to_next": 0.0004,
+      "topic_fit": 1.0,
+      "evidence_count": 15,
+      "evidence_sources": {
+        "cert": 1,
+        "self": 1,
+        "project": 7,
+        "answer": 6
+      },
+      "same_dept_as_gold": true,
+      "same_branch_as_gold": true,
+      "difficulty": "L3",
+      "n_gold": 4
+    },
+    {
+      "query_id": 58,
+      "rank": 1,
+      "person_id": 22,
+      "hit": false,
+      "confidence": "高",
+      "score": 0.8096,
+      "margin_to_next": 0.0137,
+      "topic_fit": 0.9963,
+      "evidence_count": 6,
+      "evidence_sources": {
+        "project": 2,
+        "answer": 4
+      },
+      "same_dept_as_gold": true,
+      "same_branch_as_gold": true,
+      "difficulty": "L3",
+      "n_gold": 4
+    },
+    {
+      "query_id": 58,
+      "rank": 2,
+      "person_id": 4,
+      "hit": true,
+      "confidence": "高",
+      "score": 0.7959,
+      "margin_to_next": 0.0284,
+      "topic_fit": 0.9973,
+      "evidence_count": 7,
+      "evidence_sources": {
+        "project": 4,
+        "answer": 3
+      },
+      "same_dept_as_gold": true,
+      "same_branch_as_gold": true,
+      "difficulty": "L3",
+      "n_gold": 4
+    },
+    {
+      "query_id": 58,
+      "rank": 3,
+      "person_id": 5,
+      "hit": true,
+      "confidence": "高",
+      "score": 0.7675,
+      "margin_to_next": 0.0529,
+      "topic_fit": 0.9997,
+      "evidence_count": 9,
+      "evidence_sources": {
+        "project": 4,
+        "answer": 5
+      },
+      "same_dept_as_gold": true,
+      "same_branch_as_gold": true,
+      "difficulty": "L3",
+      "n_gold": 4
+    },
+    {
+      "query_id": 59,
+      "rank": 1,
+      "person_id": 6,
+      "hit": true,
+      "confidence": "高",
+      "score": 0.7402,
+      "margin_to_next": 0.1022,
+      "topic_fit": 0.9975,
+      "evidence_count": 7,
+      "evidence_sources": {
+        "cert": 1,
+        "answer": 6
+      },
+      "same_dept_as_gold": true,
+      "same_branch_as_gold": true,
+      "difficulty": "L3",
+      "n_gold": 3
+    },
+    {
+      "query_id": 59,
+      "rank": 2,
+      "person_id": 24,
+      "hit": true,
+      "confidence": "高",
+      "score": 0.638,
+      "margin_to_next": 0.1096,
+      "topic_fit": 0.8997,
+      "evidence_count": 3,
+      "evidence_sources": {
+        "cert": 1,
+        "answer": 2
+      },
+      "same_dept_as_gold": true,
+      "same_branch_as_gold": true,
+      "difficulty": "L3",
+      "n_gold": 3
+    },
+    {
+      "query_id": 59,
+      "rank": 3,
+      "person_id": 7,
+      "hit": false,
+      "confidence": "中",
+      "score": 0.5284,
+      "margin_to_next": 0.0331,
+      "topic_fit": 0.7534,
+      "evidence_count": 2,
+      "evidence_sources": {
+        "answer": 2
+      },
+      "same_dept_as_gold": true,
+      "same_branch_as_gold": false,
+      "difficulty": "L3",
+      "n_gold": 3
+    },
+    {
+      "query_id": 60,
+      "rank": 1,
+      "person_id": 21,
+      "hit": true,
+      "confidence": "高",
+      "score": 0.811,
+      "margin_to_next": 0.0079,
+      "topic_fit": 1.0,
+      "evidence_count": 12,
+      "evidence_sources": {
+        "project": 7,
+        "answer": 5
+      },
+      "same_dept_as_gold": true,
+      "same_branch_as_gold": true,
+      "difficulty": "L3",
+      "n_gold": 4
+    },
+    {
+      "query_id": 60,
+      "rank": 2,
+      "person_id": 1,
+      "hit": true,
+      "confidence": "高",
+      "score": 0.8031,
+      "margin_to_next": 0.0164,
+      "topic_fit": 0.9955,
+      "evidence_count": 6,
+      "evidence_sources": {
+        "project": 3,
+        "answer": 3
+      },
+      "same_dept_as_gold": true,
+      "same_branch_as_gold": true,
+      "difficulty": "L3",
+      "n_gold": 4
+    },
+    {
+      "query_id": 60,
+      "rank": 3,
+      "person_id": 2,
+      "hit": false,
+      "confidence": "高",
+      "score": 0.7867,
+      "margin_to_next": 0.0879,
+      "topic_fit": 0.9983,
+      "evidence_count": 8,
+      "evidence_sources": {
+        "cert": 1,
+        "project": 3,
+        "answer": 4
+      },
+      "same_dept_as_gold": true,
+      "same_branch_as_gold": false,
+      "difficulty": "L3",
+      "n_gold": 4
+    },
+    {
+      "query_id": 61,
+      "rank": 1,
+      "person_id": 3,
+      "hit": true,
+      "confidence": "高",
+      "score": 0.8139,
+      "margin_to_next": 0.022,
+      "topic_fit": 0.9999,
+      "evidence_count": 12,
+      "evidence_sources": {
+        "cert": 1,
+        "self": 1,
+        "project": 5,
+        "answer": 5
+      },
+      "same_dept_as_gold": true,
+      "same_branch_as_gold": true,
+      "difficulty": "L3",
+      "n_gold": 4
+    },
+    {
+      "query_id": 61,
+      "rank": 2,
+      "person_id": 1,
+      "hit": true,
+      "confidence": "高",
+      "score": 0.7919,
+      "margin_to_next": 0.0102,
+      "topic_fit": 0.9998,
+      "evidence_count": 12,
+      "evidence_sources": {
+        "self": 2,
+        "project": 7,
+        "answer": 3
+      },
+      "same_dept_as_gold": true,
+      "same_branch_as_gold": true,
+      "difficulty": "L3",
+      "n_gold": 4
+    },
+    {
+      "query_id": 61,
+      "rank": 3,
+      "person_id": 2,
+      "hit": false,
+      "confidence": "高",
+      "score": 0.7817,
+      "margin_to_next": 0.0187,
+      "topic_fit": 0.9994,
+      "evidence_count": 9,
+      "evidence_sources": {
+        "cert": 1,
+        "project": 4,
+        "answer": 4
+      },
+      "same_dept_as_gold": true,
+      "same_branch_as_gold": true,
+      "difficulty": "L3",
+      "n_gold": 4
+    },
+    {
+      "query_id": 62,
+      "rank": 1,
+      "person_id": 10,
+      "hit": true,
+      "confidence": "高",
+      "score": 0.6569,
+      "margin_to_next": 0.0078,
+      "topic_fit": 0.9257,
+      "evidence_count": 3,
+      "evidence_sources": {
+        "cert": 1,
+        "answer": 2
+      },
+      "same_dept_as_gold": true,
+      "same_branch_as_gold": true,
+      "difficulty": "L3",
+      "n_gold": 4
+    },
+    {
+      "query_id": 62,
+      "rank": 2,
+      "person_id": 29,
+      "hit": false,
+      "confidence": "高",
+      "score": 0.6491,
+      "margin_to_next": 0.0798,
+      "topic_fit": 0.9257,
+      "evidence_count": 4,
+      "evidence_sources": {
+        "cert": 1,
+        "self": 1,
+        "answer": 2
+      },
+      "same_dept_as_gold": true,
+      "same_branch_as_gold": false,
+      "difficulty": "L3",
+      "n_gold": 4
+    },
+    {
+      "query_id": 62,
+      "rank": 3,
+      "person_id": 2,
+      "hit": true,
+      "confidence": "高",
+      "score": 0.5693,
+      "margin_to_next": 0.0402,
+      "topic_fit": 0.945,
+      "evidence_count": 4,
+      "evidence_sources": {
+        "project": 4
+      },
+      "same_dept_as_gold": true,
+      "same_branch_as_gold": true,
+      "difficulty": "L3",
+      "n_gold": 4
+    },
+    {
+      "query_id": 63,
+      "rank": 1,
+      "person_id": 15,
+      "hit": true,
+      "confidence": "高",
+      "score": 0.7845,
+      "margin_to_next": 0.0644,
+      "topic_fit": 0.9997,
+      "evidence_count": 10,
+      "evidence_sources": {
+        "cert": 1,
+        "project": 4,
+        "answer": 5
+      },
+      "same_dept_as_gold": true,
+      "same_branch_as_gold": true,
+      "difficulty": "L3",
+      "n_gold": 4
+    },
+    {
+      "query_id": 63,
+      "rank": 2,
+      "person_id": 25,
+      "hit": true,
+      "confidence": "高",
+      "score": 0.7201,
+      "margin_to_next": 0.0347,
+      "topic_fit": 0.9776,
+      "evidence_count": 6,
+      "evidence_sources": {
+        "self": 1,
+        "project": 3,
+        "answer": 2
+      },
+      "same_dept_as_gold": true,
+      "same_branch_as_gold": true,
+      "difficulty": "L3",
+      "n_gold": 4
+    },
+    {
+      "query_id": 63,
+      "rank": 3,
+      "person_id": 6,
+      "hit": true,
+      "confidence": "高",
+      "score": 0.6854,
+      "margin_to_next": 0.1023,
+      "topic_fit": 0.9776,
+      "evidence_count": 5,
+      "evidence_sources": {
+        "cert": 1,
+        "project": 1,
+        "answer": 3
+      },
+      "same_dept_as_gold": true,
+      "same_branch_as_gold": true,
+      "difficulty": "L3",
+      "n_gold": 4
+    },
+    {
+      "query_id": 64,
+      "rank": 1,
+      "person_id": 17,
+      "hit": true,
+      "confidence": "高",
+      "score": 0.8145,
+      "margin_to_next": 0.0299,
+      "topic_fit": 0.9999,
+      "evidence_count": 11,
+      "evidence_sources": {
+        "project": 6,
+        "answer": 5
+      },
+      "same_dept_as_gold": true,
+      "same_branch_as_gold": true,
+      "difficulty": "L3",
+      "n_gold": 4
+    },
+    {
+      "query_id": 64,
+      "rank": 2,
+      "person_id": 34,
+      "hit": false,
+      "confidence": "高",
+      "score": 0.7846,
+      "margin_to_next": 0.0878,
+      "topic_fit": 0.9993,
+      "evidence_count": 9,
+      "evidence_sources": {
+        "project": 4,
+        "answer": 5
+      },
+      "same_dept_as_gold": true,
+      "same_branch_as_gold": false,
+      "difficulty": "L3",
+      "n_gold": 4
+    },
+    {
+      "query_id": 64,
+      "rank": 3,
+      "person_id": 33,
+      "hit": true,
+      "confidence": "高",
+      "score": 0.6968,
+      "margin_to_next": 0.032,
+      "topic_fit": 0.9834,
+      "evidence_count": 6,
+      "evidence_sources": {
+        "project": 5,
+        "answer": 1
+      },
+      "same_dept_as_gold": true,
+      "same_branch_as_gold": true,
+      "difficulty": "L3",
+      "n_gold": 4
+    },
+    {
+      "query_id": 65,
+      "rank": 1,
+      "person_id": 21,
+      "hit": true,
+      "confidence": "高",
+      "score": 0.811,
+      "margin_to_next": 0.0079,
+      "topic_fit": 1.0,
+      "evidence_count": 12,
+      "evidence_sources": {
+        "project": 7,
+        "answer": 5
+      },
+      "same_dept_as_gold": true,
+      "same_branch_as_gold": true,
+      "difficulty": "L3",
+      "n_gold": 4
+    },
+    {
+      "query_id": 65,
+      "rank": 2,
+      "person_id": 1,
+      "hit": true,
+      "confidence": "高",
+      "score": 0.8031,
+      "margin_to_next": 0.0164,
+      "topic_fit": 0.9955,
+      "evidence_count": 6,
+      "evidence_sources": {
+        "project": 3,
+        "answer": 3
+      },
+      "same_dept_as_gold": true,
+      "same_branch_as_gold": true,
+      "difficulty": "L3",
+      "n_gold": 4
+    },
+    {
+      "query_id": 65,
+      "rank": 3,
+      "person_id": 2,
+      "hit": false,
+      "confidence": "高",
+      "score": 0.7867,
+      "margin_to_next": 0.0838,
+      "topic_fit": 0.9983,
+      "evidence_count": 8,
+      "evidence_sources": {
+        "cert": 1,
+        "project": 3,
+        "answer": 4
+      },
+      "same_dept_as_gold": true,
+      "same_branch_as_gold": true,
+      "difficulty": "L3",
+      "n_gold": 4
+    },
+    {
+      "query_id": 66,
+      "rank": 1,
+      "person_id": 3,
+      "hit": true,
+      "confidence": "高",
+      "score": 0.8182,
+      "margin_to_next": 0.0262,
+      "topic_fit": 1.0,
+      "evidence_count": 19,
+      "evidence_sources": {
+        "self": 1,
+        "project": 9,
+        "answer": 9
+      },
+      "same_dept_as_gold": true,
+      "same_branch_as_gold": true,
+      "difficulty": "L3",
+      "n_gold": 3
+    },
+    {
+      "query_id": 66,
+      "rank": 2,
+      "person_id": 1,
+      "hit": true,
+      "confidence": "高",
+      "score": 0.792,
+      "margin_to_next": 0.0101,
+      "topic_fit": 1.0,
+      "evidence_count": 19,
+      "evidence_sources": {
+        "cert": 2,
+        "self": 1,
+        "project": 13,
+        "answer": 3
+      },
+      "same_dept_as_gold": true,
+      "same_branch_as_gold": true,
+      "difficulty": "L3",
+      "n_gold": 3
+    },
+    {
+      "query_id": 66,
+      "rank": 3,
+      "person_id": 2,
+      "hit": false,
+      "confidence": "高",
+      "score": 0.7819,
+      "margin_to_next": 0.096,
+      "topic_fit": 1.0,
+      "evidence_count": 13,
+      "evidence_sources": {
+        "cert": 1,
+        "project": 8,
+        "answer": 4
+      },
+      "same_dept_as_gold": true,
+      "same_branch_as_gold": true,
+      "difficulty": "L3",
+      "n_gold": 3
     }
   ]
 }

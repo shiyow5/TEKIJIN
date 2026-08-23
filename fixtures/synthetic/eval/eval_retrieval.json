@@ -1076,5 +1076,255 @@
       "proj:92"
     ],
     "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 57,
+    "query": "出稿にかけたお金がどれだけ売上に繋がったか見たいのですが、数字が媒体ごとにばらばらで比べられません。",
+    "difficulty": "L3",
+    "gold_topics": [
+      "Webマーケティング・広告",
+      "データ基盤・分析"
+    ],
+    "gold_chunks": [
+      "profile:15",
+      "profile:16",
+      "profile:23",
+      "profile:4",
+      "proj:1",
+      "proj:18",
+      "proj:3",
+      "proj:37",
+      "proj:38",
+      "proj:39",
+      "proj:4",
+      "proj:40",
+      "proj:51",
+      "proj:60"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 58,
+    "query": "短い文章での発信を増やしたいのですが、外に出す前の確認の流れも決まっていないそうです。",
+    "difficulty": "L3",
+    "gold_topics": [
+      "SNS運用",
+      "広報・PR"
+    ],
+    "gold_chunks": [
+      "profile:39",
+      "profile:4",
+      "profile:40",
+      "profile:5",
+      "proj:11",
+      "proj:61",
+      "proj:63",
+      "proj:72",
+      "proj:78"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 59,
+    "query": "在宅の社員が社内に入るための経路が古いままで、のぞき見されないか心配だと言われました。",
+    "difficulty": "L3",
+    "gold_topics": [
+      "ネットワーク・VPN",
+      "セキュリティ"
+    ],
+    "gold_chunks": [
+      "doc:doc_006",
+      "doc:doc_007",
+      "doc:doc_014",
+      "doc:doc_015",
+      "doc:doc_022",
+      "doc:doc_023",
+      "doc:doc_030",
+      "profile:24",
+      "profile:25",
+      "profile:6",
+      "proj:10",
+      "proj:101",
+      "proj:15",
+      "proj:24",
+      "proj:32",
+      "proj:62",
+      "proj:75"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 60,
+    "query": "取引先と取り交わした書面の期限を誰も把握できておらず、ひな形も古いままだそうです。",
+    "difficulty": "L3",
+    "gold_topics": [
+      "契約管理",
+      "総務・法務"
+    ],
+    "gold_chunks": [
+      "doc:doc_002",
+      "doc:doc_010",
+      "doc:doc_018",
+      "doc:doc_026",
+      "profile:1",
+      "profile:12",
+      "profile:21",
+      "profile:31",
+      "proj:14",
+      "proj:25",
+      "proj:30",
+      "proj:31",
+      "proj:35"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 61,
+    "query": "毎月の集計を人手で作り直しているのですが、そもそも数字の持ち方が部署ごとに違うそうです。",
+    "difficulty": "L3",
+    "gold_topics": [
+      "業務効率化コンサル",
+      "データ基盤・分析"
+    ],
+    "gold_chunks": [
+      "profile:1",
+      "profile:15",
+      "profile:16",
+      "profile:3",
+      "proj:2",
+      "proj:21",
+      "proj:28",
+      "proj:29",
+      "proj:3",
+      "proj:38",
+      "proj:4",
+      "proj:51",
+      "proj:60",
+      "proj:8"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 62,
+    "query": "業務の中心で動いている古い仕組みのせいで、月々の締めが遅れていると言われました。",
+    "difficulty": "L3",
+    "gold_topics": [
+      "基幹システム",
+      "経理・決算"
+    ],
+    "gold_chunks": [
+      "doc:doc_003",
+      "doc:doc_011",
+      "doc:doc_019",
+      "doc:doc_027",
+      "profile:10",
+      "profile:2",
+      "profile:28",
+      "profile:3",
+      "proj:105",
+      "proj:107",
+      "proj:42",
+      "proj:47",
+      "proj:98"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 63,
+    "query": "自社の設備をやめて外部の基盤に預けたいのですが、社内から情報漏れを心配する声が出ています。",
+    "difficulty": "L3",
+    "gold_topics": [
+      "クラウド移行",
+      "セキュリティ"
+    ],
+    "gold_chunks": [
+      "doc:doc_007",
+      "doc:doc_015",
+      "doc:doc_023",
+      "profile:14",
+      "profile:15",
+      "profile:25",
+      "profile:6",
+      "proj:101",
+      "proj:15",
+      "proj:16",
+      "proj:43",
+      "proj:69",
+      "proj:9",
+      "proj:99"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 64,
+    "query": "手元の端末から使えるようにしたところ、使い方を尋ねる連絡が増えて回らなくなりました。",
+    "difficulty": "L3",
+    "gold_topics": [
+      "モバイルアプリ開発",
+      "問い合わせ・ヘルプデスク運用"
+    ],
+    "gold_chunks": [
+      "profile:13",
+      "profile:16",
+      "profile:17",
+      "profile:33",
+      "proj:17",
+      "proj:19",
+      "proj:23",
+      "proj:26",
+      "proj:33",
+      "proj:5",
+      "proj:52",
+      "proj:6",
+      "proj:7",
+      "proj:74"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 65,
+    "query": "他社の仕組みと繋ぎたいのですが、取り交わす書面に何を書けばよいか分かりません。",
+    "difficulty": "L3",
+    "gold_topics": [
+      "システム開発・API",
+      "契約管理"
+    ],
+    "gold_chunks": [
+      "profile:1",
+      "profile:13",
+      "profile:16",
+      "profile:21",
+      "proj:14",
+      "proj:25",
+      "proj:30",
+      "proj:31",
+      "proj:35"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 66,
+    "query": "営業の日報づくりに時間がかかっているうえ、誰がどのお客様と何を話したかも残っていません。",
+    "difficulty": "L3",
+    "gold_topics": [
+      "業務効率化コンサル",
+      "CRM・営業支援"
+    ],
+    "gold_chunks": [
+      "profile:1",
+      "profile:21",
+      "profile:3",
+      "proj:10",
+      "proj:13",
+      "proj:2",
+      "proj:20",
+      "proj:21",
+      "proj:28",
+      "proj:29",
+      "proj:33",
+      "proj:36",
+      "proj:8"
+    ],
+    "label_source": "auto:document_project_profile"
   }
 ]

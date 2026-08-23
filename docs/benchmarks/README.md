@@ -5,30 +5,30 @@
 詳細な読み解きは `analysis/20_モデル実測結果.md`（非gitの検討資料）にある。ここには**数字と再現方法**を置く。
 
 > ✅ **#132 で現行 develop（Nemotron + 較正済み閾値 + #115 の RRF 重み）を実 DB で再測定した。**
-> 層2 Recall@3 は **0.140 → 0.696**（56件基準）、経路精度は **0.125 → 0.768**。
+> 層2 Recall@3 は **0.140 → 0.692**（#158 後の採点対象66件基準）、経路精度は **0.125 → 0.803**（53/66）。
 > #103（全件 `prior_answer` で候補が1名に固定）は #120 で解消済み。→ **[e2e.md](e2e.md) §0**
 >
-> ただし **0.696 の分母には構造上0点の8件が入っている**（経路 `document` 4件 ＝
-> **`gold_route` も `document` で正しい**、`gold_topics` 空 4件）。到達可能な上限は 48/56 = 0.857。
+> ただし **0.692 の分母には構造上0点の8件が入っている**（経路 `document` 4件 ＝
+> **`gold_route` も `document` で正しい**、`gold_topics` 空 4件）。到達可能な上限は 58/66 = 0.879。
 > **L1 の 0.667 は取りこぼしではなく、到達可能分の 95% を取っている**（e2e.md §0.2）。
 >
-> ⛔ **C1 の自由記述トピックが C6 の完全一致照合と噛み合わず、証拠源が4つとも空振りする**（175個中3個一致）。
-> **上位3名が全クエリで同一**（47件中44件が同じ3名）。聞き返し後の2周目の C1 は測っていないので、
+> ⛔ **C1 の自由記述トピックが C6 の完全一致照合と噛み合わず、証拠源が4つとも空振りする**（240個中12個一致）。
+> **上位3名がほぼ全クエリで同一**（採点対象66件中54件が同じ3名）。聞き返し後の2周目の C1 は測っていないので、
 > **これは製品の上限値ではない**。
-> **直し方は実測済み**: C1 に語彙を守らせ上位1件だけ使うと R@3 **0.737**（gold 配置 0.849 の87%、52件基準）。
+> **直し方は実測済み**: C1 に語彙を守らせ上位1件だけ使うと R@3 **0.680**（gold 配置 0.825 の82%、62件基準）。
 > [llm_faithful.md](llm_faithful.md) §4.6 / #116。
-> **#130 でこの直し方を入れた後の実 DB 実測は 0.702**（全社員候補・56件基準。gold トピックの
-> 0.789 との差 0.087 が C1 の取りこぼし分）→ [e2e.md](e2e.md) §0.4。
-> あわせて thinking が ON のままで **C1+C2 の p50 が 83秒**（仕様は端から端まで p50 1.5秒）。
+> **#130 でこの直し方を入れた後の実 DB 実測は 0.639**（全社員候補・66件基準。gold トピックの
+> 0.775 との差 0.136 が C1 の取りこぼし分）→ [e2e.md](e2e.md) §0.4。
+> **thinking が ON のままで C1+C2 の p50 が 83秒**だった件は **#141 で解消**し、いまは **2.91秒**。
 > → **[llm_faithful.md](llm_faithful.md)**（#113 / #116）。
 > [c2.md](c2.md)（#111）の結論は取り下げ済み。
 >
 > **続き**: モデルを固定したまま**アーキテクチャ側**で精度を上げる実験は
-> [ablation.md](ablation.md)（#65）にある。層2 Recall@3 は分割検証で **+0.129** 伸びた。
-> 旧 C4 の Dense+BM25 等重み RRF が **-0.128**（production 整合ハーネス・#68 / #158 で再測）と測れている点も、そちらを参照。
+> [ablation.md](ablation.md)（#65）にある。層2 Recall@3 は分割検証で **+0.136**（中央値）伸びた。
+> 旧 C4 の Dense+BM25 等重み RRF が **-0.134**（production 整合ハーネス・#68 / #158 で再測）と測れている点も、そちらを参照。
 
 > ⚠️ **下表の層2 Recall@3 は評価セット拡張（#73）より前の 45件で測ったもの。**
-> 採点対象が 56件になったので、埋め込みの順位は測り直しが要る（`bench_emb.json` も同様）。
+> 採点対象が 66件になったので、埋め込みの順位は測り直しが要る（`bench_emb.json` も同様）。
 
 > ⚠️ **`e2e.md` §1 と `route.md` の製品レベル数値（0.140 / 0.732 / 0.134 など）は
 > e5-large + 旧経路閾値 + 等重み RRF の条件で、現行構成では再現しない。**
@@ -83,12 +83,14 @@ markdown 側は `<!-- gen:NAME -->` … `<!-- /gen:NAME -->` で囲まれてお�
 | `res_qwen36_guided.json` | Qwen3.6-35B-A3B-NVFP4 + 構造化出力。**C7 の下書き出力も入っている**（人手評価用） |
 | `ablation/c2_qwen36_{product,scoped}.json` | C2 充足判定の生出力（#111。**結論は取り下げ済み**） |
 | `ablation/{payload_,}c1_faithful.json` / `{payload_,}c2_faithful.json` | **製品のリクエストをそのまま再現した C1/C2 の入出力**。[llm_faithful.md](llm_faithful.md) |
-| `ablation/e2e_variants_c1.json` | C1 の実トピックで測った層2 R@3。[llm_faithful.md](llm_faithful.md) |
+| `ablation/e2e_variants_c1_faithful.json` | **製品そのままの C1** の実トピックで測った層2 R@3。[llm_faithful.md](llm_faithful.md) |
 | `ablation/route_nemotron.json` | **現行構成**の経路とチャネル類似度（#132）。[e2e.md](e2e.md) §0.3 |
 | `ablation/e2e_variants_nemotron{,_c1both_top1}.json` | **現行構成**の層2 R@3（#132）。同 §0.1 / §0.4 |
 | `ablation/misrecommendation.json` | 誤推薦の分類と、**1スロットごとの確信度素性**。[confidence.md](confidence.md)（#110） |
+| `ablation/payload_topic_ctx.json` | トピック分類（検索文脈つき）に渡した入力。**出力側の `query` の照合元**（`research_corpus.assert_llm_ids_match`） |
 | `ablation/confidence_stats.json` | 確信度ラベル案ごとの差と区間（問題単位・20000回）。同上 |
-| `ablation/c1_nothink.json` / `e2e_variants_c1_nothink.json` | `enable_thinking=false` を足しただけの反実仮想。同上 §4.5 |
+| `ablation/c1_thinking.json` | **`enable_thinking=true` に戻した**反実仮想。#141 で thinking OFF が製品既定になったので、反実仮想の向きが逆転した。同上 §4.5 |
+| `ablation/c1_vocab.json` | C1 の語彙一致・gold 的中・応答時間分位点（`scripts/research_c1_vocab.py` の出力）。同上 §1・§4.5・§4.6 |
 | `ablation/{payload_,}c1_{prompt,enum,both}.json` | C1 にトピック語彙を守らせる2案の比較。同上 §4.6（#116） |
 | `ablation/e2e_variants_c1_{prompt,enum,both}{,_top1}.json` と `_both_top2.json` | 上記の層2 R@3。**1問ごとの当落 `per_query` 入り** |
 

@@ -210,7 +210,9 @@ def run_rerank(payload):
             schema=RANK_SCHEMA,
             max_tokens=256,
         )
-        out.append({"id": case["id"], **r})
+        # **`query` も残す。** id だけだと、件数を変えずに文面を差し替えられたとき
+        # `research_corpus.assert_llm_ids_match` が検出できない（#84 で実際に起きた形）。
+        out.append({"id": case["id"], "query": case["query"], **r})
         print(
             f"[{i + 1}/{len(payload)}] {r['latency']:.2f}s {r['content'][:70]}",
             flush=True,
@@ -274,7 +276,9 @@ def run_topic_ctx(payload, abstain=False, samples=1, temperature=0.0):
                 },
             ],
         )
-        out.append({"id": case["id"], **r})
+        # **`query` も残す。** id だけだと、件数を変えずに文面を差し替えられたとき
+        # `research_corpus.assert_llm_ids_match` が検出できない（#84 で実際に起きた形）。
+        out.append({"id": case["id"], "query": case["query"], **r})
         print(
             f"[{i + 1}/{len(payload)}] {r['latency']:.2f}s {r['content'][:60]!r}",
             flush=True,
@@ -326,7 +330,9 @@ def run_abstain_check(payload):
             schema=ABSTAIN_SCHEMA,
             max_tokens=128,
         )
-        out.append({"id": case["id"], **r})
+        # **`query` も残す。** id だけだと、件数を変えずに文面を差し替えられたとき
+        # `research_corpus.assert_llm_ids_match` が検出できない（#84 で実際に起きた形）。
+        out.append({"id": case["id"], "query": case["query"], **r})
         print(
             f"[{i + 1}/{len(payload)}] {r['latency']:.2f}s {r['content'][:70]}",
             flush=True,
@@ -474,6 +480,20 @@ def run_c2(payload, variant="scoped"):
     return out
 
 
+def flatten_extra_body(request):
+    """`extra_body` の中身をボディ直下に出す。
+
+    `_get_request_payload` が返すのは **openai クライアントに渡す kwargs** なので、
+    vLLM 拡張は `extra_body` に入ったままになる。クライアントは送信時にこれを
+    ボディ直下へ展開するので、**生 POST でも同じ展開をしないと製品と別物になる**。
+    実際 #140 の修正（`chat_template_kwargs` を製品が送るようになった）以降、
+    そのまま投げると vLLM に 400 で弾かれ、86件すべてが空になった。
+    """
+    body = {k: v for k, v in request.items() if k != "extra_body"}
+    body.update(request.get("extra_body") or {})
+    return body
+
+
 def run_raw(payload, extra=None):
     """組み立て済みリクエストをそのまま投げる（#113）。
 
@@ -494,7 +514,7 @@ def run_raw(payload, extra=None):
         req = urllib.request.Request(
             BASE_URL + "/chat/completions",
             data=json.dumps(
-                {**case["request"], **(extra or {}), "model": MODEL}
+                {**flatten_extra_body(case["request"]), **(extra or {}), "model": MODEL}
             ).encode(),
             headers={"Content-Type": "application/json"},
         )
@@ -513,13 +533,22 @@ def run_raw(payload, extra=None):
                 "error": None,
             }
         except Exception as exc:  # noqa: BLE001 - 落ちた事実ごと記録して続ける
+            # **本文まで残す。** `HTTP Error 400: Bad Request` だけでは何が悪いのか分からず、
+            # `--tool-call-parser` 未指定で全86件が空になったとき原因の特定に時間を使った。
+            detail = ""
+            body = getattr(exc, "read", None)
+            if callable(body):
+                try:
+                    detail = " / " + body().decode("utf-8", "replace")[:300]
+                except Exception:  # noqa: BLE001 - 本文が読めなくても行は残す
+                    detail = ""
             row = {
                 "arguments": "",
                 "content": "",
                 "reasoning": "",
                 "finish_reason": None,
                 "out_tokens": None,
-                "error": f"{type(exc).__name__}: {exc}",
+                "error": f"{type(exc).__name__}: {exc}{detail}",
             }
         out.append(
             {

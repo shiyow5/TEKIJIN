@@ -314,6 +314,12 @@ OLD_E5 = {"現状（そのまま）": "0.140", "経路の pin を外す（C4 の
           "候補を全社員にする（#87）": "0.836"}
 
 
+def e2e_basis():
+    """採点対象と gold トピックありの件数を、測定結果そのものから取る。"""
+    d = load("e2e_variants_nemotron.json")
+    return len(d[0]["per_query"]), d[0]["n_with_gold_topics"]
+
+
 def gen_e2e_variants():
     d = load("e2e_variants_nemotron.json")
     rows = []
@@ -337,7 +343,9 @@ def gen_e2e_c1():
             continue
         rows.append([v["name"].replace("[切り分け] ", ""),
                      f"**{f3(v['recall_at_3'])}**", f3(v["recall_at_3_with_gold_topics"])])
-    return table(["構成", "R@3（56件）", "52件"], rows)
+    n_all = len(c[0]["per_query"])
+    n_gold = c[0]["n_with_gold_topics"]
+    return table(["構成", f"R@3（{n_all}件）", f"{n_gold}件"], rows)
 
 
 def gen_route_channels():
@@ -468,16 +476,282 @@ def gen_unfillable():
     ])
 
 
+# --------------------------------------------------------------------------- #
+# ablation.md §2 の要約表 — 本文の見出し数字がここに集まるので、必ず生成する
+# --------------------------------------------------------------------------- #
+def _abl_by_name():
+    return {r["name"]: r for r in load("ablation_results.json")}
+
+
+def _pipe_by_name(stage):
+    return {r["name"]: r for r in load("pipeline_results.json")[stage]}
+
+
+# (表に出す名前, 出所, 備考) の3つ組。効果の数字は**必ず JSON から引く**。
+WIN_ROWS = [
+    ("**トピック媒介の構造化スコアリング**", ("stageC", "LLM(検索文脈つき) → 構造化"), "下記 §4", True),
+    ("Query2doc（クエリ+専門語）", ("stageDE", "クエリ+専門語(Query2doc)"),
+     "**#158 で L3 を増やして有意になった**（n=56 では +0.036 [-0.065,+0.146]）", False),
+    ("日報をコーパスに入れる", ("abl", "＋日報をコーパスに入れる"),
+     "向きは同じだが、#84 の再測定で有意でなくなった", False),
+]
+
+LOSE_ROWS = [
+    ("Dense + BM25 の RRF（**旧 C4 の構成**）", ("abl", "Dense+BM25 RRF(等重み=現行C4)"), "§3", True),
+    ("BM25 単独", ("abl", "BM25のみ"), "症状語しか出ないクエリと語彙が合わない", False),
+    ("クロスエンコーダのリランカー（bge-reranker-v2-m3）",
+     ("stageDE", "リランカー bge-reranker-v2-m3（574ms/query）"), "§5。+0.63s/クエリ", False),
+    ("クロスエンコーダのリランカー（Qwen3-Reranker-0.6B）",
+     ("stageDE", "リランカー Qwen3-Reranker-0.6B（704ms/query）"), "同上。+0.69s/クエリ", False),
+    ("HyDE（仮想文書をクエリに連結）", ("stageDE", "クエリ+HyDE"),
+     "段Aには効くが、人への集約では落ちる", True),
+    ("HyDE（仮想文書だけで引く）", ("stageDE", "HyDE(passageプレフィクス)"),
+     "同上。置き換えるとさらに落ちる", False),
+    ("埋め込み2本のアンサンブル", ("abl", "埋め込み2本のRRF(Nemotron+Qwen3)"), "", False),
+    ("人物中心の索引（Balog Model 1）", ("abl", "人物中心のみ(Model 1)"),
+     "Balog 2006 の Model 2 優位は再現しなかった", False),
+]
+
+
+def _headline_rows(spec):
+    src = {"abl": _abl_by_name(), "stageC": _pipe_by_name("stageC"),
+           "stageDE": _pipe_by_name("stageDE")}
+    rows = []
+    for label, (where, key), note, bold in spec:
+        r = src[where][key]
+        eff = d3(r["delta"]) + " " + ci(r)
+        rows.append([label, f"**{eff}**" if bold else eff, note])
+    return rows
+
+
+def gen_headline_win():
+    return table(["手法", "効果", "備考"], _headline_rows(WIN_ROWS))
+
+
+def gen_headline_lose():
+    return table(["手法", "効果", "なぜ効かないか"], _headline_rows(LOSE_ROWS))
+
+
+def gen_circularity():
+    """§4 循環確認。**再現できる2行だけ**を生成する。
+
+    「案件を使わない / 回答を使わない」の4行はこれを出したスクリプトが残っておらず、
+    再計算できない。生成表に混ぜると新旧の基準が同じ表に並ぶので、本文側で別表にしてある。
+    """
+    main = [r for r in load("pipeline_results.json")["stageC"]
+            if r["name"].startswith("LLM(検索文脈つき)")][0]
+    alt = [r for r in load("pipeline_results_alt.json")["stageC"]
+           if r["name"].startswith("LLM(検索文脈つき)")][0]
+    rows = [
+        ["主 gold（projects+daily 由来）", "全証拠", f3(main["R@3"]), d3(main["delta"]), ci(main)],
+        ["第2の正解（answers 由来）", "全証拠", f3(alt["R@3"]), d3(alt["delta"]), ci(alt)],
+    ]
+    return table(["正解", "スコアラーが使う証拠", "R@3", "Δ（基準比）", "95%CI"], rows)
+
+
+def gen_conclusion():
+    """§1 の結論表。現行 Dense 集約と、トピック媒介の到達域を JSON から出す。"""
+    base = load("ablation_results.json")[0]
+    sc = [r for r in load("pipeline_results.json")["stageC"]
+          if r["name"].startswith("LLM(検索文脈つき)")][0]
+    c6 = {r["name"]: r for r in load("c6_weights.json")["formula"]}
+    lo, hi = sorted((sc["R@3"], c6["C6 の完全な式（既定重み）"]["R@3"]))
+    rows = [
+        ["現行（Dense 検索 → チャンクを人へ集約）", f3(base["R@3"]), f3(base["MRR"])],
+        ["**トピック媒介（LLM分類 → 構造化スコアラー）**",
+         f"**{f3(lo)} – {f3(hi)}**", f3(sc["MRR"])],
+    ]
+    return table(["", "層2 R@3", "MRR"], rows)
+
+
+def gen_holdout():
+    """分割検証。**丸めた要約を本文に手書きしない**ための1行表。"""
+    h = load("pipeline_results.json")["holdout"]
+    rows = [[d3(h["mean"]), d3(h["median"]),
+             f"{d3(h['p5'])} – {d3(h['p95'])}", f"{h['win_rate']:.2f}"]]
+    return table(["平均", "中央値", "5–95%tile", "改善した割合"], rows)
+
+
+# --------------------------------------------------------------------------- #
+# llm_faithful.md — C1 の語彙・的中・応答時間（research_c1_vocab.py が出所）
+# --------------------------------------------------------------------------- #
+def _c1_vocab():
+    return load("c1_vocab.json")
+
+
+def gen_c1_variants():
+    """§4.6 の C1 出力表。**手で数えない**（#158 で全部ずれた）。"""
+    d = _c1_vocab()
+    rows = []
+    for v in d["variants"]:
+        bold = v["name"] in ("製品のまま", "両方")
+        w = (lambda x: f"**{x}**") if bold else (lambda x: x)
+        rows.append([
+            w(v["name"]),
+            f"{v['structured']}/{v['n']}",
+            f"{v['topics_in_vocab']}/{v['topics']}",
+            w(f"{v['hit_all']}/{v['scorable']}"),
+            f"{v['hit_top1']}/{v['scorable']}",
+            f"{v['p50']:.2f}s",
+            f"{v['p95']:.2f}s",
+        ])
+    return table(["", "構造化出力", "語彙に載ったトピック", "**gold 的中（全部）**",
+                  "**gold 的中（上位1件）**", "p50", "p95<sup>※</sup>"], rows)
+
+
+def gen_c1_thinking():
+    """§4.5。製品は #141 で thinking OFF が既定になったので、ON に戻した版と並べる。"""
+    d = _c1_vocab()
+    on = d["thinking_on"]
+    off = [v for v in d["variants"] if v["name"] == "製品のまま"][0]
+
+    def col(v):
+        return [f"{v['structured']}/{v['n']}", str(v["length_cut"]),
+                (f"{v['out_tokens_median']:.0f}（最大 {v['out_tokens_max']}）"
+                 if v["out_tokens_median"] is not None else "—"),
+                f"{v['p50']:.2f}s / {v['p95']:.2f}s"]
+
+    labels = ["C1 が構造化出力を返した", "`finish_reason=length`",
+              "出力トークン中央", "C1 p50 / p95"]
+    a, b = col(on), col(off)
+    rows = [[lab, x, f"**{y}**"] for lab, x, y in zip(labels, a, b)]
+    return table(["", "thinking を ON に戻す", "**製品のまま（#141 以降）**"], rows)
+
+
+# 変種 → (全トピック, 上位2件, 上位1件) のファイル名。無い組み合わせは "—"。
+C1_R3_ROWS = [
+    ("製品のまま", "e2e_variants_c1_faithful.json", None, None),
+    ("案1 プロンプト", "e2e_variants_c1_prompt.json", None, "e2e_variants_c1_prompt_top1.json"),
+    ("案2 enum", "e2e_variants_c1_enum.json", None, "e2e_variants_c1_enum_top1.json"),
+    ("両方", "e2e_variants_c1_both.json", "e2e_variants_c1_both_top2.json",
+     "e2e_variants_c1_both_top1.json"),
+]
+
+
+def _c1_split(fn):
+    """`[切り分け] C1 の実トピック＋全社員` の行を取る（gold あり基準, 全体基準）。"""
+    if fn is None:
+        return None
+    d = load(fn)
+    row = [v for v in d if v["name"].endswith("C1 の実トピック＋全社員")][0]
+    return row["recall_at_3_with_gold_topics"], row["recall_at_3"]
+
+
+def gen_c1_recall():
+    """§4.6 の層2 R@3。**gold トピックがある件数を基準**にし、括弧内は採点対象全体。"""
+    def cell(v, bold=False):
+        if v is None:
+            return "—"
+        txt = f"{f3(v[0])} ({f3(v[1])})"
+        return f"**{txt}**" if bold else txt
+
+    rows = []
+    for label, all_t, top2, top1 in C1_R3_ROWS:
+        b = label == "両方"
+        rows.append([f"**{label}**" if b else label,
+                     cell(_c1_split(all_t)), cell(_c1_split(top2)),
+                     cell(_c1_split(top1), bold=b)])
+    gold = load("e2e_variants_nemotron.json")
+    g = [v for v in gold if v["name"].startswith("候補を全社員")][0]
+    rows.append(["（参考）gold トピック",
+                 f"**{f3(g['recall_at_3_with_gold_topics'])}** ({f3(g['recall_at_3'])})", "—", "—"])
+    return table(["", "トピック全部", "上位2件", "**上位1件だけ**"], rows)
+
+
+def gen_c1c2_latency():
+    """§4 の応答時間。**手で写さない**（#141 で桁が変わった）。"""
+    d = load("c2_faithful_results.json")
+    lat = d["latency"]
+    rows = [
+        ["C1（全件）", str(d["n_items"]), f"{lat['c1_p50']:.2f}s", f"{lat['c1_p95']:.2f}s"],
+        ["C2（C2 に届いた分）", str(d["reached_c2"]), f"{lat['c2_p50']:.2f}s", f"{lat['c2_p95']:.2f}s"],
+        ["**C1+C2（同じ相談で合算）**", str(d["reached_c2"]),
+         f"**{lat['paired_p50']:.2f}s**", f"{lat['paired_p95']:.2f}s"],
+    ]
+    return table(["", "n", "p50", "p95"], rows)
+
+
+def gen_confidence_rules():
+    """confidence.md §4 のラベル案比較。**手で写さない**（#158 で全部ずれた）。"""
+    d = load("confidence_stats.json")
+    b, gaps = d["buckets"], d["gaps"]
+    names = ["現行", "順位だけ", "証拠の種類だけ", "順位＋証拠の種類"]
+    best = "順位＋証拠の種類"
+
+    def cell(name, text):
+        return f"**{text}**" if name == best else text
+
+    rows = []
+    for lab in ("高", "中", "低"):
+        row = [lab]
+        for n in names:
+            v = b[n][lab]
+            row.append(cell(n, f"{f3(v['acc'])} ({v['n']})") if v else "**出ない**")
+        rows.append(row)
+    rows.append(["単調"] + [("はい" if b[n]["monotonic"] else "**いいえ**") for n in names])
+    for a, c in (("高", "中"), ("高", "低")):
+        row = [f"{a} − {c}"]
+        for n in names:
+            g = gaps.get(f"{n}/{a}-{c}")
+            row.append(cell(n, f"{d3(g['point'])} {ci(g)}") if g else "測れない")
+        rows.append(row)
+    return table([""] + [f"**{n}**" if n == best else n for n in names], rows)
+
+
+def gen_scorer_conclusion():
+    """scorer.md §1 の結論表。**地の文に数字を置かない**（#158 でここだけ旧値が残った）。"""
+    c = load("c6_weights.json")
+    form = {r["name"]: r for r in c["formula"]}
+    abl = {r["name"]: r for r in c["ablation"]}
+    cand = {r["name"]: r for r in c["candidates"]}
+    full = form["C6 の完全な式（既定重み）"]
+    plain = form["素の和（#65/#80 で使っていた形）"]
+    grid = c["grid"]
+    load_gain = full["Top1"] - abl["load を 0 に"]["Top1"]
+    best_c4 = max(r["R@3"] for r in cand.values())
+    rows = [
+        ["C6 の式は素の base_score 和より良いか",
+         f"**良い**（{f3(full['R@3'])} vs {f3(plain['R@3'])}）"],
+        ["手で決めた重みは妥当か",
+         f"**妥当。交差検証で上回る設定が見つからない**（{d3(grid['cv_mean'] - grid['default_full'])}）"],
+        ["`load` ペナルティは精度を犠牲にしているか",
+         f"**していない。むしろ Top-1 を {d3(load_gain)} 上げている**"],
+        ["C4 で候補を絞ってから C6 に渡すべきか",
+         f"**絞らないほうがよい**（{d3(best_c4 - full['R@3'])}）"],
+    ]
+    return table(["", "結果"], rows)
+
+
+def gen_scorer_grid():
+    """§5 グリッド探索。既定重みと交差検証の差を JSON から出す。"""
+    g = load("c6_weights.json")["grid"]
+    rows = [["既定重みの全件スコア", f"**{f3(g['default_full'])}**"],
+            ["交差検証でのスコア", f"**{f3(g['cv_mean'])}**"],
+            ["差（交差検証 − 既定）", f"**{d3(g['cv_mean'] - g['default_full'])}**"]]
+    return table(["", "R@3"], rows)
+
+
 TABLES = {
     "cold_start": (["robustness.md"], gen_cold_start),
-    "l3_fusion": (["robustness.md"], gen_l3_fusion),
+    "l3_fusion": (["robustness.md", "ablation.md"], gen_l3_fusion),
     "constraints": (["robustness.md"], gen_constraints_table),
     "constraint_items": (["robustness.md"], gen_constraint_items),
     "decoy_items": (["robustness.md"], gen_decoy_items),
     "constraint_extraction": (["robustness.md"], gen_constraint_extraction),
+    "scorer_conclusion": (["scorer.md"], gen_scorer_conclusion),
+    "scorer_grid": (["scorer.md"], gen_scorer_grid),
     "scorer_formula": (["scorer.md"], gen_scorer_formula),
     "scorer_candidates": (["scorer.md"], gen_scorer_candidates),
     "scorer_constraint": (["scorer.md"], gen_scorer_constraint),
+    "c1_variants": (["llm_faithful.md"], gen_c1_variants),
+    "c1_recall": (["llm_faithful.md"], gen_c1_recall),
+    "c1c2_latency": (["llm_faithful.md"], gen_c1c2_latency),
+    "c1_thinking": (["llm_faithful.md"], gen_c1_thinking),
+    "conclusion": (["ablation.md"], gen_conclusion),
+    "holdout": (["ablation.md"], gen_holdout),
+    "headline_win": (["ablation.md"], gen_headline_win),
+    "circularity": (["ablation.md"], gen_circularity),
+    "headline_lose": (["ablation.md"], gen_headline_lose),
     "bm25": (["ablation.md"], gen_bm25_table),
     "stage_a": (["ablation.md"], gen_stage_a),
     "stage_c": (["ablation.md"], gen_stage_c),
@@ -487,6 +761,7 @@ TABLES = {
     "route_matrix": (["e2e.md"], gen_route_matrix),
     "misrec_buckets": (["misrecommendation.md"], gen_misrec_buckets),
     "misrec_confidence": (["misrecommendation.md"], gen_misrec_confidence),
+    "confidence_rules": (["confidence.md"], gen_confidence_rules),
     "gold_count": (["confidence.md"], gen_gold_count),
     "gold_x_evidence": (["confidence.md"], gen_gold_x_evidence),
     "evidence_buckets": (["confidence.md"], gen_evidence_buckets),
@@ -500,6 +775,8 @@ STALE_CI = {
     ("+0.130", "+0.348"): "ablation.md §4 第2の正解（n=45 の基準が保存されていない）",
     ("+0.152", "+0.359"): "同上",
     ("-0.270", "+0.030"): "同上",
+    ("-0.290", "-0.033"): "confidence.md 冒頭で「#158 以前はこうだった」と明示引用している過去の実測値",
+    ("-0.065", "+0.146"): "ablation.md §2 で「n=56 のときはこうだった」と明示引用している過去の実測値",
     ("+0.014", "+0.278"): "misrecommendation.md で「#158 前はこうだった」と明示引用している過去の実測値",
     ("-0.017", "+0.319"): "misrecommendation.md スロット単位（research_confidence.py の出力ではないため JSON に無い）",
     ("+0.033", "+0.290"): "同上（問題単位）",
@@ -509,7 +786,8 @@ STALE_CI = {
 def known_cis():
     out = set()
     for name in ("ablation_results.json", "pipeline_results.json",
-                 "robustness_results.json", "c6_weights.json", "confidence_stats.json"):
+                 "pipeline_results_alt.json", "robustness_results.json",
+                 "c6_weights.json", "confidence_stats.json"):
         path = os.path.join(ABL, name)
         if not os.path.exists(path):
             continue

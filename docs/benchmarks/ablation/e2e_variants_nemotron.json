@@ -1,18 +1,18 @@
 [
   {
     "name": "現状（そのまま）",
-    "recall_at_3": 0.6964285714285714,
-    "top1": 0.625,
-    "mrr": 0.7068452380952381,
+    "recall_at_3": 0.6919191919191919,
+    "top1": 0.6515151515151515,
+    "mrr": 0.7361111111111112,
     "by_difficulty": {
       "L1": 0.6666666666666667,
       "L2": 0.7222222222222222,
-      "L3": 0.6333333333333333,
+      "L3": 0.65,
       "L4": 0.0
     },
-    "recall_at_3_with_gold_topics": 0.75,
-    "top1_with_gold_topics": 0.6730769230769231,
-    "n_with_gold_topics": 52,
+    "recall_at_3_with_gold_topics": 0.7365591397849462,
+    "top1_with_gold_topics": 0.6935483870967742,
+    "n_with_gold_topics": 62,
     "per_query": [
       {
         "id": 1,
@@ -596,24 +596,134 @@
           13,
           16,
           14
+        ]
+      },
+      {
+        "id": 57,
+        "difficulty": "L3",
+        "has_gold_topics": true,
+        "hit_at_3": true,
+        "ranked_top3": [
+          23,
+          4,
+          5
+        ]
+      },
+      {
+        "id": 58,
+        "difficulty": "L3",
+        "has_gold_topics": true,
+        "hit_at_3": true,
+        "ranked_top3": [
+          22,
+          4,
+          5
+        ]
+      },
+      {
+        "id": 59,
+        "difficulty": "L3",
+        "has_gold_topics": true,
+        "hit_at_3": true,
+        "ranked_top3": [
+          6,
+          24,
+          7
+        ]
+      },
+      {
+        "id": 60,
+        "difficulty": "L3",
+        "has_gold_topics": true,
+        "hit_at_3": true,
+        "ranked_top3": [
+          31,
+          32,
+          12
+        ]
+      },
+      {
+        "id": 61,
+        "difficulty": "L3",
+        "has_gold_topics": true,
+        "hit_at_3": true,
+        "ranked_top3": [
+          3,
+          1,
+          12
+        ]
+      },
+      {
+        "id": 62,
+        "difficulty": "L3",
+        "has_gold_topics": true,
+        "hit_at_3": true,
+        "ranked_top3": [
+          29,
+          2,
+          3
+        ]
+      },
+      {
+        "id": 63,
+        "difficulty": "L3",
+        "has_gold_topics": true,
+        "hit_at_3": true,
+        "ranked_top3": [
+          15,
+          25,
+          6
+        ]
+      },
+      {
+        "id": 64,
+        "difficulty": "L3",
+        "has_gold_topics": true,
+        "hit_at_3": true,
+        "ranked_top3": [
+          17,
+          34,
+          33
+        ]
+      },
+      {
+        "id": 65,
+        "difficulty": "L3",
+        "has_gold_topics": true,
+        "hit_at_3": true,
+        "ranked_top3": [
+          21,
+          32,
+          12
+        ]
+      },
+      {
+        "id": 66,
+        "difficulty": "L3",
+        "has_gold_topics": true,
+        "hit_at_3": true,
+        "ranked_top3": [
+          3,
+          1,
+          2
         ]
       }
     ]
   },
   {
     "name": "経路の pin を外す（C4 の候補10名）",
-    "recall_at_3": 0.7678571428571429,
-    "top1": 0.6964285714285714,
-    "mrr": 0.7782738095238095,
+    "recall_at_3": 0.7525252525252525,
+    "top1": 0.7121212121212122,
+    "mrr": 0.7967171717171717,
     "by_difficulty": {
       "L1": 0.9666666666666666,
       "L2": 0.75,
-      "L3": 0.6333333333333333,
+      "L3": 0.65,
       "L4": 0.0
     },
-    "recall_at_3_with_gold_topics": 0.8269230769230769,
-    "top1_with_gold_topics": 0.75,
-    "n_with_gold_topics": 52,
+    "recall_at_3_with_gold_topics": 0.8010752688172043,
+    "top1_with_gold_topics": 0.7580645161290323,
+    "n_with_gold_topics": 62,
     "per_query": [
       {
         "id": 1,
@@ -1214,23 +1324,133 @@
           16,
           14
         ]
+      },
+      {
+        "id": 57,
+        "difficulty": "L3",
+        "has_gold_topics": true,
+        "hit_at_3": true,
+        "ranked_top3": [
+          23,
+          4,
+          5
+        ]
+      },
+      {
+        "id": 58,
+        "difficulty": "L3",
+        "has_gold_topics": true,
+        "hit_at_3": true,
+        "ranked_top3": [
+          22,
+          4,
+          5
+        ]
+      },
+      {
+        "id": 59,
+        "difficulty": "L3",
+        "has_gold_topics": true,
+        "hit_at_3": true,
+        "ranked_top3": [
+          6,
+          24,
+          7
+        ]
+      },
+      {
+        "id": 60,
+        "difficulty": "L3",
+        "has_gold_topics": true,
+        "hit_at_3": true,
+        "ranked_top3": [
+          31,
+          32,
+          12
+        ]
+      },
+      {
+        "id": 61,
+        "difficulty": "L3",
+        "has_gold_topics": true,
+        "hit_at_3": true,
+        "ranked_top3": [
+          3,
+          1,
+          12
+        ]
+      },
+      {
+        "id": 62,
+        "difficulty": "L3",
+        "has_gold_topics": true,
+        "hit_at_3": true,
+        "ranked_top3": [
+          29,
+          2,
+          3
+        ]
+      },
+      {
+        "id": 63,
+        "difficulty": "L3",
+        "has_gold_topics": true,
+        "hit_at_3": true,
+        "ranked_top3": [
+          15,
+          25,
+          6
+        ]
+      },
+      {
+        "id": 64,
+        "difficulty": "L3",
+        "has_gold_topics": true,
+        "hit_at_3": true,
+        "ranked_top3": [
+          17,
+          34,
+          33
+        ]
+      },
+      {
+        "id": 65,
+        "difficulty": "L3",
+        "has_gold_topics": true,
+        "hit_at_3": true,
+        "ranked_top3": [
+          21,
+          32,
+          12
+        ]
+      },
+      {
+        "id": 66,
+        "difficulty": "L3",
+        "has_gold_topics": true,
+        "hit_at_3": true,
+        "ranked_top3": [
+          3,
+          1,
+          2
+        ]
       }
     ]
   },
   {
     "name": "候補を全社員にする（#87）",
-    "recall_at_3": 0.7886904761904762,
-    "top1": 0.7142857142857143,
-    "mrr": 0.8080357142857143,
+    "recall_at_3": 0.7752525252525252,
+    "top1": 0.7424242424242424,
+    "mrr": 0.8295454545454546,
     "by_difficulty": {
       "L1": 0.9666666666666666,
       "L2": 0.7453703703703703,
-      "L3": 0.7666666666666666,
+      "L3": 0.7333333333333333,
       "L4": 0.0
     },
-    "recall_at_3_with_gold_topics": 0.8493589743589743,
-    "top1_with_gold_topics": 0.7692307692307693,
-    "n_with_gold_topics": 52,
+    "recall_at_3_with_gold_topics": 0.825268817204301,
+    "top1_with_gold_topics": 0.7903225806451613,
+    "n_with_gold_topics": 62,
     "per_query": [
       {
         "id": 1,
@@ -1830,6 +2050,116 @@
           13,
           16,
           14
+        ]
+      },
+      {
+        "id": 57,
+        "difficulty": "L3",
+        "has_gold_topics": true,
+        "hit_at_3": true,
+        "ranked_top3": [
+          23,
+          4,
+          5
+        ]
+      },
+      {
+        "id": 58,
+        "difficulty": "L3",
+        "has_gold_topics": true,
+        "hit_at_3": true,
+        "ranked_top3": [
+          22,
+          4,
+          5
+        ]
+      },
+      {
+        "id": 59,
+        "difficulty": "L3",
+        "has_gold_topics": true,
+        "hit_at_3": true,
+        "ranked_top3": [
+          6,
+          24,
+          7
+        ]
+      },
+      {
+        "id": 60,
+        "difficulty": "L3",
+        "has_gold_topics": true,
+        "hit_at_3": true,
+        "ranked_top3": [
+          21,
+          1,
+          2
+        ]
+      },
+      {
+        "id": 61,
+        "difficulty": "L3",
+        "has_gold_topics": true,
+        "hit_at_3": true,
+        "ranked_top3": [
+          3,
+          1,
+          2
+        ]
+      },
+      {
+        "id": 62,
+        "difficulty": "L3",
+        "has_gold_topics": true,
+        "hit_at_3": true,
+        "ranked_top3": [
+          10,
+          29,
+          2
+        ]
+      },
+      {
+        "id": 63,
+        "difficulty": "L3",
+        "has_gold_topics": true,
+        "hit_at_3": true,
+        "ranked_top3": [
+          15,
+          25,
+          6
+        ]
+      },
+      {
+        "id": 64,
+        "difficulty": "L3",
+        "has_gold_topics": true,
+        "hit_at_3": true,
+        "ranked_top3": [
+          17,
+          34,
+          33
+        ]
+      },
+      {
+        "id": 65,
+        "difficulty": "L3",
+        "has_gold_topics": true,
+        "hit_at_3": true,
+        "ranked_top3": [
+          21,
+          1,
+          2
+        ]
+      },
+      {
+        "id": 66,
+        "difficulty": "L3",
+        "has_gold_topics": true,
+        "hit_at_3": true,
+        "ranked_top3": [
+          3,
+          1,
+          2
         ]
       }
     ]

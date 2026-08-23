@@ -304,19 +304,26 @@ def main():
 
     print("\n== 8. ラベル案ごとの正解率 ==")
     results = {}
+    # 群ごとの n と正解率も JSON に残す。**文書の表をここから生成する**ため
+    # （#158 まで手で写していて、評価セットを増やすたびにずれていた）。
+    buckets = {}
     for name, f in RULES.items():
         print(f"\n  -- {name} --")
         prev, mono = None, True
+        buckets[name] = {}
         for lab in ("高", "中", "低"):
             g = [s["hit"] for s in slots if f(s) == lab]
             if not g:
                 print(f"    {lab}: 0件")
+                buckets[name][lab] = None
                 continue
             p = float(np.mean(g))
+            buckets[name][lab] = {"n": len(g), "acc": p}
             print(f"    {lab}: n={len(g):3d} 正解率 {p:.3f}")
             if prev is not None and p > prev + 1e-9:
                 mono = False
             prev = p
+        buckets[name]["monotonic"] = mono
         print(f"    単調（高≧中≧低）: {'はい' if mono else '**いいえ**'}")
         for a, b in (("高", "中"), ("高", "低")):
             pt, lo_, hi_, pos = bootstrap_gap(slots, f, a, b)
@@ -356,6 +363,7 @@ def main():
                     "seed": SEED,
                     "unit": "query",
                     "gaps": results,
+                    "buckets": buckets,
                     # 分割検証も保存する。ここが JSON に無いと、文書に書くときに
                     # コンソールから手で写すことになる（#158 でそれを2度間違えた）。
                     "split_half": {

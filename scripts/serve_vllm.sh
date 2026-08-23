@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # vLLM を1本立てる。$1=モデルディレクトリ名 $2=served名 以降=追加オプション
 # GMU / MML / MNS を環境変数で上書きできる。
+#
+# 注意: **tool_choice で関数を名指しするリクエスト（製品の C1/C2）を測るときは
+# `--enable-auto-tool-choice --tool-call-parser qwen3_xml` を両方渡すこと。**
+# 片方だけだと vLLM はパーサを組まず、400 を返して全件が空になる
+# （vllm/parser/parser_manager.py が `not enable_auto_tools` で None を返す）。
 set -x
 MODEL_DIR="$1"; SERVED="$2"; shift 2
 GMU="${GMU:-0.60}"; MML="${MML:-8192}"; MNS="${MNS:-8}"
