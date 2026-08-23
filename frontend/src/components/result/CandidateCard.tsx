@@ -8,6 +8,7 @@
  * ranks show compact reason labels.
  */
 
+import { ConfidenceGauge } from "@/components/result/ConfidenceGauge";
 import type { Recommendation } from "@/lib/api-types";
 import { reasonLabel } from "@/lib/reasons";
 
@@ -36,11 +37,12 @@ export function CandidateCard({
         selected ? "border-primary" : "border-outline-variant"
       }`}
     >
-      <div className="absolute top-0 right-0 rounded-bl-lg bg-secondary-container px-sm py-xs font-bold text-on-secondary-container text-xs">
-        適合度: {candidate.confidence}
+      <div className="absolute top-1 right-1 flex items-center gap-xs rounded-bl-lg px-xs py-xs">
+        <span className="text-on-surface-variant text-xs">適合度</span>
+        <ConfidenceGauge level={candidate.confidence} />
       </div>
 
-      <div className="mb-sm flex items-center gap-sm">
+      <div className="mb-sm flex items-center gap-sm pr-16">
         <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-surface-variant font-bold text-lg text-on-surface-variant">
           {avatarInitial(candidate.name)}
         </div>
