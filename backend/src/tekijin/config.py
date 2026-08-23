@@ -71,6 +71,25 @@ class Settings(BaseSettings):
     # still falls back to MemorySaver at runtime (see the checkpointer factory).
     checkpointer_backend: Literal["memory", "postgres"] = "memory"
 
+    # Whether to FAIL-CLOSED on durability (#180): refuse to start on a non-durable
+    # checkpointer (``memory``, or a ``postgres`` whose setup fails) instead of
+    # silently degrading to in-memory — which would drop every session on the next
+    # restart. ``None`` (default) derives from ``app_env`` (enforced when it is not
+    # "development"). It is a SEPARATE knob from ``app_env`` on purpose: the DGX host
+    # must run ``app_env=development`` for an unrelated reason (#108/#173 — the local
+    # embedding model has no pinnable revision), so tying durability to ``app_env``
+    # alone would leave it OFF exactly where it matters. Set
+    # ``TEKIJIN_STRICT_DURABILITY=true`` on such a host to enforce it regardless, or
+    # ``false`` as an explicit escape hatch in a throwaway prod-flavored env.
+    strict_durability: bool | None = None
+
+    def durability_enforced(self) -> bool:
+        """True when a non-durable checkpointer must be a hard error, not a fallback."""
+
+        if self.strict_durability is not None:
+            return self.strict_durability
+        return self.app_env != "development"
+
     # Embedding model used by the retrieval component (C3). Chosen by the on-DGX
     # benchmark (#61): Nemotron-3-Embed-1B was 1st of 5 on the primary metric
     # (層2 Recall@3 0.615 vs e5-large 0.530). See docs/benchmarks/README.md.
