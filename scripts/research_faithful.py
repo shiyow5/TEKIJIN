@@ -111,6 +111,10 @@ def topic_vocabulary():
     return sorted(
         {s["topic"] for s in fx["skills"]}
         | {a["topic"] for a in fx["answers"] if a.get("topic")}
+        # `answers.topic` が NULL の行は `questions.topics` 側で引かれる
+        # （`repository.answers_by_topics`）。実行時に作られた回答はこちらに入るので、
+        # **製品で語彙を作るときは questions.topics も足すこと。**
+        | {t for q in fx["questions"] for t in (q.get("topics") or [])}
     )
 
 

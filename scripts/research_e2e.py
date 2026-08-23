@@ -155,6 +155,8 @@ def load_c1_topics(path, topk=0):
     import research_faithful as rf
 
     by_eval = {r["id"]: r["eval_id"] for r in rf.items() if r["klass"] == "normal"}
+    if topk < 0:
+        raise SystemExit("--c1-topk に負数は指定できない")
     return {
         by_eval[i]: list(intent.topics)[:topk] if topk else list(intent.topics)
         for i, intent in rf.load_c1(path).items()
@@ -250,6 +252,25 @@ def task_variants(url, out, c1_topics=None):
             f"{label:34s} R@3={metrics.recall_at_3:.3f} Top1={metrics.top1_accuracy:.3f} "
             f"MRR={metrics.mrr:.3f} | {line}"
         )
+        # 1問ごとの当落も残す。集計値だけだと差が有意かを後から検算できない
+        # （変種どうしの比較では、実際に違うのは数問しかないことがある）。
+        per_query = [
+            {
+                "id": q.id,
+                "difficulty": q.difficulty,
+                "has_gold_topics": bool(q.gold_topics),
+                "hit_at_3": bool(set(r.ranked_experts[:3]) & set(r.gold_experts)),
+                "ranked_top3": list(r.ranked_experts[:3]),
+            }
+            for q, r in zip(queries, results)
+            if q.gold_experts
+        ]
+        # 同じ recall の式のまま、gold トピックがある52件に限定して測り直す
+        # （hit@3 のような別定義を並べると、集計値と比較できなくなる）。
+        with_topics = evaluate(
+            [r for q, r in zip(queries, results) if q.gold_topics and q.gold_experts]
+        )
+        n_with_topics = sum(1 for q in queries if q.gold_topics and q.gold_experts)
         report.append(
             {
                 "name": label,
@@ -257,6 +278,12 @@ def task_variants(url, out, c1_topics=None):
                 "top1": metrics.top1_accuracy,
                 "mrr": metrics.mrr,
                 "by_difficulty": {k: v.recall_at_3 for k, v in layers.items()},
+                # gold トピックが空の4件は、gold を使う行では構造上0点になる
+                # （scorer.rank がトピック無しでは何も返さない）。変種と公平に比べるにはこちら。
+                "recall_at_3_with_gold_topics": with_topics.recall_at_3,
+                "top1_with_gold_topics": with_topics.top1_accuracy,
+                "n_with_gold_topics": n_with_topics,
+                "per_query": per_query,
             }
         )
     if out:
