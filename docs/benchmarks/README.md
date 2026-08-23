@@ -4,18 +4,21 @@
 
 詳細な読み解きは `analysis/20_モデル実測結果.md`（非gitの検討資料）にある。ここには**数字と再現方法**を置く。
 
-> ⚠️ **製品コードで回したら層2 Recall@3 は 0.140 だった（[e2e.md](e2e.md) / #103）。**
-> 経路が全件 `prior_answer` に倒れて候補が1名に固定されている。**下の数字はハーネス上のもの。**
+> ✅ **#132 で現行 develop（Nemotron + 較正済み閾値 + #115 の RRF 重み）を実 DB で再測定した。**
+> 層2 Recall@3 は **0.140 → 0.673**（56件基準）、経路精度は **0.125 → 0.821**。
+> #103（全件 `prior_answer` で候補が1名に固定）は #120 で解消済み。→ **[e2e.md](e2e.md) §0**
+>
+> ただし **0.673 の分母には構造上0点の11件が入っている**（経路 `document` 7件 ＝
+> **`gold_route` も `document` で正しい**、`gold_topics` 空 4件）。到達可能な上限は 45/56 = 0.804。
+> **L1 の 0.500 は取りこぼしではなく、到達可能分を全問取っている**（e2e.md §0.2）。
 >
 > ⛔ **C1 の自由記述トピックが C6 の完全一致照合と噛み合わず、証拠源が4つとも空振りする**（175個中3個一致）。
-> **1周目の C1 トピックだけを C6 に渡す切り分け**では、#103 と #87 を直した条件でも層2 R@3 は **0.131**
-> （同条件で gold トピックなら 0.836）。**上位3名が全クエリで同一**（47件中44件が同じ3名）。
-> 聞き返し後の2周目の C1 は測っていないので、**これは製品の上限値ではない**。
-> 現状そのままの実測は 0.140 → 0.134。
-> **直し方は実測済み**: C1 に語彙を守らせ上位1件だけ使うと R@3 **0.788**（gold 配置 0.901 の87%）。
-> **この2つ（0.788 / 0.901）だけ `gold_topics` がある52件基準**で、
-> 上の 0.131 / 0.836 / 0.140 / 0.134 は56件基準。
-> [llm_faithful.md](llm_faithful.md) §4.6。
+> **上位3名が全クエリで同一**（47件中44件が同じ3名）。聞き返し後の2周目の C1 は測っていないので、
+> **これは製品の上限値ではない**。
+> **直し方は実測済み**: C1 に語彙を守らせ上位1件だけ使うと R@3 **0.788**（gold 配置 0.901 の87%、52件基準）。
+> [llm_faithful.md](llm_faithful.md) §4.6 / #116。
+> **#130 でこの直し方を入れた後の実 DB 実測は 0.750**（全社員候補・56件基準。gold トピックの
+> 0.836 との差 0.086 が C1 の取りこぼし分）→ [e2e.md](e2e.md) §0.4。
 > あわせて thinking が ON のままで **C1+C2 の p50 が 83秒**（仕様は端から端まで p50 1.5秒）。
 > → **[llm_faithful.md](llm_faithful.md)**（#113 / #116）。
 > [c2.md](c2.md)（#111）の結論は取り下げ済み。
@@ -27,9 +30,13 @@
 > ⚠️ **下表の層2 Recall@3 は評価セット拡張（#73）より前の 45件で測ったもの。**
 > 採点対象が 56件になったので、埋め込みの順位は測り直しが要る（`bench_emb.json` も同様）。
 
-> ⚠️ **製品レベルの数値（0.140 / 0.732 / 0.836 / 0.134）は e5-large + 旧経路閾値 + 等重み RRF の条件。**
-> develop はその後 #102・#115・#120 で変わっており、**現行構成では再現しない** → **#132**。
-> 検索を通らない数値（`llm_faithful.md` §4.6、`confidence.md`）は影響を受けない。
+> ⚠️ **`e2e.md` §1 と `route.md` の製品レベル数値（0.140 / 0.732 / 0.134 など）は
+> e5-large + 旧経路閾値 + 等重み RRF の条件で、現行構成では再現しない。**
+> **#132 で再測定した現行構成の値は [e2e.md](e2e.md) §0 にある。**
+> 検索を通らない数値（`llm_faithful.md` §4.6、`confidence.md`）は影響を受けない
+> — 実際、`confidence.md` の元データは再測定で**バイト単位で同一**だった（e2e.md §0.5）。
+> **候補を全社員にする変種（0.836 / C1 実トピックの 0.750）も両構成で完全一致**する
+> （`res` も `route` も読まないため）。
 
 ## 結論
 
@@ -51,6 +58,8 @@
 | `ablation/c2_qwen36_{product,scoped}.json` | C2 充足判定の生出力（#111。**結論は取り下げ済み**） |
 | `ablation/{payload_,}c1_faithful.json` / `{payload_,}c2_faithful.json` | **製品のリクエストをそのまま再現した C1/C2 の入出力**。[llm_faithful.md](llm_faithful.md) |
 | `ablation/e2e_variants_c1.json` | C1 の実トピックで測った層2 R@3。[llm_faithful.md](llm_faithful.md) |
+| `ablation/route_nemotron.json` | **現行構成**の経路とチャネル類似度（#132）。[e2e.md](e2e.md) §0.3 |
+| `ablation/e2e_variants_nemotron{,_c1both_top1}.json` | **現行構成**の層2 R@3（#132）。同 §0.1 / §0.4 |
 | `ablation/misrecommendation.json` | 誤推薦の分類と、**1スロットごとの確信度素性**。[confidence.md](confidence.md)（#110） |
 | `ablation/confidence_stats.json` | 確信度ラベル案ごとの差と区間（問題単位・20000回）。同上 |
 | `ablation/c1_nothink.json` / `e2e_variants_c1_nothink.json` | `enable_thinking=false` を足しただけの反実仮想。同上 §4.5 |
@@ -114,7 +123,10 @@ Apache-2.0 と 1024次元の扱いやすさを優先するなら Qwen3-Embedding
 ```bash
 # GPUホスト（~/tekijin-bench に fixtures/ と scripts/ を置く）
 uv venv .venv
-uv pip install --python .venv/bin/python "sentence-transformers>=3" torch "huggingface_hub[cli]"
+# 採用した Nemotron-3-Embed-1B は sentence-transformers<4 では読めない（#137）。
+# backend/requirements-ml.txt と同じ下限にそろえること。
+uv pip install --python .venv/bin/python \
+  "sentence-transformers>=5.4" "transformers>=5.5" torch "huggingface_hub[cli]"
 
 # 【重要】重い処理は1つずつ nohup で流す。前景の ssh セッションで走らせると、
 # 接続が切れた時点でリモート側も SIGHUP で死ぬ（2026-08-22 に実際に消えた）。

@@ -10,9 +10,21 @@
 #     pip install -r requirements.txt -r requirements-ml.txt
 # then compute and store vectors with:
 #     make embed        (see scripts/embed_fixtures.py)
-sentence-transformers>=3.0,<4.0
+# 既定の埋め込みモデル nvidia/Nemotron-3-Embed-1B-BF16 は、同梱の
+# config_sentence_transformers.json で作成時の版をこう宣言している:
+#     sentence_transformers 5.4.1 / transformers 5.5.0 / pytorch 2.11.0+cu130
+# sentence-transformers<4 が引く transformers 4.x は、このモデルの
+# model_type `ministral3` を認識できず ValueError で落ちる（#137）。
+# 実機（internship-dgx1, GB10/aarch64）では
+#     sentence-transformers 6.0.0 / transformers 5.6.0 / torch 2.13.0a0
+# で読み込みと encode を確認済み。
+# 上限は置いていない。上限を置くと「モデル側が要求する版に上げられない」という
+# #137 と同じ詰まり方をするため。代わりに `-m model` のテスト
+# （backend/tests/test_embedding_model_loads.py）を安全弁にしている。
+# 実機で `pytest -m model --no-cov` を回せば、上げすぎ・下げすぎの両方を検出できる。
+sentence-transformers>=5.4
+transformers>=5.5
 
-# torch is a transitive dependency of sentence-transformers; pin the major line
-# to keep resolution predictable. Install the CUDA/CPU build appropriate for the
-# host from https://pytorch.org if the default wheel does not match your setup.
+# torch は sentence-transformers の推移的依存。ホストに合う CUDA/CPU ビルドを
+# https://pytorch.org から入れること（既定のホイールが合わない環境がある）。
 torch>=2.2
