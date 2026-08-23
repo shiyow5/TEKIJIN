@@ -101,6 +101,9 @@ make run-frontend # frontend のみ（next dev）
 TEKIJIN_LLM_BACKEND=vllm TEKIJIN_CHECKPOINTER_BACKEND=postgres make serve-prod
 ```
 
+チームで GPU サーバー（共有 vLLM）を使って立ち上げる手順は
+[docs/gpu-server-setup.md](docs/gpu-server-setup.md) を参照。
+
 ## 開発フロー（重要）
 
 Issue → ブランチ → 実装 → `make check` → PR（develop向け）→ CI → AIレビュー →（メンバーは PL レビュー）→ マージ。
