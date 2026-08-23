@@ -18,7 +18,12 @@ from tekijin.api import events, schemas
 from tekijin.config import Settings
 from tekijin.llm.factory import make_llm_nodes
 from tekijin.llm.schemas import IntentSchema, SufficiencySchema
-from tekijin.llm.vllm import VllmDraftModel, VllmIntentModel, VllmSufficiencyModel
+from tekijin.llm.vllm import (
+    VllmDraftModel,
+    VllmIntentModel,
+    VllmSufficiencyModel,
+    _thinking_extra_body,
+)
 
 
 def _settings(**overrides) -> Settings:
@@ -304,6 +309,15 @@ def test_vllm_sufficiency_adapter_converts_schema() -> None:
     result = VllmSufficiencyModel(model=model).check("q", intent, 0)
     assert result.sufficient is False and result.missing == ["現行製品"]
     assert result.followup_question == "製品は?"
+
+
+def test_thinking_extra_body_wires_setting_both_ways() -> None:
+    # The extra_body dict is the actual fix (#140): it must carry the setting's
+    # value under chat_template_kwargs.enable_thinking for vLLM to honor it.
+    assert _thinking_extra_body(_settings()) == {"chat_template_kwargs": {"enable_thinking": False}}
+    assert _thinking_extra_body(_settings(llm_enable_thinking=True)) == {
+        "chat_template_kwargs": {"enable_thinking": True}
+    }
 
 
 def test_vllm_intent_raises_on_empty_structured_output() -> None:

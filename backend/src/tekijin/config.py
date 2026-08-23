@@ -50,10 +50,12 @@ class Settings(BaseSettings):
     # answer. Kept OFF by default: with thinking ON the C1/C2 structured-output
     # (tool-call) calls became both slow (C1+C2 p50 ≈ 83s) AND unreliable — the
     # reasoning pass sometimes suppressed the forced tool call, so
-    # ``with_structured_output`` returned ``None`` and routing crashed (#116).
+    # ``with_structured_output`` returned ``None`` and routing crashed (#140).
     # Passed to vLLM as ``chat_template_kwargs={"enable_thinking": ...}``; the
-    # Qwen3 chat template reads it. Flip on only for free-text quality experiments
-    # where latency and structured parsing are not on the path.
+    # Qwen3 chat template reads it. This is a SINGLE GLOBAL switch shared by all
+    # LLM nodes (C1 intent, C2 sufficiency, AND C7 draft) — flipping it on to
+    # experiment with draft (C7) quality also re-enables thinking on C1/C2 and can
+    # reintroduce the structured-output breakage, so change it deliberately.
     llm_enable_thinking: bool = False
 
     # Which C1/C2/C7 implementation the API wires: "stub" = deterministic,
