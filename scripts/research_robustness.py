@@ -232,6 +232,56 @@ def constraints(ctx, base, llm_ctx):
     return rows
 
 
+# 拠点名と、それを一意に指す地域名・言い換え。#84 で評価セットの制約文を散らしたので、
+# 「素朴な文字列一致では取れない」ことを毎回この場で測れるようにしておく。
+BRANCHES = ("本社", "東京", "名古屋", "大阪", "福岡")
+
+
+def naive_branch(query):
+    """拠点名がそのまま書かれている場合だけ拾う、いちばん素朴な抽出。"""
+    for b in BRANCHES:
+        if b in query:
+            return b
+    return None
+
+
+def constraint_extraction(ctx):
+    """制約の「抽出しやすさ」を測る（#84）。
+
+    以前の評価セットは制約つき5件が同じ文型で終わっていたため、この素朴な抽出が
+    5/5・誤検出0 で通ってしまい、抽出の難しさを一切測れていなかった。
+    """
+    items = ctx["items"]
+    tp = fn = fp = 0
+    missed, false_hits = [], []
+    for it in items:
+        want = (it.get("constraint") or {}).get("branch")
+        got = naive_branch(it["query"])
+        if want:
+            if got == want:
+                tp += 1
+            else:
+                fn += 1
+                missed.append({"id": it["id"], "want": want, "got": got})
+        elif got:
+            fp += 1
+            false_hits.append({"id": it["id"], "got": got})
+    n_con = tp + fn
+    print(f"\n== 4. 制約の抽出しやすさ（素朴な文字列一致）==")
+    print(f"  再現率 {tp}/{n_con}  誤検出 {fp} 件（制約なし {len(items) - n_con} 件中）")
+    for m in missed:
+        print(f"    取り逃し id {m['id']}: 正解={m['want']} 抽出={m['got']}")
+    for m in false_hits:
+        print(f"    誤検出   id {m['id']}: 抽出={m['got']}（制約なし）")
+    return {
+        "recall": tp / n_con if n_con else 0.0,
+        "n_constrained": n_con,
+        "false_positives": fp,
+        "missed": missed,
+        "false_hits": false_hits,
+    }
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--emb", required=True)
@@ -251,6 +301,7 @@ def main():
         "cold_start": cold_start(ctx, args.model, ctopics, llm_plain, llm_ctx),
         "l3_fusion": l3_fusion(ctx, base, llm_ctx),
         "constraints": constraints(ctx, base, llm_ctx),
+        "constraint_extraction": constraint_extraction(ctx),
     }
     if args.out:
         with open(args.out, "w", encoding="utf-8") as f:

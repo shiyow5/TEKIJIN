@@ -11,6 +11,10 @@ C4（Dense + BM25 + RRF）の融合は当初、順位のみで統合する**等�
 セット eval_person.json v2、層2 Recall@3、`docs/benchmarks/ablation.md` §3）で、
 **等重み RRF が Dense 単体より -0.170 悪い**ことが分かった。
 
+> 注（#84）: 評価クエリ8件の文面を散らした後に測り直すと **-0.173**（Dense 0.607 / 等重み 0.435）。
+> **決定は変わらない**ので本 ADR の本文は当時のまま残す。最新値は
+> [ablation.md](../benchmarks/ablation.md) §3。
+
 数値は **harness の BM25 を production（`retrieval/sparse.py`）と同じ語彙オーバーラップ・
 フィルタに揃えて**測り直したもの（#68 codex 指摘対応。以前はスコア上位を無条件返却しノイズを
 融合していた）。フィルタを揃えても結論は不変だった。

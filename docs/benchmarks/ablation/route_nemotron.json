@@ -105,27 +105,27 @@
    "gold_route": "document",
    "route": "person",
    "n_candidates": 10,
-   "answer_confidence": 0.24,
-   "document_confidence": 0.186,
-   "people_confidence": 0.334
+   "answer_confidence": 0.242,
+   "document_confidence": 0.168,
+   "people_confidence": 0.263
   },
   {
    "id": 12,
    "gold_route": "person",
    "route": "person",
    "n_candidates": 10,
-   "answer_confidence": 0.3,
-   "document_confidence": 0.157,
-   "people_confidence": 0.284
+   "answer_confidence": 0.288,
+   "document_confidence": 0.176,
+   "people_confidence": 0.293
   },
   {
    "id": 13,
    "gold_route": "person",
    "route": "person",
    "n_candidates": 10,
-   "answer_confidence": 0.201,
-   "document_confidence": 0.118,
-   "people_confidence": 0.226
+   "answer_confidence": 0.179,
+   "document_confidence": 0.127,
+   "people_confidence": 0.192
   },
   {
    "id": 14,
@@ -133,26 +133,26 @@
    "route": "person",
    "n_candidates": 10,
    "answer_confidence": 0.271,
-   "document_confidence": 0.081,
-   "people_confidence": 0.289
+   "document_confidence": 0.109,
+   "people_confidence": 0.243
   },
   {
    "id": 15,
    "gold_route": "person",
    "route": "person",
    "n_candidates": 10,
-   "answer_confidence": 0.184,
-   "document_confidence": 0.089,
-   "people_confidence": 0.268
+   "answer_confidence": 0.176,
+   "document_confidence": 0.088,
+   "people_confidence": 0.266
   },
   {
    "id": 16,
    "gold_route": "person",
    "route": "person",
    "n_candidates": 10,
-   "answer_confidence": 0.344,
-   "document_confidence": 0.17,
-   "people_confidence": 0.262
+   "answer_confidence": 0.306,
+   "document_confidence": 0.158,
+   "people_confidence": 0.341
   },
   {
    "id": 17,
@@ -168,9 +168,9 @@
    "gold_route": "document",
    "route": "person",
    "n_candidates": 10,
-   "answer_confidence": 0.249,
-   "document_confidence": 0.184,
-   "people_confidence": 0.219
+   "answer_confidence": 0.212,
+   "document_confidence": 0.153,
+   "people_confidence": 0.325
   },
   {
    "id": 19,
@@ -195,9 +195,9 @@
    "gold_route": "prior_answer",
    "route": "person",
    "n_candidates": 10,
-   "answer_confidence": 0.211,
-   "document_confidence": 0.099,
-   "people_confidence": 0.13
+   "answer_confidence": 0.156,
+   "document_confidence": 0.095,
+   "people_confidence": 0.205
   },
   {
    "id": 22,
