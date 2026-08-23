@@ -76,18 +76,31 @@ def _thinking_extra_body(settings: Settings) -> dict[str, Any]:
     return {"chat_template_kwargs": {"enable_thinking": settings.llm_enable_thinking}}
 
 
+def _openai_model_kwargs(settings: Settings) -> dict[str, Any]:
+    """Network-free kwargs for :func:`init_chat_model`, kept unit-testable.
+
+    Includes the per-request ``timeout`` (#180 task 4) so a stuck vLLM call fails
+    fast instead of hanging the run and holding a backpressure slot; omitted when
+    ``llm_timeout_seconds`` is ``None`` (langchain's own default applies).
+    """
+
+    kwargs: dict[str, Any] = {
+        "base_url": settings.llm_base_url,
+        "api_key": settings.llm_api_key,
+        "extra_body": _thinking_extra_body(settings),
+    }
+    if settings.llm_timeout_seconds is not None:
+        kwargs["timeout"] = settings.llm_timeout_seconds
+    return kwargs
+
+
 def _openai_model(name: str, settings: Settings) -> Any:  # pragma: no cover - network client
     from langchain.chat_models import init_chat_model
 
     # Qwen3 is a reasoning model; unless we opt in, tell vLLM to skip the <think>
     # pass via the chat template. Thinking-ON made the forced tool-call structured
     # outputs slow and occasionally empty (see Settings.llm_enable_thinking / #140).
-    return init_chat_model(
-        f"openai:{name}",
-        base_url=settings.llm_base_url,
-        api_key=settings.llm_api_key,
-        extra_body=_thinking_extra_body(settings),
-    )
+    return init_chat_model(f"openai:{name}", **_openai_model_kwargs(settings))
 
 
 class VllmIntentModel:

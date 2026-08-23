@@ -448,6 +448,22 @@ def test_thinking_extra_body_wires_setting_both_ways() -> None:
     }
 
 
+def test_openai_model_kwargs_wires_timeout() -> None:
+    from tekijin.llm.vllm import _openai_model_kwargs
+
+    # #180 task 4: the per-request timeout is threaded into the client kwargs.
+    kwargs = _openai_model_kwargs(_settings(llm_timeout_seconds=12.5))
+    assert kwargs["timeout"] == 12.5
+    assert kwargs["base_url"] and "extra_body" in kwargs
+    # None disables the bound -> the key is omitted (langchain's own default).
+    assert "timeout" not in _openai_model_kwargs(_settings(llm_timeout_seconds=None))
+
+
+def test_llm_timeout_default_is_bounded() -> None:
+    # A finite default so a stuck vLLM call cannot hang a run indefinitely (#180).
+    assert _settings().llm_timeout_seconds == 60.0
+
+
 def test_vllm_intent_raises_on_empty_structured_output() -> None:
     # A reasoning model can suppress the forced tool call, so with_structured_output
     # yields None. Surface a clear error instead of an opaque AttributeError (#116).
