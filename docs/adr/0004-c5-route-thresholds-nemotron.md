@@ -18,7 +18,7 @@ C5 `decide_route`（`backend/src/tekijin/agent/route.py`）は、C4 が返す各
 `prior_answer` が定数偽になり、全件 `person` に倒れる）。逆に e5 時代は最小値が閾値を超えて全件
 `prior_answer` に倒れていた（#103）。いずれも「実装は正しいが閾値と分布が噛み合っていない」不具合。
 
-## 実測（`fixtures/synthetic/eval/route_calibration.json`, Nemotron, n=71, gold付き56件）
+## 実測（`fixtures/synthetic/eval/route_calibration.json`, Nemotron, **決定当時の n=71 / gold付き56件**）
 
 チャネルごとの gold 別分布:
 
@@ -43,9 +43,11 @@ C5 `decide_route`（`backend/src/tekijin/agent/route.py`）は、C4 が返す各
 
 結果: **経路精度 0.821（多数決 person 0.696 を上回る）**、1経路への潰れ 0.90（< 0.95）。
 
-> 注（#158）: その後 #84 / #158 で評価セットの制約の付き方を変えたところ、**実 DB での
-> 経路精度は 0.768（43/56）に下がった**（`document` に振られるのが 7件→4件）。
-> 決定そのものは変えないが、**閾値は再較正の余地がある**。→
+> 注（#158）: その後 #84 / #158 で評価セットを変えたので、**上の 0.821 は当時の56件基準の値**である。
+> #158 第1段（制約を5→15件）で 0.768（43/56）に下がり、L3 を10→20件に増やした現在は
+> **0.803（53/66）**（`gold_route` が `none` でない件数が 56 → 66 に増えた）。
+> **分母が違うので3つの値を直接は比べられない。** `document` に振られるのは 7件 → 4件 のまま
+> 戻っていないので、決定そのものは変えないが **閾値は再較正の余地がある**。→
 > [e2e.md](../benchmarks/e2e.md) §0.3
 
 ## prior_answer が発火しないことの明示

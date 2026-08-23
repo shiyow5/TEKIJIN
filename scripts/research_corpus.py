@@ -150,3 +150,56 @@ def scored_person_items(person, gold_key="gold_experts"):
     2本の差が「トピックが分かった後の人の並び」の妥当性の目安になる。
     """
     return [q for q in person if q["difficulty"] != "L4" and q.get(gold_key)]
+
+
+def assert_llm_ids_match(path):
+    """保存済みの LLM 出力が、いまの評価セットと**同じクエリを指しているか**を確かめる。
+
+    これらのファイルは基本的に `id` しか持たず、クエリ文を持たない。
+    そのため評価セットに項目を足して id がずれると、予測が**別のクエリに紐づいたまま**
+    黙って測定が続く。実際 #158 で L3 を10件足したとき、
+    旧 id57（L4・工場の生産ライン）の予測が新 id57（L3・出稿の効果測定）に割り当てられた。
+
+    検査は2段階:
+
+    1. **id 集合の一致**。「採点対象を覆っているか」だけでは検出できない
+       （1〜71 は 1〜66 を覆ってしまう）ので、集合として一致するかを見る
+    2. **クエリ文の一致**（`query` を持つファイルだけ）。件数を変えずに文面だけ
+       差し替えた場合は 1 をすり抜けるので、持っている情報は使い切る
+
+    ファイルが無ければ何もしない（その手法を測っていないだけなので）。
+    """
+    if not os.path.exists(path):
+        return
+    with open(path, encoding="utf-8") as f:
+        records = json.load(f)
+
+    person, _ = load_eval()
+    all_ids = {q["id"] for q in person}
+    scored_ids = {q["id"] for q in person if q["difficulty"] != "L4"}
+    text = {q["id"]: q["query"] for q in person}
+
+    got = {d["id"] for d in records if isinstance(d.get("id"), int)}
+    if not got:
+        return  # `p1` / `r3` のような別 id 空間のファイル（C1 系）はここでは見ない
+    name = os.path.basename(path)
+    if got not in (all_ids, scored_ids):
+        raise SystemExit(
+            f"{name} の id 集合が、いまの評価セットと違う。\n"
+            f"  保存されている id: {len(got)} 件（{min(got)}〜{max(got)}）\n"
+            f"  評価セット: 全 {len(all_ids)} 件 / 採点対象 {len(scored_ids)} 件\n"
+            "評価セットに項目を足すと id がずれ、**別のクエリの予測を使ってしまう**。\n"
+            "LLM 分類を測り直すこと（scripts/research_llm.py）。"
+        )
+
+    for d in records:
+        saved = d.get("query")
+        if saved is None:
+            continue
+        if saved != text.get(d["id"]):
+            raise SystemExit(
+                f"{name} の id={d['id']} が、いまの評価セットと違うクエリを指している。\n"
+                f"  保存: {saved[:60]}\n"
+                f"  現在: {text.get(d['id'], '(存在しない)')[:60]}\n"
+                "LLM 分類を測り直すこと（scripts/research_llm.py）。"
+            )

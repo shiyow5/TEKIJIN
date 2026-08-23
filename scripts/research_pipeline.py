@@ -24,6 +24,8 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 import research_ablation as A
 import research_corpus as rc
 import research_rank as rr
@@ -135,6 +137,17 @@ def main():
     ctopics = rt.chunk_topics(fx)
     model = args.model
     d = args.llm_dir
+
+    # **id しか持たないファイルは全部検査する。** 1本だけ守っても、他が同じ事故を起こす。
+    for fn in (
+        "llm_topic.json",
+        "llm_topic_ctx.json",
+        "llm_topic_abstain.json",
+        "llm_topic_sc.json",
+        "llm_rerank.json",
+        "llm_abstain_conf.json",
+    ):
+        rc.assert_llm_ids_match(os.path.join(d, fn))
 
     llm_plain = load_topics(os.path.join(d, "llm_topic.json"))
     llm_ctx = load_topics(os.path.join(d, "llm_topic_ctx.json"))

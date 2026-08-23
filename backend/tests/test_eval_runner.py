@@ -164,7 +164,7 @@ def test_evaluate_alt_uses_alternate_gold_only_where_present() -> None:
 # --------------------------------------------------------------------------- #
 def test_load_bundled_eval_person() -> None:
     queries = load_eval_queries()
-    assert len(queries) == 71  # eval_person.json v2 (fixtures README)
+    assert len(queries) == 81  # eval_person.json v2 (#158 で L3 を10件足した)
     assert all(isinstance(q, EvalQuery) for q in queries)
     assert {q.gold_route for q in queries} <= VALID_ROUTES
     # L4 abstain queries carry no gold experts and route "none".
@@ -428,7 +428,7 @@ def test_run_eval_real_pipeline_over_seed(seed_counts, session, fake_embedder) -
     report = run_eval(queries, ranker)
 
     m = report.metrics
-    assert m.n == 71  # ran over every query
+    assert m.n == 81  # ran over every query
     assert m.n_ranked > 0 and m.n_routed > 0
     for value in (m.top1_accuracy, m.recall_at_3, m.mrr, m.route_accuracy):
         assert 0.0 <= value <= 1.0
@@ -448,25 +448,23 @@ def test_run_eval_real_pipeline_over_seed(seed_counts, session, fake_embedder) -
     # fixtures store NULL vectors so BM25 drives retrieval and routing degenerates
     # to the person line (route accuracy == the person fraction among routed queries).
     #
-    # #158 の直前（develop 2ae8a10）と直後を実測して比べた:
+    # #158 で評価セットを2段階に変えたので、その都度実測して床を引き直している。
     #
-    #     指標        直前     直後     差
-    #     Top-1      0.643   0.536   -0.107
-    #     Recall@3   0.545   0.551   +0.006   ← 下がっていない
-    #     MRR        0.670   0.598   -0.072
-    #     route      0.696   0.696    0.000
+    #     指標        #158前   制約15件   ＋L3 20件
+    #     Top-1      0.643    0.536      0.606
+    #     Recall@3   0.545    0.551      0.568
+    #     MRR        0.670    0.598      0.659
+    #     route      0.696    0.696      0.742
     #
-    # **Top-1 と MRR の低下は検索やスコアラーの劣化ではない。** 拠点制約つきを
-    # 5 件から 15 件に増やしたことで 10 件の gold が 4 名から 1〜2 名に絞られ
-    # （gold 人数の合計 40 → 19）、該当クエリでランダムに 1 名選んだときの
-    # Top-1 期待値は 0.100 → 0.048 に半減した。正解集合が小さくなった分だけ
-    # 当てにくくなるのは設計どおりで、影響は採点対象 56 件中 10 件
-    # （最大 10/56 = 0.179 の押し下げ）。観測された 0.107 はその範囲に収まる。
+    # 制約を 15 件に増やした段では 10 件の gold が 4 名から 1〜2 名に絞られ
+    # （gold 人数の合計 40 → 19）、Top-1 と MRR が下がった。**検索やスコアラーの
+    # 劣化ではない**（該当クエリでランダムに 1 名選んだときの Top-1 期待値も
+    # 0.100 → 0.048 に半減している）。その後 L3 を 10 件足したところ、
+    # 新しい L3 は gold が 3〜4 名で当てやすいぶん、いずれも戻った。
     #
-    # したがって床を下げるのは Top-1 と MRR だけにする。
-    # **Recall@3 は上がっているので 0.50 のまま据え置く**（下げると回帰検出の
-    # 余裕を理由なく捨てることになる）。
-    assert m.top1_accuracy >= 0.45
+    # 床は現在の実測から余裕を取って置く。**下げるのは実測が下がったときだけにし、
+    # 理由をここに書く**（一度、下がっていない Recall@3 の床まで下げてしまった）。
+    assert m.top1_accuracy >= 0.50
     assert m.recall_at_3 >= 0.50
     assert m.mrr >= 0.55
-    assert m.route_accuracy >= 0.55
+    assert m.route_accuracy >= 0.65

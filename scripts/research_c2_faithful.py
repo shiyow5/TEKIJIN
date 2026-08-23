@@ -98,7 +98,8 @@ def main():
     all_items = {r["id"]: r for r in rf.items()}
 
     print("== 0. 段ごとの歩留まり（母集団をここで確定する）==")
-    print(f"  相談 {len(all_items)} 件（正常系56 + 異常系20）")
+    n_norm = sum(1 for d in all_items.values() if d["klass"] == "normal")
+    print(f"  相談 {len(all_items)} 件（正常系{n_norm} + 異常系{len(all_items) - n_norm}）")
     print(f"  C1 が応答            {len(c1_rows)}")
     c1_fail = [i for i in c1_rows if i not in intents]
     print(

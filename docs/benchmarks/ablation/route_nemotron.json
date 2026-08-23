@@ -6,7 +6,7 @@
    "document_sim": 0.3,
    "person_weak_sim": 0.4
   },
-  "n": 71,
+  "n": 81,
   "source": "scripts/research_e2e.py --task route"
  },
  "rows": [
@@ -516,6 +516,96 @@
   },
   {
    "id": 57,
+   "gold_route": "person",
+   "route": "person",
+   "n_candidates": 10,
+   "answer_confidence": 0.171,
+   "document_confidence": 0.025,
+   "people_confidence": 0.143
+  },
+  {
+   "id": 58,
+   "gold_route": "person",
+   "route": "person",
+   "n_candidates": 10,
+   "answer_confidence": 0.249,
+   "document_confidence": 0.132,
+   "people_confidence": 0.162
+  },
+  {
+   "id": 59,
+   "gold_route": "person",
+   "route": "person",
+   "n_candidates": 10,
+   "answer_confidence": 0.238,
+   "document_confidence": 0.137,
+   "people_confidence": 0.141
+  },
+  {
+   "id": 60,
+   "gold_route": "person",
+   "route": "person",
+   "n_candidates": 10,
+   "answer_confidence": 0.21,
+   "document_confidence": 0.174,
+   "people_confidence": 0.132
+  },
+  {
+   "id": 61,
+   "gold_route": "person",
+   "route": "person",
+   "n_candidates": 10,
+   "answer_confidence": 0.267,
+   "document_confidence": 0.14,
+   "people_confidence": 0.195
+  },
+  {
+   "id": 62,
+   "gold_route": "person",
+   "route": "person",
+   "n_candidates": 10,
+   "answer_confidence": 0.268,
+   "document_confidence": 0.144,
+   "people_confidence": 0.133
+  },
+  {
+   "id": 63,
+   "gold_route": "person",
+   "route": "person",
+   "n_candidates": 10,
+   "answer_confidence": 0.187,
+   "document_confidence": 0.169,
+   "people_confidence": 0.203
+  },
+  {
+   "id": 64,
+   "gold_route": "person",
+   "route": "person",
+   "n_candidates": 10,
+   "answer_confidence": 0.172,
+   "document_confidence": 0.13,
+   "people_confidence": 0.162
+  },
+  {
+   "id": 65,
+   "gold_route": "person",
+   "route": "person",
+   "n_candidates": 10,
+   "answer_confidence": 0.225,
+   "document_confidence": 0.199,
+   "people_confidence": 0.146
+  },
+  {
+   "id": 66,
+   "gold_route": "person",
+   "route": "person",
+   "n_candidates": 10,
+   "answer_confidence": 0.243,
+   "document_confidence": 0.109,
+   "people_confidence": 0.289
+  },
+  {
+   "id": 67,
    "gold_route": "none",
    "route": "person",
    "n_candidates": 10,
@@ -524,7 +614,7 @@
    "people_confidence": 0.153
   },
   {
-   "id": 58,
+   "id": 68,
    "gold_route": "none",
    "route": "person",
    "n_candidates": 10,
@@ -533,7 +623,7 @@
    "people_confidence": 0.226
   },
   {
-   "id": 59,
+   "id": 69,
    "gold_route": "none",
    "route": "person",
    "n_candidates": 10,
@@ -542,7 +632,7 @@
    "people_confidence": 0.193
   },
   {
-   "id": 60,
+   "id": 70,
    "gold_route": "none",
    "route": "person",
    "n_candidates": 10,
@@ -551,7 +641,7 @@
    "people_confidence": 0.139
   },
   {
-   "id": 61,
+   "id": 71,
    "gold_route": "none",
    "route": "person",
    "n_candidates": 10,
@@ -560,7 +650,7 @@
    "people_confidence": 0.052
   },
   {
-   "id": 62,
+   "id": 72,
    "gold_route": "none",
    "route": "person",
    "n_candidates": 10,
@@ -569,7 +659,7 @@
    "people_confidence": 0.215
   },
   {
-   "id": 63,
+   "id": 73,
    "gold_route": "none",
    "route": "person",
    "n_candidates": 10,
@@ -578,7 +668,7 @@
    "people_confidence": 0.071
   },
   {
-   "id": 64,
+   "id": 74,
    "gold_route": "none",
    "route": "person",
    "n_candidates": 10,
@@ -587,7 +677,7 @@
    "people_confidence": 0.096
   },
   {
-   "id": 65,
+   "id": 75,
    "gold_route": "none",
    "route": "person",
    "n_candidates": 10,
@@ -596,7 +686,7 @@
    "people_confidence": 0.145
   },
   {
-   "id": 66,
+   "id": 76,
    "gold_route": "none",
    "route": "person",
    "n_candidates": 10,
@@ -605,7 +695,7 @@
    "people_confidence": 0.154
   },
   {
-   "id": 67,
+   "id": 77,
    "gold_route": "none",
    "route": "person",
    "n_candidates": 10,
@@ -614,7 +704,7 @@
    "people_confidence": 0.117
   },
   {
-   "id": 68,
+   "id": 78,
    "gold_route": "none",
    "route": "person",
    "n_candidates": 10,
@@ -623,7 +713,7 @@
    "people_confidence": 0.166
   },
   {
-   "id": 69,
+   "id": 79,
    "gold_route": "none",
    "route": "person",
    "n_candidates": 10,
@@ -632,7 +722,7 @@
    "people_confidence": 0.126
   },
   {
-   "id": 70,
+   "id": 80,
    "gold_route": "none",
    "route": "person",
    "n_candidates": 10,
@@ -641,7 +731,7 @@
    "people_confidence": 0.087
   },
   {
-   "id": 71,
+   "id": 81,
    "gold_route": "none",
    "route": "person",
    "n_candidates": 10,

@@ -24,6 +24,8 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 import research_ablation as A
 import research_corpus as rc
 import research_rank as rr
@@ -47,6 +49,7 @@ def load_topics(path):
         except (ValueError, KeyError):
             continue
     return out
+
 
 
 def keep_answers(fx, fraction, seed=SEED):
@@ -149,7 +152,8 @@ def cold_start(ctx, model, ctopics, llm_plain, llm_ctx):
 # --------------------------------------------------------------------------- #
 def l3_fusion(ctx, base, llm_ctx):
     fx = ctx["fx"]
-    print("\n== 2. 複数トピックの統合方法（L3 = 2分野にまたがる相談 10件）==")
+    n_l3 = sum(1 for it in ctx["items"] if it.get("difficulty") == "L3")
+    print(f"\n== 2. 複数トピックの統合方法（L3 = 2分野にまたがる相談 {n_l3}件）==")
     rows = []
     for k, mode in [
         (1, "weighted_sum"),
@@ -301,6 +305,9 @@ def main():
 
     ctx = A.build_context([args.emb])
     ctopics = rt.chunk_topics(ctx["fx"])
+    # **読むファイルは全部検査する。** 1本だけ守っても、他が同じ事故を起こす。
+    for fn in ("llm_topic.json", "llm_topic_ctx.json"):
+        rc.assert_llm_ids_match(os.path.join(args.llm_dir, fn))
     llm_plain = load_topics(os.path.join(args.llm_dir, "llm_topic.json"))
     llm_ctx = load_topics(os.path.join(args.llm_dir, "llm_topic_ctx.json"))
     base = A.evaluate(ctx, A.make_system(model=args.model))

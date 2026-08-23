@@ -25,6 +25,8 @@ from collections import defaultdict
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(
     0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "backend", "src")
 )
@@ -213,6 +215,7 @@ def main():
     fx = ctx["fx"]
     now = latest_moment(fx)
     c6 = C6(fx, now)
+    rc.assert_llm_ids_match(os.path.join(args.llm_dir, "llm_topic_ctx.json"))
     topics = load_topics(os.path.join(args.llm_dir, "llm_topic_ctx.json"))
     base = A.evaluate(ctx, A.make_system(model=args.model))
     default = Weights()
