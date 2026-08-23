@@ -306,6 +306,19 @@ def test_vllm_sufficiency_adapter_converts_schema() -> None:
     assert result.followup_question == "製品は?"
 
 
+def test_vllm_intent_raises_on_empty_structured_output() -> None:
+    # A reasoning model can suppress the forced tool call, so with_structured_output
+    # yields None. Surface a clear error instead of an opaque AttributeError (#116).
+    with pytest.raises(ValueError, match="C1 intent"):
+        VllmIntentModel(model=_FakeStructured(None)).analyze("q", None)
+
+
+def test_vllm_sufficiency_raises_on_empty_structured_output() -> None:
+    intent = IntentResult(topics=["セキュリティ"], question_type="技術相談")
+    with pytest.raises(ValueError, match="C2 sufficiency"):
+        VllmSufficiencyModel(model=_FakeStructured(None)).check("q", intent, 0)
+
+
 # --------------------------------------------------------------------------- #
 # service helpers
 # --------------------------------------------------------------------------- #

@@ -37,10 +37,14 @@ _DRAFT_SYSTEM = (
 def _openai_model(name: str, settings: Settings) -> Any:  # pragma: no cover - network client
     from langchain.chat_models import init_chat_model
 
+    # Qwen3 is a reasoning model; unless we opt in, tell vLLM to skip the <think>
+    # pass via the chat template. Thinking-ON made the forced tool-call structured
+    # outputs slow and occasionally empty (see Settings.llm_enable_thinking / #116).
     return init_chat_model(
         f"openai:{name}",
         base_url=settings.llm_base_url,
         api_key=settings.llm_api_key,
+        extra_body={"chat_template_kwargs": {"enable_thinking": settings.llm_enable_thinking}},
     )
 
 
@@ -63,7 +67,9 @@ class VllmIntentModel:
 
     def analyze(self, question: str, asker: dict[str, Any] | None) -> IntentResult:
         model = self._model if self._model is not None else self._structured()
-        out: IntentSchema = model.invoke(self.prompt(question, asker))
+        out: IntentSchema | None = model.invoke(self.prompt(question, asker))
+        if out is None:  # forced tool call was not emitted (e.g. reasoning suppressed it)
+            raise ValueError("C1 intent: structured output was empty (no tool call from the LLM)")
         return IntentResult(
             topics=list(out.topics),
             products=list(out.products),
@@ -93,7 +99,11 @@ class VllmSufficiencyModel:
 
     def check(self, question: str, intent: IntentResult, followup_count: int) -> SufficiencyResult:
         model = self._model if self._model is not None else self._structured()
-        out: SufficiencySchema = model.invoke(self.prompt(question, intent))
+        out: SufficiencySchema | None = model.invoke(self.prompt(question, intent))
+        if out is None:  # forced tool call was not emitted (e.g. reasoning suppressed it)
+            raise ValueError(
+                "C2 sufficiency: structured output was empty (no tool call from the LLM)"
+            )
         return SufficiencyResult(
             sufficient=out.sufficient,
             missing=list(out.missing),
