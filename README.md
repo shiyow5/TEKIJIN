@@ -1,10 +1,22 @@
 # TEKIJIN（適時／適材適所）
 
 社内の「これ誰に聞けばいいんだろう」を、AIが正しい人へ正しい形で取り次ぐプロダクト。
-大塚商会サマーインターン Aチーム。
+**回答の出所は常に人**（AIは代弁せず、適材へ取り次ぐ）。大塚商会サマーインターン Aチーム。
 
-> プロトタイプ実装が進行中です。ローカルでの起動方法は
+> フロー（C1〜C8）と全画面が動作するプロトタイプ実装済み。DB＋埋め込み＋vLLM を
+> 揃えれば質問→取り次ぎまで実データで通ります。ローカルでの起動方法は
 > [アプリの起動（開発）](#アプリの起動開発)を参照してください。
+
+## 主な機能（実装済み）
+
+- **質問→意図解析→経路判定→推薦→依頼文（C1〜C8, LangGraph）**: 質問を構造化し、
+  適任者に取り次ぐ（人ルート）／過去回答・社内文書で自己解決（補助ルート）を判定。
+- **画面**: ハブ `/`・質問 `/questions`・思考過程 `/session/[id]`・結果 `/session/[id]/result`・
+  受信箱 `/inbox`・回答 `/answer/[session_id]`・文書ビューア `/documents/[id]`・ダッシュボード `/dashboard`。
+- **取り次ぎの堅牢性**: 受諾/辞退→リルート、stale-outcome ガード（generation token）、
+  切断後の再接続 replay。
+- **安全性**: C1 で個人情報要求・プロンプト注入・担当外照会を `out_of_scope` として拒否。
+- **ダッシュボード**: 推薦精度・自己解決率・平均解決時間（実行時解決を反映）などの集計のみ表示。
 
 ## リポジトリ構成
 
@@ -101,16 +113,17 @@ Issue → ブランチ → 実装 → `make check` → PR（develop向け）→ 
 
 | 対象 | 言語/FW | フォーマッタ | Linter | テスト |
 |---|---|---|---|---|
-| backend | Python 3.12 | ruff format | ruff | pytest |
-| frontend | TypeScript | Biome | Biome | vitest |
+| backend | Python 3.12（FastAPI + LangGraph + SQLAlchemy/pgvector） | ruff format | ruff（型検査は mypy を併用） | pytest |
+| frontend | TypeScript（Next.js 15 + React 19 + Tailwind） | Biome | Biome | vitest + Playwright(E2E) |
 
 ## CI
 
 `main` への push と Pull Request で、変更のあった領域だけ以下が走ります。
 
 - **Format Check** … 整形崩れの検出
-- **Lint** … 静的解析
-- **Test** … 単体テスト
+- **Lint** … 静的解析（ruff / Biome）
+- **Test** … backend pytest（PostgreSQL+pgvector 結合を含む）／frontend vitest
+- **E2E** … frontend の Playwright（主要フローのブラウザテスト）
 
 GitHub-hosted の `ubuntu-latest` で動作します（追加のランナー設定は不要）。
 
