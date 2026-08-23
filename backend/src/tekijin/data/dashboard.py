@@ -12,7 +12,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from tekijin.models.tables import Answer, Employee, EvalRun, Question, Recommendation
+from tekijin.models.tables import Answer, Employee, EvalRun, Event, Question, Recommendation
 
 # Routes that resolve a question WITHOUT contacting a live person — the numerator
 # of the self-resolution rate (product-spec 画面5). Only ``document`` qualifies in
@@ -87,6 +87,7 @@ def dashboard_summary(
         "self_resolution_rate": _self_resolution_rate(session),
         "avg_resolution_hours": _avg_resolution_hours(session),
         "top_responder_share": _top_responder_share(answers_per_responder, total_answers),
+        "processing_latency": _processing_latency(session),
         "latest_eval": _latest_eval(session),
         "answers_per_responder": answers_per_responder,
         "topic_distribution": topic_distribution,
@@ -142,6 +143,36 @@ def _avg_resolution_hours(session: Session) -> float | None:
         .outerjoin(first_answer, first_answer.c.qid == Question.id)
         .where(Question.created_at.isnot(None), solved.isnot(None))
     )
+
+
+def _processing_latency(session: Session) -> dict[str, Any]:
+    """p50/p95 of per-question AI processing time in ms (画面5 / #177).
+
+    Sums each question's recorded stage durations (``events.ended_at -
+    started_at``) — so human-wait gaps between run segments are excluded — then
+    takes the median / 95th percentile across questions. Empty (no runs recorded
+    yet) yields None percentiles with ``sample_size`` 0.
+    """
+
+    stage_ms = func.extract("epoch", Event.ended_at - Event.started_at) * 1000.0
+    per_question = (
+        select(func.sum(stage_ms).label("ms"))
+        .where(Event.started_at.isnot(None), Event.ended_at.isnot(None))
+        .group_by(Event.question_id)
+        .subquery()
+    )
+    p50, p95, n = session.execute(
+        select(
+            func.percentile_cont(0.5).within_group(per_question.c.ms.asc()),
+            func.percentile_cont(0.95).within_group(per_question.c.ms.asc()),
+            func.count(),
+        )
+    ).one()
+    return {
+        "p50_ms": round(p50) if p50 is not None else None,
+        "p95_ms": round(p95) if p95 is not None else None,
+        "sample_size": n,
+    }
 
 
 def _top_responder_share(answers_per_responder: list[dict[str, Any]], total_answers: int) -> float:

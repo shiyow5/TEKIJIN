@@ -26,7 +26,7 @@ from tekijin.api.service import (
 from tekijin.app import create_app
 from tekijin.data.dashboard import dashboard_summary
 from tekijin.data.db import get_sessionmaker
-from tekijin.models.tables import Answer, Question, Recommendation
+from tekijin.models.tables import Answer, Event, Question, Recommendation
 
 NOW = dt.datetime(2026, 9, 15, 12, 0, 0)
 GOOD_Q = "現行のVPN機器で3拠点の拠点間接続について相談したいです"
@@ -128,6 +128,9 @@ def _cleanup_api_rows(engine):
         session.execute(
             text(r"DELETE FROM recommendations WHERE question_id LIKE 'api\_%' ESCAPE '\'")
         )
+        # events reference questions (FK) and are now written at runtime (#177), so
+        # they must be removed before the questions they point at.
+        session.execute(text(r"DELETE FROM events WHERE question_id LIKE 'api\_%' ESCAPE '\'"))
         session.execute(text(r"DELETE FROM questions WHERE id LIKE 'api\_%' ESCAPE '\'"))
         session.commit()
     finally:
@@ -160,8 +163,54 @@ def test_happy_path_ask_events_answer(seed_counts, engine, fake_embedder) -> Non
     ans = client.post("/answer", json={"session_id": "s1", "outcome": "accepted"})
     assert ans.status_code == 200 and ans.json()["status"] == "resumed"
     done = _events(client, "s1")
-    assert done == [("done", {"status": "sent", "answer": done[0][1]["answer"]})]
+    assert len(done) == 1 and done[0][0] == "done"
+    assert done[0][1]["status"] == "sent"
     assert "取り次ぎました" in done[0][1]["answer"]
+    # #177: the done event carries the segment's processing latency (int ms).
+    assert isinstance(done[0][1]["latency_ms"], int)
+
+
+# --------------------------------------------------------------------------- #
+# #177: per-stage run events (latency KPI source) + dashboard percentiles
+# --------------------------------------------------------------------------- #
+def _events_for(engine, question_id: str) -> list[Event]:
+    check = get_sessionmaker(engine)()
+    try:
+        return check.query(Event).filter(Event.question_id == question_id).all()
+    finally:
+        check.close()
+
+
+def test_run_records_stage_events(seed_counts, engine, fake_embedder) -> None:
+    client = _client(engine, fake_embedder)
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "ev1"})
+    _events(client, "ev1")  # run to the send interrupt
+
+    qid = _latest_question(engine).id
+    rows = _events_for(engine, qid)
+    stages = {r.stage for r in rows}
+    # Every compute stage of the person-route segment is recorded (not just the
+    # ones that surface an SSE event), so the latency sum is real processing time.
+    assert {"c1_intent", "c3_embed", "c4_retrieve", "c5_route", "c6_score", "c7_draft"} <= stages
+    # No interrupt pseudo-node is recorded, and timing columns are populated.
+    assert "__interrupt__" not in stages
+    for r in rows:
+        assert r.started_at is not None and r.ended_at is not None
+
+
+def test_dashboard_exposes_processing_latency_from_events(
+    seed_counts, engine, fake_embedder
+) -> None:
+    client = _client(engine, fake_embedder)
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "lat1"})
+    _events(client, "lat1")
+
+    body = client.get("/dashboard").json()
+    lat = body["processing_latency"]
+    assert lat["sample_size"] >= 1
+    # p50/p95 are present and non-negative once at least one run is recorded.
+    assert lat["p50_ms"] is not None and lat["p50_ms"] >= 0
+    assert lat["p95_ms"] is not None and lat["p95_ms"] >= 0
 
 
 # --------------------------------------------------------------------------- #

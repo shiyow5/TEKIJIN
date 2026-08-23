@@ -51,6 +51,7 @@ from tekijin.agent.protocols import DraftModel, IntentModel, SufficiencyModel
 from tekijin.api import schemas
 from tekijin.api.events import (
     TERMINAL_EVENTS,
+    TERMINAL_NODES,
     interrupt_event,
     node_event,
     reconnect_events,
@@ -65,6 +66,7 @@ from tekijin.data.writes import (
     mark_question_resolved,
     persist_question,
     recommendation_outcome,
+    record_events,
     set_recommendation_outcome,
     update_question_route,
     update_question_topics,
@@ -118,6 +120,15 @@ def _interrupt_payload(value: Any) -> dict[str, Any]:
     if value and isinstance(value, tuple):
         return getattr(value[0], "value", {}) or {}
     return {}
+
+
+def _segment_latency_ms(
+    event_rows: list[tuple[str, dt.datetime, dt.datetime, dict[str, Any] | None]],
+) -> int:
+    """Total processing time (ms) of the recorded stages in this run segment (#177)."""
+
+    total = sum((ended - started).total_seconds() for _stage, started, ended, _meta in event_rows)
+    return round(total * 1000)
 
 
 def _error_event() -> ServerSentEvent:
@@ -652,6 +663,11 @@ class AgentService:
         question_id = self._run_question_id(graph, config, agent_input)
         rec_ids: list[int] | None = None
         terminal: ServerSentEvent | None = None
+        # Per-stage timing for the latency KPI (#177): each real node's duration is
+        # (this node's end) - (previous node's end within this segment). `prev`
+        # starts at segment start, so a resume segment does not count the human wait.
+        event_rows: list[tuple[str, dt.datetime, dt.datetime, dict[str, Any] | None]] = []
+        prev = self._now_factory()
         # Occupy a backpressure slot only while the graph actually executes (#180);
         # released by the finally on completion or client disconnect.
         with self._run_slot():
@@ -663,16 +679,25 @@ class AgentService:
                         self._persist_route(question_id, data)
                     elif node == "c6_score":
                         rec_ids = self._persist_recommendations(question_id, data)
-                    event = (
-                        interrupt_event(_interrupt_payload(data))
-                        if node == "__interrupt__"
-                        else node_event(node, data)
-                    )
+                    if node == "__interrupt__":
+                        event = interrupt_event(_interrupt_payload(data))
+                    else:
+                        # Record this stage's timing (all compute nodes, not just the
+                        # ones that surface an SSE event).
+                        now_dt = self._now_factory()
+                        if question_id is not None:
+                            event_rows.append((node, prev, now_dt, None))
+                        prev = now_dt
+                        latency = (
+                            _segment_latency_ms(event_rows) if node in TERMINAL_NODES else None
+                        )
+                        event = node_event(node, data, latency_ms=latency)
                     if event is not None:
                         if event.event in TERMINAL_EVENTS:
                             terminal = event
                         yield event
             self._persist_run_state(graph, config, rec_ids, terminal)
+            self._persist_events(question_id, event_rows)
 
     def _persist_run_state(
         self,
@@ -689,6 +714,22 @@ class AgentService:
             updates["last_event"] = {"event": terminal.event, "data": terminal.data}
         if updates:
             graph.update_state(config, updates)
+
+    def _persist_events(
+        self,
+        question_id: str | None,
+        event_rows: list[tuple[str, dt.datetime, dt.datetime, dict[str, Any] | None]],
+    ) -> None:
+        """Batch-write this segment's stage timings (latency KPI source, #177).
+
+        Runs once after the stream segment (not in the hot loop), so the added DB
+        write is a single insert per segment. No-op when there is nothing to record.
+        """
+
+        if question_id is None or not event_rows:
+            return
+        with session_scope(self._session_factory) as session:
+            record_events(session, question_id, event_rows)
 
     def _run_question_id(self, graph: Any, config: dict[str, Any], agent_input: Any) -> str | None:
         if isinstance(agent_input, dict):

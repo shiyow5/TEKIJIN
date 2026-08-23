@@ -252,6 +252,7 @@ export const DASHBOARD = {
   self_resolution_rate: 0.25,
   avg_resolution_hours: 4.5,
   top_responder_share: 0.3,
+  processing_latency: { p50_ms: 900, p95_ms: 3100, sample_size: 30 },
   latest_eval: {
     top1_accuracy: 0.66,
     recall_at_3: 0.59,

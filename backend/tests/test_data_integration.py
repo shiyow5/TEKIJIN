@@ -90,6 +90,36 @@ def test_recommendation_created_at_server_default(seed_counts, session) -> None:
     assert rec.created_at is not None
 
 
+def test_record_events_persists_stage_rows(seed_counts, session) -> None:
+    # #177: batch-insert per-stage timing rows for a question; empty list is a no-op.
+    import datetime as dt
+
+    from tekijin.data.writes import record_events
+    from tekijin.models.tables import Event
+
+    record_events(session, "q_0001", [])  # no-op, no rows
+    session.flush()
+    assert session.query(Event).filter(Event.question_id == "q_0001").count() == 0
+
+    base = dt.datetime(2026, 1, 1, 12, 0, 0)
+    rows = [
+        ("c1_intent", base, base + dt.timedelta(milliseconds=100), None),
+        (
+            "c6_score",
+            base + dt.timedelta(milliseconds=100),
+            base + dt.timedelta(milliseconds=400),
+            {"n": 3},
+        ),
+    ]
+    record_events(session, "q_0001", rows)
+    session.flush()
+    saved = (
+        session.query(Event).filter(Event.question_id == "q_0001").order_by(Event.started_at).all()
+    )
+    assert [e.stage for e in saved] == ["c1_intent", "c6_score"]
+    assert saved[1].meta == {"n": 3}
+
+
 def test_project_members_role_check_constraint(engine, seed_counts) -> None:
     # The CHECK constraint must reject roles outside {lead, member}.
     factory = get_sessionmaker(engine)

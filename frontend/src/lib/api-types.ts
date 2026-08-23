@@ -205,6 +205,13 @@ export interface EvalSnapshot {
   created_at: string | null;
 }
 
+/** p50/p95 of per-question AI processing time in ms (schemas.py `ProcessingLatency`, #177). */
+export interface ProcessingLatency {
+  p50_ms: number | null;
+  p95_ms: number | null;
+  sample_size: number;
+}
+
 /**
  * GET /dashboard payload (schemas.py `DashboardResponse`). Aggregate-only — no
  * per-record listing (product-spec §241-251: summarise usage, never a monitoring
@@ -223,6 +230,8 @@ export interface DashboardResponse {
   avg_resolution_hours: number | null;
   /** 負荷分散: share of answers by the single busiest responder. */
   top_responder_share: number;
+  /** 応答速度: p50/p95 of AI processing time (ms) from recorded run events (#177). */
+  processing_latency: ProcessingLatency;
   /** 推薦精度: latest offline eval snapshot; null when not yet measured. */
   latest_eval: EvalSnapshot | null;
   answers_per_responder: ResponderLoad[];
@@ -263,6 +272,8 @@ export interface DraftData {
 export interface DoneData {
   status: string;
   answer?: string | null;
+  /** This run segment's processing time in ms (#177); null on a replay. */
+  latency_ms?: number | null;
 }
 
 export interface MessageData {
@@ -270,6 +281,8 @@ export interface MessageData {
   message: string;
   /** For the "document" route: the cited document's id (GET /documents/{doc_id}). */
   doc_id?: string | null;
+  /** This run segment's processing time in ms (#177); null on a replay. */
+  latency_ms?: number | null;
 }
 
 /** GET /documents/{doc_id} payload (schemas.py `DocumentDetail`). */

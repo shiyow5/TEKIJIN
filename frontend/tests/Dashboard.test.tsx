@@ -19,6 +19,7 @@ const DATA: DashboardResponse = {
   self_resolution_rate: 0.42,
   avg_resolution_hours: 3.5,
   top_responder_share: 0.18,
+  processing_latency: { p50_ms: 820, p95_ms: 2900, sample_size: 42 },
   latest_eval: {
     top1_accuracy: 0.7,
     recall_at_3: 0.6,
@@ -66,6 +67,10 @@ describe("Dashboard", () => {
     expect(screen.getByText("3.5 時間")).toBeInTheDocument();
     expect(screen.getByText("推薦精度（最有力）")).toBeInTheDocument();
     expect(screen.getByText("70%")).toBeInTheDocument(); // eval top1
+    // #177: processing-latency KPI (p50 value + p95/sample-size hint).
+    expect(screen.getByText("応答速度（中央値）")).toBeInTheDocument();
+    expect(screen.getByText("820ms")).toBeInTheDocument(); // p50_ms
+    expect(screen.getByText(/95%タイル 2.9s・42件/)).toBeInTheDocument();
     // distributions
     expect(screen.getByText("高梨 健太")).toBeInTheDocument();
     expect(screen.getByText("ネットワーク・VPN")).toBeInTheDocument();

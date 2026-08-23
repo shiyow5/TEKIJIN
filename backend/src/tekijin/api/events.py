@@ -38,13 +38,24 @@ EVENT_NODES: frozenset[str] = frozenset(
     {"c1_intent", "c5_route", "c6_score", "c7_draft", "c8_update", *_TERMINAL_STATUS}
 )
 
+# Nodes whose event ends the run — ``done`` (c8_update) and the terminal messages.
+# The service attaches ``latency_ms`` (this segment's processing time) to these.
+TERMINAL_NODES: frozenset[str] = frozenset({"c8_update", *_TERMINAL_STATUS})
+
 
 def _sse(event: str, data: schemas.BaseModel) -> ServerSentEvent:
     return ServerSentEvent(event=event, data=data.model_dump_json())
 
 
-def node_event(node: str, update: dict[str, Any]) -> ServerSentEvent | None:
-    """Map one node update to an SSE event, or ``None`` for internal nodes."""
+def node_event(
+    node: str, update: dict[str, Any], *, latency_ms: int | None = None
+) -> ServerSentEvent | None:
+    """Map one node update to an SSE event, or ``None`` for internal nodes.
+
+    ``latency_ms`` (this run segment's processing time) is attached to the terminal
+    events (``done`` / ``message``) so the client can surface it; it is ignored for
+    non-terminal nodes (#177).
+    """
 
     update = update or {}
     if node == "c1_intent":
@@ -78,7 +89,10 @@ def node_event(node: str, update: dict[str, Any]) -> ServerSentEvent | None:
     if node == "c7_draft":
         return _sse("draft", schemas.DraftData(draft=update.get("draft") or ""))
     if node == "c8_update":
-        return _sse("done", schemas.DoneData(status="sent", answer=update.get("answer")))
+        return _sse(
+            "done",
+            schemas.DoneData(status="sent", answer=update.get("answer"), latency_ms=latency_ms),
+        )
     if node in _TERMINAL_STATUS:
         return _sse(
             "message",
@@ -87,6 +101,7 @@ def node_event(node: str, update: dict[str, Any]) -> ServerSentEvent | None:
                 message=update.get("answer") or "",
                 # Only the document terminal carries a doc id; harmless None elsewhere.
                 doc_id=update.get("document_id"),
+                latency_ms=latency_ms,
             ),
         )
     return None  # internal node: no event
