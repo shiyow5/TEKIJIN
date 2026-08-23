@@ -1,0 +1,49 @@
+# TEKIJIN backend as a systemd service (auto-restart on crash) — #180 task 2.
+#
+# The backend runs as a host process (uvicorn), so a bare `nohup` gives no
+# supervision: if it crashes, it stays down. This unit restarts it automatically
+# and starts it on boot.
+#
+# Install (on the GPU host, as the deploy user — adjust User/paths to match):
+#   1. Copy this file, substituting your user/paths:
+#        sed 's/%DEPLOY_USER%/team_a/; s#%APP_DIR%#/home/team_a/TEKIJIN#' \
+#          deploy/tekijin-backend.service | sudo tee /etc/systemd/system/tekijin-backend.service
+#   2. sudo systemctl daemon-reload
+#   3. sudo systemctl enable --now tekijin-backend
+#   4. systemctl status tekijin-backend   # verify
+#      journalctl -u tekijin-backend -f   # follow logs
+#
+# This supervises the BACKEND only. The vLLM / Postgres / frontend containers
+# should carry their own restart policy instead: run them with
+#   docker run --restart unless-stopped ...
+# (or `docker update --restart unless-stopped <name>` for already-running ones),
+# so the whole stack survives a host reboot.
+#
+# NOTE (#180 task 1): production requires a durable checkpointer. This unit sets
+# TEKIJIN_CHECKPOINTER_BACKEND=postgres; the backend now refuses to start in a
+# non-development env with an in-memory checkpointer, so a misconfigured restart
+# fails loudly here rather than silently losing sessions.
+
+[Unit]
+Description=TEKIJIN backend (FastAPI/uvicorn)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=%DEPLOY_USER%
+WorkingDirectory=%APP_DIR%/backend
+# start_backend.sh cd's into backend/ and exec's uvicorn on :18000.
+ExecStart=%APP_DIR%/start_backend.sh
+Environment=TEKIJIN_LLM_BACKEND=vllm
+Environment=TEKIJIN_CHECKPOINTER_BACKEND=postgres
+# Restart on any non-clean exit, with a small backoff; don't hammer on a boot loop.
+Restart=always
+RestartSec=3
+StartLimitIntervalSec=60
+StartLimitBurst=5
+# Give in-flight SSE streams a moment to drain on stop/restart.
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target

@@ -265,6 +265,51 @@ def test_make_checkpointer_postgres_falls_back(monkeypatch) -> None:
     assert isinstance(cp, MemorySaver)  # fell back
 
 
+# --- #180 item 1: persistence is enforced in production --------------------- #
+def test_make_checkpointer_memory_rejected_in_production() -> None:
+    # In production, in-memory sessions would vanish on the next restart — refuse.
+    import tekijin.api.checkpointer as ck
+
+    with pytest.raises(RuntimeError, match="not allowed in production"):
+        ck.make_checkpointer(_settings(app_env="production", checkpointer_backend="memory"))
+
+
+def test_make_checkpointer_postgres_failure_raises_in_production(monkeypatch) -> None:
+    # A Postgres setup failure in production must NOT silently degrade to memory.
+    import tekijin.api.checkpointer as ck
+
+    def _boom(_url: str):
+        raise RuntimeError("no database")
+
+    monkeypatch.setattr(ck, "make_postgres_checkpointer", _boom)
+    with pytest.raises(RuntimeError, match="production"):
+        ck.make_checkpointer(_settings(app_env="production", checkpointer_backend="postgres"))
+
+
+def test_make_checkpointer_postgres_success_in_production(monkeypatch) -> None:
+    # When Postgres sets up cleanly, production uses it (no fallback path taken).
+    import tekijin.api.checkpointer as ck
+
+    sentinel = object()
+    monkeypatch.setattr(ck, "make_postgres_checkpointer", lambda _url: sentinel)
+    cp = ck.make_checkpointer(_settings(app_env="production", checkpointer_backend="postgres"))
+    assert cp is sentinel
+
+
+def test_make_checkpointer_development_still_falls_back(monkeypatch) -> None:
+    # Development keeps the lenient behavior: a Postgres failure degrades to memory.
+    from langgraph.checkpoint.memory import MemorySaver
+
+    import tekijin.api.checkpointer as ck
+
+    def _boom(_url: str):
+        raise RuntimeError("no database")
+
+    monkeypatch.setattr(ck, "make_postgres_checkpointer", _boom)
+    cp = ck.make_checkpointer(_settings(app_env="development", checkpointer_backend="postgres"))
+    assert isinstance(cp, MemorySaver)
+
+
 def test_postgres_conn_string_strips_driver() -> None:
     from tekijin.api.checkpointer import _postgres_conn_string
 

@@ -30,10 +30,17 @@ def test_health_returns_ok(monkeypatch) -> None:
 
 def test_health_env_reflects_settings(monkeypatch) -> None:
     monkeypatch.setenv("TEKIJIN_APP_ENV", "staging")
-    # Outside development the embedder is fail-closed against unpinned remote code
-    # (#108): building the real service would refuse trust_remote_code=True + no
-    # revision. This test only cares about the env echo, so disable remote code.
+    # Outside development the real service is fail-closed on two fronts, and this
+    # test only cares about the env echo — so satisfy both guards:
+    #   * embedder refuses unpinned remote code (#108) -> disable remote code;
+    #   * checkpointer refuses a non-durable/failed backend in production (#180) ->
+    #     inject a working checkpointer so create_app doesn't hard-fail.
     monkeypatch.setenv("TEKIJIN_EMBEDDING_TRUST_REMOTE_CODE", "false")
+    from langgraph.checkpoint.memory import MemorySaver
+
+    import tekijin.api.factory as factory
+
+    monkeypatch.setattr(factory, "make_checkpointer", lambda _s: MemorySaver())
     get_settings.cache_clear()
 
     client = TestClient(create_app())
