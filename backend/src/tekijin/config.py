@@ -46,6 +46,18 @@ class Settings(BaseSettings):
     llm_model: str = "Qwen3.6-35B-A3B-NVFP4"
     llm_api_key: str = "dummy"
 
+    # Whether to let a reasoning model (Qwen3) emit its <think> chain before the
+    # answer. Kept OFF by default: with thinking ON the C1/C2 structured-output
+    # (tool-call) calls became both slow (C1+C2 p50 ≈ 83s) AND unreliable — the
+    # reasoning pass sometimes suppressed the forced tool call, so
+    # ``with_structured_output`` returned ``None`` and routing crashed (#140).
+    # Passed to vLLM as ``chat_template_kwargs={"enable_thinking": ...}``; the
+    # Qwen3 chat template reads it. This is a SINGLE GLOBAL switch shared by all
+    # LLM nodes (C1 intent, C2 sufficiency, AND C7 draft) — flipping it on to
+    # experiment with draft (C7) quality also re-enables thinking on C1/C2 and can
+    # reintroduce the structured-output breakage, so change it deliberately.
+    llm_enable_thinking: bool = False
+
     # Which C1/C2/C7 implementation the API wires: "stub" = deterministic,
     # network-free defaults (CI/tests); "vllm" = real langchain-openai client
     # against ``llm_base_url``. A ``Literal`` so an invalid value is rejected at
