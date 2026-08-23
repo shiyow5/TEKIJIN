@@ -670,33 +670,42 @@ class AgentService:
         prev = self._now_factory()
         # Occupy a backpressure slot only while the graph actually executes (#180);
         # released by the finally on completion or client disconnect.
-        with self._run_slot():
-            for update in graph.stream(agent_input, config, stream_mode="updates"):
-                for node, data in update.items():
-                    if node == "c1_intent":
-                        self._persist_topics(question_id, data)
-                    elif node == "c5_route":
-                        self._persist_route(question_id, data)
-                    elif node == "c6_score":
-                        rec_ids = self._persist_recommendations(question_id, data)
-                    if node == "__interrupt__":
-                        event = interrupt_event(_interrupt_payload(data))
-                    else:
-                        # Record this stage's timing (all compute nodes, not just the
-                        # ones that surface an SSE event).
-                        now_dt = self._now_factory()
-                        if question_id is not None:
-                            event_rows.append((node, prev, now_dt, None))
-                        prev = now_dt
-                        latency = (
-                            _segment_latency_ms(event_rows) if node in TERMINAL_NODES else None
-                        )
-                        event = node_event(node, data, latency_ms=latency)
-                    if event is not None:
-                        if event.event in TERMINAL_EVENTS:
-                            terminal = event
-                        yield event
-            self._persist_run_state(graph, config, rec_ids, terminal)
+        try:
+            with self._run_slot():
+                for update in graph.stream(agent_input, config, stream_mode="updates"):
+                    for node, data in update.items():
+                        if node == "c1_intent":
+                            self._persist_topics(question_id, data)
+                        elif node == "c5_route":
+                            self._persist_route(question_id, data)
+                        elif node == "c6_score":
+                            rec_ids = self._persist_recommendations(question_id, data)
+                        if node == "__interrupt__":
+                            event = interrupt_event(_interrupt_payload(data))
+                        else:
+                            # Record this stage's timing (all compute nodes, not just
+                            # the ones that surface an SSE event).
+                            now_dt = self._now_factory()
+                            if question_id is not None:
+                                event_rows.append((node, prev, now_dt, None))
+                            prev = now_dt
+                            # latency only when the segment actually recorded stages
+                            # (question_id set) — else leave it None, not a bogus 0.
+                            latency = (
+                                _segment_latency_ms(event_rows)
+                                if node in TERMINAL_NODES and event_rows
+                                else None
+                            )
+                            event = node_event(node, data, latency_ms=latency)
+                        if event is not None:
+                            if event.event in TERMINAL_EVENTS:
+                                terminal = event
+                            yield event
+                self._persist_run_state(graph, config, rec_ids, terminal)
+        finally:
+            # Flush collected stage timings even on a client disconnect / error
+            # (GeneratorExit) — otherwise the whole segment's latency is lost and
+            # the KPI under-counts exactly the reconnect-heavy sessions (#177 review).
             self._persist_events(question_id, event_rows)
 
     def _persist_run_state(

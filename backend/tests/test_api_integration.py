@@ -213,6 +213,39 @@ def test_dashboard_exposes_processing_latency_from_events(
     assert lat["p95_ms"] is not None and lat["p95_ms"] >= 0
 
 
+def test_run_records_nonzero_monotonic_durations(seed_counts, engine, fake_embedder) -> None:
+    # With an advancing clock (not the fixed test clock), each stage has a real,
+    # positive, non-overlapping duration and the terminal reports a non-zero
+    # latency_ms — exercising the actual prev-threading in _run (#177 review).
+    import datetime as dt
+    import itertools
+
+    base = dt.datetime(2026, 1, 1, 0, 0, 0)
+    ticks = itertools.count()
+
+    svc = _svc(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2, 3], people_confidence=0.2),
+        scorer=_FakeScorer([]),  # empty -> reaches the no_candidate terminal (a done-ish end)
+        now_factory=lambda: base + dt.timedelta(seconds=next(ticks)),
+    )
+    svc.start_question("dur1", 10, GOOD_Q)
+    out = list(svc.stream_events("dur1"))
+
+    # The terminal message carries a strictly-positive processing latency.
+    msg = next(e for e in out if e.event == "message")
+    assert json.loads(msg.data)["latency_ms"] > 0
+
+    qid = _latest_question(engine).id
+    rows = sorted(_events_for(engine, qid), key=lambda r: r.started_at)
+    assert rows
+    for r in rows:
+        assert r.ended_at > r.started_at  # positive duration
+    for a, b in zip(rows, rows[1:], strict=False):
+        assert b.started_at >= a.ended_at  # non-overlapping, monotonic
+
+
 # --------------------------------------------------------------------------- #
 # clarification: followup -> reply resume -> continues
 # --------------------------------------------------------------------------- #
@@ -1040,7 +1073,7 @@ def test_postgres_checkpointer_persists(
 # --------------------------------------------------------------------------- #
 # service-level helper for durability / concurrency tests (no TestClient/SSE)
 # --------------------------------------------------------------------------- #
-def _svc(engine, embedder, *, retriever=None, scorer=None) -> AgentService:
+def _svc(engine, embedder, *, retriever=None, scorer=None, now_factory=None) -> AgentService:
     return AgentService(
         session_factory=get_sessionmaker(engine),
         checkpointer=MemorySaver(),
@@ -1050,7 +1083,7 @@ def _svc(engine, embedder, *, retriever=None, scorer=None) -> AgentService:
         draft_model=TemplateDraftModel(),
         retriever=retriever,
         scorer=scorer,
-        now_factory=lambda: NOW,
+        now_factory=now_factory or (lambda: NOW),
     )
 
 
