@@ -346,6 +346,9 @@ c5_route: {route, confidence}         → event: route
 c6_score: {recommendations}           → event: recommend
 c7_draft: {draft}                     → event: draft
 c8_update: {status}                   → event: done
+off_topic / document /               → event: message   （非人ルートの終端）
+  unresolved_intent / no_candidate
+（接続断・例外）                       → event: error
 ```
 
 ```
@@ -354,8 +357,23 @@ event: followup      data: {"question":"現行製品と拠点数を教えてく�
 event: route         data: {"route":"person","reason":"…","confidence":0.78}
 event: recommend     data: {"recommendations":[ … C6出力 … ]}
 event: draft         data: {"draft":"高梨さん …"}
-event: done          data: {"status":"sent"}
+event: done          data: {"status":"sent","answer":"…"}
+event: message       data: {"status":"document","message":"…","doc_id":"doc_001"}
+event: error         data: {"error":"内部エラーが発生しました"}
 ```
+
+**終端 `message` イベント**（`event: message`）は、人に取り次がない終端の結果を表す。
+`status` は終端ノードに対応する:
+
+| status | 発生元ノード | 意味 |
+|---|---|---|
+| `off_topic` | off_topic | 業務外・悪意ある入力（C1 が `out_of_scope`。個人情報要求/注入含む、#118） |
+| `document` | document | 社内文書ルートで自己解決。`doc_id` に該当文書ID（#143。`GET /documents/{doc_id}` で本文取得） |
+| `unresolved` | unresolved_intent | 逆質問後もトピックを特定できず |
+| `no_candidate` | no_candidate | 適任者が見つからない |
+
+`doc_id` は `document` のときのみ非 null（他 status では `null`）。`done` は `answer`（取り次ぎ確定メッセージ）を伴う。
+接続断・例外時は `event: error`（汎用文言のみ・詳細は非開示）。
 
 ### レスポンス（最終）
 
