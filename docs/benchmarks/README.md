@@ -123,7 +123,10 @@ Apache-2.0 と 1024次元の扱いやすさを優先するなら Qwen3-Embedding
 ```bash
 # GPUホスト（~/tekijin-bench に fixtures/ と scripts/ を置く）
 uv venv .venv
-uv pip install --python .venv/bin/python "sentence-transformers>=3" torch "huggingface_hub[cli]"
+# 採用した Nemotron-3-Embed-1B は sentence-transformers<4 では読めない（#137）。
+# backend/requirements-ml.txt と同じ下限にそろえること。
+uv pip install --python .venv/bin/python \
+  "sentence-transformers>=5.4" "transformers>=5.5" torch "huggingface_hub[cli]"
 
 # 【重要】重い処理は1つずつ nohup で流す。前景の ssh セッションで走らせると、
 # 接続が切れた時点でリモート側も SIGHUP で死ぬ（2026-08-22 に実際に消えた）。

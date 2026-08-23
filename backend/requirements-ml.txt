@@ -18,6 +18,10 @@
 # 実機（internship-dgx1, GB10/aarch64）では
 #     sentence-transformers 6.0.0 / transformers 5.6.0 / torch 2.13.0a0
 # で読み込みと encode を確認済み。
+# 上限は置いていない。上限を置くと「モデル側が要求する版に上げられない」という
+# #137 と同じ詰まり方をするため。代わりに `-m model` のテスト
+# （backend/tests/test_embedding_model_loads.py）を安全弁にしている。
+# 実機で `pytest -m model --no-cov` を回せば、上げすぎ・下げすぎの両方を検出できる。
 sentence-transformers>=5.4
 transformers>=5.5
 

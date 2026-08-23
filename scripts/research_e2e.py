@@ -20,6 +20,7 @@ import collections
 import datetime as dt
 import json
 import os
+import re
 import statistics as st
 import subprocess
 import sys
@@ -32,6 +33,11 @@ DEFAULT_PGDIR = os.path.join(os.environ.get("TMPDIR", "/tmp"), "tekijin_e2e_pgda
 # scorer の recency / 7日負荷窓を固定する（`tekijin.eval.__main__` の EVAL_NOW と同じ）
 # scorer は naive な datetime を要求する（保存側が naive）。ruff の DTZ001 はここでは不適切。
 NOW = dt.datetime(2026, 8, 22, 0, 0, 0)  # noqa: DTZ001
+
+
+def _redact(url):
+    """接続 URL からパスワードを伏せる（--db-url には実際の資格情報が入りうる）。"""
+    return re.sub(r"://([^:/@]+):[^@]*@", r"://\1:***@", url)
 
 
 def start_db(pgdir):
@@ -468,7 +474,7 @@ def main():
         sys.path.insert(0, SRC)
     else:
         url = start_db(args.pgdir)
-    print(f"DB: {url}")
+    print(f"DB: {_redact(url)}")
     if args.task == "prepare":
         prepare(url)
     elif args.task == "route":
