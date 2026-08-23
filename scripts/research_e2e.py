@@ -147,7 +147,22 @@ def task_route(url, out):
     session.get_bind().dispose()
 
 
-def task_variants(url, out):
+def load_c1_topics(path):
+    """C1 の実出力を {評価ID: トピック列} に直す（#113）。無ければ None。"""
+    if not path:
+        return None
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import research_faithful as rf
+
+    by_eval = {r["id"]: r["eval_id"] for r in rf.items() if r["klass"] == "normal"}
+    return {
+        by_eval[i]: list(intent.topics)
+        for i, intent in rf.load_c1(path).items()
+        if i in by_eval
+    }
+
+
+def task_variants(url, out, c1_topics=None):
     """経路の pin と候補集合を差し替えて、製品の metrics で測り直す。"""
     from sqlalchemy import select
     from tekijin.agent.route import decide_route
@@ -168,18 +183,21 @@ def task_variants(url, out):
         res = retriever.search(q.query)
         cache[q.id] = (res, decide_route(res).route)
 
-    def rank(query, candidates):
-        if not query.gold_topics or not candidates:
+    def rank(query, candidates, topics=None):
+        topics = query.gold_topics if topics is None else topics
+        if not topics or not candidates:
             return []
-        out_ = scorer.rank(query.gold_topics, candidates, None, NOW, top_k=10)
+        out_ = scorer.rank(topics, candidates, None, NOW, top_k=10)
         return [r["person_id"] for r in out_["recommendations"]]
 
-    def as_is(query, res, route):
+    def as_is(query, res, route, topics=None):
         if route == "document":
             return []
         pinned = _pinned_responder(res) if route == "prior_answer" else None
         return rank(
-            query, [pinned] if pinned is not None else list(res["candidate_people"])
+            query,
+            [pinned] if pinned is not None else list(res["candidate_people"]),
+            topics,
         )
 
     variants = {
@@ -189,6 +207,26 @@ def task_variants(url, out):
         ),
         "候補を全社員にする（#87）": lambda q, res, route: rank(q, all_ids),
     }
+    if c1_topics is not None:
+        # 評価IDの取り違えで全件0点になると「壊滅的な結果」に見えてしまうので、
+        # 突き合わせできた件数をここで必ず出す。
+        matched = sum(1 for q in queries if c1_topics.get(q.id))
+        print(f"  C1 のトピックを突き合わせた件数: {matched}/{len(queries)}")
+        if not matched:
+            raise SystemExit(
+                "C1 の評価IDが1件も一致しない。fixtures の指定を確認すること"
+            )
+        # 上3つは gold トピックを渡している（＝C1 が完璧という仮定）。
+        # 製品では C6 が受け取るのは **C1 が実際に出した自由記述のトピック**。
+        # 注意: これは **C1→C6 の切り分け** であって、端から端までの再現ではない。
+        # C2 の聞き返しでも C1 の out_of_scope でも止めず、トピックだけを差し替えている。
+        # 「トピックが語彙外だと C6 が何を返すか」を単独で見るための行。
+        variants["[切り分け] C1 の実トピック＋全社員"] = lambda q, res, route: rank(
+            q, all_ids, c1_topics.get(q.id, [])
+        )
+        variants["[切り分け] C1 の実トピック＋現状の経路"] = lambda q, res, route: (
+            as_is(q, res, route, c1_topics.get(q.id, []))
+        )
 
     report = []
     for label, fn in variants.items():
@@ -333,6 +371,11 @@ def main():
         help="pgserver のデータディレクトリ（使い回す）",
     )
     ap.add_argument("--out", default=None)
+    ap.add_argument(
+        "--c1",
+        default=None,
+        help="variants で使う C1 の実出力（research_faithful.py --task c1 の結果）",
+    )
     args = ap.parse_args()
 
     url = start_db(args.pgdir)
@@ -344,7 +387,7 @@ def main():
     elif args.task == "misrec":
         task_misrec(url, args.out)
     else:
-        task_variants(url, args.out)
+        task_variants(url, args.out, load_c1_topics(args.c1))
 
 
 if __name__ == "__main__":

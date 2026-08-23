@@ -7,8 +7,14 @@
 > ⚠️ **製品コードで回したら層2 Recall@3 は 0.140 だった（[e2e.md](e2e.md) / #103）。**
 > 経路が全件 `prior_answer` に倒れて候補が1名に固定されている。**下の数字はハーネス上のもの。**
 >
-> ⚠️ **C2 の system プロンプトのままだと、正常な相談 56件すべてが聞き返しで止まる（[c2.md](c2.md) / #111）。**
-> 異常系の検出は 20/20 で満点なので、直すのは判断基準の文面だけでよい。
+> ⛔ **C1 の自由記述トピックが C6 の完全一致照合と噛み合わず、証拠源が4つとも空振りする**（175個中3個一致）。
+> **1周目の C1 トピックだけを C6 に渡す切り分け**では、#103 と #87 を直した条件でも層2 R@3 は **0.131**
+> （同条件で gold トピックなら 0.836）。**上位3名が全クエリで同一**（47件中44件が同じ3名）。
+> 聞き返し後の2周目の C1 は測っていないので、**これは製品の上限値ではない**。
+> 現状そのままの実測は 0.140 → 0.134。
+> あわせて thinking が ON のままで **C1+C2 の p50 が 83秒**（仕様は端から端まで p50 1.5秒）。
+> → **[llm_faithful.md](llm_faithful.md)**（#113 / #116）。
+> [c2.md](c2.md)（#111）の結論は取り下げ済み。
 >
 > **続き**: モデルを固定したまま**アーキテクチャ側**で精度を上げる実験は
 > [ablation.md](ablation.md)（#65）にある。層2 Recall@3 は分割検証で **+0.114** 伸びた。
@@ -23,7 +29,7 @@
 |---|---|---|
 | C3 埋め込み | **Nemotron-3-Embed-1B**（次点 Qwen3-Embedding-0.6B） | 層2 Recall@3 = 0.615（次点 0.533） |
 | C1 意図理解 | **Qwen3.6-35B-A3B-NVFP4** + **構造化出力** | トピックF1 0.780 / JSON妥当率 1.000 / p50 0.52s |
-| C2 充足判定 | **Qwen3.6-35B-A3B-NVFP4** + 構造化出力 | 正解率 0.900（n=20 の旧ベンチ。**76件で測り直すと出荷時プロンプトで 0.263** → [c2.md](c2.md) / #111） |
+| C2 充足判定 | **Qwen3.6-35B-A3B-NVFP4** + 構造化出力 | 正解率 0.900（n=20 の旧ベンチ。**製品のまま測ると母集団が長さ切れで壊れる** → [llm_faithful.md](llm_faithful.md) / #113） |
 | C7 下書き | **Qwen3.6-35B-A3B-NVFP4**（#91 で決着） | 根拠違反 0/56・字数中央186・p50 1.38s。Swallow は単価と品番を捏造し、84%で依頼事項を勝手に追加 |
 
 ## ファイル
@@ -34,7 +40,10 @@
 | `res_swallow_off.json` | Qwen3-Swallow-30B-A3B-AWQ（thinking off、構造化出力なし） |
 | `res_swallow_guided.json` | 同上 + 構造化出力 |
 | `res_qwen36_guided.json` | Qwen3.6-35B-A3B-NVFP4 + 構造化出力。**C7 の下書き出力も入っている**（人手評価用） |
-| `ablation/c2_qwen36_{product,scoped}.json` | C2 充足判定の生出力（system プロンプト2版 × 76件）。[c2.md](c2.md) |
+| `ablation/c2_qwen36_{product,scoped}.json` | C2 充足判定の生出力（#111。**結論は取り下げ済み**） |
+| `ablation/{payload_,}c1_faithful.json` / `{payload_,}c2_faithful.json` | **製品のリクエストをそのまま再現した C1/C2 の入出力**。[llm_faithful.md](llm_faithful.md) |
+| `ablation/e2e_variants_c1.json` | C1 の実トピックで測った層2 R@3。[llm_faithful.md](llm_faithful.md) |
+| `ablation/c1_nothink.json` / `e2e_variants_c1_nothink.json` | `enable_thinking=false` を足しただけの反実仮想。同上 §4.5 |
 
 ## 埋め込み（層2 Recall@3 が主指標）
 
@@ -46,7 +55,9 @@
 | bge-m3 | 1024 | 0.198 | 0.314 | 0.519 | 0.651 | 0.600 | 0.547 | 0.367 |
 | ruri-v3-310m | 768 | 0.174 | 0.239 | 0.515 | 0.631 | 0.767 | 0.473 | 0.367 |
 
-ベースライン: random 0.107 / answers_count 0.393 / lexical_profile 0.193（`scripts/eval_baselines.py`）
+ベースライン（**#74 の評価セット拡張後・56件で再実行**）:
+random 0.077 / answers_count 0.327 / lexical_profile 0.173 / lexical_answers 0.116
+（`scripts/eval_baselines.py`）。**旧値 0.107 / 0.393 / 0.193 は拡張前のもの。**
 
 **Nemotron-3-Embed-1B は 2048次元。pgvector の HNSW は `vector` が2000次元上限なので `halfvec` が必須。**
 ライセンスは NVIDIA Open Model License なので商用条件の確認が要る。
@@ -60,11 +71,15 @@ Apache-2.0 と 1024次元の扱いやすさを優先するなら Qwen3-Embedding
 | Qwen3-Swallow-30B-A3B-AWQ | + 構造化出力 | 1.000 | 0.545 | 0.56s | 44 | 0.350 | 0.62s | 4.66s | 79 |
 | **Qwen3.6-35B-A3B-NVFP4** | + 構造化出力 | **1.000** | **0.780** | **0.52s** | 33 | **0.900** | **0.25s** | 1.40s | 62〜73 |
 
-**C1+C2 合計 p95: 1.31秒**（合格ライン3秒）
+**C1+C2 合計 p95: 1.31秒**（仕様の目標は `technical-spec.md` の**初回表示 p50 1.5秒 / p95 3秒**。
+段別の線は仕様に無いので、これは内訳の目安）
 
-> ⚠️ **上の C2 の列は n=20（`insufficient` 5件 + L1/L2 15件、C1 のトピックを渡さない）で測ったもの。**
-> 契約どおり C1 の出力を渡して 76件で測り直すと、**出荷時の system プロンプトでは正常系 0/56**、
-> C2 単体の p95 も 2.73秒 で **C1+C2 合計 3.34秒**（合格ライン割れ）になる。[c2.md](c2.md)（#111）を見ること。
+> ⛔ **上の表はすべて `enable_thinking=false` で測った値で、製品の設定では再現しない。**
+> `_openai_model`（`llm/vllm.py`）は `chat_template_kwargs` を渡していないので thinking が ON のまま動く。
+> 製品のリクエストをそのまま再現すると **C1 p50 14.14秒 / C1+C2 p50 83.15秒**、
+> C1 は 76件中10件、C2 は届いた60件中29件が長さ切れになる
+> （製品では SSE に `error` イベントが1つ流れて、回答が出ないまま stream が終わる）。
+> → [llm_faithful.md](llm_faithful.md)（#116）。
 
 ## 実装に直結する注意（実測で分かったこと）
 
