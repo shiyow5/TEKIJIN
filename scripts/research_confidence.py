@@ -21,7 +21,7 @@ import numpy as np
 BOOTSTRAP = 20000
 SEED = 42
 SPLIT_REPS = 200
-SPLIT_SEED = 0  # 分割検証は別の乱数列。文書に書く 147/200 はこの seed の値
+SPLIT_SEED = 0  # 分割検証は別の乱数列。文書の 193/200 はこの seed の値
 
 
 def auc(scores, labels):
@@ -35,7 +35,7 @@ def auc(scores, labels):
     return float((np.sum(diff > 0) + 0.5 * np.sum(diff == 0)) / diff.size)
 
 
-def within_query_auc(slots, key, sign=1):
+def within_query_auc(slots, key, sign=1, group_key="query_id"):
     """**同じ問題の中だけ**で比べた AUC。
 
     問題をまたぐと「その問題が簡単か」が混ざる。素性が人を見分けられているかは
@@ -44,7 +44,7 @@ def within_query_auc(slots, key, sign=1):
     num = den = 0.0
     by_q = collections.defaultdict(list)
     for s in slots:
-        by_q[s["query_id"]].append(s)
+        by_q[s[group_key]].append(s)
     for group in by_q.values():
         pos = [sign * s[key] for s in group if s["hit"]]
         neg = [sign * s[key] for s in group if not s["hit"]]
@@ -121,8 +121,11 @@ def within_query_auc_ci(slots, key, sign=1, reps=5000, seed=SEED):
     draws = []
     for _ in range(reps):
         pick = rng.choice(qs, size=len(qs), replace=True)
-        data = [s for q in pick for s in by_q[q]]
-        v, _ = within_query_auc(data, key, sign)
+        # **同じ問題を2回引いたら、別々のグループとして数える。**
+        # そのまま連結すると `within_query_auc` が query_id で畳み直してしまい、
+        # 3枠が 3k 枠の1グループになって対の数が k^2 に膨らむ（区間が広く出る）。
+        data = [dict(s, _draw=(q, i)) for i, q in enumerate(pick) for s in by_q[q]]
+        v, _ = within_query_auc(data, key, sign, group_key="_draw")
         if not np.isnan(v):
             draws.append(v)
     draws = np.array(draws)
@@ -176,7 +179,7 @@ def split_half(slots, reps=SPLIT_REPS, seed=SPLIT_SEED):
         b = [s["hit"] for s in data if rule(s) == "低"]
         return (np.mean(a) - np.mean(b)) if a and b else np.nan
 
-    held, picked = [], collections.Counter()
+    held, picked, ties = [], collections.Counter(), [0]
     for _ in range(reps):
         perm = rng.permutation(qs)
         tr = [s for q in perm[: len(qs) // 2] for s in by_q[q]]
@@ -185,12 +188,18 @@ def split_half(slots, reps=SPLIT_REPS, seed=SPLIT_SEED):
         scored = [(v, k) for v, k in scored if not np.isnan(v)]
         if not scored:
             continue
-        best = max(scored)[1]
+        # 同点は名前順ではなく**くじ**で決める。名前順にすると、たまたま
+        # 文字コードの若いルールが勝ち続けて「一貫して選ばれた」ように見える。
+        top = max(v for v, _ in scored)
+        tied = [k for v, k in scored if v == top]
+        if len(tied) > 1:
+            ties[0] += 1
+        best = tied[int(rng.integers(len(tied)))]
         picked[best] += 1
         v = spread(RULES[best], te)
         if not np.isnan(v):
             held.append(v)
-    return np.array(held), picked
+    return np.array(held), picked, ties[0]
 
 
 def main():
@@ -202,6 +211,31 @@ def main():
     with open(args.slots, encoding="utf-8") as f:
         slots = json.load(f)["slots"]
     print(f"スロット {len(slots)} / 問題 {len({s['query_id'] for s in slots})}")
+
+    # 素性名 `topic_fit` は scorer の `edge_weight(evidence)` そのもの
+    # （`research_e2e.py --task misrec` が `edge_weight(ev)` を書いている）。
+    # `confidence_label(edge_weight, evidence_count)` の2条件がそれぞれ効いているかを、
+    # 文書で主張する前にここで数える。
+    print("== 0. ラベルの2条件はそれぞれ効いているか ==")
+    ge3 = [s for s in slots if s["evidence_count"] >= 3]
+    hi = [s for s in slots if s["confidence"] == "高"]
+    bad = [s for s in ge3 if s["topic_fit"] < 0.7]
+    print(
+        f"  証拠3件以上 {len(ge3)} / 「高」 {len(hi)} / そのうち topic_fit<0.7 の例外 {len(bad)}"
+    )
+    print(
+        f"  → 高 ⟺ 証拠3件以上: {len(ge3) == len(hi) == len({id(x) for x in ge3} & {id(x) for x in hi})}"
+    )
+    one = [s for s in slots if s["evidence_count"] == 1]
+    rescued = [s for s in one if s["topic_fit"] >= 0.4]
+    print(
+        f"  証拠1件 {len(one)} 件（ラベル {sorted({x['confidence'] for x in one})}）。"
+        f"うち topic_fit>=0.4 が {len(rescued)} 件"
+    )
+    print(
+        "  → 2段目の edge_weight>=0.4 が無ければ、この "
+        f"{len(rescued)} 件は「低」になる（＝「低」が出ない原因）"
+    )
 
     print("\n== 1. 素性が当たり外れを見分けられるか ==")
     print(
@@ -299,9 +333,9 @@ def main():
                 }
 
     print("\n== 9. 分割検証（候補から選ぶ部分だけを検証する）==")
-    held, picked = split_half(slots)
+    held, picked, ties = split_half(slots)
     print(f"  問題単位で半分に分割、{SPLIT_REPS}回、seed {SPLIT_SEED}")
-    print(f"  学習半分で選ばれたルール: {dict(picked)}")
+    print(f"  学習半分で選ばれたルール: {dict(picked)}（うち同点でくじ引き {ties} 回）")
     print(
         f"  検証半分での 高−低: 中央 {np.median(held):+.3f}"
         f"  95%区間 [{np.percentile(held, 2.5):+.3f}, {np.percentile(held, 97.5):+.3f}]"
