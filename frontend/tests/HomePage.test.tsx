@@ -22,4 +22,15 @@ describe("HomePage (hub)", () => {
     render(<HomePage />);
     expect(screen.queryByText(/プレースホルダ/)).toBeNull();
   });
+
+  it("presents the product promise, a primary CTA, and a how-it-works strip", () => {
+    render(<HomePage />);
+    expect(screen.getByRole("heading", { level: 1, name: /TEKIJIN/ })).toBeInTheDocument();
+    expect(screen.getByText("回答の出所は、常に人。")).toBeInTheDocument();
+    // The hero CTA and the "質問する" action card both link to /questions.
+    const ask = screen.getAllByRole("link", { name: /質問する/ });
+    expect(ask.length).toBeGreaterThanOrEqual(1);
+    expect(ask.every((a) => a.getAttribute("href") === "/questions")).toBe(true);
+    expect(screen.getByRole("heading", { name: "使い方" })).toBeInTheDocument();
+  });
 });
