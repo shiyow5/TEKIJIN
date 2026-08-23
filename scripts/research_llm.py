@@ -525,6 +525,10 @@ def run_raw(payload, extra=None):
             {
                 "id": case["id"],
                 "klass": case.get("klass"),
+                # どの変種・どの追加設定で作った出力かを行に残す。
+                # ファイル名だけが出所という状態にしない。
+                "c1_variant": case.get("c1_variant"),
+                "raw_extra": extra or None,
                 **row,
                 "latency": time.time() - t0,
             }

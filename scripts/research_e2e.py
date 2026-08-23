@@ -147,8 +147,10 @@ def task_route(url, out):
     session.get_bind().dispose()
 
 
-def load_c1_topics(path):
+def load_c1_topics(path, topk=0):
     """C1 の実出力を {評価ID: トピック列} に直す（#113）。無ければ None。"""
+    if topk < 0:
+        raise SystemExit("--c1-topk に負数は指定できない")
     if not path:
         return None
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -156,7 +158,7 @@ def load_c1_topics(path):
 
     by_eval = {r["id"]: r["eval_id"] for r in rf.items() if r["klass"] == "normal"}
     return {
-        by_eval[i]: list(intent.topics)
+        by_eval[i]: list(intent.topics)[:topk] if topk else list(intent.topics)
         for i, intent in rf.load_c1(path).items()
         if i in by_eval
     }
@@ -250,6 +252,25 @@ def task_variants(url, out, c1_topics=None):
             f"{label:34s} R@3={metrics.recall_at_3:.3f} Top1={metrics.top1_accuracy:.3f} "
             f"MRR={metrics.mrr:.3f} | {line}"
         )
+        # 1問ごとの当落も残す。集計値だけだと差が有意かを後から検算できない
+        # （変種どうしの比較では、実際に違うのは数問しかないことがある）。
+        per_query = [
+            {
+                "id": q.id,
+                "difficulty": q.difficulty,
+                "has_gold_topics": bool(q.gold_topics),
+                "hit_at_3": bool(set(r.ranked_experts[:3]) & set(r.gold_experts)),
+                "ranked_top3": list(r.ranked_experts[:3]),
+            }
+            for q, r in zip(queries, results)
+            if q.gold_experts
+        ]
+        # 同じ recall の式のまま、gold トピックがある52件に限定して測り直す
+        # （hit@3 のような別定義を並べると、集計値と比較できなくなる）。
+        with_topics = evaluate(
+            [r for q, r in zip(queries, results) if q.gold_topics and q.gold_experts]
+        )
+        n_with_topics = sum(1 for q in queries if q.gold_topics and q.gold_experts)
         report.append(
             {
                 "name": label,
@@ -257,6 +278,12 @@ def task_variants(url, out, c1_topics=None):
                 "top1": metrics.top1_accuracy,
                 "mrr": metrics.mrr,
                 "by_difficulty": {k: v.recall_at_3 for k, v in layers.items()},
+                # gold トピックが空の4件は、gold を使う行では構造上0点になる
+                # （scorer.rank がトピック無しでは何も返さない）。変種と公平に比べるにはこちら。
+                "recall_at_3_with_gold_topics": with_topics.recall_at_3,
+                "top1_with_gold_topics": with_topics.top1_accuracy,
+                "n_with_gold_topics": n_with_topics,
+                "per_query": per_query,
             }
         )
     if out:
@@ -376,6 +403,12 @@ def main():
         default=None,
         help="variants で使う C1 の実出力（research_faithful.py --task c1 の結果）",
     )
+    ap.add_argument(
+        "--c1-topk",
+        type=int,
+        default=0,
+        help="C1 のトピックを上位何件だけ使うか（0=全部）。余分なトピックが証拠を薄めるかを見る",
+    )
     args = ap.parse_args()
 
     url = start_db(args.pgdir)
@@ -387,7 +420,7 @@ def main():
     elif args.task == "misrec":
         task_misrec(url, args.out)
     else:
-        task_variants(url, args.out, load_c1_topics(args.c1))
+        task_variants(url, args.out, load_c1_topics(args.c1, args.c1_topk))
 
 
 if __name__ == "__main__":

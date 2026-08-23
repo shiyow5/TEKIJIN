@@ -1,5 +1,9 @@
 # 製品コードでの実測（Issue #100）
 
+> ⚠️ **ここの層2 R@3 はすべて gold トピックを渡した条件で、`gold_topics` が空の4件を含む56件基準。**
+> `gold_topics` がある52件で測ると 0.836 は **0.901** になる。
+> また **C1 が実際に出すトピックではこの数字は出ない**（[llm_faithful.md](llm_faithful.md) §1・§4.6 / #116）。
+
 これまでの数値（[ablation.md](ablation.md) / [robustness.md](robustness.md) / [scorer.md](scorer.md) /
 [route.md](route.md) / [draft.md](draft.md)）は**すべて `scripts/research_*.py` の再現実装**で測ったもの。
 式・重み・base_score・`decide_route` は製品の純関数を import しているが、
