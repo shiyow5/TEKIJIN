@@ -89,11 +89,14 @@ export function CurrentUserProvider({ children }: { children: ReactNode }) {
 
   // Load (or reload) the directory. Exposed as `reload` so the UI can retry after
   // a failure instead of leaving the submit permanently gated with no explanation.
-  const load = useCallback(() => {
+  // ``isActive`` lets the mount effect drop a stale result (React StrictMode double
+  // invoke in dev, or an unmount mid-fetch); the button retry uses the default.
+  const load = useCallback((isActive: () => boolean = () => true) => {
     setLoading(true);
     setError(false);
     getEmployees()
       .then((list) => {
+        if (!isActive()) return;
         setEmployees(list);
         // Restore the remembered user if it still exists, else default to the
         // first employee so the app always has an acting user.
@@ -102,14 +105,22 @@ export function CurrentUserProvider({ children }: { children: ReactNode }) {
           stored && list.some((e) => e.id === stored) ? stored : (list[0]?.id ?? null);
         setCurrentUserIdState(initial);
       })
-      .catch(() => setError(true))
-      .finally(() => setLoading(false));
+      .catch(() => {
+        if (isActive()) setError(true);
+      })
+      .finally(() => {
+        if (isActive()) setLoading(false);
+      });
   }, []);
 
-  const reload = load;
+  const reload = useCallback(() => load(), [load]);
 
   useEffect(() => {
-    load();
+    let active = true;
+    load(() => active);
+    return () => {
+      active = false;
+    };
   }, [load]);
 
   const currentUser = useMemo(
