@@ -27,6 +27,8 @@ test.describe("dashboard", () => {
     await page.goto("/dashboard");
 
     await expect(page.getByRole("heading", { name: "表示できませんでした" })).toBeVisible();
-    await expect(page.getByRole("alert")).toContainText("集計データの取得に失敗しました");
+    // Target the app's alert text directly — `getByRole("alert")` also matches
+    // Next.js's hidden route announcer (strict-mode ambiguity).
+    await expect(page.getByText("集計データの取得に失敗しました")).toBeVisible();
   });
 });

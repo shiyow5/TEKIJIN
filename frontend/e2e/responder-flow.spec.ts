@@ -65,7 +65,9 @@ test.describe("responder flow", () => {
 
     await page.goto(`/answer/${SESSION_ID}`);
     await expect(page.getByRole("heading", { name: "表示できませんでした" })).toBeVisible();
-    await expect(page.getByRole("alert")).toContainText("受付を終了");
+    // getByText, not getByRole("alert") — Next.js's hidden route announcer also
+    // has role="alert" (strict-mode ambiguity).
+    await expect(page.getByText(/受付を終了/)).toBeVisible();
     await expect(page.getByRole("button", { name: "回答する" })).toHaveCount(0);
   });
 

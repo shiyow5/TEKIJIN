@@ -216,19 +216,6 @@ export async function mockRecentQuestions(page: Page, items: unknown[] = []): Pr
   );
 }
 
-/**
- * Mock GET /events so successive requests return successive bodies (the last one
- * repeats). Lets a test drive a multi-phase stream (e.g. followup → resume).
- */
-export async function mockEventsSequence(page: Page, bodies: string[]): Promise<void> {
-  let call = 0;
-  await page.route(`${API_BASE}/events/**`, (route) => {
-    const body = bodies[Math.min(call, bodies.length - 1)];
-    call += 1;
-    return fulfillSse(route, body);
-  });
-}
-
 export const HANDOFF = {
   question: "UTM の移行時に気をつけることは？",
   asker: { id: 1, name: "山田 太郎", dept: "営業部" },
