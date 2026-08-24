@@ -31,8 +31,11 @@ _RANK_DEPTH = 10
 # own rrf_k). A retrieved answer at rank r contributes 1/(k+r+1) to each of its
 # topics, so a topic backed by several high-ranked answers wins over a one-off hit.
 _TOPIC_VOTE_K = 60
-# Only the top handful of predicted topics matter (acc@1/acc@3 read the first 3).
-_TOPIC_PREDICT_DEPTH = 10
+# Vote only over the top-N retrieved answers (like the reference's ``ranked_ids[:top_n]``),
+# so a long tail of low-confidence answers can't outvote the head. 20 matches
+# ``research_topic.predict_topic_from_ranking``'s default; the retriever's own top_k
+# is smaller today, but this stays faithful if that is ever widened.
+_TOPIC_VOTE_DEPTH = 20
 
 
 def predict_topics_from_retrieval(
@@ -40,25 +43,25 @@ def predict_topics_from_retrieval(
     answer_topics: Mapping[str, list[str]],
     *,
     k: int = _TOPIC_VOTE_K,
-    top_n: int = _TOPIC_PREDICT_DEPTH,
+    vote_depth: int = _TOPIC_VOTE_DEPTH,
 ) -> list[str]:
     """Stage-A topic prediction from what retrieval surfaced (LLM-free, #71).
 
     The only topic-bearing retrieval channel is ``past_answers`` (documents carry
     no topic), so predicted topics are a rank-weighted vote over the topics of the
-    top retrieved answers — mirroring ``research_topic.predict_topic_from_ranking``.
-    ``answer_topics`` maps a qa_id to its topics (``answers.topic``, else the
-    linked question's ``topics``). Returns topics best first; ties broken by name
-    for determinism.
+    top ``vote_depth`` retrieved answers — mirroring
+    ``research_topic.predict_topic_from_ranking`` (which caps the *voting input*,
+    then returns all scored topics best first). ``answer_topics`` maps a qa_id to
+    its topics (``answers.topic``, else the linked question's ``topics``). Ties are
+    broken by topic name for determinism.
     """
 
     scores: dict[str, float] = {}
-    for rank, answer in enumerate(retrieval.get("past_answers") or []):
+    for rank, answer in enumerate((retrieval.get("past_answers") or [])[:vote_depth]):
         weight = 1.0 / (k + rank + 1)
         for topic in answer_topics.get(answer["qa_id"], ()):
             scores[topic] = scores.get(topic, 0.0) + weight
-    ranked = sorted(scores.items(), key=lambda kv: (-kv[1], kv[0]))
-    return [topic for topic, _ in ranked[:top_n]]
+    return [topic for topic, _ in sorted(scores.items(), key=lambda kv: (-kv[1], kv[0]))]
 
 
 def build_answer_topics(repo: Repository) -> dict[str, list[str]]:

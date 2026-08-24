@@ -438,6 +438,22 @@ def test_predict_topics_from_retrieval_empty_without_answers() -> None:
     assert predict_topics_from_retrieval(retrieval2, {"a1": ["x"]}) == []
 
 
+def test_predict_topics_from_retrieval_caps_voting_input() -> None:
+    from tekijin.eval.pipeline import predict_topics_from_retrieval
+
+    # 25 answers all tagged "TAIL", plus one "HEAD" answer sitting just past the
+    # vote_depth cut. With vote_depth=2 only the first two (both TAIL) vote, so the
+    # HEAD answer beyond the cut contributes nothing — proving the cap bounds the
+    # voting INPUT (the reference semantics), not just the output list.
+    past = [{"qa_id": f"t{i}", "score": 1.0 - i * 0.01, "responder_id": i} for i in range(25)]
+    past.append({"qa_id": "head", "score": 0.0, "responder_id": 99})
+    retrieval = {"past_answers": past, "documents": []}
+    topics = {f"t{i}": ["TAIL"] for i in range(25)} | {"head": ["HEAD"]}
+    assert predict_topics_from_retrieval(retrieval, topics, vote_depth=2) == ["TAIL"]
+    # Without a cut the head answer is reached and its topic appears too.
+    assert set(predict_topics_from_retrieval(retrieval, topics, vote_depth=100)) == {"TAIL", "HEAD"}
+
+
 def test_pipeline_ranker_populates_predicted_topics() -> None:
     from tekijin.eval.pipeline import PipelineRanker
 
@@ -461,16 +477,100 @@ def test_pipeline_ranker_populates_predicted_topics() -> None:
     assert result.predicted_topics == ["ネットワーク・VPN"]
 
 
-def test_build_answer_topics_prefers_answer_topic_then_question(session, seed_counts) -> None:
-    from tekijin.data.repository import Repository
+def _answer_dto(**over):
+    from tekijin.data.dto import AnswerDTO
+
+    base = {
+        "id": "ans1",
+        "question_id": "q1",
+        "responder_id": 1,
+        "body": "b",
+        "topic": None,
+        "reuse_count": 0,
+        "was_helpful": None,
+        "created_at": None,
+        "has_embedding": False,
+    }
+    base.update(over)
+    return AnswerDTO(**base)
+
+
+def _question_dto(**over):
+    from tekijin.data.dto import QuestionDTO
+
+    base = {
+        "id": "q1",
+        "asker_id": 1,
+        "body": "b",
+        "topics": (),
+        "status": None,
+        "created_at": None,
+        "has_embedding": False,
+    }
+    base.update(over)
+    return QuestionDTO(**base)
+
+
+class _FakeTopicRepo:
+    def __init__(self, answers, questions):
+        self._answers = answers
+        self._questions = questions
+
+    def list_answers(self):
+        return self._answers
+
+    def list_questions(self):
+        return self._questions
+
+
+def test_build_answer_topics_prefers_answer_topic_then_question() -> None:
     from tekijin.eval.pipeline import build_answer_topics
 
-    mapping = build_answer_topics(Repository(session))
-    assert mapping  # the seed has answers
-    # Every answer resolves to a (possibly empty) topic list; at least one is
-    # non-empty (answers.topic or the linked question's topics).
-    assert all(isinstance(v, list) for v in mapping.values())
-    assert any(v for v in mapping.values())
+    repo = _FakeTopicRepo(
+        answers=[
+            # own topic wins outright
+            _answer_dto(id="a_own", topic="セキュリティ", question_id="q_multi"),
+            # NULL topic -> falls back to the linked question's topics array
+            _answer_dto(id="a_fallback", topic=None, question_id="q_multi"),
+            # NULL topic AND no matching question -> empty list, not a crash
+            _answer_dto(id="a_orphan", topic=None, question_id="q_missing"),
+        ],
+        questions=[_question_dto(id="q_multi", topics=("ネットワーク・VPN", "クラウド移行"))],
+    )
+    mapping = build_answer_topics(repo)  # type: ignore[arg-type]
+    assert mapping["a_own"] == ["セキュリティ"]
+    assert mapping["a_fallback"] == ["ネットワーク・VPN", "クラウド移行"]
+    assert mapping["a_orphan"] == []
+
+
+def test_build_answer_topics_fallback_agrees_with_repository(session, seed_counts) -> None:
+    """The NULL-topic fallback must resolve the SAME topics ``answers_by_topics`` uses.
+
+    Insert a runtime-style answer (``topic`` NULL) on a question that has a topics
+    array, then assert build_answer_topics maps it to that array AND that
+    ``Repository.answers_by_topics`` treats the answer as evidence for each — locking
+    the two code paths together (they both implement the NULL-topic fallback rule).
+    """
+
+    from tekijin.data.repository import Repository
+    from tekijin.eval.pipeline import build_answer_topics
+    from tekijin.models.tables import Answer, Question
+
+    session.add(
+        Question(id="q_rt", asker_id=1, body="拠点間のVPNが不安定", topics=["ネットワーク・VPN"])
+    )
+    session.flush()  # persist the question before its answer references it (FK order)
+    session.add(
+        Answer(id="a_rt", question_id="q_rt", responder_id=1, body="MTUを見直す", topic=None)
+    )
+    session.flush()
+
+    repo = Repository(session)
+    mapping = build_answer_topics(repo)
+    assert mapping["a_rt"] == ["ネットワーク・VPN"]
+    # The repository's topic-evidence query agrees: the NULL-topic answer counts
+    # for the question's topic.
+    assert any(a.id == "a_rt" for a in repo.answers_by_topics(["ネットワーク・VPN"]))
 
 
 def test_pipeline_ranker_returns_no_experts_when_topics_empty() -> None:
