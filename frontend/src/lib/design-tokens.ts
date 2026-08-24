@@ -1,5 +1,5 @@
 /**
- * Design tokens for TEKIJIN (たずねーる).
+ * Design tokens for TEKIJIN.
  *
  * Source: the Stitch design export (DESIGN.md), kept in the project workspace
  * outside this repository (ui_template/stitch_tekijin_ai_ui_dashboard/tekijin/).
