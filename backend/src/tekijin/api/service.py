@@ -1019,6 +1019,12 @@ class AgentService:
         question_id = self._run_question_id(graph, config, agent_input)
         rec_ids: list[int] | None = None
         terminal: ServerSentEvent | None = None
+        # Track the C5 route as it streams: on the document route, C6 runs only to
+        # compute an inline person-fallback name in the answer (#279) — it is NOT a
+        # live hand-off, so its recommendations must NOT be persisted or surfaced as
+        # a `recommend` event (they could never resolve, permanently inflating the
+        # pending-handoff KPI and dead-ending responder inboxes — #281 review).
+        route: str | None = None
         # Per-stage timing for the latency KPI (#177): each real node's duration is
         # (this node's end) - (previous node's end within this segment). `prev`
         # starts at segment start, so a resume segment does not count the human wait.
@@ -1037,8 +1043,9 @@ class AgentService:
                             # persist it so /inbox and /history match the run (#268).
                             self._persist_question_body(question_id, data)
                         elif node == "c5_route":
+                            route = (data or {}).get("route") or route
                             self._persist_route(question_id, data)
-                        elif node == "c6_score":
+                        elif node == "c6_score" and route != "document":
                             rec_ids = self._persist_recommendations(question_id, data)
                         if node == "__interrupt__":
                             event = interrupt_event(_interrupt_payload(data))
@@ -1057,6 +1064,10 @@ class AgentService:
                                 else None
                             )
                             event = node_event(node, data, latency_ms=latency)
+                            # #279/#281: no `recommend` event on the document route —
+                            # C6 there is a fallback note, not a hand-off in progress.
+                            if node == "c6_score" and route == "document":
+                                event = None
                         if event is not None:
                             if event.event in TERMINAL_EVENTS:
                                 terminal = event
