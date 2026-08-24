@@ -63,8 +63,23 @@ deps_changed() {
 
 pip_sync() {
   log "requirements changed -> syncing backend deps into the venv"
+  # The venv may have been created without pip (`--without-pip`), so `-m pip`
+  # fails with "No module named pip" the FIRST time a requirements change triggers
+  # this path (#243). Bootstrap pip idempotently before installing.
+  "$VENV_PY" -m ensurepip --upgrade >/dev/null 2>&1 || true
   "$VENV_PY" -m pip install -q -r "${DEPLOY_DIR}/backend/requirements.txt"
   "$VENV_PY" -m pip install -q -r "${DEPLOY_DIR}/backend/requirements-ml.txt"
+}
+
+migrate_schema() {
+  # Non-destructive schema sync (#243): `ADD COLUMN IF NOT EXISTS`, `create_all`
+  # for new tables, pgvector ensure — NEVER truncates (that is `run_seed`). Without
+  # this, a model change that adds a column (e.g. employees.password_hash, #241)
+  # would 500 every query against that table after deploy. Idempotent, so it is
+  # safe to run on every deploy. Runs BEFORE the backend restarts so the new code
+  # never serves against a stale schema.
+  log "apply non-destructive schema migrations"
+  ( cd "${DEPLOY_DIR}/backend" && env PYTHONPATH=src "$VENV_PY" -m tekijin.data.migrate )
 }
 
 build_frontend() {
@@ -135,6 +150,8 @@ main() {
   else
     log "requirements unchanged -> skipping pip"
   fi
+
+  migrate_schema
 
   log "rebuild frontend"
   build_frontend
