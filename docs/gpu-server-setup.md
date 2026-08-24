@@ -182,8 +182,48 @@ docker run -d --name tekijin_frontend_b --restart unless-stopped \
 | `http://100.118.131.67:130xx` に繋がらない | Tailnet に入っているか（ACL 含む）。ポート衝突していないか（`docker ps` / `ss -ltnp`） |
 | 応答が遅い | 共有 vLLM が混雑（`max-num-seqs=8`）。落ちてはいない。順番待ち |
 
+## 自動デプロイ（develop マージ → DGX、#203）
+
+develop へマージすると、DGX 上の **self-hosted GitHub Actions runner** が
+[`deploy/deploy.sh`](../deploy/deploy.sh) を実行して自動デプロイする
+（[`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml)）。
+DGX は Tailscale 内の private ホストなので、runner を**ホスト上に置く**ことで
+SSH 鍵も Tailscale 認証鍵も GitHub に預けずに済む。
+
+デプロイは **backend（nohup uvicorn）と frontend コンテナのみ**を再起動し、
+**vLLM と Postgres は一切触らない**（GPU 占有・DB を落とさない）。health-check に
+失敗したら直前のリリースへロールバックする。
+
+### runner の初期セットアップ（DGX 上・一度だけ・sudo 不要）
+
+```bash
+# 1) 登録トークンを取得（リポジトリ管理者の端末で）
+gh api -X POST repos/shiyow5/TEKIJIN/actions/runners/registration-token -q .token
+
+# 2) DGX にログインして runner を配置
+ssh team_a@internship-dgx1
+mkdir -p ~/actions-runner && cd ~/actions-runner
+curl -o r.tar.gz -L https://github.com/actions/runner/releases/latest/download/actions-runner-linux-x64.tar.gz
+tar xzf r.tar.gz
+./config.sh --url https://github.com/shiyow5/TEKIJIN \
+  --token <REGISTRATION_TOKEN> --labels dgx --name dgx1 --unattended --replace
+
+# 3) 常駐起動（sudo が無いので systemd サービス化はできない。nohup で起動）
+nohup ./run.sh >~/runner.log 2>&1 </dev/null &
+```
+
+> sudo が使えないため runner は **userspace 常駐**（`nohup ./run.sh`）。ホスト再起動後は
+> `~/actions-runner/run.sh` を再度起動する必要がある（linger/systemd 化は sudo 権限が
+> 得られたら [`deploy/tekijin-backend.service`](../deploy/tekijin-backend.service) と同様に対応）。
+
+### 手動実行・確認
+
+- 手動デプロイ: GitHub Actions の **Deploy to DGX** ワークフローを `workflow_dispatch` で実行。
+- ローカル確認: DGX 上で `GITHUB_WORKSPACE=<checkout> bash deploy/deploy.sh` を直接実行しても同じ。
+
 ## 関連
 
 - [README](../README.md) / [.env.example](../.env.example)
+- [`deploy/deploy.sh`](../deploy/deploy.sh)・[`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml)（自動デプロイ・#203）
 - [`deploy/tekijin-backend.service`](../deploy/tekijin-backend.service)・[`deploy/start_backend.sh`](../deploy/start_backend.sh)（自動再起動・#180/#181）
 - 耐久性の設計は Issue #180、開発フローは [.claude/skills/dev-flow/SKILL.md](../.claude/skills/dev-flow/SKILL.md)

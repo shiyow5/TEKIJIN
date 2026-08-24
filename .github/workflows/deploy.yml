@@ -1,0 +1,34 @@
+name: Deploy to DGX
+
+# Auto-deploy every merge to develop (#203). Runs on a self-hosted runner that
+# lives ON the DGX (label: dgx), so the private Tailscale host is reached without
+# storing any SSH/Tailscale secret in GitHub. The deploy touches ONLY the backend
+# and frontend — vLLM (GPU) and Postgres are never restarted (see deploy/deploy.sh).
+on:
+  push:
+    branches: [develop]
+  workflow_dispatch: {}
+
+# Never run two deploys at once, and never cancel one mid-flight (a half-applied
+# release on a shared host is worse than waiting).
+concurrency:
+  group: deploy-dgx
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, dgx]
+    timeout-minutes: 25
+    steps:
+      - name: Checkout the merged commit
+        uses: actions/checkout@v4
+
+      - name: Deploy to DGX (backend + frontend, vLLM untouched)
+        run: bash deploy/deploy.sh
+        env:
+          TEKIJIN_DEPLOY_DIR: /home/team_a/TEKIJIN
+          TEKIJIN_VENV_PY: /home/team_a/tekijin-bench/.venv/bin/python
+          TEKIJIN_API_BASE_URL: http://100.118.131.67:18000
+          TEKIJIN_FRONTEND_CONTAINER: tekijin_frontend
+          TEKIJIN_PORT: "18000"
+          TEKIJIN_FRONTEND_PORT: "13000"
