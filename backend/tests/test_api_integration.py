@@ -30,6 +30,10 @@ from tekijin.models.tables import Answer, Event, Question, Recommendation
 
 NOW = dt.datetime(2026, 9, 15, 12, 0, 0)
 GOOD_Q = "現行のVPN機器で3拠点の拠点間接続について相談したいです"
+# Vague, no extractable topic -> C1 confidence stays sub-threshold -> C2 still asks
+# a clarification. Under the #113 safety valve a topic-only question routes straight
+# through, so this is what now exercises the ask/followup interrupt path.
+VAGUE_Q = "相談したいことがあります"
 
 
 class _FakeRetriever:
@@ -257,9 +261,7 @@ def test_followup_then_reply_resumes(seed_counts, engine, fake_embedder) -> None
         scorer=_FakeScorer(_recs(1, 2)),
     )
     # Topic-only question -> missing slots -> C2 asks a followup.
-    client.post(
-        "/ask", json={"asker_id": 10, "question": "ネットワークの技術相談です", "session_id": "s2"}
-    )
+    client.post("/ask", json={"asker_id": 10, "question": VAGUE_Q, "session_id": "s2"})
     first = _events(client, "s2")
     assert [e for e, _ in first] == ["understood", "followup"]
     assert "教えてください" in first[1][1]["question"]
@@ -350,9 +352,7 @@ def test_answer_wrong_kind_is_422(seed_counts, engine, fake_embedder) -> None:
     assert client.post("/answer", json={"session_id": "c3", "reply": "x"}).status_code == 422
 
     # Paused at ask (expects a reply) — sending an 'outcome' is the wrong kind.
-    client.post(
-        "/ask", json={"asker_id": 10, "question": "ネットワークの技術相談です", "session_id": "c4"}
-    )
+    client.post("/ask", json={"asker_id": 10, "question": VAGUE_Q, "session_id": "c4"})
     _events(client, "c4")
     assert (
         client.post("/answer", json={"session_id": "c4", "outcome": "accepted"}).status_code == 422
@@ -387,9 +387,7 @@ def test_reconnect_resends_pending_interrupt(seed_counts, engine, fake_embedder)
     assert again[0][1]["recommendations"][0]["person_id"] == "E001"
 
     # ask interrupt -> reconnect re-sends the followup.
-    client.post(
-        "/ask", json={"asker_id": 10, "question": "ネットワークの技術相談です", "session_id": "r2"}
-    )
+    client.post("/ask", json={"asker_id": 10, "question": VAGUE_Q, "session_id": "r2"})
     _events(client, "r2")
     again2 = _events(client, "r2")
     assert [e for e, _ in again2] == ["followup"]
@@ -756,9 +754,7 @@ def test_handoff_conflicts_when_awaiting_clarification(seed_counts, engine, fake
         engine, fake_embedder, retriever=_FakeRetriever(people=[1]), scorer=_FakeScorer(_recs(1))
     )
     # Topic-only question -> paused at ``ask`` (a followup is owed to the asker).
-    client.post(
-        "/ask", json={"asker_id": 10, "question": "ネットワークの技術相談です", "session_id": "h2"}
-    )
+    client.post("/ask", json={"asker_id": 10, "question": VAGUE_Q, "session_id": "h2"})
     _events(client, "h2")
     assert client.get("/handoff/h2").status_code == 409  # not a responder handoff
 
@@ -847,9 +843,7 @@ def test_handoff_draft_409_when_awaiting_clarification(seed_counts, engine, fake
     client = _client(
         engine, fake_embedder, retriever=_FakeRetriever(people=[1]), scorer=_FakeScorer(_recs(1))
     )
-    client.post(
-        "/ask", json={"asker_id": 10, "question": "ネットワークの技術相談です", "session_id": "hd3"}
-    )
+    client.post("/ask", json={"asker_id": 10, "question": VAGUE_Q, "session_id": "hd3"})
     _events(client, "hd3")  # paused at ``ask`` (a clarification is owed to the asker)
     resp = client.post("/handoff/draft", json={"session_id": "hd3", "draft": "本文"})
     assert resp.status_code == 409

@@ -25,6 +25,27 @@ TOPIC = "ネットワーク・VPN"
 # A well-formed question: yields topic ネットワーク・VPN and satisfies C2 (mentions a
 # current product and 拠点), so no clarification interrupt on the happy path.
 GOOD_Q = "現行のVPN機器で3拠点の拠点間接続について相談したいです"
+# A genuinely vague question: NO topic keyword extractable, so C1 confidence stays
+# below the routing threshold and C2 still asks a clarification. Since the #113
+# safety valve only proceeds when C1 already has a confident topic, this is what
+# exercises the ask/interrupt path now (a topic-only question routes straight
+# through — finding the person is the product's job, not the asker's).
+VAGUE_Q = "相談したいことがあります"
+
+
+class _FixedIntent:
+    """C1 stand-in with a topic but sub-threshold confidence.
+
+    Used to exercise the C2 follow-up machinery under the #113 safety valve: a
+    topic is present (so C6 can still score and reach the hand-off), but the
+    confidence is below the routing threshold, so the valve does NOT auto-proceed
+    and the injected/insufficient C2 path is what drives the ask -> cap flow.
+    """
+
+    def analyze(self, question, asker):  # noqa: ARG002
+        from tekijin.agent.protocols import IntentResult
+
+        return IntentResult(topics=[TOPIC], products=[], question_type="技術相談", confidence=0.4)
 
 
 class _FakeRetriever:
@@ -122,13 +143,13 @@ def test_insufficient_triggers_interrupt_then_resumes(seed_counts, session, fake
     agent = build_agent(fake_embedder, session, retriever=_FakeRetriever(people=[1, 2]))
     cfg = _cfg("insuf")
 
-    # Topic-only question -> both slots missing -> ask interrupt.
-    agent.invoke(_init("ネットワークの技術相談です"), cfg)
+    # Vague question (no extractable topic) -> C2 asks a clarification interrupt.
+    agent.invoke(_init(VAGUE_Q), cfg)
     assert _is_paused(agent, cfg)
     state_at_ask = agent.get_state(cfg)
     assert state_at_ask.next == ("ask",)
 
-    # Provide the missing info; the followup cap makes C2 sufficient next pass.
+    # Reply introduces the topic (VPN); the followup cap makes C2 sufficient next pass.
     agent.invoke(Command(resume="現行はVPN機器で、対象は3拠点です"), cfg)
     after = agent.get_state(cfg).values
     assert after["followup_count"] == 1
@@ -137,6 +158,20 @@ def test_insufficient_triggers_interrupt_then_resumes(seed_counts, session, fake
 
     final = agent.invoke(Command(resume="accepted"), cfg)
     assert "取り次ぎました" in final["answer"]
+
+
+def test_confident_topic_skips_clarification(seed_counts, session, fake_embedder) -> None:
+    # #113 safety valve: a confident, on-topic consultation must NOT be pushed back
+    # for estimate-style slots (現行製品/対象拠点数). "ネットワークの技術相談です" yields the
+    # topic ネットワーク・VPN at confidence ≥ threshold, so C2 proceeds straight to the
+    # hand-off instead of asking — finding the responder is the product's job.
+    for emp in (1, 2):
+        _seed_skill(session, f"sk_conf_{emp}", emp)
+    agent = build_agent(fake_embedder, session, retriever=_FakeRetriever(people=[1, 2]))
+    cfg = _cfg("conf")
+    state = agent.invoke(_init("ネットワークの技術相談です"), cfg)
+    assert state["sufficient"] is True
+    assert agent.get_state(cfg).next == ("send",)  # reached hand-off, no ask interrupt
 
 
 # --------------------------------------------------------------------------- #
@@ -345,7 +380,7 @@ def test_resume_does_not_reset_followup_loop(seed_counts, session, fake_embedder
         _seed_skill(session, f"sk_noreset_{emp}", emp)
     agent = build_agent(fake_embedder, session, retriever=_FakeRetriever(people=[1, 2]))
     cfg = _cfg("noreset")
-    agent.invoke(_init("ネットワークの技術相談です"), cfg)  # insufficient -> ask
+    agent.invoke(_init(VAGUE_Q), cfg)  # vague -> C2 asks
     assert agent.get_state(cfg).next == ("ask",)
     # Resume (NOT a new question) must keep the followup_count it accrued.
     agent.invoke(Command(resume="現行はVPN、3拠点です"), cfg)
@@ -367,6 +402,7 @@ def test_node_enforces_followup_cap(seed_counts, session, fake_embedder) -> None
     agent = build_agent(
         fake_embedder,
         session,
+        intent_model=_FixedIntent(),  # topic present but sub-threshold -> valve off
         sufficiency_model=_NeverSufficient(),
         retriever=_FakeRetriever(people=[1, 2]),
     )
@@ -467,7 +503,12 @@ def test_unresolved_intent_terminal(seed_counts, session, fake_embedder) -> None
 def test_ask_ignores_non_string_resume(seed_counts, session, fake_embedder) -> None:
     for emp in (1, 2):
         _seed_skill(session, f"sk_badreply_{emp}", emp)
-    agent = build_agent(fake_embedder, session, retriever=_FakeRetriever(people=[1, 2]))
+    agent = build_agent(
+        fake_embedder,
+        session,
+        intent_model=_FixedIntent(),  # topic present but sub-threshold -> valve off, C2 asks
+        retriever=_FakeRetriever(people=[1, 2]),
+    )
     cfg = _cfg("badreply")
     original = "ネットワークの技術相談です"
     agent.invoke(_init(original), cfg)

@@ -25,7 +25,11 @@ from tekijin.agent.protocols import (
 from tekijin.agent.route import PRIOR_ANSWER, decide_route
 from tekijin.agent.safety import scan_disallowed
 from tekijin.agent.state import AgentState, empty_retrieval
-from tekijin.agent.stubs import MAX_FOLLOWUPS, collect_known_values
+from tekijin.agent.stubs import (
+    INTENT_CONFIDENCE_THRESHOLD,
+    MAX_FOLLOWUPS,
+    collect_known_values,
+)
 from tekijin.retrieval.embedding import QUERY, Embedder
 from tekijin.scorer.scorer import ExpertiseScorer
 
@@ -153,7 +157,14 @@ class AgentNodes:
         # Graph-level termination guarantee: never ask more than MAX_FOLLOWUPS,
         # whatever the (possibly future vLLM) model returns.
         capped = followup_count >= MAX_FOLLOWUPS
-        sufficient = result.sufficient or capped
+        # Safety valve (#113): once C1 has confidently identified the topic, we can
+        # already decide WHO to route to — the responder can ask for any missing
+        # detail (現行製品/対象拠点数…). So don't let C2 block a confident, on-topic
+        # consultation on estimate-style slots, no matter how a (prompt-sensitive)
+        # model feels. This overrides the model, but never fires on a vague/low-signal
+        # request (no topic, or confidence below threshold), which still clarifies.
+        can_route = bool(intent.topics) and intent.confidence >= INTENT_CONFIDENCE_THRESHOLD
+        sufficient = result.sufficient or capped or can_route
         # If we have already asked once (capped) and STILL have no topic, the
         # intent is unresolved. Rather than silently search on nothing and land in
         # no_candidate, flag it so the graph routes to an explicit "couldn't
