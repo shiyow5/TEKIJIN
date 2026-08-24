@@ -247,6 +247,25 @@ class Recommendation(Base):
     declined_seen_at: Mapped[dt.datetime | None] = mapped_column(DateTime)
 
 
+class Message(Base):
+    """A chat message on an accepted recommendation (承諾後のやり取り, #224).
+
+    ``recommendation_id`` doubles as the thread id: a decline+reroute creates a
+    NEW rank-1 recommendation row rather than mutating the old one, and only
+    one recommendation per question ever reaches ``outcome == "accepted"``, so
+    the accepted ``Recommendation.id`` is a stable, unique key for "this
+    accepted collaboration's chat" (no separate thread table needed).
+    """
+
+    __tablename__ = "messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    recommendation_id: Mapped[int] = mapped_column(ForeignKey("recommendations.id"), index=True)
+    sender_id: Mapped[int] = mapped_column(ForeignKey("employees.id"), index=True)
+    body: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now(), index=True)
+
+
 class EvalRun(Base):
     """A stored offline-evaluation snapshot (dashboard 推薦精度 source).
 
@@ -382,6 +401,7 @@ __all__ = [
     "Question",
     "Answer",
     "Recommendation",
+    "Message",
     "EvalRun",
     "Event",
     "ProjectMember",

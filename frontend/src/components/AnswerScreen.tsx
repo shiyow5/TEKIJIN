@@ -54,6 +54,19 @@ function BackLink() {
   );
 }
 
+function ChatCta({ href, label }: { href: string; label: string }) {
+  return (
+    <div className="flex justify-center">
+      <Link
+        href={href}
+        className="min-h-[48px] rounded-full border border-primary px-lg py-sm font-bold text-primary shadow-sm transition-colors hover:bg-primary-container hover:text-on-primary-container"
+      >
+        {label}
+      </Link>
+    </div>
+  );
+}
+
 function ReasonList({ reasons }: { reasons: Reason[] }) {
   if (reasons.length === 0) {
     return <p className="text-on-surface-variant text-sm">根拠を確認中…</p>;
@@ -120,6 +133,10 @@ export function AnswerScreen({ sessionId }: AnswerScreenProps) {
         >
           {message}
         </div>
+        {/* "gone" is this issue's other gap: reloading after an accept 404s here
+            with no way back to the conversation. The chat list finds it without
+            needing the (now-consumed) session id (#224). */}
+        {errorKind === "gone" ? <ChatCta href="/chat" label="チャット一覧を見る" /> : null}
         <BackLink />
       </Centered>
     );
@@ -130,6 +147,9 @@ export function AnswerScreen({ sessionId }: AnswerScreenProps) {
       <Centered>
         <h1 className="font-bold text-2xl text-primary">{DONE_HEADING[action]}</h1>
         <p className="text-on-surface-variant">{DONE_BODY[action]}</p>
+        {action === "answer" && handoff?.recommendation_id != null ? (
+          <ChatCta href={`/chat?thread=${handoff.recommendation_id}`} label="チャットを開く" />
+        ) : null}
         <BackLink />
       </Centered>
     );

@@ -447,6 +447,69 @@ class NotificationAckResponse(BaseModel):
 
 
 # --------------------------------------------------------------------------- #
+# chat (GET/POST /messages) — accepted-recommendation threads (#224)
+# --------------------------------------------------------------------------- #
+class MessageSendRequest(BaseModel):
+    """Send one chat message on an accepted-recommendation thread."""
+
+    thread_id: int
+    sender_id: int
+    # Unlike /ask and /handoff/draft (one per session), chat is a repeat-send
+    # surface, so an unbounded body is a storage-growth foot-gun rather than a
+    # theoretical one. 2000 chars is well past any real message.
+    body: str = Field(min_length=1, max_length=2000)
+
+    @field_validator("sender_id", mode="before")
+    @classmethod
+    def _accept_e_prefixed_id(cls, value: object) -> int:
+        return _coerce_asker_id(value)
+
+    @field_validator("body")
+    @classmethod
+    def _trim_nonempty(cls, value: str) -> str:
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("body must not be blank")
+        return trimmed
+
+
+class MessageItem(BaseModel):
+    """One chat message, sender in the external ``"E###"`` form."""
+
+    id: int
+    thread_id: int
+    sender_id: str
+    body: str
+    created_at: str
+
+
+class MessageThreadSummary(BaseModel):
+    """One accepted thread for the chat list (newest activity first)."""
+
+    thread_id: int
+    question_id: str
+    question_title: str
+    counterpart: HandoffAsker
+    last_message: str | None = None
+    last_message_at: str | None = None
+    created_at: str
+
+
+class MessageThreadListResponse(BaseModel):
+    items: list[MessageThreadSummary] = Field(default_factory=list)
+
+
+class MessageThreadDetail(BaseModel):
+    """One thread's full history, oldest first."""
+
+    thread_id: int
+    question_id: str
+    question_title: str
+    counterpart: HandoffAsker
+    messages: list[MessageItem] = Field(default_factory=list)
+
+
+# --------------------------------------------------------------------------- #
 # document detail (GET /documents/{doc_id}) — the cited internal document (#143)
 # --------------------------------------------------------------------------- #
 class DocumentDetail(BaseModel):

@@ -27,6 +27,9 @@ const NAV = [
   { href: "/questions", label: "質問する", adminOnly: false },
   { href: "/history", label: "質問履歴", adminOnly: false },
   { href: "/inbox", label: "受信箱", adminOnly: false },
+  // Chat is per-person (only your own accepted threads), so unlike the dashboard
+  // it is NOT admin-only (#224).
+  { href: "/chat", label: "チャット", adminOnly: false },
   { href: "/dashboard", label: "ダッシュボード", adminOnly: true },
 ] as const;
 

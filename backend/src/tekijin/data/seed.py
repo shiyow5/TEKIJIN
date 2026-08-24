@@ -43,6 +43,7 @@ _TRUNCATE_ORDER: tuple[str, ...] = (
     "person_topic_edges",
     "events",
     "eval_runs",
+    "messages",
     "recommendations",
     "answers",
     "questions",

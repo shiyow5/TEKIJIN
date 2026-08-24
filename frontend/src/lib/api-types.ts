@@ -271,6 +271,54 @@ export interface HandoffResponse {
 }
 
 // --------------------------------------------------------------------------- //
+// chat (GET/POST /messages) — accepted-recommendation threads (#224)
+// --------------------------------------------------------------------------- //
+
+/** POST /messages body — send one chat message on an accepted thread. */
+export interface SendMessageRequest {
+  thread_id: number;
+  sender_id: EmployeeId;
+  body: string;
+}
+
+/** One chat message (schemas.py `MessageItem`). `sender_id` is the external "E###" form. */
+export interface ChatMessage {
+  id: number;
+  thread_id: number;
+  sender_id: string;
+  body: string;
+  created_at: string;
+}
+
+/**
+ * One accepted thread for the chat list (schemas.py `MessageThreadSummary`),
+ * newest activity first. `thread_id` is the accepted `Recommendation.id`.
+ */
+export interface ChatThreadSummary {
+  thread_id: number;
+  question_id: string;
+  question_title: string;
+  counterpart: HandoffAsker;
+  last_message?: string | null;
+  last_message_at?: string | null;
+  created_at: string;
+}
+
+/** GET /messages/threads payload (schemas.py `MessageThreadListResponse`). */
+export interface ChatThreadListResponse {
+  items: ChatThreadSummary[];
+}
+
+/** GET /messages/threads/{id} payload (schemas.py `MessageThreadDetail`), oldest-first history. */
+export interface ChatThreadDetail {
+  thread_id: number;
+  question_id: string;
+  question_title: string;
+  counterpart: HandoffAsker;
+  messages: ChatMessage[];
+}
+
+// --------------------------------------------------------------------------- //
 // dashboard (GET /dashboard) — aggregate-only view (product-spec 画面5)
 // --------------------------------------------------------------------------- //
 

@@ -166,6 +166,14 @@ def _cleanup_api_rows(engine):
     yield
     session = get_sessionmaker(engine)()
     try:
+        # messages FK-reference recommendations (no ON DELETE CASCADE), so chat
+        # rows from #224 tests must go first.
+        session.execute(
+            text(
+                r"DELETE FROM messages WHERE recommendation_id IN "
+                r"(SELECT id FROM recommendations WHERE question_id LIKE 'api\_%' ESCAPE '\')"
+            )
+        )
         # feedback (#237) is runtime-only (seed writes none) and FKs questions, so
         # clear it first — before the questions it may reference are deleted.
         session.execute(text("DELETE FROM feedback"))
@@ -671,6 +679,171 @@ def test_document_route_returns_seeded_document(seed_counts, engine, fake_embedd
 def test_document_route_unknown_id_is_404(seed_counts, engine, fake_embedder) -> None:
     client = _client(engine, fake_embedder, retriever=_FakeRetriever(), scorer=_FakeScorer([]))
     assert client.get("/documents/doc_nope").status_code == 404
+
+
+# --------------------------------------------------------------------------- #
+# GET/POST /messages : chat threads on accepted recommendations (#224)
+# --------------------------------------------------------------------------- #
+def test_message_thread_appears_for_both_parties_after_acceptance(
+    seed_counts, engine, fake_embedder
+) -> None:
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2, 3], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2, 3)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "msg-s1"})
+    _events(client, "msg-s1")
+
+    # Before acceptance, neither party has a thread yet.
+    assert client.get("/messages/threads", params={"employee_id": "E010"}).json()["items"] == []
+    assert client.get("/messages/threads", params={"employee_id": "E001"}).json()["items"] == []
+
+    client.post("/answer", json={"session_id": "msg-s1", "outcome": "accepted"})
+    _events(client, "msg-s1")
+
+    asker_threads = client.get("/messages/threads", params={"employee_id": "E010"}).json()["items"]
+    responder_threads = client.get("/messages/threads", params={"employee_id": "E001"}).json()[
+        "items"
+    ]
+    assert len(asker_threads) == 1
+    assert len(responder_threads) == 1
+    thread_id = asker_threads[0]["thread_id"]
+    assert responder_threads[0]["thread_id"] == thread_id
+    assert asker_threads[0]["counterpart"]["id"] == "E001"
+    assert responder_threads[0]["counterpart"]["id"] == "E010"
+    assert asker_threads[0]["question_title"] == GOOD_Q
+
+
+def test_send_and_list_messages_round_trip(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2, 3], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2, 3)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "msg-s2"})
+    _events(client, "msg-s2")
+    client.post("/answer", json={"session_id": "msg-s2", "outcome": "accepted"})
+    _events(client, "msg-s2")
+    thread_id = client.get("/messages/threads", params={"employee_id": "E010"}).json()["items"][0][
+        "thread_id"
+    ]
+
+    send1 = client.post(
+        "/messages",
+        json={"thread_id": thread_id, "sender_id": "E010", "body": "よろしくお願いします"},
+    )
+    assert send1.status_code == 200
+    assert send1.json()["sender_id"] == "E010"
+    send2 = client.post(
+        "/messages", json={"thread_id": thread_id, "sender_id": "E001", "body": "承知しました"}
+    )
+    assert send2.status_code == 200
+
+    for employee_id in ("E010", "E001"):
+        detail = client.get(
+            f"/messages/threads/{thread_id}", params={"employee_id": employee_id}
+        ).json()
+        assert [m["body"] for m in detail["messages"]] == ["よろしくお願いします", "承知しました"]
+        assert [m["sender_id"] for m in detail["messages"]] == ["E010", "E001"]
+
+    listing = client.get("/messages/threads", params={"employee_id": "E010"}).json()["items"][0]
+    assert listing["last_message"] == "承知しました"
+    assert listing["last_message_at"] is not None
+
+
+def test_message_thread_rejects_non_party(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2, 3], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2, 3)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "msg-s3"})
+    _events(client, "msg-s3")
+    client.post("/answer", json={"session_id": "msg-s3", "outcome": "accepted"})
+    _events(client, "msg-s3")
+    thread_id = client.get("/messages/threads", params={"employee_id": "E010"}).json()["items"][0][
+        "thread_id"
+    ]
+
+    assert (
+        client.get(f"/messages/threads/{thread_id}", params={"employee_id": "E004"}).status_code
+        == 404
+    )
+    assert (
+        client.post(
+            "/messages", json={"thread_id": thread_id, "sender_id": "E004", "body": "hi"}
+        ).status_code
+        == 404
+    )
+
+
+def test_message_thread_404_before_acceptance_and_for_declined(
+    seed_counts, engine, fake_embedder
+) -> None:
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "msg-s4"})
+    _events(client, "msg-s4")
+    pending_rid = client.get("/handoff/msg-s4").json()["recommendation_id"]
+
+    # Not yet accepted -> 404 for both parties.
+    assert (
+        client.get(f"/messages/threads/{pending_rid}", params={"employee_id": "E010"}).status_code
+        == 404
+    )
+
+    # Decline -> reroute. The old (now declined) recommendation id stays 404
+    # forever, even after a different recommendation on the same question is
+    # accepted (#94-style reroute).
+    client.post("/answer", json={"session_id": "msg-s4", "outcome": "declined"})
+    _events(client, "msg-s4")
+    new_rid = client.get("/handoff/msg-s4").json()["recommendation_id"]
+    assert new_rid != pending_rid
+    client.post("/answer", json={"session_id": "msg-s4", "outcome": "accepted"})
+    _events(client, "msg-s4")
+
+    assert (
+        client.get(f"/messages/threads/{pending_rid}", params={"employee_id": "E010"}).status_code
+        == 404
+    )
+    assert (
+        client.get(f"/messages/threads/{new_rid}", params={"employee_id": "E010"}).status_code
+        == 200
+    )
+
+
+def test_send_message_rejects_blank_body(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2, 3], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2, 3)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "msg-s5"})
+    _events(client, "msg-s5")
+    client.post("/answer", json={"session_id": "msg-s5", "outcome": "accepted"})
+    _events(client, "msg-s5")
+    thread_id = client.get("/messages/threads", params={"employee_id": "E010"}).json()["items"][0][
+        "thread_id"
+    ]
+
+    resp = client.post(
+        "/messages", json={"thread_id": thread_id, "sender_id": "E010", "body": "   "}
+    )
+    assert resp.status_code == 422
+
+
+def test_message_threads_route_rejects_bad_employee_id(seed_counts, engine, fake_embedder) -> None:
+    client = _client(engine, fake_embedder, retriever=_FakeRetriever(), scorer=_FakeScorer([]))
+    assert client.get("/messages/threads", params={"employee_id": "not-an-id"}).status_code == 422
 
 
 def test_dashboard_self_resolution_and_latest_eval(seed_counts, session) -> None:
