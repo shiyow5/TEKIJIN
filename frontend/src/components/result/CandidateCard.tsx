@@ -5,7 +5,9 @@
  * = 高/中/低 — the intended user-facing signal), and the evidence `reasons`. The
  * raw `score` is a weighted internal ranking value (not a percentage) and is
  * never shown. The top-ranked card is `expanded` (full reason detail); lower
- * ranks show compact reason labels.
+ * ranks show compact reason labels — EXCEPT the two comparison signals 距離
+ * (proximity) and 現在の負荷 (load), whose values are shown on every card so the
+ * asker can actually compare 2nd/3rd against the top pick (#204).
  */
 
 import { ConfidenceGauge } from "@/components/result/ConfidenceGauge";
@@ -75,20 +77,25 @@ export function CandidateCard({
 
       {candidate.reasons.length > 0 ? (
         <ul className="mb-md flex flex-col gap-xs">
-          {candidate.reasons.map((reason) => (
-            <li
-              key={`${reason.type}-${reason.detail}`}
-              className="flex items-start gap-xs text-on-surface-variant text-sm"
-            >
-              <span aria-hidden="true" className="text-primary">
-                ✓
-              </span>
-              <span>
-                <span className="font-medium text-on-surface">{reasonLabel(reason.type)}</span>
-                {expanded && reason.detail ? `：${reason.detail}` : null}
-              </span>
-            </li>
-          ))}
+          {candidate.reasons.map((reason) => {
+            // Distance and current load are comparison signals: show their values
+            // on every card, not only the expanded top one (#204).
+            const showDetail = expanded || reason.type === "proximity" || reason.type === "load";
+            return (
+              <li
+                key={`${reason.type}-${reason.detail}`}
+                className="flex items-start gap-xs text-on-surface-variant text-sm"
+              >
+                <span aria-hidden="true" className="text-primary">
+                  ✓
+                </span>
+                <span>
+                  <span className="font-medium text-on-surface">{reasonLabel(reason.type)}</span>
+                  {showDetail && reason.detail ? `：${reason.detail}` : null}
+                </span>
+              </li>
+            );
+          })}
         </ul>
       ) : (
         <p className="mb-md text-on-surface-variant text-sm">根拠を確認中…</p>
