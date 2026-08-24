@@ -259,6 +259,16 @@ def test_non_participant_is_forbidden_on_session_endpoints(
         ).status_code
         == 403
     )
+    # Excluding the send target reroutes the durable hand-off, so it carries the
+    # same participant rule (#260).
+    assert (
+        client.post(
+            "/handoff/exclude",
+            json={"session_id": "s1", "person_id": "E001"},
+            headers=stranger,
+        ).status_code
+        == 403
+    )
 
     # The responder (id 1) passes the participant guard (then hits the normal
     # 404/flow, NOT 403).

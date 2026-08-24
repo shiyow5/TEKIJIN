@@ -158,6 +158,26 @@ class HandoffSelectRequest(BaseModel):
         return _coerce_asker_id(value)
 
 
+class HandoffExcludeRequest(BaseModel):
+    """Asker excludes the current send target ("この人には聞かない"), rerouting to a
+    freshly-scored next candidate (#260).
+
+    ``person_id`` must be the current primary (the person being handed off): the
+    reroute path declines the top pick and re-scores excluding them, so excluding
+    a non-target shown candidate is rejected (422) rather than silently declining
+    the target. The new candidate arrives over the open ``/events`` stream (like a
+    responder decline), so the POST only acks.
+    """
+
+    session_id: str = Field(pattern=_SESSION_ID_PATTERN)
+    person_id: int
+
+    @field_validator("person_id", mode="before")
+    @classmethod
+    def _accept_e_prefixed_person_id(cls, value: object) -> int:
+        return _coerce_asker_id(value)
+
+
 class NotificationAckRequest(BaseModel):
     """Mark decline notifications as seen for this asker (#225)."""
 

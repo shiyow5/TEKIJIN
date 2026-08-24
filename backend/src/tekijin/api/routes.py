@@ -264,6 +264,42 @@ def handoff_select(
         raise HTTPException(status_code=500, detail="内部エラーが発生しました") from exc
 
 
+@router.post("/handoff/exclude", response_model=schemas.AckResponse)
+def handoff_exclude(
+    req: schemas.HandoffExcludeRequest,
+    request: Request,
+    principal: Principal = Depends(require_principal),
+) -> schemas.AckResponse:
+    """Asker excludes the current send target ("この人には聞かない"), rerouting to a
+    freshly-scored next candidate (#260).
+
+    Queues the same reroute a responder decline drives; the new candidate + draft
+    arrive over the open ``/events`` stream, so this only acks. 404 when no
+    hand-off is pending (unknown / finished / already answered); 409 when the
+    session is awaiting a clarification instead; 422 when ``person_id`` is not the
+    current hand-off target. Object-level auth (#241): only the session's
+    asker/responder (or admin) may exclude, the same rule as ``/handoff/select``.
+    The exclusion is recorded as a ``c6`` feedback signal (#237).
+    """
+
+    asker_id, responder_id = _service(request).session_participants(req.session_id)
+    require_session_participant(principal, asker_id, responder_id)
+    try:
+        _service(request).exclude_handoff_target(
+            req.session_id, req.person_id, actor_id=principal.employee_id
+        )
+    except HandoffNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SessionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except SessionInvalid as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:  # unexpected: log detail, return a generic 500
+        logger.exception("POST /handoff/exclude failed for session %s", req.session_id)
+        raise HTTPException(status_code=500, detail="内部エラーが発生しました") from exc
+    return schemas.AckResponse(session_id=req.session_id, status="reroute_queued")
+
+
 @router.get(
     "/dashboard",
     response_model=schemas.DashboardResponse,

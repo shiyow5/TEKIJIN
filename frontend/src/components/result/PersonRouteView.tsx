@@ -11,11 +11,22 @@
  * "この内容で依頼する" then persists the (possibly further-edited) draft text
  * to the pending hand-off (POST /handoff/draft), so the responder reads the
  * edited text — it is a real send, not a UI-only transition (#174).
+ *
+ * "この人には聞かない" on the current send target calls `POST /handoff/exclude`
+ * (#260): it declines the top pick and reroutes to a freshly-scored next
+ * candidate, which arrives over the open `/events` stream and remounts this view
+ * (keyed by the new top). The control is offered ONLY on the selected target —
+ * the backend rejects excluding a non-target candidate (422) — so the reroute
+ * always follows the person the asker actually named (no mis-send).
  */
 
 import { CandidateCard } from "@/components/result/CandidateCard";
 import { DraftEditor } from "@/components/result/DraftEditor";
-import { selectHandoffCandidate, updateHandoffDraft } from "@/lib/api-client";
+import {
+  excludeHandoffCandidate,
+  selectHandoffCandidate,
+  updateHandoffDraft,
+} from "@/lib/api-client";
 import type { Recommendation } from "@/lib/api-types";
 import { fitPercents } from "@/lib/fit";
 import { useEffect, useRef, useState } from "react";
@@ -31,6 +42,7 @@ export interface PersonRouteViewProps {
 const MAX_CANDIDATES = 3;
 const SEND_ERROR = "送信に失敗しました。時間をおいて、もう一度お試しください。";
 const SELECT_ERROR = "候補の切り替えに失敗しました。時間をおいて、もう一度お試しください。";
+const EXCLUDE_ERROR = "候補の選び直しに失敗しました。時間をおいて、もう一度お試しください。";
 
 export function PersonRouteView({
   recommendations,
@@ -46,6 +58,7 @@ export function PersonRouteView({
   const [selectedPersonId, setSelectedPersonId] = useState(candidates[0]?.person_id ?? null);
   const [localDraft, setLocalDraft] = useState(draft);
   const [selecting, setSelecting] = useState(false);
+  const [excluding, setExcluding] = useState(false);
   const [sending, setSending] = useState(false);
   const [sentTo, setSentTo] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -69,7 +82,7 @@ export function PersonRouteView({
   }, []);
 
   async function handleSelect(personId: string) {
-    if (selecting || personId === selectedPersonId || !sessionId) return;
+    if (selecting || excluding || personId === selectedPersonId || !sessionId) return;
     setSelecting(true);
     setError(null);
     try {
@@ -84,6 +97,26 @@ export function PersonRouteView({
       if (mounted.current) setError(SELECT_ERROR);
     } finally {
       if (mounted.current) setSelecting(false);
+    }
+  }
+
+  async function handleExclude(personId: string) {
+    if (excluding || selecting || !sessionId) return;
+    setExcluding(true);
+    setError(null);
+    try {
+      await excludeHandoffCandidate({ session_id: sessionId, person_id: personId });
+      // Success: the reroute is queued server-side; the freshly-scored next
+      // candidate + draft arrive over the open /events stream, which remounts
+      // this view (keyed by the new top candidate) and clears `excluding`. Keep
+      // the UI disabled meanwhile so the asker can't double-exclude.
+    } catch {
+      // 404 = the hand-off was already answered/closed; 409 = a clarification is
+      // owed; 422 = this person is no longer the send target (a reroute moved on).
+      if (mounted.current) {
+        setError(EXCLUDE_ERROR);
+        setExcluding(false);
+      }
     }
   }
 
@@ -145,6 +178,9 @@ export function PersonRouteView({
               expanded={index === 0}
               selected={candidate.person_id === selectedPersonId}
               onSelect={sessionId ? handleSelect : undefined}
+              onExclude={
+                sessionId && candidate.person_id === selectedPersonId ? handleExclude : undefined
+              }
               fitPercent={fitValues[index]}
             />
           ))}
@@ -167,10 +203,16 @@ export function PersonRouteView({
         </p>
       ) : null}
 
+      {excluding ? (
+        <output className="block rounded-lg border border-outline-variant bg-surface-container-low p-sm text-on-surface-variant text-sm">
+          別の方を選び直しています…
+        </output>
+      ) : null}
+
       <DraftEditor
         key={selectedPersonId}
         initialDraft={localDraft}
-        disabled={sending || selecting}
+        disabled={sending || selecting || excluding}
         onSend={handleSend}
       />
     </section>

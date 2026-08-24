@@ -1,7 +1,8 @@
 import {
-  advanceSession,
   ApiError,
+  advanceSession,
   deleteQuestion,
+  excludeHandoffCandidate,
   getDashboard,
   getDocument,
   getEmployees,
@@ -418,6 +419,31 @@ describe("selectHandoffCandidate", () => {
       .mockResolvedValue(jsonResponse({ detail: "unknown" }, { ok: false, status: 422 }));
     await expect(
       selectHandoffCandidate({ session_id: "s1", person_id: "E099" }, { fetchImpl }),
+    ).rejects.toMatchObject({ name: "ApiError", status: 422 });
+  });
+});
+
+describe("excludeHandoffCandidate", () => {
+  it("POSTs /handoff/exclude with session_id and person_id and returns the ack (#260)", async () => {
+    const response = { session_id: "s1", status: "reroute_queued" };
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(response));
+    const result = await excludeHandoffCandidate(
+      { session_id: "s1", person_id: "E001" },
+      { fetchImpl },
+    );
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe(`${DEFAULT_API_BASE_URL}/handoff/exclude`);
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(init?.body as string)).toEqual({ session_id: "s1", person_id: "E001" });
+    expect(result).toEqual(response);
+  });
+
+  it("throws ApiError with the 422 status when the person is not the send target", async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonResponse({ detail: "not target" }, { ok: false, status: 422 }));
+    await expect(
+      excludeHandoffCandidate({ session_id: "s1", person_id: "E003" }, { fetchImpl }),
     ).rejects.toMatchObject({ name: "ApiError", status: 422 });
   });
 });

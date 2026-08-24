@@ -17,6 +17,7 @@ import type {
   EmployeeListResponse,
   EmployeeSummary,
   HandoffDraftRequest,
+  HandoffExcludeRequest,
   HandoffResponse,
   HandoffSelectRequest,
   HandoffSelectResponse,
@@ -207,6 +208,21 @@ export function selectHandoffCandidate(
   options: RequestOptions = {},
 ): Promise<HandoffSelectResponse> {
   return postJson<HandoffSelectResponse>("/handoff/select", request, options);
+}
+
+/**
+ * POST /handoff/exclude — the asker excludes the current send target
+ * ("この人には聞かない"), rerouting to a freshly-scored next candidate (#260). The
+ * new candidate + draft arrive over the open `/events` stream, so this only acks.
+ * Throws {@link ApiError} with 404 (no hand-off pending / already answered), 409
+ * (awaiting a clarification instead), or 422 (`person_id` is not the current
+ * hand-off target).
+ */
+export function excludeHandoffCandidate(
+  request: HandoffExcludeRequest,
+  options: RequestOptions = {},
+): Promise<AckResponse> {
+  return postJson<AckResponse>("/handoff/exclude", request, options);
 }
 
 /**

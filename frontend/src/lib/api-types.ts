@@ -76,6 +76,17 @@ export interface HandoffSelectRequest {
   person_id: EmployeeId;
 }
 
+/**
+ * POST /handoff/exclude body — the asker excludes the current send target
+ * ("この人には聞かない"), rerouting to a freshly-scored next candidate (#260).
+ * `person_id` must be the current hand-off target. The new candidate + draft
+ * arrive over the open `/events` stream, so the response only acks.
+ */
+export interface HandoffExcludeRequest {
+  session_id: string;
+  person_id: EmployeeId;
+}
+
 /** POST /handoff/select response (schemas.py `HandoffSelectResponse`). */
 export interface HandoffSelectResponse {
   session_id: string;
