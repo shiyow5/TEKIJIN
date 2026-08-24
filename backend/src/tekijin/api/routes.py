@@ -658,11 +658,21 @@ def ack_notifications(
         return schemas.NotificationAckResponse(acknowledged=count)
 
 
-@router.get(
-    "/documents/{doc_id}",
-    response_model=schemas.DocumentDetail,
-    dependencies=[Depends(require_principal)],
-)
+def _coerce_employee_id_or_422(value: str, *, field: str) -> int:
+    try:
+        return schemas.coerce_employee_id(value)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"{field} must be an int or 'E###'") from exc
+
+
+def _counterpart(parties: dict, employee_id: int) -> schemas.HandoffAsker:
+    is_asker = employee_id == parties["asker_id"]
+    return schemas.HandoffAsker(
+        id=schemas.format_employee_id(parties["responder_id"] if is_asker else parties["asker_id"]),
+        name=parties["responder_name"] if is_asker else parties["asker_name"],
+        dept=parties["responder_dept"] if is_asker else parties["asker_dept"],
+    )
+
 
 @router.get("/messages/threads", response_model=schemas.MessageThreadListResponse)
 def message_threads(
@@ -777,6 +787,11 @@ def send_message(
         )
 
 
+@router.get(
+    "/documents/{doc_id}",
+    response_model=schemas.DocumentDetail,
+    dependencies=[Depends(require_principal)],
+)
 def document_detail(doc_id: str, request: Request) -> schemas.DocumentDetail:
     """Full content of one internal document, for the document viewer (#143).
 

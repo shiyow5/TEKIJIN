@@ -202,6 +202,7 @@ def _apply_schema_upgrades(engine: Engine) -> None:
                 "ALTER TABLE IF EXISTS recommendations "
                 "ADD COLUMN IF NOT EXISTS declined_seen_at TIMESTAMP"
             )
+        )
         # Asker's chosen consultation method ("direct" | "chat"); NULL treated
         # as "chat" everywhere.
         conn.execute(

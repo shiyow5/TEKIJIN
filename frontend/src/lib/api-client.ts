@@ -374,7 +374,9 @@ export function ackNotifications(
   options: RequestOptions = {},
 ): Promise<NotificationAckResponse> {
   return postJson<NotificationAckResponse>("/notifications/ack", request, options);
+}
 
+/**
  * GET /messages/threads — accepted chat threads where `employeeId` is a party
  * (asker or the accepted responder), newest activity first (#224).
  */

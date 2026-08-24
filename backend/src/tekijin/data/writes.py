@@ -104,6 +104,8 @@ def update_question_body(session: Session, question_id: str, body: str) -> None:
     """
 
     session.execute(update(Question).where(Question.id == question_id).values(body=body))
+
+
 def update_question_consult_method(session: Session, question_id: str, consult_method: str) -> None:
     """Record the asker's chosen consultation method ("direct" | "chat").
 
