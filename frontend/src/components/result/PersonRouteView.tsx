@@ -15,6 +15,7 @@ import { CandidateCard } from "@/components/result/CandidateCard";
 import { DraftEditor } from "@/components/result/DraftEditor";
 import { updateHandoffDraft } from "@/lib/api-client";
 import type { Recommendation } from "@/lib/api-types";
+import { relativeFitPercents } from "@/lib/fit";
 import { useEffect, useRef, useState } from "react";
 
 export interface PersonRouteViewProps {
@@ -36,6 +37,9 @@ export function PersonRouteView({
 }: PersonRouteViewProps) {
   const candidates = recommendations.slice(0, MAX_CANDIDATES);
   const topCandidate = candidates[0];
+  // Relative fit % across the shown candidates so the gauges differentiate them
+  // instead of all pinning to the same saturated confidence level (#222).
+  const fitPercents = relativeFitPercents(candidates);
   const [sending, setSending] = useState(false);
   const [sentTo, setSentTo] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -107,6 +111,7 @@ export function PersonRouteView({
               rank={index + 1}
               expanded={index === 0}
               selected={index === 0}
+              fitPercent={fitPercents[index]}
             />
           ))}
         </div>
