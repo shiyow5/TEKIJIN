@@ -363,10 +363,22 @@ class VllmAnswerabilityModel:
     def prompt(question: str, candidate_evidence: Sequence[str]) -> list[tuple[str, str]]:
         lines = [line for line in candidate_evidence if line and line.strip()]
         block = "\n".join(f"- {_fence_safe(line)}" for line in lines) if lines else "(候補なし)"
-        human = f"相談: {question}\n<candidates>\n{block}\n</candidates>"
+        # Neutralise the asker's own angle brackets too (#282 review): the question
+        # sits right before the <candidates> fence, so a crafted "</candidates>…"
+        # in it could otherwise spoof a candidate block and inflate the score — a
+        # self-serving bypass of the very gate this critic provides.
+        human = f"相談: {_fence_safe(question)}\n<candidates>\n{block}\n</candidates>"
         return [("system", _ANSWERABILITY_SYSTEM), ("human", human)]
 
     def assess(self, question: str, candidate_evidence: Sequence[str]) -> AnswerabilityResult:
+        # Code-enforce the core safety invariant (#282 review): with no candidate to
+        # answer, reject WITHOUT trusting the LLM (a plausible topic can make it
+        # answer optimistically — the exact failure this critic exists to catch).
+        # Mirrors the stub and saves a network round-trip.
+        if not any(line and line.strip() for line in candidate_evidence):
+            return AnswerabilityResult(
+                confidence=0, reason="回答できる実績が社内に見つかりません。"
+            )
         model = self._model if self._model is not None else self._structured()
         out: AnswerabilitySchema | None = model.invoke(self.prompt(question, candidate_evidence))
         if out is None:  # forced tool call was not emitted
