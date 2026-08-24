@@ -57,6 +57,12 @@ describe("AppHeader", () => {
     expect(screen.queryByText("たずねーる")).not.toBeInTheDocument();
   });
 
+  it("renders a notification bell to the left of the user switcher (#223)", () => {
+    useCurrentUserMock.mockReturnValue(READY);
+    render(<AppHeader />);
+    expect(screen.getByLabelText("通知")).toBeInTheDocument();
+  });
+
   it("populates the switcher from the directory and reflects the current user", () => {
     useCurrentUserMock.mockReturnValue({
       employees: EMPLOYEES,

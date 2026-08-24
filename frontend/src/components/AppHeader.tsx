@@ -67,42 +67,65 @@ export function AppHeader() {
         </nav>
       </div>
 
-      <label
-        className="flex items-center gap-xs text-on-surface-variant text-xs"
-        aria-busy={loading}
-        title="プロトタイプ用の擬似ログイン（認証なし）。動作確認のため利用者を切り替えます。"
-      >
-        <span className="rounded bg-surface-container-high px-xs py-[1px] text-on-surface-variant">
-          デモ用
-        </span>
-        <span>利用者を切替</span>
-        <select
-          aria-label="利用者を切替（デモ用の擬似ログイン）"
-          className="rounded-md border border-outline bg-surface-container-lowest px-sm py-xs text-sm disabled:text-on-surface-variant"
-          value={ready ? currentUserId : ""}
-          disabled={!ready}
-          onChange={(e) => setCurrentUserId(e.target.value)}
+      <div className="flex items-center gap-sm">
+        {/* Placeholder for #176's notification surface — icon only for now (#223). */}
+        <span
+          aria-label="通知"
+          title="通知（準備中）"
+          className="flex h-8 w-8 items-center justify-center rounded-full text-on-surface-variant"
         >
-          {ready ? (
-            employees.map((employee) => (
-              <option key={employee.id} value={employee.id}>
-                {employee.dept ? `${employee.name}（${employee.dept}）` : employee.name}
-              </option>
-            ))
-          ) : (
-            <option value="">{loading ? "読み込み中…" : "利用できません"}</option>
-          )}
-        </select>
-        {error ? (
-          <button
-            type="button"
-            onClick={reload}
-            className="rounded-md border border-outline px-sm py-xs text-primary text-xs transition-colors hover:bg-surface-container-low"
+          <svg
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
           >
-            利用者一覧の取得に失敗しました。再試行
-          </button>
-        ) : null}
-      </label>
+            <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+            <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+          </svg>
+        </span>
+        <label
+          className="flex items-center gap-xs text-on-surface-variant text-xs"
+          aria-busy={loading}
+          title="プロトタイプ用の擬似ログイン（認証なし）。動作確認のため利用者を切り替えます。"
+        >
+          <span className="rounded bg-surface-container-high px-xs py-[1px] text-on-surface-variant">
+            デモ用
+          </span>
+          <span>利用者を切替</span>
+          <select
+            aria-label="利用者を切替（デモ用の擬似ログイン）"
+            className="rounded-md border border-outline bg-surface-container-lowest px-sm py-xs text-sm disabled:text-on-surface-variant"
+            value={ready ? currentUserId : ""}
+            disabled={!ready}
+            onChange={(e) => setCurrentUserId(e.target.value)}
+          >
+            {ready ? (
+              employees.map((employee) => (
+                <option key={employee.id} value={employee.id}>
+                  {employee.dept ? `${employee.name}（${employee.dept}）` : employee.name}
+                </option>
+              ))
+            ) : (
+              <option value="">{loading ? "読み込み中…" : "利用できません"}</option>
+            )}
+          </select>
+          {error ? (
+            <button
+              type="button"
+              onClick={reload}
+              className="rounded-md border border-outline px-sm py-xs text-primary text-xs transition-colors hover:bg-surface-container-low"
+            >
+              利用者一覧の取得に失敗しました。再試行
+            </button>
+          ) : null}
+        </label>
+      </div>
     </header>
   );
 }
