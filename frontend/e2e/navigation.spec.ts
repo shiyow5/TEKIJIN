@@ -9,8 +9,9 @@ import {
 
 /**
  * Cross-cutting navigation (#134): the global header nav, the hub cards, the
- * not-found page, and the current-user switcher's persistence. These are what
- * make the app feel like one app rather than disconnected screens.
+ * not-found page, and the current-user switcher — both that it persists and that
+ * switching returns to the hub (#210). These are what make the app feel like one
+ * app rather than disconnected screens.
  */
 
 // Stub every read the app chrome + landing destinations touch, so navigating
@@ -83,7 +84,24 @@ test.describe("navigation", () => {
     await expect(select).toBeEnabled();
     await select.selectOption("E002");
 
+    // Switching leaves for the hub (#210); wait for it so the reload below has a
+    // settled URL rather than racing the client-side navigation.
+    await page.waitForURL(/\/$/);
     await page.reload();
+    await expect(page.getByRole("combobox", { name: /利用者を切替/ })).toHaveValue("E002");
+  });
+
+  test("switching the current user returns to the hub (#210)", async ({ page }) => {
+    await mockChrome(page);
+    // The inbox is the screen the bug was reported on: it re-fetches for the new
+    // user, so the data was right while the screen still said "受信箱".
+    await page.goto("/inbox");
+    await expect(page.getByRole("heading", { name: "受信箱" })).toBeVisible();
+
+    await page.getByRole("combobox", { name: /利用者を切替/ }).selectOption("E002");
+
+    await page.waitForURL(/\/$/);
+    await expect(page.getByRole("heading", { level: 1, name: /TEKIJIN/ })).toBeVisible();
     await expect(page.getByRole("combobox", { name: /利用者を切替/ })).toHaveValue("E002");
   });
 });

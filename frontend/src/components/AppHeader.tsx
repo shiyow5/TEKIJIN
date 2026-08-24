@@ -13,6 +13,13 @@
  * directory (``GET /employees`` via {@link useCurrentUser}); the asker screen's
  * ``asker_id`` and the inbox follow the selection. While the directory loads (or
  * if it fails) the switcher shows a disabled placeholder.
+ *
+ * Switching also navigates home (#210). The header is in the root layout, so the
+ * switcher is reachable from every screen — including ones that never read
+ * ``currentUserId`` (``/answer/[session_id]``) and would otherwise sit there
+ * unchanged. Becoming a different person mid-flow makes the previous user's
+ * screen (their inbox, their session) meaningless, so we start over at the hub;
+ * anything unsent on that screen is deliberately dropped with it.
  */
 
 import { useCurrentUser } from "@/components/CurrentUserProvider";
