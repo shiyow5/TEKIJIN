@@ -55,9 +55,13 @@ function AuthGate({ children }: { children: ReactNode }) {
 
   return (
     <CurrentUserProvider>
-      <div className="mx-auto flex min-h-screen w-full max-w-content flex-col">
+      {/* The header's white background must span the FULL viewport, so the
+          max-width lives on `main` (and on the header's own inner wrapper),
+          not on a shared outer box — above `max-w-content` the body's tinted
+          background used to show through beside the header (#250). */}
+      <div className="flex min-h-screen w-full flex-col">
         <AppHeader />
-        <main className="flex-1 px-margin py-lg">{children}</main>
+        <main className="mx-auto w-full max-w-content flex-1 px-margin py-lg">{children}</main>
       </div>
     </CurrentUserProvider>
   );

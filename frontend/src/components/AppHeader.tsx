@@ -48,97 +48,102 @@ export function AppHeader() {
   const nav = NAV.filter((item) => !item.adminOnly || principal?.is_admin);
 
   return (
-    <header className="flex flex-wrap items-center justify-between gap-sm border-outline-variant border-b bg-surface-container-lowest px-margin py-sm">
-      <div className="flex flex-wrap items-center gap-md">
-        <Link href="/" aria-label="TEKIJIN ホーム">
-          {/* Transparent-background logo from Next's /public (aspect ≈ 2.8:1).
-              alt carries the brand name so the link's accessible name stays
-              "TEKIJIN". */}
-          <img src="/tekijin-logo.png" alt="TEKIJIN" className="h-10 w-auto" />
-        </Link>
-        <nav aria-label="メインナビゲーション">
-          <ul className="flex items-center gap-xs">
-            {nav.map((item) => {
-              const active = isActive(pathname, item.href);
-              return (
-                <li key={item.href}>
-                  <Link
-                    href={item.href}
-                    aria-current={active ? "page" : undefined}
-                    className={
-                      active
-                        ? "rounded-md bg-secondary-container px-sm py-xs font-bold text-on-secondary-container text-sm"
-                        : "rounded-md px-sm py-xs text-on-surface-variant text-sm transition-colors hover:bg-surface-container-low"
-                    }
-                  >
-                    {item.label}
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
-        </nav>
-      </div>
+    // The white background spans the full viewport; the CONTENT is centred at
+    // `max-w-content` by the inner wrapper. Constraining the <header> itself let
+    // the body's tinted background show through beside it above 1440px (#250).
+    <header className="border-outline-variant border-b bg-surface-container-lowest px-margin py-sm">
+      <div className="mx-auto flex w-full max-w-content flex-wrap items-center justify-between gap-sm">
+        <div className="flex flex-wrap items-center gap-md">
+          <Link href="/" aria-label="TEKIJIN ホーム">
+            {/* Transparent-background logo from Next's /public (aspect ≈ 2.8:1).
+                alt carries the brand name so the link's accessible name stays
+                "TEKIJIN". */}
+            <img src="/tekijin-logo.png" alt="TEKIJIN" className="h-10 w-auto" />
+          </Link>
+          <nav aria-label="メインナビゲーション">
+            <ul className="flex items-center gap-xs">
+              {nav.map((item) => {
+                const active = isActive(pathname, item.href);
+                return (
+                  <li key={item.href}>
+                    <Link
+                      href={item.href}
+                      aria-current={active ? "page" : undefined}
+                      className={
+                        active
+                          ? "rounded-md bg-secondary-container px-sm py-xs font-bold text-on-secondary-container text-sm"
+                          : "rounded-md px-sm py-xs text-on-surface-variant text-sm transition-colors hover:bg-surface-container-low"
+                      }
+                    >
+                      {item.label}
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          </nav>
+        </div>
 
-      <div className="flex flex-wrap items-center gap-sm">
-        {/* Decline notifications (#225). Logged out there is no acting user to
+        <div className="flex flex-wrap items-center gap-sm">
+          {/* Decline notifications (#225). Logged out there is no acting user to
             poll for, so the bell stays out of the tree entirely. */}
-        {principal ? <NotificationBell /> : null}
-        {canSwitch ? (
-          <label
-            className="flex items-center gap-xs text-on-surface-variant text-xs"
-            aria-busy={loading}
-            title="管理者のデモ機能。動作確認のため、任意の利用者になりかわって表示します。"
-          >
-            <span className="rounded bg-surface-container-high px-xs py-[1px] text-on-surface-variant">
-              デモ用
-            </span>
-            <span>利用者を切替</span>
-            <select
-              aria-label="利用者を切替（管理者デモ機能）"
-              className="rounded-md border border-outline bg-surface-container-lowest px-sm py-xs text-sm disabled:text-on-surface-variant"
-              value={ready ? currentUserId : ""}
-              disabled={!ready}
-              onChange={(e) => {
-                setCurrentUserId(e.target.value);
-                router.push("/");
-              }}
+          {principal ? <NotificationBell /> : null}
+          {canSwitch ? (
+            <label
+              className="flex items-center gap-xs text-on-surface-variant text-xs"
+              aria-busy={loading}
+              title="管理者のデモ機能。動作確認のため、任意の利用者になりかわって表示します。"
             >
-              {ready ? (
-                employees.map((employee) => (
-                  <option key={employee.id} value={employee.id}>
-                    {employee.dept ? `${employee.name}（${employee.dept}）` : employee.name}
-                  </option>
-                ))
-              ) : (
-                <option value="">{loading ? "読み込み中…" : "利用できません"}</option>
-              )}
-            </select>
-            {error ? (
-              <button
-                type="button"
-                onClick={reload}
-                className="rounded-md border border-outline px-sm py-xs text-primary text-xs transition-colors hover:bg-surface-container-low"
+              <span className="rounded bg-surface-container-high px-xs py-[1px] text-on-surface-variant">
+                デモ用
+              </span>
+              <span>利用者を切替</span>
+              <select
+                aria-label="利用者を切替（管理者デモ機能）"
+                className="rounded-md border border-outline bg-surface-container-lowest px-sm py-xs text-sm disabled:text-on-surface-variant"
+                value={ready ? currentUserId : ""}
+                disabled={!ready}
+                onChange={(e) => {
+                  setCurrentUserId(e.target.value);
+                  router.push("/");
+                }}
               >
-                利用者一覧の取得に失敗しました。再試行
-              </button>
-            ) : null}
-          </label>
-        ) : (
-          <span className="text-on-surface-variant text-sm">
-            {principal?.name ?? ""}
-            {principal?.is_admin ? "（管理者）" : ""}
-          </span>
-        )}
-        {principal ? (
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="rounded-md border border-outline px-sm py-xs text-on-surface-variant text-sm transition-colors hover:bg-surface-container-low"
-          >
-            ログアウト
-          </button>
-        ) : null}
+                {ready ? (
+                  employees.map((employee) => (
+                    <option key={employee.id} value={employee.id}>
+                      {employee.dept ? `${employee.name}（${employee.dept}）` : employee.name}
+                    </option>
+                  ))
+                ) : (
+                  <option value="">{loading ? "読み込み中…" : "利用できません"}</option>
+                )}
+              </select>
+              {error ? (
+                <button
+                  type="button"
+                  onClick={reload}
+                  className="rounded-md border border-outline px-sm py-xs text-primary text-xs transition-colors hover:bg-surface-container-low"
+                >
+                  利用者一覧の取得に失敗しました。再試行
+                </button>
+              ) : null}
+            </label>
+          ) : (
+            <span className="text-on-surface-variant text-sm">
+              {principal?.name ?? ""}
+              {principal?.is_admin ? "（管理者）" : ""}
+            </span>
+          )}
+          {principal ? (
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="rounded-md border border-outline px-sm py-xs text-on-surface-variant text-sm transition-colors hover:bg-surface-container-low"
+            >
+              ログアウト
+            </button>
+          ) : null}
+        </div>
       </div>
     </header>
   );
