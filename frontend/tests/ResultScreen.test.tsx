@@ -356,6 +356,49 @@ describe("ResultScreen — main line (person)", () => {
     expect(await screen.findByText(/鈴木さんに、この内容でお繋ぎしました/)).toBeInTheDocument();
   });
 
+  it("keeps the reselected draft when a late draft SSE event arrives (#258 flake)", async () => {
+    selectHandoffCandidateMock.mockResolvedValue({
+      session_id: "s1",
+      responder: THREE_CANDIDATES[1],
+      draft: "鈴木さん向けに調整した下書き",
+      recommendation_id: 42,
+    });
+    const { rerender } = renderResult(
+      state({
+        route: { route: "person", reason: "", confidence: 0.9 },
+        recommend: { recommendations: THREE_CANDIDATES },
+        draft: { draft: "高梨さん向けの下書き" },
+      }),
+    );
+    // Reselect 鈴木 (E002); the editor shows the regenerated draft for them.
+    fireEvent.click(screen.getAllByRole("button", { name: "選択する" })[0]);
+    await waitFor(() =>
+      expect(selectHandoffCandidateMock).toHaveBeenCalledWith({
+        session_id: "s1",
+        person_id: "E002",
+      }),
+    );
+    expect(await screen.findByLabelText<HTMLTextAreaElement>("聞き方の下書き")).toHaveValue(
+      "鈴木さん向けに調整した下書き",
+    );
+
+    // A late `draft` SSE event for the (still top-pick) 高梨 now arrives. Before the
+    // fix this reverted the editor to 高梨's text; the reselected 鈴木 draft must win.
+    rerender(
+      <ResultScreen
+        streamState={state({
+          route: { route: "person", reason: "", confidence: 0.9 },
+          recommend: { recommendations: THREE_CANDIDATES },
+          draft: { draft: "高梨さん向けの下書き（更新）" },
+        })}
+        sessionId="s1"
+      />,
+    );
+    expect(screen.getByLabelText<HTMLTextAreaElement>("聞き方の下書き")).toHaveValue(
+      "鈴木さん向けに調整した下書き",
+    );
+  });
+
   it("surfaces a retryable error when reselecting a candidate fails", async () => {
     selectHandoffCandidateMock.mockRejectedValueOnce(new Error("boom"));
     renderResult(
