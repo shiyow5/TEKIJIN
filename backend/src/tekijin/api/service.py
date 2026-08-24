@@ -714,9 +714,13 @@ class AgentService:
         ``reroute`` → ``c6_score`` → ``c7_draft`` → ``send``), so the freshly-scored
         next candidate and its regenerated draft arrive over the open ``/events``
         stream — reusing the graph's decline machinery and its persistence
-        unchanged. Unlike a responder decline, it does NOT stamp the shown
-        recommendation ``outcome=declined`` (nobody was actually asked); the
-        exclusion is recorded as a ``c6`` feedback signal (#237 Phase 1) instead.
+        unchanged. The excluded person's shown rank-1 row is stamped
+        ``outcome="excluded"`` (distinct from a responder's ``declined``: nobody was
+        actually asked), which — like any non-NULL outcome — drops it out of that
+        person's ``/inbox`` (``pending_handoffs_for_responder`` filters ``outcome IS
+        NULL``) and the dashboard's *pending* count, without counting against their
+        acceptance rate. The exclusion is ALSO recorded as a ``c6`` feedback signal
+        (#237 Phase 1) — the learning channel, separate from the hand-off lifecycle.
 
         Validation mirrors :meth:`select_handoff_candidate`: the run must be paused
         at ``send`` and not already answered / queued. ``person_id`` must be the
@@ -742,6 +746,12 @@ class AgentService:
                 raise SessionInvalid("person_id is not the current hand-off target")
 
             question_id = snapshot.values.get("question_id")
+
+            # Terminate the excluded person's shown rank-1 row so it stops showing
+            # as a pending hand-off in THEIR /inbox and the dashboard-pending count
+            # (first-wins, idempotent). Distinct value from a responder decline —
+            # the asker withdrew before asking, so it must not skew acceptance rate.
+            self._record_outcome(session_id, snapshot.values, "excluded")
 
             # Queue the reroute exactly as a responder decline does; the open
             # /events reader consumes it and re-scores / re-drafts the next pick.

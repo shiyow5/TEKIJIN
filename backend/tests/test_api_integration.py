@@ -1066,15 +1066,26 @@ def test_handoff_exclude_reroutes_to_next_candidate(seed_counts, engine, fake_em
         assert fb[0].target == "E001"
         assert fb[0].actor_id == 10  # the asker (from the authenticated principal)
 
-        # An asker exclusion is NOT a responder decline: E001's shown row keeps
-        # outcome=NULL (nobody was actually asked), unlike POST /answer declined.
+        # An asker exclusion is NOT a responder decline, but it still TERMINATES
+        # E001's shown rank-1 row (outcome="excluded", not "declined" and not NULL)
+        # so it stops showing as a pending hand-off — while never counting against
+        # E001's acceptance rate the way "declined" would.
         q = check.query(Question).filter(Question.session_id == "hx1").first()
         e1_rows = (
             check.query(Recommendation)
             .filter(Recommendation.question_id == q.id, Recommendation.employee_id == 1)
             .all()
         )
-        assert e1_rows and all(r.outcome is None for r in e1_rows)
+        assert e1_rows and all(r.outcome == "excluded" for r in e1_rows)
+
+        # Consequence: the excluded person no longer sees this session in their
+        # /inbox; the rerouted-to candidate (E002) does (pending, outcome NULL).
+        from tekijin.data.inbox import pending_handoffs_for_responder
+
+        e1_inbox = pending_handoffs_for_responder(check, 1)
+        e2_inbox = pending_handoffs_for_responder(check, 2)
+        assert all(item["session_id"] != "hx1" for item in e1_inbox)
+        assert any(item["session_id"] == "hx1" for item in e2_inbox)
     finally:
         check.close()
 
