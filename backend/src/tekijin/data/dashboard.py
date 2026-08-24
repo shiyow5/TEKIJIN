@@ -12,6 +12,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from tekijin.data.feedback import VALID_STAGES, feedback_counts_by_stage
 from tekijin.models.tables import Answer, Employee, EvalRun, Event, Question, Recommendation
 
 # Routes that resolve a question WITHOUT contacting a live person — the numerator
@@ -91,7 +92,21 @@ def dashboard_summary(
         "latest_eval": _latest_eval(session),
         "answers_per_responder": answers_per_responder,
         "topic_distribution": topic_distribution,
+        "feedback_by_stage": _feedback_by_stage(session),
     }
+
+
+def _feedback_by_stage(session: Session) -> dict[str, int]:
+    """Feedback counts per pipeline stage + total (#237 — どの段でどれだけずれているか).
+
+    Every stage (c1/c6/c7) is present with an explicit 0 so the dashboard shape is
+    stable before any feedback exists.
+    """
+
+    counts = feedback_counts_by_stage(session)
+    by_stage = {stage: counts.get(stage, 0) for stage in VALID_STAGES}
+    by_stage["total"] = sum(by_stage.values())
+    return by_stage
 
 
 def _self_resolution_rate(session: Session) -> float:

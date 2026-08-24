@@ -273,6 +273,30 @@ class Event(Base):
     meta: Mapped[dict | None] = mapped_column(JSONB)
 
 
+class Feedback(Base):
+    """One "the AI got this wrong / I changed it" signal from the asking side (#237).
+
+    The first-class learning signal the runtime used to throw away: the asker's
+    correction of the AI's interpretation (C1), recommendation (C6), or draft (C7).
+    Kept SEPARATE from ``events`` (which is latency measurement) on purpose. ``stage``
+    is ``c1`` / ``c6`` / ``c7``; ``kind`` names the correction (e.g. ``draft_edited``);
+    ``target`` is the thing corrected (a field name, a person id); ``payload`` carries
+    the specifics (e.g. the generated vs. sent draft). ``actor_id`` is who gave it.
+    """
+
+    __tablename__ = "feedback"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    question_id: Mapped[str | None] = mapped_column(ForeignKey("questions.id"), index=True)
+    session_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    stage: Mapped[str] = mapped_column(String(8))
+    kind: Mapped[str] = mapped_column(String(32))
+    target: Mapped[str | None] = mapped_column(String(64))
+    payload: Mapped[dict | None] = mapped_column(JSONB)
+    actor_id: Mapped[int | None] = mapped_column(ForeignKey("employees.id"), index=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now())
+
+
 class ProjectMember(Base):
     """Project membership with role (lead 0.8 / member 0.5).
 

@@ -288,4 +288,5 @@ export const DASHBOARD = {
     { topic: "ネットワーク", count: 50 },
     { topic: "セキュリティ", count: 30 },
   ],
+  feedback_by_stage: { c1: 1, c6: 4, c7: 2, total: 7 },
 };

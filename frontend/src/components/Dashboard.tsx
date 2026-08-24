@@ -222,6 +222,23 @@ export function Dashboard() {
           )}
         </section>
       </div>
+
+      <section className="flex flex-col gap-sm">
+        <h2 className="font-bold text-on-surface text-sm">
+          フィードバック（AIの解釈・推薦・下書きのズレ / #237）
+        </h2>
+        {d.feedback_by_stage.total > 0 ? (
+          <DistributionBars
+            items={[
+              { key: "c1", label: "解釈（C1）", count: d.feedback_by_stage.c1 },
+              { key: "c6", label: "推薦（C6）", count: d.feedback_by_stage.c6 },
+              { key: "c7", label: "下書き（C7）", count: d.feedback_by_stage.c7 },
+            ]}
+          />
+        ) : (
+          <p className="text-on-surface-variant text-sm">まだフィードバックはありません。</p>
+        )}
+      </section>
     </section>
   );
 }
