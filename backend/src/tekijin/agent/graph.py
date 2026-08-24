@@ -49,6 +49,12 @@ def _after_c5(state: AgentState) -> str:
 
 
 def _after_c6(state: AgentState) -> str:
+    # #279: a document-routed question runs C6 too, so a real expert behind a
+    # weak-profile document is offered as a fallback instead of dead-ending at zero
+    # person-recall — but it stays on the DOCUMENT terminal (self-resolution first,
+    # no hand-off interrupt), never c7_draft/send.
+    if state.get("route") == DOCUMENT:
+        return "document"
     return "c7_draft" if state.get("recommendations") else "no_candidate"
 
 
@@ -149,11 +155,15 @@ def build_agent(
     graph.add_conditional_edges(
         "c5_route",
         _after_c5,
-        {PERSON: "c6_score", PRIOR_ANSWER: "prior_answer", DOCUMENT: "document"},
+        # #279: the document route now also runs C6 to rank a person fallback; the
+        # DOCUMENT terminal presents the document AND those candidates.
+        {PERSON: "c6_score", PRIOR_ANSWER: "prior_answer", DOCUMENT: "c6_score"},
     )
     graph.add_edge("prior_answer", "c6_score")
     graph.add_conditional_edges(
-        "c6_score", _after_c6, {"c7_draft": "c7_draft", "no_candidate": "no_candidate"}
+        "c6_score",
+        _after_c6,
+        {"c7_draft": "c7_draft", "no_candidate": "no_candidate", "document": "document"},
     )
     graph.add_edge("c7_draft", "send")
     graph.add_conditional_edges(

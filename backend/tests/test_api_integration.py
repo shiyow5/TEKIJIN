@@ -495,14 +495,24 @@ def test_document_route_stamps_resolved_at(seed_counts, engine, fake_embedder) -
         scorer=_FakeScorer(_recs(1, 2, 3)),
     )
     client.post("/ask", json={"asker_id": 8, "question": GOOD_Q, "session_id": "docres"})
-    names = [e for e, _ in _events(client, "docres")]
+    events = _events(client, "docres")
+    names = [e for e, _ in events]
     assert "message" in names  # terminal document message, no hand-off
+    # #279/#281: C6 runs on the document route to add an inline person fallback to
+    # the answer, but it is NOT a live hand-off — so no `recommend` event fires and
+    # NO Recommendation rows are persisted (they could never resolve on a terminal
+    # document route and would inflate the pending-handoff KPI / pollute inboxes).
+    assert "recommend" not in names
+    message = next(data for e, data in events if e == "message")
+    assert "社員1さん" in message.get("message", "")  # the inline person fallback
 
     check = get_sessionmaker(engine)()
     try:
         q = check.query(Question).filter(Question.session_id == "docres").first()
         assert q is not None and q.route == "document"
         assert q.resolved_at is not None
+        # No phantom recommendation rows for the self-resolving document route.
+        assert check.query(Recommendation).filter(Recommendation.question_id == q.id).count() == 0
     finally:
         check.close()
 
