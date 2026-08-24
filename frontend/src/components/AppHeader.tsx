@@ -37,8 +37,10 @@ export function AppHeader() {
   return (
     <header className="flex flex-wrap items-center justify-between gap-sm border-outline-variant border-b bg-surface-container-lowest px-margin py-sm">
       <div className="flex flex-wrap items-center gap-md">
-        <Link href="/">
-          <span className="font-bold text-on-surface text-xl">TEKIJIN</span>
+        <Link href="/" aria-label="TEKIJIN ホーム">
+          {/* Logo served from Next's /public (aspect ≈ 2.8:1). alt carries the
+              brand name so the link's accessible name stays "TEKIJIN". */}
+          <img src="/tekijin-logo.jpg" alt="TEKIJIN" className="h-7 w-auto" />
         </Link>
         <nav aria-label="メインナビゲーション">
           <ul className="flex items-center gap-xs">
