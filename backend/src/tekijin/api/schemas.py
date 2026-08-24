@@ -178,6 +178,18 @@ class HandoffExcludeRequest(BaseModel):
         return _coerce_asker_id(value)
 
 
+class HandoffRedraftRequest(BaseModel):
+    """Asker asks the AI to regenerate the hand-off draft ("下書きの作り直し", #260).
+
+    Regenerates the draft for the CURRENT send target (no ``person_id`` — use
+    ``/handoff/select`` or ``/handoff/exclude`` to change who), discarding any
+    saved manual edit. The new draft arrives over the open ``/events`` stream, so
+    the response only acks.
+    """
+
+    session_id: str = Field(pattern=_SESSION_ID_PATTERN)
+
+
 class NotificationAckRequest(BaseModel):
     """Mark decline notifications as seen for this asker (#225)."""
 

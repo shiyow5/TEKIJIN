@@ -87,6 +87,16 @@ export interface HandoffExcludeRequest {
   person_id: EmployeeId;
 }
 
+/**
+ * POST /handoff/redraft body — the asker asks the AI to regenerate the hand-off
+ * draft for the current send target ("下書きの作り直し", #260), discarding any saved
+ * edit. The new draft arrives over the open `/events` stream, so the response
+ * only acks.
+ */
+export interface HandoffRedraftRequest {
+  session_id: string;
+}
+
 /** POST /handoff/select response (schemas.py `HandoffSelectResponse`). */
 export interface HandoffSelectResponse {
   session_id: string;

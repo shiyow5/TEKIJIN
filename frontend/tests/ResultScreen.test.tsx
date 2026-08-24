@@ -1,17 +1,19 @@
 import { ResultScreen } from "@/components/ResultScreen";
 import { SessionStreamProvider } from "@/components/SessionStreamProvider";
-import type { Recommendation } from "@/lib/api-types";
 import type { EventStreamState } from "@/hooks/useEventStream";
+import type { Recommendation } from "@/lib/api-types";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const updateHandoffDraftMock = vi.fn();
 const selectHandoffCandidateMock = vi.fn();
 const excludeHandoffCandidateMock = vi.fn();
+const regenerateHandoffDraftMock = vi.fn();
 vi.mock("@/lib/api-client", () => ({
   updateHandoffDraft: (...args: unknown[]) => updateHandoffDraftMock(...args),
   selectHandoffCandidate: (...args: unknown[]) => selectHandoffCandidateMock(...args),
   excludeHandoffCandidate: (...args: unknown[]) => excludeHandoffCandidateMock(...args),
+  regenerateHandoffDraft: (...args: unknown[]) => regenerateHandoffDraftMock(...args),
 }));
 
 beforeEach(() => {
@@ -20,6 +22,8 @@ beforeEach(() => {
   selectHandoffCandidateMock.mockReset();
   excludeHandoffCandidateMock.mockReset();
   excludeHandoffCandidateMock.mockResolvedValue({ session_id: "s1", status: "reroute_queued" });
+  regenerateHandoffDraftMock.mockReset();
+  regenerateHandoffDraftMock.mockResolvedValue({ session_id: "s1", status: "redraft_queued" });
 });
 
 // Fixtures use the REAL backend shapes: `confidence` is the Japanese fit signal
@@ -395,6 +399,43 @@ describe("ResultScreen — main line (person)", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("候補の選び直しに失敗しました");
     // The send button is re-enabled on failure so the asker can retry / send anyway.
     expect(screen.getByRole("button", { name: "この内容で依頼する" })).not.toBeDisabled();
+  });
+
+  it("regenerates the draft via 'AIに下書きを作り直してもらう', discarding local edits (#260)", async () => {
+    renderResult(
+      state({
+        route: { route: "person", reason: "", confidence: 0.9 },
+        recommend: { recommendations: THREE_CANDIDATES },
+        draft: { draft: "AIの下書き" },
+      }),
+    );
+    // The asker edits the draft, then asks the AI to redo it.
+    const editor = screen.getByLabelText<HTMLTextAreaElement>("聞き方の下書き");
+    fireEvent.change(editor, { target: { value: "手で書き換えた本文" } });
+    expect(editor).toHaveValue("手で書き換えた本文");
+
+    fireEvent.click(screen.getByRole("button", { name: "AIに下書きを作り直してもらう" }));
+    await waitFor(() =>
+      expect(regenerateHandoffDraftMock).toHaveBeenCalledWith({ session_id: "s1" }),
+    );
+    // The editor remounts and the manual edit is discarded back to the AI draft
+    // (the regenerated text then streams in over /events for a real model).
+    expect(await screen.findByLabelText<HTMLTextAreaElement>("聞き方の下書き")).toHaveValue(
+      "AIの下書き",
+    );
+  });
+
+  it("surfaces a retryable error when regenerating the draft fails (#260)", async () => {
+    regenerateHandoffDraftMock.mockRejectedValueOnce(new Error("boom"));
+    renderResult(
+      state({
+        route: { route: "person", reason: "", confidence: 0.9 },
+        recommend: { recommendations: THREE_CANDIDATES },
+        draft: { draft: "本文" },
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "AIに下書きを作り直してもらう" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("下書きの作り直しに失敗しました");
   });
 
   it("surfaces a retryable error when the confirm POST fails", async () => {

@@ -13,10 +13,10 @@
 
 import { FollowupForm } from "@/components/FollowupForm";
 import { useOptionalSessionStream } from "@/components/SessionStreamProvider";
+import { type EventStreamState, useEventStream } from "@/hooks/useEventStream";
 import { ApiError, postAnswer } from "@/lib/api-client";
 import { formatConfidence } from "@/lib/format";
 import { routeLabel } from "@/lib/routes";
-import { type EventStreamState, useEventStream } from "@/hooks/useEventStream";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";

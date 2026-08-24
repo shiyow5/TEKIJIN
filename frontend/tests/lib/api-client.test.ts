@@ -11,6 +11,7 @@ import {
   getRecentQuestions,
   postAnswer,
   postAsk,
+  regenerateHandoffDraft,
   selectHandoffCandidate,
 } from "@/lib/api-client";
 import type { AskRequest, HandoffResponse, ResumeRequest } from "@/lib/api-types";
@@ -445,6 +446,28 @@ describe("excludeHandoffCandidate", () => {
     await expect(
       excludeHandoffCandidate({ session_id: "s1", person_id: "E003" }, { fetchImpl }),
     ).rejects.toMatchObject({ name: "ApiError", status: 422 });
+  });
+});
+
+describe("regenerateHandoffDraft", () => {
+  it("POSTs /handoff/redraft with session_id and returns the ack (#260)", async () => {
+    const response = { session_id: "s1", status: "redraft_queued" };
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(response));
+    const result = await regenerateHandoffDraft({ session_id: "s1" }, { fetchImpl });
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe(`${DEFAULT_API_BASE_URL}/handoff/redraft`);
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(init?.body as string)).toEqual({ session_id: "s1" });
+    expect(result).toEqual(response);
+  });
+
+  it("throws ApiError with the 409 status when a clarification is owed", async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonResponse({ detail: "awaiting" }, { ok: false, status: 409 }));
+    await expect(regenerateHandoffDraft({ session_id: "s1" }, { fetchImpl })).rejects.toMatchObject(
+      { name: "ApiError", status: 409 },
+    );
   });
 });
 

@@ -54,14 +54,19 @@ def _after_c6(state: AgentState) -> str:
 
 def _after_send(state: AgentState) -> str:
     # The outcome is external input (Command(resume=...)); validate it. Only the
-    # two known values proceed — anything else (None, a typo, a payload) loops
-    # back to ``send`` to re-confirm, so a bad value never silently reaches the
-    # success terminal (c8_update).
+    # known values proceed — anything else (None, a typo, a payload) loops back to
+    # ``send`` to re-confirm, so a bad value never silently reaches the success
+    # terminal (c8_update).
     outcome = state.get("outcome")
     if outcome == "declined":
         return "reroute"
     if outcome == "accepted":
         return "c8_update"
+    if outcome == "redraft":
+        # Asker asked to regenerate the hand-off text ("下書きの作り直し", #260): go
+        # back to C7 for the SAME top candidate, then ``c7_draft`` pauses at ``send``
+        # again. The regeneration rides the SSE thought-process like any C7 run.
+        return "c7_draft"
     return "send"
 
 
@@ -154,7 +159,12 @@ def build_agent(
     graph.add_conditional_edges(
         "send",
         _after_send,
-        {"reroute": "reroute", "c8_update": "c8_update", "send": "send"},
+        {
+            "reroute": "reroute",
+            "c8_update": "c8_update",
+            "c7_draft": "c7_draft",  # redraft loop (#260): regenerate then re-pause at send
+            "send": "send",
+        },
     )
     graph.add_edge("reroute", "c6_score")
     graph.add_edge("c8_update", END)

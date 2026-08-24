@@ -776,6 +776,57 @@ class AgentService:
         except Exception:  # noqa: BLE001 - best-effort signal; never fail the queued reroute
             logger.exception("failed to record c6 exclude feedback for session %s", session_id)
 
+    def regenerate_handoff_draft(self, session_id: str, *, actor_id: int | None = None) -> None:
+        """Asker asks the AI to regenerate the hand-off draft ("下書きの作り直し", #260).
+
+        Queues a ``redraft`` resume that sends the graph back through ``c7_draft``
+        for the current top candidate (``_after_send`` → ``c7_draft`` → ``send``), so
+        the freshly-generated draft arrives over the open ``/events`` stream and
+        rides the SSE thought-process like any other C7 run — discarding any manual
+        edit the asker had saved (that is the point of "作り直し"). The regeneration
+        is recorded as a ``c7`` feedback signal (``draft_regenerated``, #237).
+
+        Validation mirrors :meth:`exclude_handoff_target`: the run must be paused at
+        ``send`` and not already answered / queued.
+        """
+
+        with self._lock(session_id):
+            snapshot = self._snapshot(session_id)
+            next_nodes = tuple(snapshot.next)
+            if not next_nodes:
+                raise HandoffNotFound("no responder handoff for this session")
+            if next_nodes[0] != "send":
+                raise SessionConflict("session is not awaiting a responder outcome")
+            ctx = self._reg_get(session_id)
+            if ctx is not None and ctx.pending is not None:
+                raise HandoffNotFound("this handoff has already been answered")
+
+            question_id = snapshot.values.get("question_id")
+            previous = snapshot.values.get("draft")
+
+            # Queue the redraft loop; the open /events reader consumes it and
+            # re-runs c7_draft, re-emitting a ``draft`` event before re-pausing.
+            ctx = self._reg_ensure(session_id)
+            ctx.pending = Command(resume="redraft")
+            ctx.touched_at = self._clock()
+
+        # Record the regeneration as a c7 learning signal OUTSIDE the lock —
+        # append-only, best-effort (mirrors the c7 draft-edit signal above): the
+        # redraft is already queued, so a feedback-write failure must not fail it.
+        try:
+            with session_scope(self._session_factory) as fb_session:
+                record_feedback(
+                    fb_session,
+                    stage="c7",
+                    kind="draft_regenerated",
+                    question_id=question_id if isinstance(question_id, str) else None,
+                    session_id=session_id,
+                    payload={"previous": previous} if isinstance(previous, str) else None,
+                    actor_id=actor_id,
+                )
+        except Exception:  # noqa: BLE001 - best-effort signal; never fail the queued redraft
+            logger.exception("failed to record c7 redraft feedback for session %s", session_id)
+
     # -- /events : stream ------------------------------------------------- #
     def is_streamable(self, session_id: str) -> bool:
         """True if there is a queued run, a paused run, or a replayable terminal.

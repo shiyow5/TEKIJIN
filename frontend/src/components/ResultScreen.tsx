@@ -13,9 +13,9 @@
  * placeholder is shown.
  */
 
+import { useOptionalSessionId, useOptionalSessionStream } from "@/components/SessionStreamProvider";
 import { PersonRouteView } from "@/components/result/PersonRouteView";
 import { PriorAnswerView } from "@/components/result/PriorAnswerView";
-import { useOptionalSessionId, useOptionalSessionStream } from "@/components/SessionStreamProvider";
 import type { EventStreamState } from "@/hooks/useEventStream";
 import { useState } from "react";
 
