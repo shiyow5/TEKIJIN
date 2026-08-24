@@ -129,6 +129,9 @@ def test_canonicalize_topic_drops_ambiguous_fragments() -> None:
     # wrong guess. Same for "システム" (システム開発・API vs 基幹システム).
     assert canonicalize_topic("運用") is None
     assert canonicalize_topic("システム") is None
+    # "IT" is a substring of ONLY 社内IT・ヘルプデスク, so the unambiguous-substring
+    # rule would wrongly snap it there — too generic, so it is explicitly dropped.
+    assert canonicalize_topic("IT") is None
 
 
 def test_normalize_topics_merges_split_compounds_and_dedups() -> None:

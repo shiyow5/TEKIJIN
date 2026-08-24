@@ -66,11 +66,17 @@ class Settings(BaseSettings):
     # fallback on timeout is a separate, credential-gated follow-up.
     llm_timeout_seconds: float | None = 60.0
 
-    # Sampling temperature for every LLM call (C1/C2/C7). Default 0.0 so the
-    # structured C1/C2 outputs are deterministic, as model-definition.md specifies
+    # Sampling temperature for the STRUCTURED calls (C1 intent / C2 sufficiency).
+    # Default 0.0 so they are deterministic, as model-definition.md specifies
     # ("C1・C2 は低温"). ChatOpenAI otherwise sends its own default (0.7), which
     # made C1 non-deterministic and contributed to routing noise (#116 原因3).
     llm_temperature: float = 0.0
+
+    # Separate temperature for the C7 hand-off DRAFT (free text). model-definition.md
+    # wants "C7 は中温（自然さ）" — a deterministic draft reads stilted — so C7 does
+    # NOT share the C1/C2 low temperature above. Kept a distinct knob so tuning the
+    # draft's naturalness never re-introduces non-determinism into routing.
+    llm_draft_temperature: float = 0.5
 
     # Hard cap on output tokens per LLM call (C1/C2/C7). Bounds a runaway
     # generation so C1 returns a short (possibly truncated) result instead of

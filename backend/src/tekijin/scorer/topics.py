@@ -87,6 +87,13 @@ _TOPIC_ALIASES: dict[str, str] = {
 }
 
 
+# Generic fragments that HAPPEN to be a substring of exactly one canonical name
+# but are far too broad to route on it. "IT" is only in "社内IT・ヘルプデスク", so the
+# unambiguous-substring rule would wrongly snap a bare "IT" there (#116 review);
+# drop it instead so only an explicit alias/exact hit resolves such tokens.
+_SUBSTRING_DROP: frozenset[str] = frozenset({"IT"})
+
+
 def canonicalize_topic(raw: str) -> str | None:
     """Snap one (possibly free-text) topic to a canonical topic, or ``None``.
 
@@ -103,6 +110,8 @@ def canonicalize_topic(raw: str) -> str | None:
         return r
     if r in _TOPIC_ALIASES:
         return _TOPIC_ALIASES[r]
+    if r in _SUBSTRING_DROP:
+        return None
     matches = {c for c in TOPIC_VOCABULARY if r in c or c in r}
     if len(matches) == 1:
         return next(iter(matches))

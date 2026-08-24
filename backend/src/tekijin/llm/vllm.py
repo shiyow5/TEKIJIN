@@ -14,12 +14,15 @@ lazily build the real network client.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from tekijin.agent.protocols import IntentResult, SufficiencyResult
 from tekijin.config import Settings, get_settings
 from tekijin.llm.schemas import IntentSchema, SufficiencySchema
 from tekijin.scorer.topics import TOPIC_VOCABULARY, normalize_topics
+
+logger = logging.getLogger(__name__)
 
 # The closed topic list C1 must choose from. Feeding it inline keeps C1's topics
 # in the SAME vocabulary the scorer joins on — otherwise C1 invents free-text /
@@ -119,13 +122,18 @@ def _openai_model_kwargs(settings: Settings) -> dict[str, Any]:
     return kwargs
 
 
-def _openai_model(name: str, settings: Settings) -> Any:  # pragma: no cover - network client
+def _openai_model(
+    name: str, settings: Settings, *, temperature: float | None = None
+) -> Any:  # pragma: no cover - network client
     from langchain.chat_models import init_chat_model
 
     # Qwen3 is a reasoning model; unless we opt in, tell vLLM to skip the <think>
     # pass via the chat template. Thinking-ON made the forced tool-call structured
     # outputs slow and occasionally empty (see Settings.llm_enable_thinking / #140).
-    return init_chat_model(f"openai:{name}", **_openai_model_kwargs(settings))
+    kwargs = _openai_model_kwargs(settings)
+    if temperature is not None:  # C7 draft overrides the C1/C2 low temperature (#116 review)
+        kwargs["temperature"] = temperature
+    return init_chat_model(f"openai:{name}", **kwargs)
 
 
 class VllmIntentModel:
@@ -156,8 +164,14 @@ class VllmIntentModel:
         # Snap C1's topics onto the canonical vocabulary the scorer joins on: even
         # with the vocabulary in the prompt, the model still splits compound names
         # / uses synonyms, and an un-normalized topic matches no evidence (#116).
+        topics = normalize_topics(out.topics)
+        if out.topics and not topics:
+            # C1 produced topics but NONE mapped to the vocabulary — the recommend
+            # step will have no topic evidence (the #116 symptom for this question).
+            # Surface it so vocabulary gaps are visible and can feed _TOPIC_ALIASES.
+            logger.warning("C1 topics did not map to the vocabulary: %r", out.topics)
         return IntentResult(
-            topics=normalize_topics(out.topics),
+            topics=topics,
             products=list(out.products),
             situation=out.situation,
             question_type=out.question_type,
@@ -205,7 +219,13 @@ class VllmDraftModel:
         self._settings = settings or get_settings()
 
     def _chat(self) -> Any:  # pragma: no cover - builds a network client
-        return _openai_model(self._settings.llm_model, self._settings)
+        # C7 draft runs at medium temperature (model-definition.md 「C7 は中温」),
+        # NOT the C1/C2 low temperature — a deterministic draft reads stilted (#116 review).
+        return _openai_model(
+            self._settings.llm_model,
+            self._settings,
+            temperature=self._settings.llm_draft_temperature,
+        )
 
     @staticmethod
     def prompt(
