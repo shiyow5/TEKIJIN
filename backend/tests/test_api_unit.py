@@ -468,6 +468,65 @@ def test_openai_model_kwargs_pins_retries_for_a_hard_timeout() -> None:
     assert _openai_model_kwargs(_settings(llm_max_retries=1))["max_retries"] == 1
 
 
+def test_openai_model_kwargs_wires_temperature_and_max_tokens() -> None:
+    from tekijin.llm.vllm import _openai_model_kwargs
+
+    # #116: deterministic (temperature 0) + a hard output cap so C1 can't run to
+    # finish_reason=length. Defaults come from Settings.
+    kwargs = _openai_model_kwargs(_settings())
+    assert kwargs["temperature"] == 0.0
+    assert kwargs["max_tokens"] == 1024
+    over = _openai_model_kwargs(_settings(llm_temperature=0.3, llm_max_tokens=256))
+    assert over["temperature"] == 0.3 and over["max_tokens"] == 256
+    # None disables the output cap (server default applies).
+    assert "max_tokens" not in _openai_model_kwargs(_settings(llm_max_tokens=None))
+
+
+def test_intent_system_prompt_lists_the_topic_vocabulary() -> None:
+    from tekijin.llm.vllm import _INTENT_SYSTEM
+    from tekijin.scorer.topics import TOPIC_VOCABULARY
+
+    # #116: C1 must be told the closed topic list so it stops inventing free-text
+    # topics. Every canonical topic appears verbatim in the system prompt.
+    for topic in TOPIC_VOCABULARY:
+        assert topic in _INTENT_SYSTEM
+    # And the client-facing rejection wording no longer trips on "照会" alone (#199).
+    assert "照会" in _INTENT_SYSTEM and "取引先" in _INTENT_SYSTEM
+
+
+def test_vllm_intent_normalizes_topics_to_the_vocabulary() -> None:
+    # #116: the real model splits compound topic names into words; analyze() must
+    # snap them back onto the canonical vocabulary the scorer joins on.
+    model = _FakeStructured(
+        IntentSchema(
+            topics=["購買", "仕入れ", "値段交渉"], question_type="技術相談", confidence=0.7
+        )
+    )
+    result = VllmIntentModel(model=model).analyze("取引先との値段交渉の相談", None)
+    assert result.topics == ["購買・仕入れ"]  # merged + de-duped, "値段交渉" dropped
+    assert result.out_of_scope is False  # still informative (raw topics were present)
+
+
+def test_vllm_intent_warns_when_all_topics_drop(caplog) -> None:
+    # #116 review: if C1's topics are non-empty but none map to the vocabulary, the
+    # recommend step gets no topic evidence — log it so vocabulary gaps are visible.
+    model = _FakeStructured(IntentSchema(topics=["値段交渉", "取引先"], confidence=0.6))
+    with caplog.at_level("WARNING", logger="tekijin.llm.vllm"):
+        result = VllmIntentModel(model=model).analyze("q", None)
+    assert result.topics == []  # all dropped
+    assert result.out_of_scope is False  # raw topics were present -> not uninformative
+    assert any("did not map to the vocabulary" in r.message for r in caplog.records)
+
+
+def test_draft_temperature_is_separate_from_structured() -> None:
+    # #116 review: C7 draft must run at medium temperature (model-definition.md
+    # 「C7 は中温」), NOT the C1/C2 low temperature, so the draft reads natural.
+    s = _settings()
+    assert s.llm_temperature == 0.0  # C1/C2 deterministic
+    assert s.llm_draft_temperature > 0.0  # C7 medium
+    assert s.llm_draft_temperature != s.llm_temperature
+
+
 def test_llm_timeout_default_is_bounded() -> None:
     # A finite default so a stuck vLLM call cannot hang a run indefinitely (#180).
     assert _settings().llm_timeout_seconds == 60.0

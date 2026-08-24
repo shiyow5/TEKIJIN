@@ -15,7 +15,14 @@ from tekijin.data.dto import AnswerDTO, CertificationDTO, ProjectMembershipDTO, 
 from tekijin.scorer import features
 from tekijin.scorer.evidence import Evidence, collect_topic_evidence, edge_weight
 from tekijin.scorer.scorer import ExpertiseScorer
-from tekijin.scorer.topics import cert_matches_topic, product_matches_topic
+from tekijin.scorer.topics import (
+    PRODUCT_TOPIC_MAP,
+    TOPIC_VOCABULARY,
+    canonicalize_topic,
+    cert_matches_topic,
+    normalize_topics,
+    product_matches_topic,
+)
 from tekijin.scorer.weights import (
     BASE_SCORE_CERTIFICATION,
     BASE_SCORE_HELPFUL_ANSWER,
@@ -82,6 +89,62 @@ def test_product_matches_topic() -> None:
     assert product_matches_topic("広告運用代行", "Webマーケティング・広告") is True
     assert product_matches_topic("CRM導入支援", "セキュリティ") is False
     assert product_matches_topic(None, "CRM・営業支援") is False
+
+
+def test_topic_vocabulary_is_the_scorer_join_vocabulary() -> None:
+    # 22 canonical topics, unique. Every CERT/PRODUCT map resolves INTO this set —
+    # otherwise that evidence source could never match a C1 topic (#116).
+    assert len(TOPIC_VOCABULARY) == 22
+    assert len(set(TOPIC_VOCABULARY)) == 22
+    vocab = set(TOPIC_VOCABULARY)
+    assert set(PRODUCT_TOPIC_MAP.values()) <= vocab
+
+
+def test_topic_vocabulary_matches_build_eval_v2() -> None:
+    # The eval gold vocabulary (scripts/build_eval_v2.TOPICS) and the runtime
+    # vocabulary MUST be the same set, or the eval measures a different vocabulary
+    # than production routes on.
+    import pathlib
+    import sys
+
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "scripts"))
+    try:
+        from build_eval_v2 import TOPICS  # type: ignore[import-not-found]
+    finally:
+        sys.path.pop(0)
+    assert set(TOPICS) == set(TOPIC_VOCABULARY)
+
+
+def test_canonicalize_topic_exact_alias_and_substring() -> None:
+    assert canonicalize_topic("セキュリティ") == "セキュリティ"  # exact
+    assert canonicalize_topic("VPN") == "ネットワーク・VPN"  # alias
+    assert canonicalize_topic("運用保守") == "サーバー・インフラ運用"  # alias (non-substring)
+    assert canonicalize_topic("サーバー") == "サーバー・インフラ運用"  # unambiguous substring
+    assert canonicalize_topic("値段交渉") is None  # unmappable -> dropped
+    assert canonicalize_topic("  ") is None
+
+
+def test_canonicalize_topic_drops_ambiguous_fragments() -> None:
+    # "運用" is a substring of TWO canonical topics -> ambiguous -> dropped, not a
+    # wrong guess. Same for "システム" (システム開発・API vs 基幹システム).
+    assert canonicalize_topic("運用") is None
+    assert canonicalize_topic("システム") is None
+    # "IT" is a substring of ONLY 社内IT・ヘルプデスク, so the unambiguous-substring
+    # rule would wrongly snap it there — too generic, so it is explicitly dropped.
+    assert canonicalize_topic("IT") is None
+
+
+def test_normalize_topics_merges_split_compounds_and_dedups() -> None:
+    # The #116 failure mode: the model splits "購買・仕入れ" into words.
+    assert normalize_topics(["購買", "仕入れ", "値段交渉", "取引先"]) == ["購買・仕入れ"]
+    # Split "サーバー・インフラ運用" + an unmappable extra.
+    assert normalize_topics(["サーバー", "インフラ", "老朽化"]) == ["サーバー・インフラ運用"]
+    # Already-canonical topics pass through, order preserved, deduped.
+    assert normalize_topics(["セキュリティ", "セキュリティ", "クラウド"]) == [
+        "セキュリティ",
+        "クラウド移行",
+    ]
+    assert normalize_topics([]) == []
 
 
 # --------------------------------------------------------------------------- #
