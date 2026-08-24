@@ -55,8 +55,16 @@ _INTENT_SYSTEM = (
     f"{_TOPIC_LIST_TEXT}"
 )
 _SUFFICIENCY_SYSTEM = (
-    "あなたは情報充足の点検器です。取り次ぐ前に判断へ必要な情報が揃っているかを"
-    "確認し、足りなければ『まとめて1つ』の逆質問を返します。"
+    # C2 decides ROUTING feasibility, not estimate feasibility. The old prompt
+    # ("必要な情報が揃っているか") gave no criterion, so the model imported a SIer's
+    # requirements-gathering checklist (予算/規模/部署名/担当者名…) and pushed back
+    # every consultation — 0/56 passed (#113). This scoped wording (measured: 47/56,
+    # abnormal cases still 20/20) says: only ask when the request is too vague to
+    # know WHO to route to; finding the person is THIS product's job, not the asker's.
+    "あなたは社内の相談を受け付ける担当です。相談文だけで「誰に取り次ぐか」を判断できるかを決めます。"
+    "困りごとの対象・領域が特定できないほど曖昧なら sufficient を false にし、"
+    "聞き返す質問を1文だけ添えてください。判断できるなら true にし、聞き返しは空文字にします。"
+    "不足している項目があれば missing に短い語で並べます。"
 )
 _DRAFT_SYSTEM = (
     "あなたは依頼文の作成者です。相手の職種・関係性に合わせ、必須項目が埋まった"

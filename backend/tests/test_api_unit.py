@@ -507,6 +507,15 @@ def test_vllm_intent_normalizes_topics_to_the_vocabulary() -> None:
     assert result.out_of_scope is False  # still informative (raw topics were present)
 
 
+def test_sufficiency_system_prompt_scopes_to_routing() -> None:
+    from tekijin.llm.vllm import _SUFFICIENCY_SYSTEM
+
+    # #113: C2 decides ROUTING feasibility, not estimate feasibility. The scoped
+    # prompt must frame the decision as "誰に取り次ぐか判断できるか".
+    assert "取り次" in _SUFFICIENCY_SYSTEM
+    assert "曖昧" in _SUFFICIENCY_SYSTEM  # only ask when too vague to route
+
+
 def test_vllm_intent_warns_when_all_topics_drop(caplog) -> None:
     # #116 review: if C1's topics are non-empty but none map to the vocabulary, the
     # recommend step gets no topic evidence — log it so vocabulary gaps are visible.
