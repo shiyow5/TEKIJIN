@@ -13,7 +13,7 @@ import re
 from collections.abc import Sequence
 from typing import Any
 
-from tekijin.agent.protocols import IntentResult, SufficiencyResult
+from tekijin.agent.protocols import AnswerabilityResult, IntentResult, SufficiencyResult
 
 # At most one clarifying round (model-definition C2: "逆質問はまとめて1回").
 MAX_FOLLOWUPS = 1
@@ -304,3 +304,23 @@ class TemplateDraftModel:
             lines.append("【補足いただきたい点】\n" + "、".join(missing))
         lines.append("お手数ですが、ご確認いただけますと幸いです。")
         return "\n".join(lines)
+
+
+class RuleAnswerabilityModel:
+    """Evidence-sufficiency critic stub (#70): confidence from candidate evidence.
+
+    Deterministic scaffolding — the real judgement is the vLLM critic. With no
+    candidate (nobody to answer) the confidence is 0 (reject); otherwise it rises
+    with how many candidates carry a track-record line, capped at 100. The graph
+    compares this to an externalised threshold, so the stub never hard-codes the
+    accept/reject decision here.
+    """
+
+    def assess(self, question: str, candidate_evidence: Sequence[str]) -> AnswerabilityResult:
+        evidence = [line for line in candidate_evidence if line and line.strip()]
+        if not evidence:
+            return AnswerabilityResult(
+                confidence=0, reason="回答できる実績が社内に見つかりません。"
+            )
+        confidence = min(100, 40 + 20 * len(evidence))
+        return AnswerabilityResult(confidence=confidence, reason="候補者に関連実績があります。")

@@ -28,6 +28,7 @@ from tekijin.agent.state import AgentState, PastAnswer, RetrievalResult
 from tekijin.agent.stubs import (
     MAX_FOLLOWUPS,
     KeywordIntentModel,
+    RuleAnswerabilityModel,
     RuleSufficiencyModel,
     TemplateDraftModel,
     collect_known_values,
@@ -597,3 +598,24 @@ def test_c7_draft_never_double_lists_a_filled_slot() -> None:
     assert "現行製品：CRM" in draft
     # both slots are surfaced as known values -> no 補足いただきたい点 section
     assert "補足いただきたい点" not in draft
+
+
+# --------------------------------------------------------------------------- #
+# evidence-sufficiency critic stub (#70)
+# --------------------------------------------------------------------------- #
+def test_answerability_stub_rejects_when_no_candidate_evidence() -> None:
+    result = RuleAnswerabilityModel().assess("海外の知財登録の相談", [])
+    assert result.confidence == 0  # nobody to answer -> reject signal
+    assert result.reason
+
+
+def test_answerability_stub_scales_with_evidence_count() -> None:
+    model = RuleAnswerabilityModel()
+    one = model.assess("VPNの相談", ["社員1: ネットワーク案件3件"])
+    three = model.assess(
+        "VPNの相談",
+        ["社員1: ネットワーク案件3件", "社員2: VPN構築2件", "社員3: 回線移行1件"],
+    )
+    assert 0 < one.confidence < three.confidence <= 100
+    # Blank lines do not count as evidence.
+    assert model.assess("q", ["  ", ""]).confidence == 0

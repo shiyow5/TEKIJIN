@@ -103,6 +103,15 @@ class Settings(BaseSettings):
     # startup (never a silent fallback). Default stub keeps imports/CI LLM-free.
     llm_backend: Literal["stub", "vllm"] = "stub"
 
+    # Evidence-sufficiency critic (#70): reject to a graceful "no in-house expert"
+    # terminal when the critic's 0–100 answerable score is BELOW this threshold.
+    # Externalised (not hard-coded) because the measured accept band is wide and
+    # flat (30–70) on a tiny reject set (#65/#67 §6). ``answerability_enabled``
+    # gates the whole step OFF by default until it is wired + verified on the eval
+    # (this is the component-only slice; the graph does not call it yet).
+    answerability_enabled: bool = False
+    answerability_threshold: int = 40
+
     # LangGraph checkpointer for session persistence / interrupt-resume:
     # "memory" = in-process MemorySaver (safe default, works without a DB);
     # "postgres" = PostgresSaver over ``database_url`` (production). A ``Literal``
