@@ -839,9 +839,8 @@ class AgentService:
         """Asker corrects the AI's interpretation ("解釈の訂正", #260).
 
         Folds ``supplement`` into the question and re-runs the WHOLE pipeline from
-        the top — the same "add context, re-understand" move as the ``ask`` clarification
-        loop (re-embed → re-retrieve → re-understand, #69), but asker-initiated from
-        the result screen. Implemented
+        C1 — the same "add context, re-understand" move as the ``ask → c1_intent``
+        clarification edge, but asker-initiated from the result screen. Implemented
         by queuing a fresh invoke input (a dict, not a ``Command``): on the next
         ``/events`` read that restarts the graph from ``reset`` (which clears the
         per-question control fields — declined_ids / recommendations / route — so

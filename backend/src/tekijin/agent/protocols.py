@@ -20,16 +20,7 @@ from tekijin.agent.state import RetrievalResult
 
 @dataclass(frozen=True, slots=True)
 class IntentResult:
-    """C1 output: the question parsed into a searchable structure.
-
-    ``topics`` is the full topic set fed to C6 scoring. ``context_topics`` (#69) is
-    the subset of ``topics`` that came ONLY from the retrieved fragments, not from
-    the question itself — so ``set(topics) - set(context_topics)`` is the
-    question-derived signal the graph uses to decide whether the *asker's own*
-    request was identifiable (the ``intent_unresolved`` graceful terminal). A
-    model that judges relevance holistically (the vLLM C1) leaves it empty: all its
-    topics count as question-level. Always a subset of ``topics``.
-    """
+    """C1 output: the question parsed into a searchable structure."""
 
     topics: list[str] = field(default_factory=list)
     products: list[str] = field(default_factory=list)
@@ -37,7 +28,6 @@ class IntentResult:
     question_type: str = "製品QA"
     out_of_scope: bool = False
     confidence: float = 0.0
-    context_topics: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)

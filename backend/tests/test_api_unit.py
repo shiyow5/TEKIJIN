@@ -863,7 +863,7 @@ def test_service_close_releases_pool_and_engine() -> None:
 
 def test_stream_error_yields_generic_event_and_hides_details() -> None:
     class _Raising:
-        def analyze(self, question, asker, *, context=None):
+        def analyze(self, question, asker):
             raise RuntimeError("secret sql detail at 10.0.0.1")
 
     svc = _service(intent=_Raising())
