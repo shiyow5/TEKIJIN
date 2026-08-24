@@ -125,8 +125,14 @@ def confidence_label(source_types: Iterable[str]) -> str:
     ``source_types`` is every evidence item's ``source_type`` for this person on
     the question's topics (order/duplicates irrelevant — only the set matters).
 
-    Calibrated, monotone rule (held-out 高−低 +0.27, P(>0)=0.99 in the split-half
-    check; full-set 高 0.84 / 中 0.61 / 低 0.55):
+    Calibrated on the misrecommendation slot dump (docs/benchmarks/confidence.md
+    §4-5). This rule's OWN separation is monotone and significant: full-set
+    高 0.84 / 中 0.61 / 低 0.55, paired 高−低 +0.287 (95%CI [+0.106, +0.461],
+    問題単位20000回). A "rank+kind" variant scored marginally higher (高−低
+    +0.326) and won the split-half selection more often, but rank is only known
+    after ranking whereas this label is computed per-candidate inside
+    ``_score_person`` (before the sort in ``rank``); the kind-only rule is kept
+    for that architectural simplicity. The tiers mean:
 
     * **低** — no past answer on the topic. Certs, skills and project roles alone
       do not prove the person answers *here*; this is the tier a "低 は棄却"
