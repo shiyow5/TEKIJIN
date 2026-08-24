@@ -7,7 +7,7 @@ models mirror the events emitted by :mod:`tekijin.api.events`.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -185,6 +185,29 @@ class DeleteQuestionResponse(BaseModel):
 
     question_id: str
     deleted: bool
+
+
+class FeedbackRequest(BaseModel):
+    """The asking side's correction of an AI output (#237 Phase 1).
+
+    ``stage`` is which pipeline output was wrong (c1 interpretation / c6
+    recommendation / c7 draft). ``actor_id`` is NOT accepted from the body — it is
+    taken from the authenticated principal so a caller cannot attribute feedback to
+    someone else.
+    """
+
+    stage: Literal["c1", "c6", "c7"]
+    kind: str = Field(min_length=1, max_length=32)
+    question_id: str | None = None
+    session_id: str | None = None
+    target: str | None = Field(default=None, max_length=64)
+    payload: dict[str, Any] | None = None
+
+
+class FeedbackAck(BaseModel):
+    """Acknowledgement for POST /feedback (#237)."""
+
+    status: str
 
 
 class EmployeeSummary(BaseModel):
@@ -458,6 +481,15 @@ class ProcessingLatency(BaseModel):
     sample_size: int = 0
 
 
+class FeedbackByStage(BaseModel):
+    """Feedback counts per pipeline stage + total (#237 — どの段でどれだけずれているか)."""
+
+    c1: int = 0
+    c6: int = 0
+    c7: int = 0
+    total: int = 0
+
+
 class DashboardResponse(BaseModel):
     """Aggregate-only view (counts / distributions / ratios).
 
@@ -480,6 +512,7 @@ class DashboardResponse(BaseModel):
     latest_eval: EvalSnapshot | None = None  # 推薦精度（未計測なら None）
     answers_per_responder: list[ResponderLoad] = Field(default_factory=list)
     topic_distribution: list[TopicCount] = Field(default_factory=list)
+    feedback_by_stage: FeedbackByStage = Field(default_factory=FeedbackByStage)  # #237 段別ズレ件数
 
 
 # --------------------------------------------------------------------------- #

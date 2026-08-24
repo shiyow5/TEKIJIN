@@ -44,6 +44,7 @@ from tekijin.auth.principal import Principal
 from tekijin.data.dashboard import dashboard_summary
 from tekijin.data.db import session_scope
 from tekijin.data.documents import get_document
+from tekijin.data.feedback import record_feedback
 from tekijin.data.history import question_asker_id, recent_questions_for_asker
 from tekijin.data.inbox import pending_handoffs_for_responder
 from tekijin.data.notifications import pending_decline_notifications_for_asker
@@ -219,7 +220,9 @@ def handoff_draft(
     asker_id, responder_id = _service(request).session_participants(req.session_id)
     require_session_participant(principal, asker_id, responder_id)
     try:
-        _service(request).save_handoff_draft(req.session_id, req.draft)
+        _service(request).save_handoff_draft(
+            req.session_id, req.draft, actor_id=principal.employee_id
+        )
     except HandoffNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except SessionConflict as exc:
@@ -407,6 +410,36 @@ def delete_question_endpoint(
         # Existence was just confirmed above and the delete ran in the same
         # transaction, so the question is gone.
         return schemas.DeleteQuestionResponse(question_id=question_id, deleted=True)
+
+
+@router.post("/feedback", response_model=schemas.FeedbackAck)
+def feedback(
+    req: schemas.FeedbackRequest,
+    request: Request,
+    principal: Principal = Depends(require_principal),
+) -> schemas.FeedbackAck:
+    """Record the asking side's correction of an AI output (#237 Phase 1).
+
+    The signal the runtime used to discard: "the interpretation / recommendation /
+    draft is wrong". ``actor_id`` is taken from the authenticated principal (never
+    the body), so feedback cannot be attributed to another user. Authorization is
+    intentionally light per the issue scope — any authenticated user may record
+    their own feedback; it is a learning signal, not a state mutation.
+    """
+
+    with _generic_500("POST /feedback"):
+        with session_scope(_service(request).session_factory) as session:
+            record_feedback(
+                session,
+                stage=req.stage,
+                kind=req.kind,
+                question_id=req.question_id,
+                session_id=req.session_id,
+                target=req.target,
+                payload=req.payload,
+                actor_id=principal.employee_id,
+            )
+        return schemas.FeedbackAck(status="recorded")
 
 
 @router.get("/notifications", response_model=schemas.NotificationsResponse)

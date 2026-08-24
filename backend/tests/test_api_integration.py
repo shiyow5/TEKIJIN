@@ -29,7 +29,7 @@ from tekijin.auth.tokens import create_access_token
 from tekijin.config import get_settings
 from tekijin.data.dashboard import dashboard_summary
 from tekijin.data.db import get_sessionmaker
-from tekijin.models.tables import Answer, Event, Question, Recommendation
+from tekijin.models.tables import Answer, Event, Feedback, Question, Recommendation
 
 NOW = dt.datetime(2026, 9, 15, 12, 0, 0)
 GOOD_Q = "現行のVPN機器で3拠点の拠点間接続について相談したいです"
@@ -166,6 +166,9 @@ def _cleanup_api_rows(engine):
     yield
     session = get_sessionmaker(engine)()
     try:
+        # feedback (#237) is runtime-only (seed writes none) and FKs questions, so
+        # clear it first — before the questions it may reference are deleted.
+        session.execute(text("DELETE FROM feedback"))
         session.execute(
             text(r"DELETE FROM recommendations WHERE question_id LIKE 'api\_%' ESCAPE '\'")
         )
@@ -1878,3 +1881,87 @@ def test_questions_limit_is_validated(seed_counts, engine, fake_embedder) -> Non
     # Out-of-range limits are rejected (1..200).
     assert client.get("/questions", params={"asker_id": "E010", "limit": 0}).status_code == 422
     assert client.get("/questions", params={"asker_id": "E010", "limit": 201}).status_code == 422
+
+
+# --------------------------------------------------------------------------- #
+# #237 Phase 1: record feedback (the correction signal the runtime discarded)
+# --------------------------------------------------------------------------- #
+def _feedback_rows(engine) -> list[Feedback]:
+    with get_sessionmaker(engine)() as s:
+        return s.query(Feedback).order_by(Feedback.id).all()
+
+
+def test_feedback_endpoint_records_with_actor_from_principal(
+    seed_counts, engine, fake_embedder
+) -> None:
+    client = _client(engine, fake_embedder)
+    resp = client.post(
+        "/feedback",
+        json={
+            "stage": "c6",
+            "kind": "person_rejected",
+            "target": "E001",
+            "payload": {"reason": "多忙"},
+        },
+        headers=_user_headers(10),
+    )
+    assert resp.status_code == 200 and resp.json() == {"status": "recorded"}
+    rows = _feedback_rows(engine)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.stage == "c6" and row.kind == "person_rejected" and row.target == "E001"
+    assert row.payload == {"reason": "多忙"}
+    # actor_id comes from the token (employee 10), NOT the body.
+    assert row.actor_id == 10
+
+
+def test_feedback_endpoint_rejects_an_unknown_stage(seed_counts, engine, fake_embedder) -> None:
+    client = _client(engine, fake_embedder)
+    resp = client.post("/feedback", json={"stage": "c9", "kind": "x"}, headers=_user_headers(10))
+    assert resp.status_code == 422
+    assert _feedback_rows(engine) == []
+
+
+def test_editing_the_draft_records_implicit_c7_feedback(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "fb1"})
+    _events(client, "fb1")  # pause at send; C7 draft ready
+    generated = client.get("/handoff/fb1").json()["draft"]
+
+    edited = f"{generated}（追記: 10月中にお願いできると助かります）"
+    saved = client.post("/handoff/draft", json={"session_id": "fb1", "draft": edited})
+    assert saved.status_code == 200
+
+    rows = _feedback_rows(engine)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.stage == "c7" and row.kind == "draft_edited"
+    assert row.session_id == "fb1"
+    assert row.payload["generated"] == generated and row.payload["sent"] == edited
+
+
+def test_saving_the_draft_unchanged_records_no_feedback(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine, fake_embedder, retriever=_FakeRetriever(people=[1]), scorer=_FakeScorer(_recs(1))
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "fb2"})
+    _events(client, "fb2")
+    generated = client.get("/handoff/fb2").json()["draft"]
+
+    # Re-saving the identical generated text is not a correction -> no feedback.
+    saved = client.post("/handoff/draft", json={"session_id": "fb2", "draft": generated})
+    assert saved.status_code == 200
+    assert _feedback_rows(engine) == []
+
+
+def test_dashboard_reports_feedback_by_stage(seed_counts, engine, fake_embedder) -> None:
+    client = _client(engine, fake_embedder)
+    for stage in ("c1", "c6", "c6"):
+        client.post("/feedback", json={"stage": stage, "kind": "x"}, headers=_user_headers(10))
+    data = client.get("/dashboard").json()
+    assert data["feedback_by_stage"] == {"c1": 1, "c6": 2, "c7": 0, "total": 3}

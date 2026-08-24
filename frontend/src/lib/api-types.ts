@@ -274,6 +274,14 @@ export interface ProcessingLatency {
  * per-record listing (product-spec §241-251: summarise usage, never a monitoring
  * log of individual questions).
  */
+/** #237: feedback counts per pipeline stage (どの段でどれだけずれているか). */
+export interface FeedbackByStage {
+  c1: number;
+  c6: number;
+  c7: number;
+  total: number;
+}
+
 export interface DashboardResponse {
   total_employees: number;
   total_questions: number;
@@ -293,6 +301,8 @@ export interface DashboardResponse {
   latest_eval: EvalSnapshot | null;
   answers_per_responder: ResponderLoad[];
   topic_distribution: TopicCount[];
+  /** #237: how often the asking side corrected each stage (c1/c6/c7). */
+  feedback_by_stage: FeedbackByStage;
 }
 
 // --------------------------------------------------------------------------- //

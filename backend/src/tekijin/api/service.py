@@ -59,6 +59,7 @@ from tekijin.api.events import (
     replay_terminal,
 )
 from tekijin.data.db import session_scope
+from tekijin.data.feedback import record_feedback
 from tekijin.data.handoff import employee_brief, responder_reuse_stats
 from tekijin.data.writes import (
     employee_exists,
@@ -557,7 +558,9 @@ class AgentService:
             recommendation_id=values.get("primary_recommendation_id"),
         )
 
-    def save_handoff_draft(self, session_id: str, draft: str) -> None:
+    def save_handoff_draft(
+        self, session_id: str, draft: str, *, actor_id: int | None = None
+    ) -> None:
         """Persist the asker's edited hand-off ``draft`` (画面3 → 画面4) (#174).
 
         Only the durable ``draft`` value is updated, never the recommendation ids
@@ -566,6 +569,11 @@ class AgentService:
         lock: the run must be paused at ``send`` and not already answered, so an
         edit cannot be saved against a finished run, a clarification, or a
         hand-off whose outcome was already queued.
+
+        Implicit C7 feedback (#237 Phase 1): when the sent text differs from the
+        draft C7 generated, that edit is the one real "human corrected the AI" signal
+        the runtime already had but discarded — it is recorded as ``c7`` feedback
+        here (the generated vs. sent text in the payload). ``actor_id`` is who edited.
         """
 
         text = draft.strip()
@@ -578,7 +586,8 @@ class AgentService:
                 config = self._config(session_id)
                 # Snapshot + write share one graph/session under the lock, so the
                 # validated state cannot change before update_state runs.
-                next_nodes = tuple(graph.get_state(config).next)
+                state = graph.get_state(config)
+                next_nodes = tuple(state.next)
                 if not next_nodes:
                     raise HandoffNotFound("no responder handoff for this session")
                 if next_nodes[0] != "send":
@@ -586,9 +595,25 @@ class AgentService:
                 ctx = self._reg_get(session_id)
                 if ctx is not None and ctx.pending is not None:
                     raise HandoffNotFound("this handoff has already been answered")
+                generated = state.values.get("draft")
+                question_id = state.values.get("question_id")
                 graph.update_state(config, {"draft": text})
             finally:
                 session.close()
+        # Record the edit as C7 feedback OUTSIDE the graph session/lock: it is an
+        # append-only learning signal, not part of the checkpointer transaction, and
+        # a failure to record must never break the (already-committed) draft save.
+        if isinstance(generated, str) and generated.strip() != text:
+            with session_scope(self._session_factory) as fb_session:
+                record_feedback(
+                    fb_session,
+                    stage="c7",
+                    kind="draft_edited",
+                    question_id=question_id if isinstance(question_id, str) else None,
+                    session_id=session_id,
+                    payload={"generated": generated, "sent": text},
+                    actor_id=actor_id,
+                )
 
     def select_handoff_candidate(
         self, session_id: str, person_id: int

@@ -35,6 +35,7 @@ const DATA: DashboardResponse = {
     { topic: "ネットワーク・VPN", count: 30 },
     { topic: "基幹システム", count: 18 },
   ],
+  feedback_by_stage: { c1: 2, c6: 5, c7: 3, total: 10 },
 };
 
 describe("Dashboard", () => {
@@ -74,6 +75,11 @@ describe("Dashboard", () => {
     // distributions
     expect(screen.getByText("高梨 健太")).toBeInTheDocument();
     expect(screen.getByText("ネットワーク・VPN")).toBeInTheDocument();
+    // #237: feedback-by-stage section (どの段でどれだけずれているか)
+    expect(screen.getByText(/フィードバック（AIの解釈・推薦・下書きのズレ/)).toBeInTheDocument();
+    expect(screen.getByText("解釈（C1）")).toBeInTheDocument();
+    expect(screen.getByText("推薦（C6）")).toBeInTheDocument();
+    expect(screen.getByText("下書き（C7）")).toBeInTheDocument();
   });
 
   it("shows 未計測 for the eval metric and — for resolution time when absent", async () => {
@@ -95,12 +101,14 @@ describe("Dashboard", () => {
       ...DATA,
       answers_per_responder: [],
       topic_distribution: [],
+      feedback_by_stage: { c1: 0, c6: 0, c7: 0, total: 0 },
     } satisfies DashboardResponse);
     render(<Dashboard />);
 
     await screen.findByRole("heading", { name: "ダッシュボード" });
     expect(screen.getByText("まだ回答がありません。")).toBeInTheDocument();
     expect(screen.getByText("まだトピックがありません。")).toBeInTheDocument();
+    expect(screen.getByText("まだフィードバックはありません。")).toBeInTheDocument();
   });
 
   it("shows an error state when the request fails", async () => {
