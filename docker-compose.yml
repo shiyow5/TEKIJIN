@@ -7,6 +7,19 @@
 #
 # First boot downloads the dense embedding model (a few GB) unless you mount
 # your existing Hugging Face cache — see `backend`'s volumes below.
+#
+# FOR AN ISOLATED LOCAL MACHINE ONLY — do not run this on the shared DGX. That
+# host runs other teams' containers plus our own hand-created `tekijin_vllm` /
+# `tekijin_app_pg`, and everyone is expected to use unique container names and
+# ports there (docs/gpu-server-setup.md). The deploy pipeline does not use
+# Compose at all (deploy/deploy.sh).
+#
+# `name:` pins the Compose project instead of letting it default to the checkout
+# directory's basename. Without it, two checkouts that happen to share a basename
+# (e.g. two `TEKIJIN/` clones on one host) resolve to the SAME project, and a
+# `docker compose down` in one silently tears down the other's containers —
+# Compose matches on the project label, not the working directory.
+name: tekijin-local
 
 services:
   db:
