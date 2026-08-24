@@ -22,9 +22,11 @@ from tekijin.eval.metrics import (
     evaluate,
     evaluate_alt,
     evaluate_by_difficulty,
+    evaluate_topics,
     recall_at_k,
     reciprocal_rank,
     top1_hit,
+    topic_hit_at_k,
 )
 from tekijin.eval.runner import RankResult, format_report, run_eval
 
@@ -34,7 +36,14 @@ NOW = dt.datetime(2026, 8, 22, 0, 0, 0)
 
 
 def _qr(
-    ranked, gold, predicted_route="person", gold_route="person", difficulty="L1", gold_alt=None
+    ranked,
+    gold,
+    predicted_route="person",
+    gold_route="person",
+    difficulty="L1",
+    gold_alt=None,
+    predicted_topics=None,
+    gold_topics=None,
 ) -> QueryResult:
     return QueryResult(
         ranked_experts=ranked,
@@ -43,6 +52,8 @@ def _qr(
         gold_route=gold_route,
         difficulty=difficulty,
         gold_experts_alt=gold_alt or [],
+        predicted_topics=predicted_topics or [],
+        gold_topics=gold_topics or [],
     )
 
 
@@ -86,6 +97,46 @@ def test_reciprocal_rank() -> None:
     assert reciprocal_rank(_qr([9, 3, 1], [3])) == pytest.approx(1 / 2)  # first hit at index 1
     assert reciprocal_rank(_qr([3, 9], [3])) == pytest.approx(1.0)
     assert reciprocal_rank(_qr([9, 8], [3])) == 0.0  # miss
+
+
+def test_topic_hit_at_k() -> None:
+    r = _qr([], [], predicted_topics=["B", "A", "C"], gold_topics=["A"])
+    assert topic_hit_at_k(r, 1) is False  # top guess "B" is not gold
+    assert topic_hit_at_k(r, 3) is True  # gold "A" is within the top 3
+    # exact top-1 hit
+    assert topic_hit_at_k(_qr([], [], predicted_topics=["A"], gold_topics=["A", "Z"]), 1) is True
+    # no prediction never hits
+    assert topic_hit_at_k(_qr([], [], predicted_topics=[], gold_topics=["A"]), 3) is False
+
+
+def test_topic_hit_at_k_rejects_nonpositive_k() -> None:
+    with pytest.raises(ValueError):
+        topic_hit_at_k(_qr([], [], predicted_topics=["A"], gold_topics=["A"]), 0)
+
+
+def test_evaluate_topics_averages_over_gold_topic_rows_only() -> None:
+    results = [
+        _qr([], [], predicted_topics=["A"], gold_topics=["A"]),  # acc@1 hit, acc@3 hit
+        _qr([], [], predicted_topics=["X", "B"], gold_topics=["B"]),  # acc@1 miss, acc@3 hit
+        _qr([], [], predicted_topics=["Y", "Z", "Q"], gold_topics=["A"]),  # both miss
+        # abstain row: no gold topics -> excluded from the denominator entirely.
+        _qr([], [], predicted_topics=["A"], gold_topics=[]),
+    ]
+    ta = evaluate_topics(results)
+    assert ta.n_topic == 3  # the goldless row is not counted
+    assert ta.acc_at_1 == pytest.approx(1 / 3)  # only the first row
+    assert ta.acc_at_3 == pytest.approx(2 / 3)  # first two rows
+    assert ta.as_dict() == {
+        "n_topic": 3,
+        "acc_at_1": pytest.approx(1 / 3),
+        "acc_at_3": pytest.approx(2 / 3),
+    }
+
+
+def test_evaluate_topics_empty_when_no_gold_topics() -> None:
+    ta = evaluate_topics([_qr([], [], predicted_topics=["A"], gold_topics=[])])
+    assert ta.n_topic == 0
+    assert ta.acc_at_1 == 0.0 and ta.acc_at_3 == 0.0
 
 
 def test_evaluate_excludes_goldless_and_nonabc_routes() -> None:
@@ -348,6 +399,80 @@ def test_pipeline_ranker_presents_no_experts_on_document_route() -> None:
     assert scorer.called is False  # C6 never runs on the document route
 
 
+def test_predict_topics_from_retrieval_rank_weighted_vote() -> None:
+    from tekijin.eval.pipeline import predict_topics_from_retrieval
+
+    def _retrieval(*qa_ids):
+        return {
+            "past_answers": [
+                {"qa_id": qa, "score": 1.0 - i * 0.1, "responder_id": i}
+                for i, qa in enumerate(qa_ids)
+            ],
+            "documents": [],
+        }
+
+    topics = {"a1": ["ネットワーク"], "a2": ["セキュリティ"], "a3": ["セキュリティ"]}
+    # Frequency accumulates: セキュリティ (ranks 1+2 -> 1/62+1/63) outweighs a lone
+    # ネットワーク at rank 0 (1/61) under the default k=60.
+    assert predict_topics_from_retrieval(_retrieval("a1", "a2", "a3"), topics) == [
+        "セキュリティ",
+        "ネットワーク",
+    ]
+    # But rank still matters: when ネットワーク is backed twice at the top and
+    # セキュリティ only once below it, ネットワーク wins.
+    topics2 = {"a1": ["ネットワーク"], "a2": ["ネットワーク"], "a3": ["セキュリティ"]}
+    assert predict_topics_from_retrieval(_retrieval("a1", "a2", "a3"), topics2) == [
+        "ネットワーク",
+        "セキュリティ",
+    ]
+
+
+def test_predict_topics_from_retrieval_empty_without_answers() -> None:
+    from tekijin.eval.pipeline import predict_topics_from_retrieval
+
+    # Documents carry no topic, so a document-only retrieval predicts nothing.
+    retrieval = {"past_answers": [], "documents": [{"doc_id": "d1", "score": 0.9}]}
+    assert predict_topics_from_retrieval(retrieval, {"a1": ["x"]}) == []
+    # An answer with no known topic mapping contributes nothing either.
+    retrieval2 = {"past_answers": [{"qa_id": "unknown", "score": 0.9, "responder_id": 1}]}
+    assert predict_topics_from_retrieval(retrieval2, {"a1": ["x"]}) == []
+
+
+def test_pipeline_ranker_populates_predicted_topics() -> None:
+    from tekijin.eval.pipeline import PipelineRanker
+
+    retriever = _StaticRetriever(
+        {
+            "past_answers": [{"qa_id": "a1", "score": 0.95, "responder_id": 3}],
+            "documents": [],
+            "candidate_people": [3],
+            "answer_confidence": 0.99,
+            "document_confidence": 0.0,
+            "people_confidence": 0.1,
+        }
+    )
+    ranker = PipelineRanker(
+        retriever=retriever,
+        scorer=_RecordingScorer(),
+        now=NOW,
+        answer_topics={"a1": ["ネットワーク・VPN"]},
+    )
+    result = ranker(_q(gold_route="prior_answer", gold_topics=["ネットワーク・VPN"]))
+    assert result.predicted_topics == ["ネットワーク・VPN"]
+
+
+def test_build_answer_topics_prefers_answer_topic_then_question(session, seed_counts) -> None:
+    from tekijin.data.repository import Repository
+    from tekijin.eval.pipeline import build_answer_topics
+
+    mapping = build_answer_topics(Repository(session))
+    assert mapping  # the seed has answers
+    # Every answer resolves to a (possibly empty) topic list; at least one is
+    # non-empty (answers.topic or the linked question's topics).
+    assert all(isinstance(v, list) for v in mapping.values())
+    assert any(v for v in mapping.values())
+
+
 def test_pipeline_ranker_returns_no_experts_when_topics_empty() -> None:
     from tekijin.eval.pipeline import PipelineRanker
 
@@ -401,20 +526,46 @@ def test_run_eval_with_empty_stub_scores_zero() -> None:
     assert report.metrics.route_accuracy == 0.0
 
 
+def test_run_eval_carries_topics_and_scores_stage_a() -> None:
+    queries = [
+        _q(id=1, gold_topics=["A"], gold_experts=[1]),
+        _q(id=2, gold_topics=["B"], gold_experts=[2]),
+    ]
+
+    def ranker(query: EvalQuery) -> RankResult:
+        # Query 1's top predicted topic is correct; query 2's is not (but B is #2).
+        predicted = ["A"] if query.id == 1 else ["X", "B"]
+        return RankResult(list(query.gold_experts), query.gold_route, predicted_topics=predicted)
+
+    report = run_eval(queries, ranker)
+    # Per-query records keep the topics for drill-down.
+    assert report.results[0].predicted_topics == ["A"]
+    assert report.results[0].gold_topics == ["A"]
+    # Stage-A aggregate: 1/2 acc@1 (only query 1), 2/2 acc@3 (B is within top 3).
+    assert report.topic_accuracy.n_topic == 2
+    assert report.topic_accuracy.acc_at_1 == pytest.approx(0.5)
+    assert report.topic_accuracy.acc_at_3 == pytest.approx(1.0)
+
+
 def test_format_report_contains_all_metrics_and_breakdowns() -> None:
     queries = [
         _q(id=1, difficulty="L1", gold_experts=[1], gold_experts_alt=[1]),
         _q(id=2, difficulty="L2", gold_experts=[2], gold_experts_alt=[9]),
     ]
-    report = run_eval(queries, lambda q: RankResult(list(q.gold_experts), "person"))
+    report = run_eval(
+        queries,
+        lambda q: RankResult(list(q.gold_experts), "person", predicted_topics=list(q.gold_topics)),
+    )
     text = format_report(report)
     for label in ("Top-1 Accuracy", "Recall@3", "MRR", "Route Accuracy"):
         assert label in text
     assert "層別" in text and "L1" in text and "L2" in text  # per-layer breakdown
     assert "第2正解" in text  # anti-circularity (alt) line
+    assert "段A" in text and "acc@1" in text and "acc@3" in text  # stage-A topic block
     # report structure
     assert set(report.by_difficulty) == {"L1", "L2"}
     assert report.metrics_alt.n_ranked == 2
+    assert report.topic_accuracy.n_topic == 2  # both rows carry gold_topics (["t"])
 
 
 # --------------------------------------------------------------------------- #
@@ -435,6 +586,13 @@ def test_run_eval_real_pipeline_over_seed(seed_counts, session, fake_embedder) -
     # Layer-wise breakdown + anti-circularity run are produced.
     assert {"L1", "L2", "L3"} <= set(report.by_difficulty)
     assert report.metrics_alt.n_ranked > 0
+    # Stage-A topic hit-rate is produced (#71): scored over the queries carrying
+    # gold topics, with valid fractions. Documents carry no topic so predictions
+    # come from retrieved past answers over the seed. The abstain (L4) rows have
+    # empty gold_topics, so the denominator sits strictly between 0 and n.
+    ta = report.topic_accuracy
+    assert 0 < ta.n_topic <= m.n - m.n_abstain
+    assert 0.0 <= ta.acc_at_1 <= ta.acc_at_3 <= 1.0
     # Abstain layer is measured (15 L4 rows) and the rate is a valid fraction.
     assert m.n_abstain == 15
     assert 0.0 <= m.abstain_accuracy <= 1.0
