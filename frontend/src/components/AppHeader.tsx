@@ -37,7 +37,7 @@ export function AppHeader() {
   return (
     <header className="flex flex-wrap items-center justify-between gap-sm border-outline-variant border-b bg-surface-container-lowest px-margin py-sm">
       <div className="flex flex-wrap items-center gap-md">
-        <Link href="/" className="flex items-baseline gap-sm">
+        <Link href="/">
           <span className="font-bold text-on-surface text-xl">TEKIJIN</span>
         </Link>
         <nav aria-label="メインナビゲーション">
