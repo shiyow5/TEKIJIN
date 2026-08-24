@@ -198,24 +198,24 @@ describe("AppHeader", () => {
     );
   });
 
-  it("shows the decline-notification bell for the acting user (#E7)", async () => {
-    useCurrentUserMock.mockReturnValue(READY);
+  it("shows the decline-notification bell for the acting user (#225)", async () => {
+    useCurrentUserMock.mockReturnValue(ADMIN_READY);
     render(<AppHeader />);
     await waitFor(() => expect(getNotificationsMock).toHaveBeenCalledWith("E001"));
     expect(screen.getByRole("button", { name: "通知" })).toBeInTheDocument();
   });
 
   it("does not show the notification bell before a current user is resolved", () => {
-    useCurrentUserMock.mockReturnValue({
-      employees: [],
-      currentUserId: null,
-      currentUser: null,
-      setCurrentUserId: vi.fn(),
-      loading: true,
-      error: false,
-      reload: () => {},
-    });
+    useCurrentUserMock.mockReturnValue(ctx({ loading: true }));
     render(<AppHeader />);
     expect(screen.queryByRole("button", { name: /通知/ })).not.toBeInTheDocument();
+  });
+
+  it("does not mount the bell at all when logged out (#241: nobody to poll for)", () => {
+    useAuthMock.mockReturnValue(auth(null as unknown as Principal));
+    useCurrentUserMock.mockReturnValue(ADMIN_READY);
+    render(<AppHeader />);
+    expect(screen.queryByRole("button", { name: /通知/ })).not.toBeInTheDocument();
+    expect(getNotificationsMock).not.toHaveBeenCalled();
   });
 });

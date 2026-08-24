@@ -25,6 +25,7 @@ function asUser(id: string | null): CurrentUserContextValue {
     loading: false,
     error: false,
     reload: vi.fn(),
+    canSwitch: false,
   };
 }
 
