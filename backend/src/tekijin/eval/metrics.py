@@ -32,6 +32,11 @@ class QueryResult:
     (L1–L4) drives layer-wise reporting; ``gold_experts_alt`` is the independent
     second gold set (derived from ``answers``, not ``projects``) used for the
     anti-circularity check — empty when the query has no alternate labels.
+
+    ``predicted_topics`` (best first) + ``gold_topics`` isolate stage A (query →
+    topic) from the ranking stages: the ranking metrics feed the *gold* topics to
+    the scorer, so a poor Recall@3 could be either weak retrieval OR weak topic
+    inference. Scoring predicted vs gold topics separates the two (#71 / #65).
     """
 
     ranked_experts: list[int]
@@ -40,6 +45,8 @@ class QueryResult:
     gold_route: str
     difficulty: str = ""
     gold_experts_alt: list[int] = field(default_factory=list)
+    predicted_topics: list[str] = field(default_factory=list)
+    gold_topics: list[str] = field(default_factory=list)
 
 
 def _first_hit_rank(ranked: Sequence[int], gold: Iterable[int]) -> int | None:
@@ -86,6 +93,19 @@ def route_hit(result: QueryResult) -> bool:
     return result.predicted_route == result.gold_route
 
 
+def topic_hit_at_k(result: QueryResult, k: int) -> bool:
+    """True if any of the top-``k`` predicted topics is a gold topic (stage A).
+
+    ``acc@1`` == ``topic_hit_at_k(r, 1)`` (the single best-guess topic is correct),
+    ``acc@3`` == ``topic_hit_at_k(r, 3)`` (a gold topic is anywhere in the top 3).
+    Mirrors ``scripts/research_pipeline.py``'s ``topic_accuracy`` exactly.
+    """
+
+    if k <= 0:
+        raise ValueError(f"k must be positive, got {k}")
+    return bool(set(result.predicted_topics[:k]) & set(result.gold_topics))
+
+
 @dataclass(frozen=True)
 class EvalMetrics:
     """Aggregate metrics over an evaluation run."""
@@ -120,8 +140,46 @@ class EvalMetrics:
         }
 
 
+@dataclass(frozen=True)
+class TopicAccuracy:
+    """Stage A (query → topic) hit-rate, scored against ``gold_topics`` (#71).
+
+    Separated from the ranking metrics because those feed the *gold* topics to the
+    scorer — so this is the ceiling-independent measure of how well topics are
+    inferred. ``n_topic`` is the denominator: queries carrying gold topics (an
+    abstain/unsupported row has none and is excluded, not counted as a miss).
+    """
+
+    n_topic: int
+    acc_at_1: float
+    acc_at_3: float
+
+    def as_dict(self) -> dict[str, float | int]:
+        return {
+            "n_topic": self.n_topic,
+            "acc_at_1": self.acc_at_1,
+            "acc_at_3": self.acc_at_3,
+        }
+
+
 def _mean(values: list[float]) -> float:
     return sum(values) / len(values) if values else 0.0
+
+
+def evaluate_topics(results: Sequence[QueryResult]) -> TopicAccuracy:
+    """Aggregate stage-A topic hit-rate over queries that carry gold topics.
+
+    Averaged only over rows with non-empty ``gold_topics`` — an abstain /
+    unsupported-topic query has no gold topic to hit, so including it would
+    conflate "no topic exists" with "topic missed".
+    """
+
+    scored = [r for r in results if r.gold_topics]
+    return TopicAccuracy(
+        n_topic=len(scored),
+        acc_at_1=_mean([1.0 if topic_hit_at_k(r, 1) else 0.0 for r in scored]),
+        acc_at_3=_mean([1.0 if topic_hit_at_k(r, 3) else 0.0 for r in scored]),
+    )
 
 
 def evaluate(results: Sequence[QueryResult]) -> EvalMetrics:
