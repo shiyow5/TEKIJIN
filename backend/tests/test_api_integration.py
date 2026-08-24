@@ -1339,6 +1339,49 @@ def test_handoff_correct_409_when_awaiting_clarification(
     assert resp.status_code == 409
 
 
+# --------------------------------------------------------------------------- #
+# #268: an enriched question (clarification reply / interpretation correction)
+# is persisted to Question.body so /inbox and /history match the processed run
+# --------------------------------------------------------------------------- #
+def _question_body(engine, session_id: str) -> str:
+    with get_sessionmaker(engine)() as s:
+        q = s.query(Question).filter(Question.session_id == session_id).first()
+        return q.body if q else ""
+
+
+def test_clarification_reply_persists_enriched_question_body(
+    seed_counts, engine, fake_embedder
+) -> None:
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": VAGUE_Q, "session_id": "qb1"})
+    _events(client, "qb1")  # paused at ask (a clarification is owed)
+    assert VAGUE_Q in _question_body(engine, "qb1")  # still the original so far
+
+    client.post("/answer", json={"session_id": "qb1", "reply": "現行はVPN機器で3拠点です"})
+    _events(client, "qb1")  # resumes; the ask node folds the reply into the question
+    body = _question_body(engine, "qb1")
+    assert "現行はVPN機器で3拠点です" in body  # #268: enriched body persisted for /inbox / /history
+
+
+def test_correction_persists_enriched_question_body(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "qb2"})
+    _events(client, "qb2")  # pause at send
+    client.post("/handoff/correct", json={"session_id": "qb2", "supplement": "対象は5拠点です"})
+    # The correction persists the enriched body durably, before the re-run streams.
+    assert "対象は5拠点です" in _question_body(engine, "qb2")
+
+
 def test_record_feedback_bounds_oversized_payload_values() -> None:
     """Internal callers stash drafts in ``payload``; an oversized string is
     truncated so the JSONB row cannot grow unbounded (bypasses the public 16KB
