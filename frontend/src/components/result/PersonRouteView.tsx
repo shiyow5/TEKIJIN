@@ -86,12 +86,20 @@ export function PersonRouteView({
   const [sentTo, setSentTo] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const topPersonId = candidates[0]?.person_id ?? null;
   // A later-arriving `draft` SSE event (recommend can land before draft) updates
-  // the baseline shown in the editor; a reselect's response (see handleSelect)
-  // overrides this locally without waiting on a new SSE event.
+  // the editor baseline — but ONLY while the top pick is still the selected
+  // recipient. After a reselect, the SSE `draft` is the (stale) top-pick draft;
+  // the reselected candidate's draft came from handleSelect's response, so folding
+  // the SSE baseline back in would clobber it. That clobber was the #258 flake:
+  // a `draft` event re-firing after a reselect reverted the editor to the top's
+  // text. Gating on `selectedPersonId === topPersonId` makes the two writers
+  // (SSE baseline vs reselect response) mutually exclusive.
   useEffect(() => {
-    setLocalDraft(draft);
-  }, [draft]);
+    if (selectedPersonId === topPersonId) {
+      setLocalDraft(draft);
+    }
+  }, [draft, selectedPersonId, topPersonId]);
 
   // A decline→reroute remounts this view (keyed by the top candidate in
   // ResultScreen) while a confirm POST may still be in flight. Drop the post-await
