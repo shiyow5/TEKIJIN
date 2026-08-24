@@ -52,7 +52,7 @@ describe("AppHeader", () => {
     // The brand is now a logo image (#201); its alt carries the product name.
     const logo = screen.getByAltText("TEKIJIN");
     expect(logo).toBeInTheDocument();
-    expect(logo).toHaveAttribute("src", "/tekijin-logo.jpg");
+    expect(logo).toHaveAttribute("src", "/tekijin-logo.png");
     // The retired "たずねーる" subtitle must no longer render (#196).
     expect(screen.queryByText("たずねーる")).not.toBeInTheDocument();
   });
