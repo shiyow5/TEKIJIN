@@ -14,6 +14,7 @@
  * wiring only. A `sessionId` is the single input (from the route param).
  */
 
+import { ConsultMethodBadge } from "@/components/ConsultMethodBadge";
 import type { HandoffAction } from "@/hooks/useHandoff";
 import { useHandoff } from "@/hooks/useHandoff";
 import type { HandoffResponse, Reason } from "@/lib/api-types";
@@ -190,9 +191,12 @@ export function AnswerScreen({ sessionId, onDone }: AnswerScreenProps) {
       </header>
 
       <article className="flex flex-col gap-sm rounded-xl border border-outline-variant bg-surface-container-lowest p-md shadow-sm">
-        <div className="flex items-center gap-sm text-on-surface-variant text-sm">
+        <div className="flex flex-wrap items-center gap-sm text-on-surface-variant text-sm">
           <span className="font-medium text-on-surface">{askerName}さん</span>
           {askerMeta ? <span>（{askerMeta}）</span> : null}
+          {/* Shown BEFORE the accept/decline buttons: "直接相談" never opens a
+              chat, so it changes what accepting commits you to (#245). */}
+          <ConsultMethodBadge method={hf.consult_method ?? "chat"} />
         </div>
         <h2 className="font-bold text-lg text-on-surface leading-snug">{hf.question}</h2>
         {slots.length > 0 ? (

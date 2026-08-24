@@ -621,9 +621,21 @@ def test_inbox_lists_pending_handoff_then_clears_after_answer(
     assert item["asker"]["id"] == "E010"
     assert item["question"] == GOOD_Q
     assert item["topics"]  # C1 topics persisted onto the question
+    # Never-chosen defaults to "chat"; the responder must see this BEFORE
+    # accepting, since "direct" means no chat thread is ever opened (#245).
+    assert item["consult_method"] == "chat"
 
     # A non-primary candidate (E002) was not handed off -> nothing pending.
     assert client.get("/inbox", params={"responder_id": "E002"}).json()["items"] == []
+
+    # Choosing 直接相談 at send time surfaces on the inbox item (#245).
+    client.post(
+        "/handoff/draft",
+        json={"session_id": "inbox-s1", "draft": "直接うかがいます", "consult_method": "direct"},
+    )
+    direct = client.get("/inbox", params={"responder_id": "E001"}).json()
+    picked = next(i for i in direct["items"] if i["session_id"] == "inbox-s1")
+    assert picked["consult_method"] == "direct"
 
     # Once the responder accepts, the handoff clears from the inbox.
     client.post("/answer", json={"session_id": "inbox-s1", "outcome": "accepted"})

@@ -394,6 +394,10 @@ class InboxItem(BaseModel):
     question: str
     topics: list[str] = Field(default_factory=list)
     asker: HandoffAsker
+    # Shown as a badge in the list so the responder can tell, BEFORE accepting,
+    # whether accepting opens a chat or means they will be approached directly
+    # (#245). Absent on the question = the implicit default, "chat".
+    consult_method: ConsultMethod = "chat"
     created_at: str | None = None
 
 

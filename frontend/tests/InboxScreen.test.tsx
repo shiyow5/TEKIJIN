@@ -1,7 +1,7 @@
 import type { CurrentUserContextValue } from "@/components/CurrentUserProvider";
 import { InboxScreen } from "@/components/InboxScreen";
 import type { HandoffResponse, InboxItem } from "@/lib/api-types";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const useCurrentUserMock = vi.fn<() => CurrentUserContextValue>();
@@ -47,6 +47,7 @@ const ITEM: InboxItem = {
   question: "UTM の移行時に気をつけることは？",
   topics: ["ネットワーク", "セキュリティ"],
   asker: { id: "E010", name: "藤田 悠斗", dept: "第3営業部" },
+  consult_method: "chat",
   created_at: "2026-08-23T09:30:00",
 };
 
@@ -56,6 +57,8 @@ const ITEM2: InboxItem = {
   question: "VPN の帯域制限について",
   topics: ["ネットワーク"],
   asker: { id: "E011", name: "森田 恵", dept: "広報部" },
+  // The two items differ so the list badge is visibly per-item (#245).
+  consult_method: "direct",
   created_at: "2026-08-23T10:00:00",
 };
 
@@ -213,4 +216,22 @@ describe("InboxScreen", () => {
 
     await waitFor(() => expect(screen.getByText("匿名 さんからの質問")).toBeInTheDocument());
   });
+  it("labels each item with the asker's chosen consultation method (#245)", async () => {
+    useCurrentUserMock.mockReturnValue(asUser("E001"));
+    getInboxMock.mockResolvedValue([ITEM, ITEM2]);
+    getHandoffMock.mockImplementation((sessionId: string) =>
+      Promise.resolve(handoffFor(sessionId === ITEM.session_id ? ITEM : ITEM2)),
+    );
+    render(<InboxScreen />);
+
+    // The responder must be able to tell BEFORE accepting: "直接相談" never
+    // opens a chat thread, so it changes what accepting commits them to.
+    // Both badges live on the list buttons themselves, so the responder sees
+    // them without opening anything.
+    const chat = await screen.findByRole("button", { name: /藤田 悠斗 さんからの質問/ });
+    expect(within(chat).getByText("チャットで相談")).toBeInTheDocument();
+    const direct = screen.getByRole("button", { name: /森田 恵 さんからの質問/ });
+    expect(within(direct).getByText("直接相談")).toBeInTheDocument();
+  });
+
 });

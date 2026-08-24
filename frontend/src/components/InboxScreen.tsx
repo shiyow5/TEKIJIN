@@ -12,6 +12,7 @@
  */
 
 import { AnswerScreen } from "@/components/AnswerScreen";
+import { ConsultMethodBadge } from "@/components/ConsultMethodBadge";
 import { useCurrentUser } from "@/components/CurrentUserProvider";
 import type { HandoffAction } from "@/hooks/useHandoff";
 import { getInbox } from "@/lib/api-client";
@@ -64,6 +65,9 @@ function InboxListItem({
           ) : null}
         </div>
         <p className="line-clamp-2 text-on-surface-variant text-sm">{item.question}</p>
+        {/* Before accepting, the responder needs to know whether saying yes
+            opens a chat or means being approached directly (#245). */}
+        <ConsultMethodBadge method={item.consult_method} />
         {item.topics.length > 0 ? (
           <ul className="flex flex-wrap gap-xs">
             {item.topics.map((topic) => (

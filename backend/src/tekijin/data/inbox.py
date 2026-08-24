@@ -38,6 +38,7 @@ def pending_handoffs_for_responder(session: Session, responder_id: int) -> list[
             Question.body,
             Question.topics,
             Question.asker_id,
+            Question.consult_method,
             Employee.name,
             Employee.department,
         )
@@ -61,6 +62,7 @@ def pending_handoffs_for_responder(session: Session, responder_id: int) -> list[
         body,
         topics,
         asker_id,
+        consult_method,
         asker_name,
         asker_dept,
     ) in session.execute(stmt):
@@ -76,6 +78,10 @@ def pending_handoffs_for_responder(session: Session, responder_id: int) -> list[
                 "asker_id": asker_id,
                 "asker_name": asker_name,
                 "asker_dept": asker_dept,
+                # NULL (never chosen) means the implicit pre-existing default.
+                # The responder needs this BEFORE accepting (#245): "直接相談"
+                # never opens a chat thread, so it changes what accepting means.
+                "consult_method": consult_method or "chat",
                 "created_at": created_at.isoformat() if created_at is not None else None,
             }
         )

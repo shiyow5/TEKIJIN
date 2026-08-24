@@ -156,6 +156,8 @@ export interface InboxItem {
   question: string;
   topics: string[];
   asker: HandoffAsker;
+  /** How the asker chose to be helped (#245); absent on the question = "chat". */
+  consult_method: ConsultMethod;
   created_at?: string | null;
 }
 
