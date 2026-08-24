@@ -272,11 +272,16 @@ def test_proximity_tiers() -> None:
     assert features.proximity("大阪", None) == 0.2
 
 
-def test_confidence_label_thresholds() -> None:
-    assert features.confidence_label(0.8, 3) == "高"
-    assert features.confidence_label(0.5, 1) == "中"
-    assert features.confidence_label(0.2, 2) == "中"  # evidence_count path
-    assert features.confidence_label(0.1, 1) == "低"
+def test_confidence_label_by_evidence_kind() -> None:
+    # 高: answered on the topic and not merely project-adjacent (#110).
+    assert features.confidence_label(["answer"]) == "高"
+    assert features.confidence_label(["cert", "self", "answer"]) == "高"
+    # 中: answered, but also carries project membership (diluting signal, #110).
+    assert features.confidence_label(["answer", "project"]) == "中"
+    assert features.confidence_label(["answer", "answer", "project"]) == "中"
+    # 低: no past answer — certs/skills/projects alone don't prove answering here.
+    assert features.confidence_label(["cert", "project", "self"]) == "低"
+    assert features.confidence_label([]) == "低"
 
 
 # --------------------------------------------------------------------------- #

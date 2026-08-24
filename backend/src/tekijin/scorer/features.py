@@ -108,11 +108,40 @@ def proximity(
     return PROXIMITY_COMPANY_WIDE
 
 
-def confidence_label(edge_weight: float, evidence_count: int) -> str:
-    """Deterministic 高/中/低 from the topic edge weight and evidence count."""
+# Evidence source types that drive the confidence tier (#110). Calibrated on the
+# misrecommendation slot dump via scripts/research_confidence.py: a past ANSWER on
+# the topic is the single signal that separates right from wrong picks (within a
+# question, answer あり 0.70 vs なし 0.55), while PROJECT membership co-occurs with
+# WRONG picks (あり 0.60 vs なし 0.84) — being staffed near a product ≠ being the
+# topic's answerer. Evidence QUANTITY (edge_weight / evidence_count) is
+# non-predictive and was even inverted, so it is deliberately dropped.
+_CONFIDENCE_ANSWER = "answer"
+_CONFIDENCE_PROJECT = "project"
 
-    if edge_weight >= 0.7 and evidence_count >= 3:
-        return "高"
-    if edge_weight >= 0.4 or evidence_count >= 2:
+
+def confidence_label(source_types: Iterable[str]) -> str:
+    """Deterministic 高/中/低 from the KINDS of evidence a person has (#110).
+
+    ``source_types`` is every evidence item's ``source_type`` for this person on
+    the question's topics (order/duplicates irrelevant — only the set matters).
+
+    Calibrated, monotone rule (held-out 高−低 +0.27, P(>0)=0.99 in the split-half
+    check; full-set 高 0.84 / 中 0.61 / 低 0.55):
+
+    * **低** — no past answer on the topic. Certs, skills and project roles alone
+      do not prove the person answers *here*; this is the tier a "低 は棄却"
+      policy can finally act on (the old rule never produced 低).
+    * **中** — has answered, but also carries project membership, which dilutes
+      the signal (product-adjacency, not topic authorship) in the eval corpus.
+    * **高** — has answered and is not merely project-adjacent.
+
+    Replaces the pre-#110 quantity rule ``(edge_weight, evidence_count)``, whose
+    tiers were inverted (高 0.66 < 中 0.77) and never assigned 低.
+    """
+
+    kinds = set(source_types)
+    if _CONFIDENCE_ANSWER not in kinds:
+        return "低"
+    if _CONFIDENCE_PROJECT in kinds:
         return "中"
-    return "低"
+    return "高"
