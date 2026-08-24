@@ -10,9 +10,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from tekijin import __version__
+from tekijin.api.auth_routes import router as auth_router
 from tekijin.api.health import router as health_router
 from tekijin.api.routes import router as api_router
 from tekijin.api.service import AgentService
+from tekijin.auth.service import LoginRateLimiter
 from tekijin.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -53,7 +55,15 @@ def create_app(agent_service: AgentService | None = None) -> FastAPI:
 
         agent_service = build_default_service(settings)
     app.state.agent_service = agent_service
+    # In-process login throttle (single-worker API; see _lifespan). Shared by all
+    # /auth/login calls so brute-force attempts are counted per email across the
+    # process.
+    app.state.login_rate_limiter = LoginRateLimiter(
+        max_attempts=settings.login_max_attempts,
+        window_seconds=settings.login_window_seconds,
+    )
 
     app.include_router(health_router)
+    app.include_router(auth_router)
     app.include_router(api_router)
     return app

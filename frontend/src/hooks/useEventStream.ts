@@ -26,6 +26,7 @@ import type {
   SseEventName,
   UnderstoodData,
 } from "@/lib/api-types";
+import { getAuthToken } from "@/lib/auth-token";
 import { getApiBaseUrl } from "@/lib/config";
 import { useEffect, useState } from "react";
 
@@ -170,7 +171,12 @@ export function useEventStream(
     setState(INITIAL_STATE);
 
     const base = baseUrl ?? getApiBaseUrl();
-    const url = `${base}/events/${encodeURIComponent(sessionId)}`;
+    // A browser EventSource cannot send an Authorization header, so the access
+    // token rides as a ?token= query parameter (the backend accepts it there for
+    // /events only). Read at subscribe time — the token is stable within a session.
+    const token = getAuthToken();
+    const query = token ? `?token=${encodeURIComponent(token)}` : "";
+    const url = `${base}/events/${encodeURIComponent(sessionId)}${query}`;
     const source = eventSourceFactory ? eventSourceFactory(url) : new globalThis.EventSource(url);
 
     let closed = false;

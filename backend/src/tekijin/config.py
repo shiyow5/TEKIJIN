@@ -198,6 +198,34 @@ class Settings(BaseSettings):
     # browsers) and an immutable tuple so the cached singleton cannot be mutated.
     cors_origins: tuple[str, ...] = ("http://localhost:3000",)
 
+    # --- Authentication (#241) ------------------------------------------------ #
+    # HS256 signing secret for access tokens. The default is INSECURE (a fixed
+    # dev value) — set TEKIJIN_AUTH_SECRET to a long random string in any real
+    # deployment, or every issued token is forgeable.
+    auth_secret: str = "dev-insecure-change-me"
+
+    # Access-token lifetime in hours (the "失効" of a stateless JWT). Logout is a
+    # client-side token drop; there is no server session to revoke, so keep this
+    # modest. 12h covers a demo/work session without a mid-use expiry.
+    auth_token_ttl_hours: float = 12.0
+
+    # The single ADMIN account. It is NOT a DB employee (the seeded roster stays
+    # at 40 and the admin never becomes a recommendation candidate); it logs in
+    # with these credentials and impersonates any employee via the demo switcher.
+    # CHANGE admin_password in any real deployment (the default is a known value).
+    admin_email: str = "admin@tekijin.local"
+    admin_password: str = "tekijin-admin"
+    admin_name: str = "管理者"
+
+    # Password seeded for EVERY employee (demo login). All synthetic, so a shared
+    # demo password is acceptable and documented; override per environment.
+    demo_user_password: str = "tekijin-demo"
+
+    # Login brute-force throttle: at most this many FAILED attempts per email
+    # within the rolling window before further attempts are refused (429).
+    login_max_attempts: int = 5
+    login_window_seconds: float = 300.0
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -1,23 +1,26 @@
 "use client";
 
 /**
- * Current-user context (prototype stand-in for auth).
+ * Current-user (acting employee) context, now driven by authentication (#241).
  *
- * The app has no login yet, so the acting employee is chosen from the directory
- * (`GET /employees`) and remembered in `localStorage`. Both the header switcher
- * (`AppHeader`) and the asker/responder screens read the selection from here, so
- * `asker_id` and the inbox responder id are no longer hardcoded.
+ * The acting user depends on WHO is logged in ({@link useAuth}):
  *
- * The default context (no provider) is inert — empty directory, `null` user —
- * so a component can still render in isolation (unit tests); real wiring comes
- * from wrapping the tree in {@link CurrentUserProvider} (done in app/layout.tsx).
+ * * A regular USER acts only as themselves — `currentUserId` is their own id, the
+ *   directory is empty, and switching is disabled. There is no impersonation.
+ * * The ADMIN gets the demo switcher: the employee directory (`GET /employees`,
+ *   admin-only) loads and `currentUserId` is the chosen impersonation (remembered
+ *   in `localStorage`, defaulting to the first employee).
+ *
+ * The context shape is unchanged, so the asker/responder screens (`asker_id`,
+ * inbox `responder_id`) read the acting id from here exactly as before.
  */
 
+import { useAuth } from "@/components/AuthProvider";
 import { getEmployees } from "@/lib/api-client";
 import type { EmployeeSummary } from "@/lib/api-types";
 import {
-  createContext,
   type ReactNode,
+  createContext,
   useCallback,
   useContext,
   useEffect,
@@ -28,20 +31,22 @@ import {
 const STORAGE_KEY = "tekijin.currentUserId";
 
 export interface CurrentUserContextValue {
-  /** The employee directory (empty until loaded / on load failure). */
+  /** The employee directory (admin only; empty for a regular user). */
   employees: EmployeeSummary[];
-  /** The acting user's id ("E###"), or null before the directory loads. */
+  /** The acting user's id ("E###"), or null before it resolves. */
   currentUserId: string | null;
   /** The acting user's full record, or null when unresolved. */
   currentUser: EmployeeSummary | null;
-  /** Select a different acting user (persisted to localStorage). */
+  /** Select a different acting user (admin only; no-op for a regular user). */
   setCurrentUserId: (id: string) => void;
-  /** True while the directory request is in flight. */
+  /** True while the admin directory request is in flight. */
   loading: boolean;
-  /** True when the last directory load failed (and none is loaded). */
+  /** True when the last directory load failed (admin only). */
   error: boolean;
-  /** Retry loading the directory (after a failure). */
+  /** Retry loading the directory (admin only). */
   reload: () => void;
+  /** True when the acting user may switch identities (admin). */
+  canSwitch: boolean;
 }
 
 const INERT: CurrentUserContextValue = {
@@ -52,6 +57,7 @@ const INERT: CurrentUserContextValue = {
   loading: false,
   error: false,
   reload: () => {},
+  canSwitch: false,
 };
 
 const CurrentUserContext = createContext<CurrentUserContextValue>(INERT);
@@ -77,60 +83,90 @@ function writeStored(id: string): void {
 }
 
 export function CurrentUserProvider({ children }: { children: ReactNode }) {
+  const { principal } = useAuth();
+  const isAdmin = principal?.is_admin === true;
+
   const [employees, setEmployees] = useState<EmployeeSummary[]>([]);
-  const [currentUserId, setCurrentUserIdState] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [adminSelectedId, setAdminSelectedId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(isAdmin);
   const [error, setError] = useState(false);
 
-  const setCurrentUserId = useCallback((id: string) => {
-    setCurrentUserIdState(id);
-    writeStored(id);
-  }, []);
+  const setCurrentUserId = useCallback(
+    (id: string) => {
+      if (!isAdmin) return; // regular users cannot switch identity
+      setAdminSelectedId(id);
+      writeStored(id);
+    },
+    [isAdmin],
+  );
 
-  // Load (or reload) the directory. Exposed as `reload` so the UI can retry after
-  // a failure instead of leaving the submit permanently gated with no explanation.
-  // ``isActive`` lets the mount effect drop a stale result (React StrictMode double
-  // invoke in dev, or an unmount mid-fetch); the button retry uses the default.
-  const load = useCallback((isActive: () => boolean = () => true) => {
-    setLoading(true);
-    setError(false);
-    getEmployees()
-      .then((list) => {
-        if (!isActive()) return;
-        setEmployees(list);
-        // Restore the remembered user if it still exists, else default to the
-        // first employee so the app always has an acting user.
-        const stored = readStored();
-        const initial =
-          stored && list.some((e) => e.id === stored) ? stored : (list[0]?.id ?? null);
-        setCurrentUserIdState(initial);
-      })
-      .catch(() => {
-        if (isActive()) setError(true);
-      })
-      .finally(() => {
-        if (isActive()) setLoading(false);
-      });
-  }, []);
+  // Admin only: load the directory so the switcher can impersonate anyone.
+  const load = useCallback(
+    (isActive: () => boolean = () => true) => {
+      if (!isAdmin) return;
+      setLoading(true);
+      setError(false);
+      getEmployees()
+        .then((list) => {
+          if (!isActive()) return;
+          setEmployees(list);
+          const stored = readStored();
+          const initial =
+            stored && list.some((e) => e.id === stored) ? stored : (list[0]?.id ?? null);
+          setAdminSelectedId(initial);
+        })
+        .catch(() => {
+          if (isActive()) setError(true);
+        })
+        .finally(() => {
+          if (isActive()) setLoading(false);
+        });
+    },
+    [isAdmin],
+  );
 
   const reload = useCallback(() => load(), [load]);
 
   useEffect(() => {
+    if (!isAdmin) {
+      // Regular user (or logged out): no directory, act as self.
+      setEmployees([]);
+      setAdminSelectedId(null);
+      setLoading(false);
+      setError(false);
+      return;
+    }
     let active = true;
     load(() => active);
     return () => {
       active = false;
     };
-  }, [load]);
+  }, [isAdmin, load]);
 
-  const currentUser = useMemo(
-    () => employees.find((e) => e.id === currentUserId) ?? null,
-    [employees, currentUserId],
-  );
+  // A regular user's acting identity is fixed to their own principal.
+  const selfUser = useMemo<EmployeeSummary | null>(() => {
+    if (!principal || principal.is_admin || principal.id === null) return null;
+    return { id: principal.id, name: principal.name, dept: principal.dept ?? null };
+  }, [principal]);
+
+  const currentUserId = isAdmin ? adminSelectedId : (selfUser?.id ?? null);
+  const currentUser = useMemo<EmployeeSummary | null>(() => {
+    if (isAdmin) return employees.find((e) => e.id === currentUserId) ?? null;
+    return selfUser;
+  }, [isAdmin, employees, currentUserId, selfUser]);
 
   const value = useMemo<CurrentUserContextValue>(
-    () => ({ employees, currentUserId, currentUser, setCurrentUserId, loading, error, reload }),
-    [employees, currentUserId, currentUser, setCurrentUserId, loading, error, reload],
+    () => ({
+      employees,
+      currentUserId,
+      currentUser,
+      setCurrentUserId,
+      loading,
+      error,
+      reload,
+      canSwitch: isAdmin,
+    }),
+    [employees, currentUserId, currentUser, setCurrentUserId, loading, error, reload, isAdmin],
   );
 
   return <CurrentUserContext.Provider value={value}>{children}</CurrentUserContext.Provider>;

@@ -9,6 +9,7 @@ import {
   RECENT_QUESTIONS,
   fulfillJson,
   fulfillSse,
+  mockAuth,
   mockEmployees,
   mockRecentQuestions,
   sseBody,
@@ -23,6 +24,7 @@ import {
 test.describe("asker flow", () => {
   test("質問 → 処理 → 結果（人に聞く）→ 送信", async ({ page }) => {
     await mockEmployees(page);
+    await mockAuth(page);
     await mockRecentQuestions(page);
     await page.route(`${API_BASE}/ask`, (route) =>
       fulfillJson(route, { session_id: "srv-session", status: "accepted" }),
@@ -66,6 +68,7 @@ test.describe("asker flow", () => {
 
   test("該当者なし → メッセージで終了", async ({ page }) => {
     await mockEmployees(page);
+    await mockAuth(page);
     await mockRecentQuestions(page);
     await page.route(`${API_BASE}/ask`, (route) =>
       fulfillJson(route, { session_id: "srv-session", status: "accepted" }),
@@ -86,6 +89,7 @@ test.describe("asker flow", () => {
 
   test("逆質問（followup）→ 補足を回答", async ({ page }) => {
     await mockEmployees(page);
+    await mockAuth(page);
     await mockRecentQuestions(page);
     await page.route(`${API_BASE}/ask`, (route) =>
       fulfillJson(route, { session_id: "srv-session", status: "accepted" }),
@@ -114,6 +118,7 @@ test.describe("asker flow", () => {
 
   test("prior_answer 経路 → 詳しい人の提示 → 解決", async ({ page }) => {
     await mockEmployees(page);
+    await mockAuth(page);
     await mockRecentQuestions(page);
     await page.route(`${API_BASE}/ask`, (route) =>
       fulfillJson(route, { session_id: "srv-session", status: "accepted" }),
@@ -139,6 +144,7 @@ test.describe("asker flow", () => {
 
   test("「最近のあなたの質問」パネルが履歴を表示する", async ({ page }) => {
     await mockEmployees(page);
+    await mockAuth(page);
     await mockRecentQuestions(page, RECENT_QUESTIONS);
 
     await page.goto("/questions");
@@ -154,6 +160,7 @@ test.describe("asker flow", () => {
 
   test("履歴の項目をクリックすると結果セッションを再表示できる (#150)", async ({ page }) => {
     await mockEmployees(page);
+    await mockAuth(page);
     await mockRecentQuestions(page, RECENT_QUESTIONS);
     // The re-viewed session replays a (person-route) result over /events.
     await page.route(`${API_BASE}/events/**`, (route) =>

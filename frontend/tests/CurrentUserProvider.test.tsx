@@ -1,4 +1,6 @@
+import type { AuthContextValue } from "@/components/AuthProvider";
 import { CurrentUserProvider, useCurrentUser } from "@/components/CurrentUserProvider";
+import type { Principal } from "@/lib/api-types";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -7,16 +9,41 @@ vi.mock("@/lib/api-client", () => ({
   getEmployees: () => getEmployeesMock(),
 }));
 
+const useAuthMock = vi.fn<() => AuthContextValue>();
+vi.mock("@/components/AuthProvider", () => ({
+  useAuth: () => useAuthMock(),
+}));
+
 const EMPLOYEES = [
   { id: "E001", name: "山田 太郎", dept: "営業部" },
   { id: "E002", name: "佐藤 花子", dept: "技術部" },
 ];
 
+const ADMIN: Principal = { id: null, name: "管理者", dept: null, is_admin: true };
+const USER: Principal = { id: "E007", name: "田中 一郎", dept: "第2営業部", is_admin: false };
+
 const STORAGE_KEY = "tekijin.currentUserId";
 
+function setPrincipal(principal: Principal | null): void {
+  useAuthMock.mockReturnValue({
+    principal,
+    loading: false,
+    login: vi.fn(),
+    logout: vi.fn(),
+  });
+}
+
 function Consumer() {
-  const { currentUserId, currentUser, employees, loading, error, reload, setCurrentUserId } =
-    useCurrentUser();
+  const {
+    currentUserId,
+    currentUser,
+    employees,
+    loading,
+    error,
+    reload,
+    setCurrentUserId,
+    canSwitch,
+  } = useCurrentUser();
   return (
     <div>
       <span data-testid="loading">{String(loading)}</span>
@@ -24,6 +51,7 @@ function Consumer() {
       <span data-testid="count">{employees.length}</span>
       <span data-testid="current">{currentUserId ?? "none"}</span>
       <span data-testid="name">{currentUser?.name ?? "none"}</span>
+      <span data-testid="canSwitch">{String(canSwitch)}</span>
       <button type="button" onClick={() => setCurrentUserId("E002")}>
         switch
       </button>
@@ -45,13 +73,14 @@ function renderProvider() {
 beforeEach(() => {
   getEmployeesMock.mockReset();
   window.localStorage.clear();
+  setPrincipal(ADMIN); // most tests exercise the admin switcher
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("CurrentUserProvider", () => {
+describe("CurrentUserProvider — admin (demo switcher)", () => {
   it("loads the directory and defaults to the first employee", async () => {
     getEmployeesMock.mockResolvedValue(EMPLOYEES);
     renderProvider();
@@ -59,6 +88,7 @@ describe("CurrentUserProvider", () => {
     await waitFor(() => expect(screen.getByTestId("current")).toHaveTextContent("E001"));
     expect(screen.getByTestId("count")).toHaveTextContent("2");
     expect(screen.getByTestId("name")).toHaveTextContent("山田 太郎");
+    expect(screen.getByTestId("canSwitch")).toHaveTextContent("true");
     expect(screen.getByTestId("loading")).toHaveTextContent("false");
   });
 
@@ -107,7 +137,6 @@ describe("CurrentUserProvider", () => {
     renderProvider();
     await waitFor(() => expect(screen.getByTestId("error")).toHaveTextContent("true"));
 
-    // The retry succeeds this time -> directory loads and the error clears.
     getEmployeesMock.mockResolvedValueOnce(EMPLOYEES);
     act(() => {
       screen.getByRole("button", { name: "reload" }).click();
@@ -117,12 +146,38 @@ describe("CurrentUserProvider", () => {
     expect(screen.getByTestId("error")).toHaveTextContent("false");
     expect(screen.getByTestId("count")).toHaveTextContent("2");
   });
+});
 
+describe("CurrentUserProvider — regular user (self only)", () => {
+  it("acts as the logged-in user with no directory and no switching", async () => {
+    setPrincipal(USER);
+    renderProvider();
+
+    await waitFor(() => expect(screen.getByTestId("current")).toHaveTextContent("E007"));
+    expect(screen.getByTestId("name")).toHaveTextContent("田中 一郎");
+    expect(screen.getByTestId("count")).toHaveTextContent("0"); // no directory
+    expect(screen.getByTestId("canSwitch")).toHaveTextContent("false");
+    expect(getEmployeesMock).not.toHaveBeenCalled(); // never fetches /employees
+  });
+
+  it("ignores setCurrentUserId (a regular user cannot switch)", async () => {
+    setPrincipal(USER);
+    renderProvider();
+    await waitFor(() => expect(screen.getByTestId("current")).toHaveTextContent("E007"));
+
+    act(() => {
+      screen.getByRole("button", { name: "switch" }).click();
+    });
+    // Still acting as themselves.
+    expect(screen.getByTestId("current")).toHaveTextContent("E007");
+  });
+});
+
+describe("CurrentUserProvider — inert default", () => {
   it("provides an inert default outside a provider", () => {
     render(<Consumer />);
     expect(screen.getByTestId("current")).toHaveTextContent("none");
     expect(screen.getByTestId("count")).toHaveTextContent("0");
-    // The inert setter is a no-op and must not throw.
     act(() => {
       screen.getByRole("button", { name: "switch" }).click();
     });

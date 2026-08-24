@@ -19,7 +19,7 @@ import contextlib
 import logging
 from collections.abc import Iterator
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sse_starlette import EventSourceResponse
 
 from tekijin.api import schemas
@@ -31,6 +31,8 @@ from tekijin.api.service import (
     SessionConflict,
     SessionInvalid,
 )
+from tekijin.auth.deps import require_admin, require_can_act_as, require_principal
+from tekijin.auth.principal import Principal
 from tekijin.data.dashboard import dashboard_summary
 from tekijin.data.documents import get_document
 from tekijin.data.history import recent_questions_for_asker
@@ -67,9 +69,18 @@ def _generic_500(route: str) -> Iterator[None]:
 
 
 @router.post("/ask", response_model=schemas.AckResponse)
-def ask(req: schemas.AskRequest, request: Request) -> schemas.AckResponse:
-    """Start a new question for ``session_id``; stream flows over /events."""
+def ask(
+    req: schemas.AskRequest,
+    request: Request,
+    principal: Principal = Depends(require_principal),
+) -> schemas.AckResponse:
+    """Start a new question for ``session_id``; stream flows over /events.
 
+    A non-admin may only ask as themselves; admin may ask as any employee (demo
+    impersonation) — enforced by ``require_can_act_as`` on ``asker_id``.
+    """
+
+    require_can_act_as(principal, req.asker_id)
     try:
         _service(request).start_question(req.session_id, req.asker_id, req.question)
     except ServiceBusy as exc:
@@ -91,7 +102,11 @@ def ask(req: schemas.AskRequest, request: Request) -> schemas.AckResponse:
     return schemas.AckResponse(session_id=req.session_id, status="accepted")
 
 
-@router.post("/answer", response_model=schemas.AckResponse)
+@router.post(
+    "/answer",
+    response_model=schemas.AckResponse,
+    dependencies=[Depends(require_principal)],
+)
 def answer(req: schemas.ResumeRequest, request: Request) -> schemas.AckResponse:
     """Resume a paused run: a responder outcome or a clarification reply."""
 
@@ -112,12 +127,16 @@ def answer(req: schemas.ResumeRequest, request: Request) -> schemas.AckResponse:
     return schemas.AckResponse(session_id=req.session_id, status="resumed")
 
 
-@router.get("/events/{session_id}")
+@router.get("/events/{session_id}", dependencies=[Depends(require_principal)])
 def events(session_id: str, request: Request) -> EventSourceResponse:
     """SSE stream of the queued run's node updates (model-definition §4).
 
     Returns 404 only when there is neither a queued run nor a paused run for the
     session; a paused session reconnects (re-emits its pending interrupt).
+
+    A browser ``EventSource`` cannot send an ``Authorization`` header, so this
+    endpoint accepts the token as a ``?token=`` query parameter (handled inside
+    ``require_principal``).
     """
 
     service = _service(request)
@@ -126,7 +145,11 @@ def events(session_id: str, request: Request) -> EventSourceResponse:
     return EventSourceResponse(service.stream_events(session_id))
 
 
-@router.get("/handoff/{session_id}", response_model=schemas.HandoffResponse)
+@router.get(
+    "/handoff/{session_id}",
+    response_model=schemas.HandoffResponse,
+    dependencies=[Depends(require_principal)],
+)
 def handoff(session_id: str, request: Request) -> schemas.HandoffResponse:
     """Responder-facing handoff payload for a session paused at ``send``.
 
@@ -147,7 +170,11 @@ def handoff(session_id: str, request: Request) -> schemas.HandoffResponse:
         raise HTTPException(status_code=500, detail="内部エラーが発生しました") from exc
 
 
-@router.post("/handoff/draft", response_model=schemas.AckResponse)
+@router.post(
+    "/handoff/draft",
+    response_model=schemas.AckResponse,
+    dependencies=[Depends(require_principal)],
+)
 def handoff_draft(req: schemas.HandoffDraftRequest, request: Request) -> schemas.AckResponse:
     """Persist the asker's edited hand-off draft (画面3) so the responder (画面4)
     reads the edited text (#174).
@@ -170,9 +197,17 @@ def handoff_draft(req: schemas.HandoffDraftRequest, request: Request) -> schemas
     return schemas.AckResponse(session_id=req.session_id, status="draft_saved")
 
 
-@router.get("/dashboard", response_model=schemas.DashboardResponse)
+@router.get(
+    "/dashboard",
+    response_model=schemas.DashboardResponse,
+    dependencies=[Depends(require_admin)],
+)
 def dashboard(request: Request) -> schemas.DashboardResponse:
-    """Aggregate load / topic mix / recent activity for the dashboard."""
+    """Aggregate load / topic mix / recent activity for the dashboard.
+
+    Admin-only (#241): the dashboard aggregates everyone's activity, so it is
+    gated behind ``require_admin``.
+    """
 
     with _generic_500("GET /dashboard"):
         with _service(request).session_factory() as session:
@@ -180,13 +215,17 @@ def dashboard(request: Request) -> schemas.DashboardResponse:
         return schemas.DashboardResponse(**data)
 
 
-@router.get("/employees", response_model=schemas.EmployeeListResponse)
+@router.get(
+    "/employees",
+    response_model=schemas.EmployeeListResponse,
+    dependencies=[Depends(require_admin)],
+)
 def employees(request: Request) -> schemas.EmployeeListResponse:
-    """List employees for the current-user switcher (id / name / dept).
+    """List employees for the ADMIN's demo impersonation switcher (id / name / dept).
 
-    The prototype has no auth, so the frontend picks the acting user from this
-    directory (used as ``asker_id`` and as the responder id for the inbox). ids
-    are the external ``"E###"`` form to match the rest of the contract.
+    Admin-only (#241): this directory is what lets the admin act as any employee,
+    so it is gated behind ``require_admin``. Regular users never call it. ids are
+    the external ``"E###"`` form to match the rest of the contract.
     """
 
     with _generic_500("GET /employees"):
@@ -205,12 +244,17 @@ def employees(request: Request) -> schemas.EmployeeListResponse:
 
 
 @router.get("/inbox", response_model=schemas.InboxResponse)
-def inbox(request: Request, responder_id: str = Query(min_length=1)) -> schemas.InboxResponse:
+def inbox(
+    request: Request,
+    responder_id: str = Query(min_length=1),
+    principal: Principal = Depends(require_principal),
+) -> schemas.InboxResponse:
     """Questions currently awaiting ``responder_id`` (the responder inbox, #123).
 
-    ``responder_id`` accepts an int or the ``"E###"`` form (422 otherwise). Each
-    item deep-links to ``/answer/{session_id}``; seeded history (no session) is
-    excluded — there is no live handoff to open.
+    ``responder_id`` accepts an int or the ``"E###"`` form (422 otherwise). A
+    non-admin may only read their own inbox; admin may read anyone's (demo).
+    Each item deep-links to ``/answer/{session_id}``; seeded history (no session)
+    is excluded — there is no live handoff to open.
     """
 
     with _generic_500("GET /inbox"):
@@ -220,6 +264,7 @@ def inbox(request: Request, responder_id: str = Query(min_length=1)) -> schemas.
             raise HTTPException(
                 status_code=422, detail="responder_id must be an int or 'E###'"
             ) from exc
+        require_can_act_as(principal, rid)
 
         with _service(request).session_factory() as session:
             rows = pending_handoffs_for_responder(session, rid)
@@ -244,11 +289,14 @@ def inbox(request: Request, responder_id: str = Query(min_length=1)) -> schemas.
 
 @router.get("/questions", response_model=schemas.RecentQuestionsResponse)
 def questions(
-    request: Request, asker_id: str = Query(min_length=1)
+    request: Request,
+    asker_id: str = Query(min_length=1),
+    principal: Principal = Depends(require_principal),
 ) -> schemas.RecentQuestionsResponse:
     """The asker's own recent questions with resolution state (画面1 の一覧, #125).
 
-    ``asker_id`` accepts an int or the ``"E###"`` form (422 otherwise).
+    ``asker_id`` accepts an int or the ``"E###"`` form (422 otherwise). A non-admin
+    may only read their own questions; admin may read anyone's (demo).
     """
 
     with _generic_500("GET /questions"):
@@ -258,6 +306,7 @@ def questions(
             raise HTTPException(
                 status_code=422, detail="asker_id must be an int or 'E###'"
             ) from exc
+        require_can_act_as(principal, aid)
 
         with _service(request).session_factory() as session:
             rows = recent_questions_for_asker(session, aid)
@@ -266,7 +315,11 @@ def questions(
         )
 
 
-@router.get("/documents/{doc_id}", response_model=schemas.DocumentDetail)
+@router.get(
+    "/documents/{doc_id}",
+    response_model=schemas.DocumentDetail,
+    dependencies=[Depends(require_principal)],
+)
 def document_detail(doc_id: str, request: Request) -> schemas.DocumentDetail:
     """Full content of one internal document, for the document viewer (#143).
 

@@ -64,6 +64,10 @@ class Employee(Base):
     role: Mapped[str | None] = mapped_column(String(255))
     hire_date: Mapped[dt.date | None] = mapped_column(Date)
     department_history: Mapped[list | None] = mapped_column(JSONB)
+    # PBKDF2-encoded login password (#241). Nullable so a pre-auth DB row (or a
+    # fixture that omits it) is valid; a NULL/blank hash simply never verifies, so
+    # such an account cannot log in until seeded. Never exposed via EmployeeDTO.
+    password_hash: Mapped[str | None] = mapped_column(String(255))
 
 
 class EmployeeProfile(Base):
