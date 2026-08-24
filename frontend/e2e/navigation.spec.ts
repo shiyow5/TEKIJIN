@@ -119,6 +119,46 @@ test.describe("navigation", () => {
     expect(navRight).toBeLessThanOrEqual((viewportWidth - 1440) / 2 + 1440 + 1);
   });
 
+  test("mobile width collapses the nav behind a hamburger (#254)", async ({ page }) => {
+    await mockChrome(page);
+    await page.setViewportSize({ width: 375, height: 780 });
+    await page.goto("/questions");
+
+    // The desktop nav is display:none below `md`, so its links are not reachable.
+    const nav = page.getByRole("navigation", { name: "メインナビゲーション" });
+    await expect(nav).toBeHidden();
+
+    const toggle = page.getByRole("button", { name: "メニューを開く" });
+    await expect(toggle).toBeVisible();
+    await toggle.click();
+
+    const menu = page.locator("#mobile-nav-menu");
+    await expect(menu.getByRole("link", { name: "受信箱" })).toBeVisible();
+    await menu.getByRole("link", { name: "受信箱" }).click();
+    await page.waitForURL(/\/inbox$/);
+    // Navigating closes it.
+    await expect(page.locator("#mobile-nav-menu")).toHaveCount(0);
+
+    // Nothing overflows the viewport at phone width (the崩れ #254 reports).
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow).toBeLessThanOrEqual(0);
+  });
+
+  test("desktop width keeps the inline nav and no hamburger (#254)", async ({ page }) => {
+    await mockChrome(page);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto("/questions");
+
+    await expect(
+      page.getByRole("navigation", { name: "メインナビゲーション" }).getByRole("link", {
+        name: "受信箱",
+      }),
+    ).toBeVisible();
+    await expect(page.getByRole("button", { name: /メニューを(開く|閉じる)/ })).toBeHidden();
+  });
+
   test("switching the current user returns to the hub (#210)", async ({ page }) => {
     await mockChrome(page);
     // The inbox is the screen the bug was reported on: it re-fetches for the new
