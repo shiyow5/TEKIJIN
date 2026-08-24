@@ -163,6 +163,8 @@ describe("AppHeader", () => {
     const nav = screen.getByRole("navigation", { name: "メインナビゲーション" });
     expect(within(nav).queryByRole("link", { name: "ダッシュボード" })).not.toBeInTheDocument();
     expect(within(nav).getByRole("link", { name: "質問する" })).toBeInTheDocument();
+    // 質問履歴 (#208) is available to everyone, not admin-gated.
+    expect(within(nav).getByRole("link", { name: "質問履歴" })).toHaveAttribute("href", "/history");
     expect(screen.getByText("山田 太郎")).toBeInTheDocument();
   });
 

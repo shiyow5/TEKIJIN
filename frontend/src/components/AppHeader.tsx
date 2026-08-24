@@ -25,6 +25,7 @@ import { useEffect, useRef, useState } from "react";
 
 const NAV = [
   { href: "/questions", label: "質問する", adminOnly: false },
+  { href: "/history", label: "質問履歴", adminOnly: false },
   { href: "/inbox", label: "受信箱", adminOnly: false },
   { href: "/dashboard", label: "ダッシュボード", adminOnly: true },
 ] as const;

@@ -257,14 +257,17 @@ export async function getInbox(
 /**
  * GET /questions — the asker's own recent questions with resolution state
  * (画面1 の "最近のあなたの質問"). `askerId` is the external "E###" form.
- * Returns the unwrapped items array, newest first.
+ * `limit` caps how many newest-first questions come back (default 5 for the panel;
+ * the history screen #208 passes a larger value). Returns the unwrapped items array.
  */
 export async function getRecentQuestions(
   askerId: string,
-  options: RequestOptions = {},
+  options: RequestOptions & { limit?: number } = {},
 ): Promise<RecentQuestionItem[]> {
-  const query = `?asker_id=${encodeURIComponent(askerId)}`;
-  const body = await getJson<RecentQuestionsResponse>(`/questions${query}`, options);
+  const { limit, ...requestOptions } = options;
+  const limitQuery = limit === undefined ? "" : `&limit=${encodeURIComponent(limit)}`;
+  const query = `?asker_id=${encodeURIComponent(askerId)}${limitQuery}`;
+  const body = await getJson<RecentQuestionsResponse>(`/questions${query}`, requestOptions);
   return body.items;
 }
 
