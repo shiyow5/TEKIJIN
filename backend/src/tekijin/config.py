@@ -66,6 +66,19 @@ class Settings(BaseSettings):
     # fallback on timeout is a separate, credential-gated follow-up.
     llm_timeout_seconds: float | None = 60.0
 
+    # Sampling temperature for every LLM call (C1/C2/C7). Default 0.0 so the
+    # structured C1/C2 outputs are deterministic, as model-definition.md specifies
+    # ("C1・C2 は低温"). ChatOpenAI otherwise sends its own default (0.7), which
+    # made C1 non-deterministic and contributed to routing noise (#116 原因3).
+    llm_temperature: float = 0.0
+
+    # Hard cap on output tokens per LLM call (C1/C2/C7). Bounds a runaway
+    # generation so C1 returns a short (possibly truncated) result instead of
+    # burning the whole context and failing with ``finish_reason=length`` (#116
+    # 原因2). 1024 comfortably covers the structured C1/C2 tool calls and a C7
+    # hand-off draft. ``None`` sends no limit (the server default applies).
+    llm_max_tokens: int | None = 1024
+
     # Client-side retries per LLM call. Default 0 so ``llm_timeout_seconds`` is a
     # HARD per-request bound: ChatOpenAI defaults to 2 retries and retries on a
     # timeout, which would make the real worst-case stall ``timeout × 3`` (~185s)
