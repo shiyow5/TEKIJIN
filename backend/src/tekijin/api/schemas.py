@@ -144,6 +144,20 @@ class HandoffDraftRequest(BaseModel):
         return trimmed
 
 
+class HandoffSelectRequest(BaseModel):
+    """Asker picks a different (of the currently shown) candidate as the
+    hand-off target, reordering it to primary and regenerating the draft for
+    them (#200/#A1)."""
+
+    session_id: str = Field(pattern=_SESSION_ID_PATTERN)
+    person_id: int
+
+    @field_validator("person_id", mode="before")
+    @classmethod
+    def _accept_e_prefixed_person_id(cls, value: object) -> int:
+        return _coerce_asker_id(value)
+
+
 # --------------------------------------------------------------------------- #
 # responses
 # --------------------------------------------------------------------------- #
@@ -227,6 +241,15 @@ class HandoffResponse(BaseModel):
     # on POST /answer so a stale outcome (after a reroute / from a competing tab)
     # is rejected instead of binding to a new candidate (#94). None if no primary.
     recommendation_id: int | None = None
+
+
+class HandoffSelectResponse(BaseModel):
+    """The new primary responder + regenerated draft after a reselect (#200/#A1/#204)."""
+
+    session_id: str
+    responder: Recommendation
+    draft: str
+    recommendation_id: int
 
 
 # --------------------------------------------------------------------------- #

@@ -44,6 +44,26 @@ def _top_by_score(items: Sequence[Mapping[str, Any]]) -> Mapping[str, Any] | Non
     return max(items, key=lambda item: float(item.get("score", 0.0)))
 
 
+def draft_context(state: Mapping[str, Any]) -> tuple[list[str], dict[str, str]]:
+    """``(missing, known_values)`` for drafting a hand-off to a given responder.
+
+    Factored out of :meth:`AgentNodes.c7_draft` so the ``/handoff/select``
+    reselect path (#A1) can regenerate a draft for a different candidate using
+    the exact same slot logic, without duplicating it.
+    """
+
+    question_type = state.get("question_type", _QUESTION_TYPE_DEFAULT)
+    products = state.get("products") or []
+    known_values = collect_known_values(state["question"], question_type, products)
+    # A slot must never appear as both a filled premise and an open gap: drop
+    # from `missing` anything we now surface under known_values, so the draft
+    # cannot show the same slot as "確認済み" and "補足いただきたい" at once
+    # (defensive dedup — C2 already recomputes `missing` on the re-understood
+    # question via the ask->c1_intent edge, so they normally agree) (#175).
+    missing = [slot for slot in (state.get("missing") or []) if slot not in known_values]
+    return missing, known_values
+
+
 class AgentNodes:
     """Bundles the graph's node implementations around their dependencies."""
 
@@ -276,15 +296,7 @@ class AgentNodes:
     # -- C7: draft the request (LLM stub) ---------------------------------
     def c7_draft(self, state: AgentState) -> AgentState:
         top = (state.get("recommendations") or [])[0]
-        question_type = state.get("question_type", _QUESTION_TYPE_DEFAULT)
-        products = state.get("products") or []
-        known_values = collect_known_values(state["question"], question_type, products)
-        # A slot must never appear as both a filled premise and an open gap: drop
-        # from `missing` anything we now surface under known_values, so the draft
-        # cannot show the same slot as "確認済み" and "補足いただきたい" at once
-        # (defensive dedup — C2 already recomputes `missing` on the re-understood
-        # question via the ask->c1_intent edge, so they normally agree) (#175).
-        missing = [slot for slot in (state.get("missing") or []) if slot not in known_values]
+        missing, known_values = draft_context(state)
         draft = self._draft.draft(
             state["question"],
             top,

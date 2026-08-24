@@ -3,17 +3,18 @@
 /**
  * Main-line result (route === "person"): the person is the answer, so this
  * leads with the candidate cards and a sendable draft. Up to three candidates
- * are shown; the top pick is the recipient. "この内容で依頼する" persists the
- * asker's (possibly edited) draft to the pending hand-off (POST /handoff/draft),
- * so the responder reads the edited text — it is a real send, not a UI-only
- * transition (#174). Recipient reselection is intentionally not offered: the
- * hand-off targets the top pick, so a reselect control the send does not honour
- * would misdirect (#174 / recipient routing is #76).
+ * are shown, all with full reason detail so they can be compared (#204/#A2);
+ * the asker may pick any of them as the recipient, not just the top pick
+ * (#200/#A1) — picking one calls `POST /handoff/select`, which reorders the
+ * durable hand-off target and regenerates the draft for that person (#204/#C4).
+ * "この内容で依頼する" then persists the (possibly further-edited) draft text
+ * to the pending hand-off (POST /handoff/draft), so the responder reads the
+ * edited text — it is a real send, not a UI-only transition (#174).
  */
 
 import { CandidateCard } from "@/components/result/CandidateCard";
 import { DraftEditor } from "@/components/result/DraftEditor";
-import { updateHandoffDraft } from "@/lib/api-client";
+import { selectHandoffCandidate, updateHandoffDraft } from "@/lib/api-client";
 import type { Recommendation } from "@/lib/api-types";
 import { relativeFitPercents } from "@/lib/fit";
 import { useEffect, useRef, useState } from "react";
@@ -28,6 +29,7 @@ export interface PersonRouteViewProps {
 
 const MAX_CANDIDATES = 3;
 const SEND_ERROR = "送信に失敗しました。時間をおいて、もう一度お試しください。";
+const SELECT_ERROR = "候補の切り替えに失敗しました。時間をおいて、もう一度お試しください。";
 
 export function PersonRouteView({
   recommendations,
@@ -36,13 +38,22 @@ export function PersonRouteView({
   sessionId,
 }: PersonRouteViewProps) {
   const candidates = recommendations.slice(0, MAX_CANDIDATES);
-  const topCandidate = candidates[0];
   // Relative fit % across the shown candidates so the gauges differentiate them
   // instead of all pinning to the same saturated confidence level (#222).
   const fitPercents = relativeFitPercents(candidates);
+  const [selectedPersonId, setSelectedPersonId] = useState(candidates[0]?.person_id ?? null);
+  const [localDraft, setLocalDraft] = useState(draft);
+  const [selecting, setSelecting] = useState(false);
   const [sending, setSending] = useState(false);
   const [sentTo, setSentTo] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // A later-arriving `draft` SSE event (recommend can land before draft) updates
+  // the baseline shown in the editor; a reselect's response (see handleSelect)
+  // overrides this locally without waiting on a new SSE event.
+  useEffect(() => {
+    setLocalDraft(draft);
+  }, [draft]);
 
   // A decline→reroute remounts this view (keyed by the top candidate in
   // ResultScreen) while a confirm POST may still be in flight. Drop the post-await
@@ -55,6 +66,25 @@ export function PersonRouteView({
     };
   }, []);
 
+  async function handleSelect(personId: string) {
+    if (selecting || personId === selectedPersonId || !sessionId) return;
+    setSelecting(true);
+    setError(null);
+    try {
+      const result = await selectHandoffCandidate({ session_id: sessionId, person_id: personId });
+      if (mounted.current) {
+        setSelectedPersonId(personId);
+        setLocalDraft(result.draft);
+      }
+    } catch {
+      // 404 = the hand-off was already answered/closed; 409 = a clarification is
+      // owed; 422 = the candidate is no longer among the shown recommendations.
+      if (mounted.current) setError(SELECT_ERROR);
+    } finally {
+      if (mounted.current) setSelecting(false);
+    }
+  }
+
   async function handleSend(text: string) {
     if (!sessionId) {
       setError(SEND_ERROR);
@@ -64,7 +94,8 @@ export function PersonRouteView({
     setError(null);
     try {
       await updateHandoffDraft({ session_id: sessionId, draft: text });
-      if (mounted.current) setSentTo(topCandidate?.name ?? "ご担当者");
+      const selected = candidates.find((c) => c.person_id === selectedPersonId);
+      if (mounted.current) setSentTo(selected?.name ?? candidates[0]?.name ?? "ご担当者");
     } catch {
       // 404 = the hand-off was already answered/closed; 409 = a clarification is
       // owed; either way the send can't land, so surface a retryable error.
@@ -109,8 +140,9 @@ export function PersonRouteView({
               key={candidate.person_id}
               candidate={candidate}
               rank={index + 1}
-              expanded={index === 0}
-              selected={index === 0}
+              expanded
+              selected={candidate.person_id === selectedPersonId}
+              onSelect={sessionId ? handleSelect : undefined}
               fitPercent={fitPercents[index]}
             />
           ))}
@@ -133,7 +165,12 @@ export function PersonRouteView({
         </p>
       ) : null}
 
-      <DraftEditor initialDraft={draft} disabled={sending} onSend={handleSend} />
+      <DraftEditor
+        key={selectedPersonId}
+        initialDraft={localDraft}
+        disabled={sending || selecting}
+        onSend={handleSend}
+      />
     </section>
   );
 }

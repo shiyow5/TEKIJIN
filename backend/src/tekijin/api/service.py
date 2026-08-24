@@ -47,6 +47,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sse_starlette import ServerSentEvent
 
 from tekijin.agent.graph import build_agent
+from tekijin.agent.nodes import draft_context
 from tekijin.agent.protocols import DraftModel, IntentModel, SufficiencyModel
 from tekijin.api import schemas
 from tekijin.api.events import (
@@ -67,6 +68,7 @@ from tekijin.data.writes import (
     persist_question,
     recommendation_outcome,
     record_events,
+    reorder_recommendation_ranks,
     set_recommendation_outcome,
     update_question_route,
     update_question_topics,
@@ -587,6 +589,84 @@ class AgentService:
                 graph.update_state(config, {"draft": text})
             finally:
                 session.close()
+
+    def select_handoff_candidate(
+        self, session_id: str, person_id: int
+    ) -> schemas.HandoffSelectResponse:
+        """Reselect the hand-off target among the currently shown candidates
+        and regenerate the draft for them (#200/#A1/#204).
+
+        Validation mirrors :meth:`save_handoff_draft`: the run must be paused at
+        ``send`` and not already answered. Unlike a draft-only edit, this also
+        reorders ``recommendations`` / ``recommendation_ids`` /
+        ``primary_recommendation_id`` in the durable checkpoint (the selected
+        candidate becomes primary), and syncs the DB ``Recommendation.rank`` so
+        ``/inbox`` (SQL-only) reflects the new primary responder.
+        """
+
+        with self._lock(session_id):
+            session = self._session_factory()
+            try:
+                graph = self._graph(session)
+                config = self._config(session_id)
+                next_nodes = tuple(graph.get_state(config).next)
+                if not next_nodes:
+                    raise HandoffNotFound("no responder handoff for this session")
+                if next_nodes[0] != "send":
+                    raise SessionConflict("session is not awaiting a responder outcome")
+                ctx = self._reg_get(session_id)
+                if ctx is not None and ctx.pending is not None:
+                    raise HandoffNotFound("this handoff has already been answered")
+
+                values = graph.get_state(config).values
+                recs = list(values.get("recommendations") or [])
+                rec_ids = list(values.get("recommendation_ids") or [])
+                index = next((i for i, r in enumerate(recs) if r["person_id"] == person_id), None)
+                if index is None:
+                    raise SessionInvalid("person_id is not among the current recommendations")
+
+                selected = recs.pop(index)
+                reordered = [selected, *recs]
+                if len(rec_ids) == len(reordered):
+                    sid = rec_ids.pop(index)
+                    new_ids = [sid, *rec_ids]
+                else:  # defensive: ids/recommendations out of sync (should not happen)
+                    new_ids = rec_ids
+
+                missing, known_values = draft_context(values)
+                new_draft = self._draft.draft(
+                    values["question"],
+                    selected,
+                    values.get("asker"),
+                    missing,
+                    situation=values.get("situation"),
+                    topics=values.get("topics") or [],
+                    known_values=known_values,
+                )
+                graph.update_state(
+                    config,
+                    {
+                        "recommendations": reordered,
+                        "recommendation_ids": new_ids,
+                        "primary_recommendation_id": new_ids[0] if new_ids else None,
+                        "draft": new_draft,
+                    },
+                )
+            finally:
+                session.close()
+
+            if new_ids:
+                with session_scope(self._session_factory) as write_session:
+                    reorder_recommendation_ranks(write_session, new_ids)
+
+        return schemas.HandoffSelectResponse(
+            session_id=session_id,
+            responder=schemas.Recommendation(
+                **{**selected, "person_id": schemas.format_employee_id(selected["person_id"])}
+            ),
+            draft=new_draft,
+            recommendation_id=(new_ids[0] if new_ids else 0),
+        )
 
     # -- /events : stream ------------------------------------------------- #
     def is_streamable(self, session_id: str) -> bool:

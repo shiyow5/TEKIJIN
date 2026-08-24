@@ -169,6 +169,26 @@ def insert_shown_recommendations(
     return ids
 
 
+def reorder_recommendation_ranks(session: Session, ordered_ids: list[int]) -> None:
+    """Set ``rank`` (1-based) on these ``Recommendation`` rows to match ``ordered_ids``.
+
+    Used when the asker reselects a different shown candidate as the hand-off
+    target (#200/#A1): the durable checkpoint's ``recommendations`` order is the
+    source of truth for the *graph*, but ``GET /inbox`` reads the DB ``rank``
+    column directly (SQL-only, never consults the checkpoint) — so a reselect
+    must also sync this projection, or the newly-selected responder's inbox will
+    not show the pending handoff. ``ordered_ids`` are the specific row ids from
+    the current checkpoint's ``recommendation_ids`` (not a question-wide query),
+    so a decline+reroute's earlier rank==1 rows for the same question are never
+    touched by this.
+    """
+
+    for position, rec_id in enumerate(ordered_ids, start=1):
+        session.execute(
+            update(Recommendation).where(Recommendation.id == rec_id).values(rank=position)
+        )
+
+
 def latest_primary_recommendation(session: Session, question_id: str) -> int | None:
     """The id of the most recent rank-1 recommendation for a question, if any.
 
