@@ -9,8 +9,10 @@ vi.mock("@/components/CurrentUserProvider", () => ({
 }));
 
 const pathnameMock = vi.fn<() => string>();
+const pushMock = vi.fn();
 vi.mock("next/navigation", () => ({
   usePathname: () => pathnameMock(),
+  useRouter: () => ({ push: pushMock }),
 }));
 
 const EMPLOYEES = [
@@ -35,6 +37,7 @@ beforeEach(() => {
 afterEach(() => {
   useCurrentUserMock.mockReset();
   pathnameMock.mockReset();
+  pushMock.mockReset();
 });
 
 describe("AppHeader", () => {
@@ -97,6 +100,24 @@ describe("AppHeader", () => {
       target: { value: "E002" },
     });
     expect(setCurrentUserId).toHaveBeenCalledWith("E002");
+  });
+
+  it("navigates to home when a different user is selected (#210)", () => {
+    useCurrentUserMock.mockReturnValue({
+      employees: EMPLOYEES,
+      currentUserId: "E001",
+      currentUser: EMPLOYEES[0],
+      setCurrentUserId: vi.fn(),
+      loading: false,
+      error: false,
+      reload: () => {},
+    });
+    pathnameMock.mockReturnValue("/inbox");
+    render(<AppHeader />);
+    fireEvent.change(screen.getByRole("combobox", { name: /利用者を切替/ }), {
+      target: { value: "E002" },
+    });
+    expect(pushMock).toHaveBeenCalledWith("/");
   });
 
   it("shows a disabled placeholder while the directory is loading", () => {
