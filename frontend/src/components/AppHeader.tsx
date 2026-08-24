@@ -78,6 +78,7 @@ export function AppHeader() {
       <div className="flex items-center gap-sm">
         {/* Placeholder for #176's notification surface — icon only for now (#223). */}
         <span
+          role="img"
           aria-label="通知"
           title="通知（準備中）"
           className="flex h-8 w-8 items-center justify-center rounded-full text-on-surface-variant"
