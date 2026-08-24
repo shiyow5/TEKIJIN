@@ -361,6 +361,65 @@ def test_greeting_with_topic_is_technical_consult() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# C1 intent topic mediation via retrieved context (#69)
+# --------------------------------------------------------------------------- #
+def test_intent_accepts_context_and_is_backward_compatible() -> None:
+    # The new keyword-only `context` defaults to None -> identical to today.
+    model = KeywordIntentModel()
+    without = model.analyze("VPNの拠点間接続の技術相談です", None)
+    with_none = model.analyze("VPNの拠点間接続の技術相談です", None, context=None)
+    assert without.topics == with_none.topics
+    assert without.confidence == with_none.confidence
+
+
+def test_context_fragments_surface_a_topic_the_question_missed() -> None:
+    # The question words the need without a canonical topic keyword, but a
+    # retrieved fragment names one -> mediation adds it (#69: vocabulary bridge).
+    model = KeywordIntentModel()
+    question = "取引先とのやり取りの履歴をまとめて残したい"
+    assert model.analyze(question, None).topics == []  # no keyword in the question
+    context = ["過去のQ&A: SFAで顧客管理の履歴を残す方法 / CRMに商談履歴を蓄積します"]
+    result = model.analyze(question, None, context=context)
+    assert "CRM・営業支援" in result.topics
+
+
+def test_context_does_not_move_question_type_or_confidence() -> None:
+    # #275 review (HIGH): context ONLY adds to the emitted topics that feed C6.
+    # question_type and confidence stay driven by the user's actual question, so a
+    # merely topic-adjacent retrieval hit cannot force a needless C2 follow-up or
+    # lift confidence past the clarify threshold for the wrong reason.
+    model = KeywordIntentModel()
+    question = "取引先とのやり取りの履歴をまとめて残したい"  # no question-side topic/product
+    base = model.analyze(question, None)
+    mediated = model.analyze(question, None, context=["CRMで商談履歴を蓄積します"])
+    assert "CRM・営業支援" in mediated.topics  # topics ARE mediated
+    assert mediated.question_type == base.question_type  # but type is not
+    assert mediated.confidence == base.confidence  # and confidence is not
+
+
+def test_context_never_pulls_an_out_of_scope_question_back_in() -> None:
+    # Off-topic input stays out_of_scope even if a fragment mentions a topic —
+    # context is reference evidence, not the user's ask.
+    model = KeywordIntentModel()
+    result = model.analyze("今日の天気を教えて", None, context=["CRMの営業支援について"])
+    assert result.out_of_scope is True
+    assert result.topics == []
+
+
+def test_context_derived_topics_keep_canonical_order() -> None:
+    # Topics stay in the canonical vocabulary order regardless of whether they
+    # came from the question or the context (deterministic output).
+    model = KeywordIntentModel()
+    # Question yields セキュリティ; context yields CRM・営業支援 (earlier in the table).
+    result = model.analyze("UTMのセキュリティ相談", None, context=["CRMの顧客管理について"])
+    assert "CRM・営業支援" in result.topics and "セキュリティ" in result.topics
+    from tekijin.agent.stubs import TOPIC_KEYWORDS
+
+    order = list(TOPIC_KEYWORDS)
+    assert result.topics == sorted(result.topics, key=order.index)
+
+
+# --------------------------------------------------------------------------- #
 # C2 sufficiency stub
 # --------------------------------------------------------------------------- #
 def test_sufficiency_asks_once_for_missing_slots() -> None:

@@ -10,6 +10,7 @@ is a pure function of its inputs, so runs are reproducible.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from typing import Any
 
 from tekijin.agent.protocols import IntentResult, SufficiencyResult
@@ -157,23 +158,49 @@ def _mention_index(lowered_question: str, product: str) -> int:
 class KeywordIntentModel:
     """C1 stub: extract topics/products and classify by keyword tables."""
 
-    def analyze(self, question: str, asker: dict[str, Any] | None) -> IntentResult:
+    def analyze(
+        self,
+        question: str,
+        asker: dict[str, Any] | None,
+        *,
+        context: Sequence[str] | None = None,
+    ) -> IntentResult:
         out_of_scope = _contains_any(question, OUT_OF_SCOPE_KEYWORDS)
-        topics = [t for t, kws in TOPIC_KEYWORDS.items() if _contains_any(question, kws)]
+        question_topics = [t for t, kws in TOPIC_KEYWORDS.items() if _contains_any(question, kws)]
+        # #69 topic mediation: a retrieved fragment that names a canonical topic
+        # keyword surfaces that topic even when the QUESTION worded it differently
+        # (the #116 vocabulary-mismatch bridge). Context ONLY adds to the emitted
+        # `topics` (what feeds C6 scoring); it never pulls an off-topic question
+        # back in-scope, and — deliberately — does NOT move question_type or
+        # confidence, which stay driven by the user's actual question. Otherwise a
+        # merely topic-adjacent retrieval hit could force a needless C2 follow-up
+        # (question_type→技術相談 flips required slots) or lift confidence past the
+        # clarify threshold for the wrong reason (code-review #275).
+        context_topics: list[str] = []
+        if context and not out_of_scope:
+            context_text = " ".join(context)
+            context_topics = [
+                t for t, kws in TOPIC_KEYWORDS.items() if _contains_any(context_text, kws)
+            ]
         products = [p for p in PRODUCT_KEYWORDS if _keyword_matches(p, question)]
-        question_type = self._classify(question, topics, products, out_of_scope)
+        # question_type / confidence: question-derived topics only (see above).
+        question_type = self._classify(question, question_topics, products, out_of_scope)
 
         if out_of_scope:
             confidence = 0.9  # confident it is off-topic
         else:
             confidence = 0.4
-            if topics:
+            if question_topics:
                 confidence += 0.25
             if products:
                 confidence += 0.15
             if question_type in ("見積", "技術相談", "事務手続き"):
                 confidence += 0.1
         confidence = round(min(confidence, 1.0), 2)
+
+        # Emit the mediated union in canonical vocabulary order (source-agnostic).
+        merged = set(question_topics) | set(context_topics)
+        topics = [t for t in TOPIC_KEYWORDS if t in merged]
 
         return IntentResult(
             topics=topics,
