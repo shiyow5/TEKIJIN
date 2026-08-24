@@ -125,6 +125,25 @@ describe("HistoryScreen", () => {
     expect(screen.getByText("社内Wi-Fiの申請方法")).toBeInTheDocument();
   });
 
+  it("keeps a pending question and shows a retry when self-resolve fails (#159)", async () => {
+    useCurrentUserMock.mockReturnValue(asUser("E001"));
+    getRecentQuestionsMock.mockResolvedValue(ITEMS);
+    resolveQuestionMock.mockRejectedValueOnce(new Error("boom"));
+    render(<HistoryScreen />);
+
+    await waitFor(() => expect(screen.getByText("社内Wi-Fiの申請方法")).toBeInTheDocument());
+    fireEvent.click(
+      screen.getByRole("button", { name: "「社内Wi-Fiの申請方法」を自分で解決済みにする" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "解決済みにする" }));
+
+    await waitFor(() => expect(resolveQuestionMock).toHaveBeenCalledWith("q2"));
+    // The row stays pending and offers a retry (visible label), rather than being lost.
+    await waitFor(() => expect(screen.getByText("再試行")).toBeInTheDocument());
+    expect(screen.getByText("取り次ぎ先を調整中")).toBeInTheDocument();
+    expect(screen.queryByText("自分で解決")).not.toBeInTheDocument();
+  });
+
   it("shows an empty state when there is no history", async () => {
     useCurrentUserMock.mockReturnValue(asUser("E002"));
     getRecentQuestionsMock.mockResolvedValue([]);

@@ -2281,15 +2281,57 @@ def test_resolve_missing_question_returns_404(seed_counts, engine, fake_embedder
 def test_self_resolution_counts_in_dashboard_rate(seed_counts, engine, fake_embedder) -> None:
     client = _client(engine, fake_embedder)
     _insert_question(engine, "api_res4", 10)
-    _set_route(engine, "api_res4", "person")  # a routed, person-bound question
+    _set_route(engine, "api_res4", "send")  # a routed, person-bound question (real C5 route)
     with get_sessionmaker(engine)() as s:
         before = dashboard_summary(s)["self_resolution_rate"]
     client.post("/questions/api_res4/resolve", headers=_user_headers(10))
     with get_sessionmaker(engine)() as s:
         after = dashboard_summary(s)["self_resolution_rate"]
-    # The explicit self-resolution now counts in the numerator even though the
-    # route was "person" (the asker solved it without actually asking anyone).
+    # The explicit self-resolution counts in the numerator: the question was routed
+    # to a person but the asker solved it WITHOUT anyone actually answering.
     assert after > before
+
+
+def test_person_answered_question_is_not_counted_self_even_if_marked(
+    seed_counts, engine, fake_embedder
+) -> None:
+    """A question a person actually resolved must never count as self-resolved, even
+    if the asker also clicked "自分で解決した" (race: self-resolve while pending, then a
+    responder accepts). The dashboard mirrors history's person>self precedence (#159
+    review HIGH)."""
+    from sqlalchemy import update
+
+    client = _client(engine, fake_embedder)
+    _insert_question(engine, "api_res5", 10)
+    _set_route(engine, "api_res5", "send")
+    # The asker self-resolves while the hand-off is still pending.
+    client.post("/questions/api_res5/resolve", headers=_user_headers(10))
+    with get_sessionmaker(engine)() as s:
+        after_self = dashboard_summary(s)["self_resolution_rate"]
+    # A responder's recommendation is THEN accepted (a real person resolution).
+    with get_sessionmaker(engine)() as s:
+        rec = Recommendation(
+            question_id="api_res5", employee_id=1, rank=1, score=0.5, outcome="accepted"
+        )
+        s.add(rec)
+        s.commit()
+    with get_sessionmaker(engine)() as s:
+        after_person = dashboard_summary(s)["self_resolution_rate"]
+        # The self-mark row remains, but the metric no longer counts it as self.
+        q = s.query(Question).filter(Question.id == "api_res5").first()
+        assert q.resolution_kind == "self"  # the label persists (history shows person)
+    assert after_person < after_self  # the accepted person-resolution removed it from self
+
+    # And guarding the write path: a question ALREADY person-resolved (resolved_at
+    # set) cannot be re-labelled self.
+    _insert_question(engine, "api_res6", 10)
+    with get_sessionmaker(engine)() as s:
+        s.execute(update(Question).where(Question.id == "api_res6").values(resolved_at=NOW))
+        s.commit()
+    client.post("/questions/api_res6/resolve", headers=_user_headers(10))
+    with get_sessionmaker(engine)() as s:
+        q = s.query(Question).filter(Question.id == "api_res6").first()
+        assert q.resolution_kind is None  # guard held: not re-labelled self
 
 
 # --------------------------------------------------------------------------- #

@@ -148,16 +148,22 @@ def mark_question_resolved(session: Session, question_id: str, resolved_at: dt.d
 def mark_self_resolved(session: Session, question_id: str, now: dt.datetime) -> None:
     """Record that the asker solved the question WITHOUT a live hand-off (#159).
 
-    Sets ``resolution_kind="self"`` and stamps ``resolved_at`` (keeping any existing
-    one), guarded on ``resolution_kind IS NULL`` so it is first-wins and idempotent —
-    a question already marked (or one a responder later accepts) is not overwritten.
-    Drives the dashboard's self-resolution rate as a genuine "人を介さず満足" signal,
-    not just a route-based proxy."""
+    Sets ``resolution_kind="self"`` and stamps ``resolved_at``, guarded on BOTH
+    ``resolution_kind IS NULL`` AND ``resolved_at IS NULL`` so it is genuinely
+    first-wins across both resolution paths: a question a responder already resolved
+    (``mark_question_resolved`` stamps ``resolved_at`` on an accept, but not
+    ``resolution_kind``) is NOT re-labelled self. Idempotent. Drives the dashboard's
+    self-resolution rate as a genuine "人を介さず満足" signal, not a route-only proxy.
+    """
 
     session.execute(
         update(Question)
-        .where(Question.id == question_id, Question.resolution_kind.is_(None))
-        .values(resolution_kind="self", resolved_at=func.coalesce(Question.resolved_at, now))
+        .where(
+            Question.id == question_id,
+            Question.resolution_kind.is_(None),
+            Question.resolved_at.is_(None),
+        )
+        .values(resolution_kind="self", resolved_at=now)
     )
 
 

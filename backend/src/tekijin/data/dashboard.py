@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, not_, or_, select
 from sqlalchemy.orm import Session
 
 from tekijin.data.feedback import VALID_STAGES, feedback_counts_by_stage
@@ -124,8 +124,22 @@ def _self_resolution_rate(session: Session) -> float:
     )
     if not routed:
         return 0.0
+    # A question actually resolved by a PERSON — an accepted rank-1 recommendation,
+    # any answer row, or a seeded ``status="answered"`` — is never a self-resolution,
+    # even if the asker also clicked "自分で解決した" (a race: self-resolve while the
+    # hand-off was pending, then a responder accepts). Mirrors history.py's
+    # ``by_person`` precedence so the KPI cannot be inflated (#159 review).
+    by_person = or_(
+        Question.status == "answered",
+        Question.id.in_(select(Answer.question_id)),
+        Question.id.in_(
+            select(Recommendation.question_id).where(
+                Recommendation.rank == 1, Recommendation.outcome == "accepted"
+            )
+        ),
+    )
     # Numerator: an auxiliary self-resolving route (document) OR an explicit
-    # "自分で解決した" signal the asker gave without a live hand-off (#159).
+    # "自分で解決した" signal on a question no person actually resolved (#159).
     self_resolved = (
         session.scalar(
             select(func.count())
@@ -134,7 +148,7 @@ def _self_resolution_rate(session: Session) -> float:
                 Question.route.isnot(None),
                 or_(
                     Question.route.in_(_SELF_RESOLVED_ROUTES),
-                    Question.resolution_kind == "self",
+                    and_(Question.resolution_kind == "self", not_(by_person)),
                 ),
             )
         )
