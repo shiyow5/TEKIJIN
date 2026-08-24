@@ -42,7 +42,7 @@ class _FixedIntent:
     and the injected/insufficient C2 path is what drives the ask -> cap flow.
     """
 
-    def analyze(self, question, asker):  # noqa: ARG002
+    def analyze(self, question, asker, *, context=None):  # noqa: ARG002
         from tekijin.agent.protocols import IntentResult
 
         return IntentResult(topics=[TOPIC], products=[], question_type="技術相談", confidence=0.4)
@@ -172,6 +172,43 @@ def test_confident_topic_skips_clarification(seed_counts, session, fake_embedder
     state = agent.invoke(_init("ネットワークの技術相談です"), cfg)
     assert state["sufficient"] is True
     assert agent.get_state(cfg).next == ("send",)  # reached hand-off, no ask interrupt
+
+
+# --------------------------------------------------------------------------- #
+# #69: retrieve-then-classify topic mediation (end-to-end through the graph)
+# --------------------------------------------------------------------------- #
+def test_topic_mediation_surfaces_a_topic_from_retrieved_fragments(
+    seed_counts, session, fake_embedder
+) -> None:
+    # The question carries NO canonical topic keyword, but a retrieved past answer's
+    # question body names one. Because C4 now runs before C1 and C1 classifies with
+    # the fragment text (re-hydrated by the repository), the topic is mediated into
+    # `topics` even though the asker never worded it — the #116 vocabulary bridge.
+    from tekijin.models.tables import Answer, Question
+
+    session.add(Question(id="q_med", asker_id=2, body="CRMで顧客管理の履歴を残す方法", topics=[]))
+    session.flush()  # the answer's FK needs the question row to exist first
+    session.add(
+        Answer(id="a_med", question_id="q_med", responder_id=1, body="商談履歴を蓄積します")
+    )
+    session.flush()
+    retriever = _FakeRetriever(
+        answers=[{"qa_id": "a_med", "score": 0.9, "responder_id": 1}],
+        people=[1, 2],
+    )
+    agent = build_agent(fake_embedder, session, retriever=retriever)
+    cfg = _cfg("mediation")
+
+    # Question has no topic keyword of its own (verify the premise).
+    from tekijin.agent.stubs import KeywordIntentModel
+
+    assert KeywordIntentModel().analyze("履歴をまとめて残したい", None).topics == []
+
+    agent.invoke(_init("履歴をまとめて残したい"), cfg)
+    values = agent.get_state(cfg).values
+    # C4 ran before C1 (the retriever saw the query), and its fragment mediated CRM.
+    assert retriever.calls  # retrieval happened
+    assert "CRM・営業支援" in values["topics"]
 
 
 # --------------------------------------------------------------------------- #
@@ -310,13 +347,14 @@ def test_stream_yields_node_updates(seed_counts, session, fake_embedder) -> None
     nodes = []
     for update in agent.stream(_init(), _cfg("stream"), stream_mode="updates"):
         nodes.extend(update.keys())
-    # The deterministic node sequence up to the send interrupt (reset runs first).
+    # The deterministic node sequence up to the send interrupt (#69: retrieve
+    # BEFORE classify, so C3/C4 precede C1/C2).
     assert nodes[:7] == [
         "reset",
-        "c1_intent",
-        "c2_sufficiency",
         "c3_embed",
         "c4_retrieve",
+        "c1_intent",
+        "c2_sufficiency",
         "c5_route",
         "c6_score",
     ]

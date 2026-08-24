@@ -31,6 +31,7 @@ from tekijin.agent.stubs import (
     collect_known_values,
 )
 from tekijin.retrieval.embedding import QUERY, Embedder
+from tekijin.retrieval.fragments import FragmentSource, collect_context_fragments
 from tekijin.scorer.scorer import ExpertiseScorer
 
 _QUESTION_TYPE_DEFAULT = "製品QA"
@@ -76,6 +77,7 @@ class AgentNodes:
         embedder: Embedder,
         retriever: Retriever,
         scorer: ExpertiseScorer,
+        fragment_source: FragmentSource | None = None,
     ) -> None:
         self._intent = intent_model
         self._sufficiency = sufficiency_model
@@ -83,6 +85,10 @@ class AgentNodes:
         self._embedder = embedder
         self._retriever = retriever
         self._scorer = scorer
+        # #69: source for re-hydrating retrieved fragment TEXT that mediates C1's
+        # topic classification. ``None`` (unit tests that never reach retrieval)
+        # keeps C1 on its pre-#69, context-free behaviour.
+        self._fragment_source = fragment_source
 
     # -- entry: validate input, reset per-question control fields ---------
     def reset(self, state: AgentState) -> AgentState:
@@ -152,7 +158,13 @@ class AgentNodes:
                 "out_of_scope": True,
                 "intent_confidence": 0.0,
             }
-        result = self._intent.analyze(state["question"], state.get("asker"))
+        # #69 topic mediation: C1 now runs AFTER C4 (retrieve-then-classify), so it
+        # can classify with the retrieved evidence's vocabulary in front of it —
+        # the #116 vocabulary-mismatch bridge. Fragments are reference data only;
+        # an empty/absent retrieval leaves C1 on its context-free path.
+        result = self._intent.analyze(
+            state["question"], state.get("asker"), context=self._intent_context(state)
+        )
         return {
             "topics": result.topics,
             "products": result.products,
@@ -161,6 +173,21 @@ class AgentNodes:
             "out_of_scope": result.out_of_scope,
             "intent_confidence": result.confidence,
         }
+
+    def _intent_context(self, state: AgentState) -> list[str] | None:
+        """Fragment snippets of C4's top hits for C1 mediation, or ``None`` (#69).
+
+        ``None`` when no fragment source is wired (unit tests) or retrieval has not
+        run / found nothing — so C1 falls back to its context-free classification.
+        """
+
+        if self._fragment_source is None:
+            return None
+        retrieval = state.get("retrieval")
+        if not retrieval:
+            return None
+        fragments = collect_context_fragments(self._fragment_source, retrieval)
+        return fragments or None
 
     # -- C2: sufficiency check (LLM stub) ---------------------------------
     def c2_sufficiency(self, state: AgentState) -> AgentState:

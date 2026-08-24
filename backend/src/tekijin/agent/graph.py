@@ -41,7 +41,10 @@ def _after_c2(state: AgentState) -> str:
     # terminal (never silently search on an empty intent and hit no_candidate).
     if state.get("intent_unresolved"):
         return "unresolved_intent"
-    return "c3_embed" if state.get("sufficient") else "ask"
+    # #69: retrieval already ran BEFORE C1 (retrieve-then-classify), so a
+    # sufficient intent proceeds straight to routing; only a clarification loops
+    # back through ``ask`` (which re-embeds + re-retrieves the enriched question).
+    return "c5_route" if state.get("sufficient") else "ask"
 
 
 def _after_c5(state: AgentState) -> str:
@@ -108,6 +111,9 @@ def build_agent(
             embedder, session, top_k=retriever_top_k, rrf_k=rrf_k, bm25_weight=bm25_weight
         ),
         scorer=scorer or ExpertiseScorer(Repository(session), weights=weights),
+        # #69: C1 mediates topic classification with the retrieved fragments' text,
+        # re-hydrated by id from this repository (see nodes._intent_context).
+        fragment_source=Repository(session),
     )
 
     graph = StateGraph(AgentState)
@@ -129,10 +135,14 @@ def build_agent(
     graph.add_node("no_candidate", nodes.no_candidate)
     graph.add_node("unresolved_intent", nodes.unresolved_intent)
 
-    # START -> reset -> C1. ``reset`` clears per-question control fields on a fresh
-    # invoke; ``resume`` bypasses START, so mid-flow interrupts keep their state.
+    # START -> reset -> C3 embed -> C4 retrieve -> C1. ``reset`` clears per-question
+    # control fields on a fresh invoke; ``resume`` bypasses START, so mid-flow
+    # interrupts keep their state. #69: retrieval runs BEFORE C1 so C1 classifies
+    # the topic with the retrieved evidence's vocabulary in front of it.
     graph.add_edge(START, "reset")
-    graph.add_edge("reset", "c1_intent")
+    graph.add_edge("reset", "c3_embed")
+    graph.add_edge("c3_embed", "c4_retrieve")
+    graph.add_edge("c4_retrieve", "c1_intent")
     graph.add_conditional_edges(
         "c1_intent",
         _after_c1,
@@ -141,11 +151,11 @@ def build_agent(
     graph.add_conditional_edges(
         "c2_sufficiency",
         _after_c2,
-        {"c3_embed": "c3_embed", "ask": "ask", "unresolved_intent": "unresolved_intent"},
+        {"c5_route": "c5_route", "ask": "ask", "unresolved_intent": "unresolved_intent"},
     )
-    graph.add_edge("ask", "c1_intent")  # re-understand the enriched question
-    graph.add_edge("c3_embed", "c4_retrieve")
-    graph.add_edge("c4_retrieve", "c5_route")
+    # A clarification enriches the question, so re-embed + re-retrieve before
+    # re-classifying (the fragments must reflect the updated question).
+    graph.add_edge("ask", "c3_embed")
     graph.add_conditional_edges(
         "c5_route",
         _after_c5,
