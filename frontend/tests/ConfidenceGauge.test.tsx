@@ -28,7 +28,7 @@ describe("ConfidenceGauge", () => {
     setReducedMotion(false);
     render(<ConfidenceGauge level="高" />);
     // role=img label carries the level AND the concrete percent — nothing depends on color.
-    expect(screen.getByRole("img", { name: "適合度 高（100%）" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "適合度 100%・確信度 高" })).toBeInTheDocument();
     expect(screen.getByText("高")).toBeInTheDocument();
     // The concrete number is shown inside the ring (円の中に数値, #適合度).
     expect(screen.getByText("100")).toBeInTheDocument();
@@ -38,7 +38,7 @@ describe("ConfidenceGauge", () => {
     setReducedMotion(true);
     const { rerender } = render(<ConfidenceGauge level="中" />);
     expect(screen.getByText("66")).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: "適合度 中（66%）" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "適合度 66%・確信度 中" })).toBeInTheDocument();
     rerender(<ConfidenceGauge level="低" />);
     expect(screen.getByText("33")).toBeInTheDocument();
   });
@@ -55,13 +55,13 @@ describe("ConfidenceGauge", () => {
     // Give the (skipped) effect a tick; the animation must never fire.
     await new Promise((r) => setTimeout(r, 20));
     expect(animateMock).not.toHaveBeenCalled();
-    expect(screen.getByRole("img", { name: "適合度 低（33%）" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "適合度 33%・確信度 低" })).toBeInTheDocument();
   });
 
   it("renders a neutral gauge (50) for an unknown level without crashing", () => {
     setReducedMotion(true);
     render(<ConfidenceGauge level="不明" />);
-    expect(screen.getByRole("img", { name: "適合度 不明（50%）" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "適合度 50%・確信度 不明" })).toBeInTheDocument();
     expect(screen.getByText("50")).toBeInTheDocument();
   });
 

@@ -3,12 +3,12 @@
 /**
  * Animated confidence gauge for a recommendation card (#139, proposal E).
  *
- * Renders the qualitative fit signal (適合度 高/中/低) as a radial ring that
- * sweeps to its level on mount, with the matching PERCENTAGE shown in the centre
- * of the ring (requested: 具体的な数値を円の中に). The percentage is derived from the
- * qualitative level (高=100 / 中=66 / 低=33), i.e. exactly the magnitude the ring
- * draws — it is NOT the raw internal `score` (a weighted ranking value, not a
- * percentage), which stays unsurfaced per CandidateCard's contract.
+ * Renders the **適合度 (fit)** as a radial ring that sweeps to the score-derived
+ * fit percent on mount, with that number shown in the centre (具体的な数値を円の中に).
+ * The magnitude is the absolute fit (`fitPercent`, normalised score) — decoupled
+ * from the 高/中/低 confidence label since #240; the ring COLOUR and the adjacent
+ * badge carry the confidence level separately, so a strong candidate on a
+ * never-asked topic reads as a high gauge with a 低 badge rather than a 33% cap.
  *
  * Accessibility: the ring is `role="img"` with a text label carrying both the
  * level and the percent, and the level is also shown, so nothing depends on
@@ -83,7 +83,7 @@ export function ConfidenceGauge({ level, percent }: { level: string; percent?: n
   return (
     <span
       role="img"
-      aria-label={`適合度 ${level}（${pct}%）`}
+      aria-label={`適合度 ${pct}%・確信度 ${level}`}
       className={`inline-flex items-center gap-xs ${colorClass}`}
     >
       <svg width="44" height="44" viewBox="0 0 40 40" aria-hidden="true" className="shrink-0">

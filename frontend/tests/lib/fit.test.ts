@@ -1,4 +1,4 @@
-import { levelFraction, relativeFitPercents } from "@/lib/fit";
+import { fitPercent, fitPercents, levelFraction, MAX_COMPOSITE_SCORE } from "@/lib/fit";
 import { describe, expect, it } from "vitest";
 
 describe("levelFraction", () => {
@@ -10,56 +10,50 @@ describe("levelFraction", () => {
   });
 });
 
-describe("relativeFitPercents", () => {
-  it("anchors the top to its level ceiling and scales the rest by score ratio", () => {
-    // Top is 高 (ceiling 100). #2 has half the score, #3 a quarter.
-    const out = relativeFitPercents([
-      { score: 0.8, confidence: "高" },
-      { score: 0.4, confidence: "高" },
-      { score: 0.2, confidence: "中" },
-    ]);
-    expect(out).toEqual([100, 50, 25]);
+describe("fitPercent", () => {
+  it("normalises a composite score against the fit ceiling (0.9 -> 100%)", () => {
+    expect(fitPercent(MAX_COMPOSITE_SCORE)).toBe(100);
+    expect(fitPercent(0.45)).toBe(50);
+    expect(fitPercent(0)).toBe(0);
   });
 
-  it("caps the anchor at the top's level, so a weak top is not overstated", () => {
-    // Top is 中 (ceiling 66); equally-scored second stays at the same ceiling.
-    const out = relativeFitPercents([
-      { score: 0.5, confidence: "中" },
-      { score: 0.25, confidence: "中" },
-    ]);
-    expect(out).toEqual([66, 33]);
+  it("clamps: a score above the ceiling caps at 100, a negative score floors at 0", () => {
+    expect(fitPercent(1.0)).toBe(100); // 1.0/0.9 -> clamp 100
+    expect(fitPercent(-0.5)).toBe(0);
+  });
+});
+
+describe("fitPercents", () => {
+  it("returns each candidate's absolute fit, independent of order", () => {
+    expect(
+      fitPercents([
+        { score: 0.9, confidence: "低" },
+        { score: 0.45, confidence: "高" },
+        { score: 0.18, confidence: "中" },
+      ]),
+    ).toEqual([100, 50, 20]);
   });
 
-  it("differentiates candidates that all share the 高 level", () => {
-    const out = relativeFitPercents([
-      { score: 1.0, confidence: "高" },
+  it("is decoupled from the confidence label — a 低 top still reads high (#240)", () => {
+    // A strong candidate on a never-asked topic: label 低 but a high fit gauge,
+    // instead of the old label-anchored 33% cap.
+    const strongLow = fitPercents([{ score: 0.74, confidence: "低" }]);
+    const strongHigh = fitPercents([{ score: 0.74, confidence: "高" }]);
+    expect(strongLow).toEqual(strongHigh); // label does not change the gauge
+    expect(strongLow[0]).toBeGreaterThan(33); // no longer capped at 33
+  });
+
+  it("differentiates candidates by their own score, not the shared label", () => {
+    const out = fitPercents([
       { score: 0.9, confidence: "高" },
-      { score: 0.6, confidence: "高" },
+      { score: 0.81, confidence: "高" },
+      { score: 0.54, confidence: "高" },
     ]);
-    // No longer all 100 — the #222 symptom is gone.
-    expect(out[0]).toBe(100);
-    expect(out[1]).toBe(90);
-    expect(out[2]).toBe(60);
+    expect(out).toEqual([100, 90, 60]);
     expect(new Set(out).size).toBeGreaterThan(1);
   });
 
-  it("falls back to each level's own percentage when the top score is not positive", () => {
-    const out = relativeFitPercents([
-      { score: 0, confidence: "高" },
-      { score: -1, confidence: "低" },
-    ]);
-    expect(out).toEqual([100, 33]);
-  });
-
-  it("clamps negative scores to 0 and never exceeds the anchor", () => {
-    const out = relativeFitPercents([
-      { score: 1.0, confidence: "高" },
-      { score: -0.5, confidence: "低" },
-    ]);
-    expect(out).toEqual([100, 0]);
-  });
-
   it("returns an empty array for no candidates", () => {
-    expect(relativeFitPercents([])).toEqual([]);
+    expect(fitPercents([])).toEqual([]);
   });
 });
