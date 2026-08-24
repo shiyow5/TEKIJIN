@@ -17,11 +17,26 @@ instruction-tuned model's benchmarked setup — #108.)
 
 from __future__ import annotations
 
+import os
 import threading
 from collections.abc import Sequence
 from typing import Any, Protocol, runtime_checkable
 
 from tekijin.config import get_settings
+
+
+def _is_local_model_path(model_name: str) -> bool:
+    """True when ``model_name`` names a LOCAL model directory, not an HF repo id.
+
+    The #108 fail-closed guard protects against executing a moving REMOTE branch's
+    code at each cold load. A local path (``/home/.../model``, ``./model``, or an
+    existing directory) has no remote ``revision`` to pin — the risk simply does
+    not apply — yet the guard would block startup with no way to satisfy it (#173).
+    HF repo ids are ``org/name`` with no path markers and do not exist on disk.
+    """
+
+    return model_name.startswith(("/", "./", "../", "~")) or os.path.exists(model_name)
+
 
 QUERY = "query"
 PASSAGE = "passage"
@@ -136,7 +151,10 @@ class SentenceTransformerEmbedder:
         # be checked against the wrong env and silently bypass the guard.
         effective_app_env = settings.app_env if app_env is None else app_env
         unpinned_remote_code = self._trust_remote_code and self._revision is None
-        if effective_app_env != "development" and unpinned_remote_code:
+        # A local model path has no pinnable remote revision, so the guard cannot be
+        # satisfied AND the supply-chain risk it guards does not exist — skip it (#173).
+        remote_repo = not _is_local_model_path(self._model_name)
+        if effective_app_env != "development" and unpinned_remote_code and remote_repo:
             raise ValueError(
                 "Refusing to load an embedding model with trust_remote_code=True and "
                 f"no pinned revision outside development (app_env={effective_app_env!r}). "
