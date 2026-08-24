@@ -201,6 +201,11 @@ class KeywordIntentModel:
         # Emit the mediated union in canonical vocabulary order (source-agnostic).
         merged = set(question_topics) | set(context_topics)
         topics = [t for t in TOPIC_KEYWORDS if t in merged]
+        # Report the context-ONLY subset so the graph can tell a question-identified
+        # topic from a purely retrieval-mediated one (the latter must not, by itself,
+        # satisfy the "was the asker's request identifiable?" check — #276 review).
+        context_only = set(context_topics) - set(question_topics)
+        mediated_topics = [t for t in TOPIC_KEYWORDS if t in context_only]
 
         return IntentResult(
             topics=topics,
@@ -209,6 +214,7 @@ class KeywordIntentModel:
             question_type=question_type,
             out_of_scope=out_of_scope,
             confidence=confidence,
+            context_topics=mediated_topics,
         )
 
     @staticmethod

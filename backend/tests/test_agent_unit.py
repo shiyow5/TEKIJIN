@@ -154,7 +154,9 @@ def test_after_c1_routes_off_topic() -> None:
 
 
 def test_after_c2_routes_on_sufficiency() -> None:
-    assert graph_mod._after_c2({"sufficient": True}) == "c3_embed"
+    # #69: retrieval runs before C1, so a sufficient intent goes straight to
+    # routing; only a clarification loops back through ``ask``.
+    assert graph_mod._after_c2({"sufficient": True}) == "c5_route"
     assert graph_mod._after_c2({"sufficient": False}) == "ask"
 
 
@@ -239,6 +241,85 @@ def test_c1_lets_a_clean_question_through_to_the_model() -> None:
     assert out["out_of_scope"] is False
     assert out["topics"] == ["ネットワーク・VPN"]
     assert out["intent_confidence"] == 0.7
+
+
+def test_c1_forwards_retrieved_fragment_context_to_the_model() -> None:
+    # #69 wiring: c1_intent re-hydrates C4's hits into fragment text and passes it
+    # to the intent model as `context` (retrieve-then-classify).
+    from tekijin.agent.state import empty_retrieval
+    from tekijin.data.dto import AnswerDTO, QuestionDTO
+
+    captured: dict[str, Any] = {}
+
+    class _Capturing:
+        def analyze(self, question: str, asker: Any, *, context: Any = None) -> IntentResult:
+            captured["context"] = context
+            return IntentResult(topics=["CRM・営業支援"], confidence=0.7)
+
+    class _Source:
+        def answers_by_ids(self, ids: Any) -> dict[str, AnswerDTO]:
+            return {
+                "a1": AnswerDTO(
+                    id="a1",
+                    question_id="q1",
+                    responder_id=1,
+                    body="CRMに商談履歴を蓄積します",
+                    topic=None,
+                    reuse_count=None,
+                    was_helpful=None,
+                    created_at=None,
+                    has_embedding=False,
+                )
+            }
+
+        def questions_by_ids(self, ids: Any) -> dict[str, QuestionDTO]:
+            return {
+                "q1": QuestionDTO(
+                    id="q1",
+                    asker_id=1,
+                    body="顧客管理の履歴の残し方",
+                    topics=(),
+                    status=None,
+                    created_at=None,
+                    has_embedding=False,
+                )
+            }
+
+        def documents_by_ids(self, ids: Any) -> dict[str, Any]:
+            return {}
+
+    stub: Any = object()
+    nodes = AgentNodes(
+        intent_model=_Capturing(),
+        sufficiency_model=stub,
+        draft_model=stub,
+        embedder=stub,
+        retriever=stub,
+        scorer=stub,
+        fragment_source=_Source(),
+    )
+    retrieval = empty_retrieval()
+    retrieval["past_answers"] = [{"qa_id": "a1", "score": 0.9, "responder_id": 1}]
+    out = nodes.c1_intent({"question": "履歴を残したい", "retrieval": retrieval})
+
+    assert out["topics"] == ["CRM・営業支援"]
+    assert captured["context"] and any("CRM" in fragment for fragment in captured["context"])
+
+
+def test_c1_without_fragment_source_stays_context_free() -> None:
+    # A node built without a fragment source (the many unit tests) never mediates.
+    from tekijin.agent.state import empty_retrieval
+
+    captured: dict[str, Any] = {}
+
+    class _Capturing:
+        def analyze(self, question: str, asker: Any, *, context: Any = None) -> IntentResult:
+            captured["context"] = context
+            return IntentResult()
+
+    nodes = _nodes_with_intent(_Capturing())  # no fragment_source
+    nodes.c1_intent({"question": "VPNの相談", "retrieval": empty_retrieval()})
+    assert captured["context"] is None
 
 
 def test_top_by_score_picks_max_and_handles_empty() -> None:
@@ -395,6 +476,21 @@ def test_context_does_not_move_question_type_or_confidence() -> None:
     assert "CRM・営業支援" in mediated.topics  # topics ARE mediated
     assert mediated.question_type == base.question_type  # but type is not
     assert mediated.confidence == base.confidence  # and confidence is not
+
+
+def test_context_topics_report_only_the_context_only_subset() -> None:
+    # #276 review: the mediated topic that came ONLY from context is reported in
+    # `context_topics` (a subset of `topics`), so the graph can tell it apart from a
+    # question-derived topic. A topic present in BOTH question and context is NOT
+    # context-only.
+    model = KeywordIntentModel()
+    # Question yields セキュリティ (UTM); context yields CRM (context-only) and also
+    # セキュリティ (already in the question -> not context-only).
+    result = model.analyze("UTMのセキュリティ相談", None, context=["CRMの顧客管理とUTMの話"])
+    assert "CRM・営業支援" in result.topics and "セキュリティ" in result.topics
+    assert result.context_topics == ["CRM・営業支援"]  # セキュリティ excluded (also in question)
+    # No context -> no context_topics.
+    assert model.analyze("UTMのセキュリティ相談", None).context_topics == []
 
 
 def test_context_never_pulls_an_out_of_scope_question_back_in() -> None:

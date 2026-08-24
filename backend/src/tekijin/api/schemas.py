@@ -182,10 +182,10 @@ class HandoffCorrectRequest(BaseModel):
     """Asker corrects the AI's interpretation of their question ("解釈の訂正", #260).
 
     The ``supplement`` is folded into the question and the whole pipeline re-runs
-    from C1 (re-understand → re-route → re-score → re-draft), exactly as the
-    ``ask → c1_intent`` clarification edge does — but asker-initiated from the
-    result screen rather than in response to a C2 followup. The re-run streams over
-    ``/events``; the response only acks.
+    from the top (re-embed → re-retrieve → re-understand → re-route → re-score →
+    re-draft), exactly as the ``ask`` clarification loop does (#69) — but
+    asker-initiated from the result screen rather than in response to a C2 followup.
+    The re-run streams over ``/events``; the response only acks.
     """
 
     session_id: str = Field(pattern=_SESSION_ID_PATTERN)
