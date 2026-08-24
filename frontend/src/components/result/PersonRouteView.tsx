@@ -315,6 +315,7 @@ export function PersonRouteView({
                 value={correctText}
                 onChange={(e) => setCorrectText(e.target.value)}
                 disabled={correcting}
+                maxLength={2000}
                 placeholder="例：対象は営業部ではなく情報システム部です／製品はUTMではなくVPNです"
                 className="h-24 w-full resize-none rounded-lg border border-outline-variant bg-surface p-sm text-on-surface text-sm outline-none focus:border-primary"
               />
