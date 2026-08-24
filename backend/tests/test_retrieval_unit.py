@@ -178,6 +178,40 @@ def test_bm25_all_empty_corpus_returns_empty_index() -> None:
     assert index.search("anything", top_k=3) == []
 
 
+# --- #56: content-signature cache reuses the built index on an unchanged corpus #
+def test_bm25_cache_reuses_index_until_content_changes() -> None:
+    from tekijin.retrieval.bm25_cache import cached_bm25_index, clear_bm25_cache
+
+    clear_bm25_cache()
+    try:
+        docs = [("a", "RX-3000 の設定"), ("b", "たよれーる 導入")]
+        first = cached_bm25_index("answers", iter(docs))
+        # Identical corpus -> the SAME index object (no re-tokenization / re-fit).
+        assert cached_bm25_index("answers", iter(docs)) is first
+        # A content change (same ids, different text) -> a fresh index.
+        changed = cached_bm25_index("answers", iter([("a", "RX-3000 の設定"), ("b", "別の内容")]))
+        assert changed is not first
+        # A different slot is cached independently, never colliding with "answers".
+        assert cached_bm25_index("documents", iter(docs)) is not changed
+        # Clearing forces a rebuild on the next call.
+        clear_bm25_cache()
+        assert cached_bm25_index("answers", iter(docs)) is not first
+    finally:
+        clear_bm25_cache()
+
+
+def test_bm25_cache_index_still_searches_correctly() -> None:
+    from tekijin.retrieval.bm25_cache import cached_bm25_index, clear_bm25_cache
+
+    clear_bm25_cache()
+    try:
+        index = cached_bm25_index("documents", iter([("d_model", "RX-3000 の見積")]))
+        hits = index.search("RX-3000", top_k=3)
+        assert hits and hits[0][0] == "d_model"
+    finally:
+        clear_bm25_cache()
+
+
 def test_bm25_drops_empty_docs_keeping_alignment() -> None:
     # The empty doc is skipped, but the real doc stays correctly indexed.
     index = BM25Index.build([("empty", ""), ("real", "VPN 設定 の 手順")])
