@@ -877,20 +877,23 @@ class AgentService:
                 # corrupt checkpoint fails cleanly instead of enriching ``None``.
                 raise SessionInvalid("session has no question to correct")
 
+            enriched = f"{question} {text}".strip()
+            # Persist the enriched body FIRST so /inbox and /history show the question
+            # that was actually processed, not the pre-correction original (#268).
+            # Ordering matters for the failure mode (#272 review): if this write
+            # throws, nothing durable has changed yet (the supersede below has not
+            # run and no re-run is queued), so the session stays cleanly at ``send``
+            # and a retry heals it — rather than committing the supersede and then
+            # failing, which would leave the checkpoint disagreeing with the DB.
+            if isinstance(question_id, str):
+                with session_scope(self._session_factory) as body_session:
+                    update_question_body(body_session, question_id, enriched)
+
             # Terminate the abandoned hand-off so it drops out of the responder's
             # /inbox and the dashboard-pending count (see exclude_handoff_target).
             self._record_outcome(session_id, values, "superseded")
 
-            # Enrich the question exactly as the ``ask`` node does, then queue a
-            # FRESH invoke (dict input) so the stream restarts from reset → C1.
-            enriched = f"{question} {text}".strip()
-            # Persist the enriched body so /inbox and /history show the question that
-            # was actually processed, not the pre-correction original (#268). Durable
-            # part of the correction — done before queuing so a write failure aborts
-            # cleanly rather than leaving a re-run bound to a stale stored body.
-            if isinstance(question_id, str):
-                with session_scope(self._session_factory) as body_session:
-                    update_question_body(body_session, question_id, enriched)
+            # Queue a FRESH invoke (dict input) so the stream restarts from reset → C1.
             ctx = self._reg_ensure(session_id)
             ctx.pending = {
                 "question": enriched,
@@ -1128,6 +1131,7 @@ class AgentService:
         """
 
         if question_id is None:  # pragma: no cover - question_id always set via /ask
+            logger.warning("enriched question with no question_id; skipping body persist")
             return
         body = (data or {}).get("question")
         if not isinstance(body, str) or not body.strip():

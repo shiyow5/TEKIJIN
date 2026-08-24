@@ -100,7 +100,8 @@ def update_question_body(session: Session, question_id: str, body: str) -> None:
     stayed the ORIGINAL text while ``GET /handoff`` showed the enriched one — so the
     responder's ``/inbox`` preview and the asker's ``/history`` displayed a
     different question than was actually processed. Writing the enriched body keeps
-    those SQL projections consistent with the run."""
+    those SQL projections consistent with the run.
+    """
 
     session.execute(update(Question).where(Question.id == question_id).values(body=body))
 
