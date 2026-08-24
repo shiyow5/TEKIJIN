@@ -38,7 +38,7 @@ afterEach(() => {
 });
 
 describe("AppHeader", () => {
-  it("renders the product name", () => {
+  it("renders the brand logo", () => {
     useCurrentUserMock.mockReturnValue({
       employees: EMPLOYEES,
       currentUserId: "E001",
@@ -49,7 +49,10 @@ describe("AppHeader", () => {
       reload: () => {},
     });
     render(<AppHeader />);
-    expect(screen.getByText("TEKIJIN")).toBeInTheDocument();
+    // The brand is now a logo image (#201); its alt carries the product name.
+    const logo = screen.getByAltText("TEKIJIN");
+    expect(logo).toBeInTheDocument();
+    expect(logo).toHaveAttribute("src", "/tekijin-logo.jpg");
     // The retired "たずねーる" subtitle must no longer render (#196).
     expect(screen.queryByText("たずねーる")).not.toBeInTheDocument();
   });
