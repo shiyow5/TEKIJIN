@@ -93,6 +93,32 @@ test.describe("navigation", () => {
     await expect(page.getByRole("combobox", { name: /利用者を切替/ })).toHaveValue("E002");
   });
 
+  test("the header background spans the full viewport above max-w-content (#250)", async ({
+    page,
+  }) => {
+    await mockChrome(page);
+    // 1920 > the 1440px `max-w-content`: the regression was the <header> itself
+    // being capped there, letting the body's tinted background show beside it.
+    await page.setViewportSize({ width: 1920, height: 900 });
+    await page.goto("/questions");
+    await expect(page.getByRole("navigation", { name: "メインナビゲーション" })).toBeVisible();
+
+    const { headerWidth, viewportWidth, navRight } = await page.evaluate(() => {
+      const header = document.querySelector("header") as HTMLElement;
+      const nav = document.querySelector('nav[aria-label="メインナビゲーション"]') as HTMLElement;
+      return {
+        headerWidth: header.getBoundingClientRect().width,
+        viewportWidth: document.documentElement.clientWidth,
+        navRight: nav.getBoundingClientRect().right,
+      };
+    });
+
+    expect(headerWidth).toBe(viewportWidth);
+    // ...while the CONTENT stays centred: the nav must not run past the
+    // centred 1440px column, or we have merely widened everything.
+    expect(navRight).toBeLessThanOrEqual((viewportWidth - 1440) / 2 + 1440 + 1);
+  });
+
   test("switching the current user returns to the hub (#210)", async ({ page }) => {
     await mockChrome(page);
     // The inbox is the screen the bug was reported on: it re-fetches for the new
