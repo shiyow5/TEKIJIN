@@ -21,6 +21,7 @@ import { useCurrentUser } from "@/components/CurrentUserProvider";
 import { NotificationBell } from "@/components/NotificationBell";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
 
 const NAV = [
   { href: "/questions", label: "質問する", adminOnly: false },
@@ -30,6 +31,72 @@ const NAV = [
 
 function isActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+function IconMenu() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      aria-hidden="true"
+      className="h-6 w-6"
+    >
+      <path d="M4 7h16M4 12h16M4 17h16" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function IconClose() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      aria-hidden="true"
+      className="h-6 w-6"
+    >
+      <path d="M6 6l12 12M18 6L6 18" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function NavLinks({
+  items,
+  pathname,
+  onNavigate,
+  className,
+}: {
+  items: readonly { href: string; label: string }[];
+  pathname: string;
+  onNavigate?: () => void;
+  className: string;
+}) {
+  return (
+    <ul className={className}>
+      {items.map((item) => {
+        const active = isActive(pathname, item.href);
+        return (
+          <li key={item.href}>
+            <Link
+              href={item.href}
+              aria-current={active ? "page" : undefined}
+              onClick={onNavigate}
+              className={
+                active
+                  ? "block rounded-md bg-secondary-container px-sm py-xs font-bold text-on-secondary-container text-sm"
+                  : "block rounded-md px-sm py-xs text-on-surface-variant text-sm transition-colors hover:bg-surface-container-low"
+              }
+            >
+              {item.label}
+            </Link>
+          </li>
+        );
+      })}
+    </ul>
+  );
 }
 
 export function AppHeader() {
@@ -46,6 +113,40 @@ export function AppHeader() {
   };
 
   const nav = NAV.filter((item) => !item.adminOnly || principal?.is_admin);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const menuButtonRef = useRef<HTMLButtonElement>(null);
+
+  // Route changes (including the switcher's "go home") always close the mobile
+  // menu — staying open after navigating away would sit there stale.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-run only when pathname changes.
+  useEffect(() => {
+    setMenuOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        setMenuOpen(false);
+        menuButtonRef.current?.focus();
+      }
+    }
+
+    function handlePointerDown(e: MouseEvent) {
+      const target = e.target as Node;
+      if (menuRef.current?.contains(target) || menuButtonRef.current?.contains(target)) return;
+      setMenuOpen(false);
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("mousedown", handlePointerDown);
+    };
+  }, [menuOpen]);
 
   return (
     // The white background spans the full viewport; the CONTENT is centred at
@@ -60,27 +161,8 @@ export function AppHeader() {
                 "TEKIJIN". */}
             <img src="/tekijin-logo.png" alt="TEKIJIN" className="h-10 w-auto" />
           </Link>
-          <nav aria-label="メインナビゲーション">
-            <ul className="flex items-center gap-xs">
-              {nav.map((item) => {
-                const active = isActive(pathname, item.href);
-                return (
-                  <li key={item.href}>
-                    <Link
-                      href={item.href}
-                      aria-current={active ? "page" : undefined}
-                      className={
-                        active
-                          ? "rounded-md bg-secondary-container px-sm py-xs font-bold text-on-secondary-container text-sm"
-                          : "rounded-md px-sm py-xs text-on-surface-variant text-sm transition-colors hover:bg-surface-container-low"
-                      }
-                    >
-                      {item.label}
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
+          <nav aria-label="メインナビゲーション" className="hidden md:block">
+            <NavLinks items={nav} pathname={pathname} className="flex items-center gap-xs" />
           </nav>
         </div>
 
@@ -143,8 +225,35 @@ export function AppHeader() {
               ログアウト
             </button>
           ) : null}
+
+          <button
+            ref={menuButtonRef}
+            type="button"
+            aria-expanded={menuOpen}
+            aria-controls="mobile-nav-menu"
+            aria-label={menuOpen ? "メニューを閉じる" : "メニューを開く"}
+            onClick={() => setMenuOpen((open) => !open)}
+            className="flex h-9 w-9 items-center justify-center rounded-md text-on-surface-variant transition-colors hover:bg-surface-container-low md:hidden"
+          >
+            {menuOpen ? <IconClose /> : <IconMenu />}
+          </button>
         </div>
       </div>
+
+      {menuOpen ? (
+        <div
+          id="mobile-nav-menu"
+          ref={menuRef}
+          className="mx-auto mt-sm w-full max-w-content border-outline-variant border-t pt-sm md:hidden"
+        >
+          <NavLinks
+            items={nav}
+            pathname={pathname}
+            onNavigate={() => setMenuOpen(false)}
+            className="flex flex-col gap-xs"
+          />
+        </div>
+      ) : null}
     </header>
   );
 }

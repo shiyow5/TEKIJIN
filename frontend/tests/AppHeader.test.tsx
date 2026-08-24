@@ -218,4 +218,75 @@ describe("AppHeader", () => {
     expect(screen.queryByRole("button", { name: /通知/ })).not.toBeInTheDocument();
     expect(getNotificationsMock).not.toHaveBeenCalled();
   });
+
+  describe("mobile menu (#254)", () => {
+    it("starts collapsed and opens on click, exposing the same destinations", () => {
+      useCurrentUserMock.mockReturnValue(ADMIN_READY);
+      render(<AppHeader />);
+      const toggle = screen.getByRole("button", { name: "メニューを開く" });
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+      expect(screen.queryByRole("link", { name: "ダッシュボード", hidden: false })).toBeTruthy();
+
+      fireEvent.click(toggle);
+
+      expect(screen.getByRole("button", { name: "メニューを閉じる" })).toHaveAttribute(
+        "aria-expanded",
+        "true",
+      );
+      const mobileMenu = document.getElementById("mobile-nav-menu");
+      expect(mobileMenu).not.toBeNull();
+      expect(
+        within(mobileMenu as HTMLElement).getByRole("link", { name: "受信箱" }),
+      ).toHaveAttribute("href", "/inbox");
+    });
+
+    it("closes when a destination in the mobile menu is clicked", () => {
+      useCurrentUserMock.mockReturnValue(ADMIN_READY);
+      render(<AppHeader />);
+      fireEvent.click(screen.getByRole("button", { name: "メニューを開く" }));
+      const mobileMenu = document.getElementById("mobile-nav-menu") as HTMLElement;
+      fireEvent.click(within(mobileMenu).getByRole("link", { name: "質問する" }));
+      expect(document.getElementById("mobile-nav-menu")).toBeNull();
+      expect(screen.getByRole("button", { name: "メニューを開く" })).toHaveAttribute(
+        "aria-expanded",
+        "false",
+      );
+    });
+
+    it("closes on Escape and returns focus to the toggle button", () => {
+      useCurrentUserMock.mockReturnValue(ADMIN_READY);
+      render(<AppHeader />);
+      const toggle = screen.getByRole("button", { name: "メニューを開く" });
+      fireEvent.click(toggle);
+      expect(document.getElementById("mobile-nav-menu")).not.toBeNull();
+
+      fireEvent.keyDown(document, { key: "Escape" });
+
+      expect(document.getElementById("mobile-nav-menu")).toBeNull();
+      expect(screen.getByRole("button", { name: "メニューを開く" })).toHaveFocus();
+    });
+
+    it("closes when clicking outside the menu", () => {
+      useCurrentUserMock.mockReturnValue(ADMIN_READY);
+      render(<AppHeader />);
+      fireEvent.click(screen.getByRole("button", { name: "メニューを開く" }));
+      expect(document.getElementById("mobile-nav-menu")).not.toBeNull();
+
+      fireEvent.mouseDown(document.body);
+
+      expect(document.getElementById("mobile-nav-menu")).toBeNull();
+    });
+
+    it("closes when the route changes (e.g. after switching users)", () => {
+      useCurrentUserMock.mockReturnValue(ADMIN_READY);
+      const { rerender } = render(<AppHeader />);
+      fireEvent.click(screen.getByRole("button", { name: "メニューを開く" }));
+      expect(document.getElementById("mobile-nav-menu")).not.toBeNull();
+
+      pathnameMock.mockReturnValue("/inbox");
+      rerender(<AppHeader />);
+
+      expect(document.getElementById("mobile-nav-menu")).toBeNull();
+    });
+  });
 });
