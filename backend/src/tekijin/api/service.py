@@ -601,19 +601,24 @@ class AgentService:
             finally:
                 session.close()
         # Record the edit as C7 feedback OUTSIDE the graph session/lock: it is an
-        # append-only learning signal, not part of the checkpointer transaction, and
-        # a failure to record must never break the (already-committed) draft save.
+        # append-only learning signal, not part of the checkpointer transaction. The
+        # draft save above is already committed, so a feedback-write failure must be
+        # swallowed (not re-raised) — otherwise the caller would see a 500 for a
+        # request whose primary effect already succeeded.
         if isinstance(generated, str) and generated.strip() != text:
-            with session_scope(self._session_factory) as fb_session:
-                record_feedback(
-                    fb_session,
-                    stage="c7",
-                    kind="draft_edited",
-                    question_id=question_id if isinstance(question_id, str) else None,
-                    session_id=session_id,
-                    payload={"generated": generated, "sent": text},
-                    actor_id=actor_id,
-                )
+            try:
+                with session_scope(self._session_factory) as fb_session:
+                    record_feedback(
+                        fb_session,
+                        stage="c7",
+                        kind="draft_edited",
+                        question_id=question_id if isinstance(question_id, str) else None,
+                        session_id=session_id,
+                        payload={"generated": generated, "sent": text},
+                        actor_id=actor_id,
+                    )
+            except Exception:  # noqa: BLE001 - best-effort signal; never fail the committed save
+                logger.exception("failed to record c7 draft feedback for session %s", session_id)
 
     def select_handoff_candidate(
         self, session_id: str, person_id: int

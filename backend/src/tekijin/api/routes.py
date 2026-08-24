@@ -429,11 +429,18 @@ def feedback(
 
     with _generic_500("POST /feedback"):
         with session_scope(_service(request).session_factory) as session:
+            # A dangling question_id would raise an FK IntegrityError → 500, which
+            # also leaks whether that id exists (an enumeration oracle the rest of
+            # the app avoids, cf. require_session_participant). Drop an unknown link
+            # instead: record the signal without confirming existence.
+            question_id = req.question_id
+            if question_id is not None and question_asker_id(session, question_id) is None:
+                question_id = None
             record_feedback(
                 session,
                 stage=req.stage,
                 kind=req.kind,
-                question_id=req.question_id,
+                question_id=question_id,
                 session_id=req.session_id,
                 target=req.target,
                 payload=req.payload,

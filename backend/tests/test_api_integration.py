@@ -1965,3 +1965,60 @@ def test_dashboard_reports_feedback_by_stage(seed_counts, engine, fake_embedder)
         client.post("/feedback", json={"stage": stage, "kind": "x"}, headers=_user_headers(10))
     data = client.get("/dashboard").json()
     assert data["feedback_by_stage"] == {"c1": 1, "c6": 2, "c7": 0, "total": 3}
+
+
+def test_draft_feedback_write_failure_does_not_break_the_save(
+    seed_counts, engine, fake_embedder, monkeypatch
+) -> None:
+    """A feedback-write failure must never surface as a 500: the draft edit is
+    already committed by then (#237 review HIGH)."""
+    import tekijin.api.service as svc
+
+    client = _client(
+        engine, fake_embedder, retriever=_FakeRetriever(people=[1]), scorer=_FakeScorer(_recs(1))
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "fb3"})
+    _events(client, "fb3")
+    generated = client.get("/handoff/fb3").json()["draft"]
+
+    def _boom(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("feedback backend is down")
+
+    monkeypatch.setattr(svc, "record_feedback", _boom)
+
+    edited = f"{generated}（追記: 期日を早めたいです）"
+    saved = client.post("/handoff/draft", json={"session_id": "fb3", "draft": edited})
+    # The save still succeeds despite the feedback write blowing up...
+    assert saved.status_code == 200 and saved.json()["status"] == "draft_saved"
+    # ...and the edit is durably persisted...
+    assert client.get("/handoff/fb3").json()["draft"] == edited
+    # ...while no feedback row was recorded (the write failed and was swallowed).
+    assert _feedback_rows(engine) == []
+
+
+def test_feedback_rejects_an_oversized_payload(seed_counts, engine, fake_embedder) -> None:
+    """An authenticated caller must not be able to grow the JSONB column unbounded
+    (storage-exhaustion DoS, #237 security review)."""
+    client = _client(engine, fake_embedder)
+    big = {"x": "あ" * 20000}  # ~60KB UTF-8, over the 16KB cap
+    resp = client.post(
+        "/feedback", json={"stage": "c1", "kind": "x", "payload": big}, headers=_user_headers(10)
+    )
+    assert resp.status_code == 422
+    assert _feedback_rows(engine) == []
+
+
+def test_feedback_with_unknown_question_id_records_without_the_link(
+    seed_counts, engine, fake_embedder
+) -> None:
+    """An unknown question_id must not 500 (FK violation) nor leak existence — it is
+    recorded without the dangling link (#237 security review)."""
+    client = _client(engine, fake_embedder)
+    resp = client.post(
+        "/feedback",
+        json={"stage": "c6", "kind": "x", "question_id": "api_does_not_exist"},
+        headers=_user_headers(10),
+    )
+    assert resp.status_code == 200
+    rows = _feedback_rows(engine)
+    assert len(rows) == 1 and rows[0].question_id is None

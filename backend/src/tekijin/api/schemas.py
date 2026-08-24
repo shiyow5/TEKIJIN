@@ -198,10 +198,23 @@ class FeedbackRequest(BaseModel):
 
     stage: Literal["c1", "c6", "c7"]
     kind: str = Field(min_length=1, max_length=32)
-    question_id: str | None = None
-    session_id: str | None = None
+    question_id: str | None = Field(default=None, max_length=64)
+    session_id: str | None = Field(default=None, max_length=64)
     target: str | None = Field(default=None, max_length=64)
     payload: dict[str, Any] | None = None
+
+    @field_validator("payload")
+    @classmethod
+    def _cap_payload_size(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
+        # Bound the JSONB blob so an authenticated caller cannot grow the table
+        # unbounded (storage-exhaustion DoS). 16KB is ample for a correction note
+        # or a generated-vs-sent draft pair.
+        if value is not None:
+            import json
+
+            if len(json.dumps(value, ensure_ascii=False).encode("utf-8")) > 16384:
+                raise ValueError("payload is too large (max 16KB)")
+        return value
 
 
 class FeedbackAck(BaseModel):
