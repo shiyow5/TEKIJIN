@@ -5,9 +5,11 @@
 e5-large では `answer_confidence` の最小値(0.816)が `PRIOR_ANSWER_SIM`(0.80) を超えるため、
 全71件が `prior_answer` に倒れて層2 Recall@3 が 0.592 落ちていた。
 
-#90 で埋め込みを Nemotron-3-Embed-1B に替え、閾値をその実測分布に較正した
-（DOCUMENT_SIM=0.30 / PERSON_WEAK_SIM=0.40 は分布内、経路精度 0.821 > 多数決 0.696、
-1経路への潰れ 0.90 < 0.95）。ただし `answer_confidence` は prior_answer を分離できず
+#90 で埋め込みを Nemotron-3-Embed-1B に替え、閾値をその実測分布に較正した。
+#191 で評価セット（全81件 / 採点66件）基準に再較正し、DOCUMENT_SIM=0.30→0.28 とした
+（DOCUMENT_SIM=0.28 / PERSON_WEAK_SIM=0.40 は分布内、経路精度 0.818 > 多数決 0.742、
+1経路への潰れ 0.94 < 0.95。0.30 のままだと潰れ 0.95 で制約を割り document recall も 4/10 に
+落ちていた）。ただし `answer_confidence` は prior_answer を分離できず
 （person gold が prior_answer gold より高い）、PRIOR_ANSWER_SIM=0.55 は観測最大 0.543 の
 直上に置いて意図的に無効化している。prior_answer の本筋復活はコーパス集計ルーティング(#119)。
 
@@ -39,8 +41,9 @@ from tekijin.agent.route import (
 from tekijin.config import get_settings
 
 # 一つの経路がここまで占めたら、実質的に分岐が死んでいる。
-# gold の多数派（routed のうち person が 0.70）に none 15件ぶんが乗るので、
-# 健全に較正しても person は 0.89 程度を占める。誤警報を避けて 0.95 に置く。
+# gold の多数派（routed のうち person が 0.74）に none 15件ぶんが乗るので、
+# 健全に較正しても person は 0.94 程度を占める（#191, 66件基準の DOCUMENT_SIM=0.28 で 76/81）。
+# 誤警報を避けて 0.95 に置く。マージンは薄い（document 側を弱めると即 0.95 に達する）。
 _COLLAPSE_RATIO = 0.95
 _REMEASURE = (
     "再測定: python scripts/research_e2e.py --task prepare && "
