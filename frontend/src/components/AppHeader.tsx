@@ -17,7 +17,7 @@
 
 import { useCurrentUser } from "@/components/CurrentUserProvider";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 
 const NAV = [
   { href: "/questions", label: "質問する" },
@@ -33,6 +33,7 @@ export function AppHeader() {
   const { employees, currentUserId, setCurrentUserId, loading, error, reload } = useCurrentUser();
   const ready = employees.length > 0 && currentUserId !== null;
   const pathname = usePathname() ?? "";
+  const router = useRouter();
 
   return (
     <header className="flex flex-wrap items-center justify-between gap-sm border-outline-variant border-b bg-surface-container-lowest px-margin py-sm">
@@ -81,7 +82,10 @@ export function AppHeader() {
           className="rounded-md border border-outline bg-surface-container-lowest px-sm py-xs text-sm disabled:text-on-surface-variant"
           value={ready ? currentUserId : ""}
           disabled={!ready}
-          onChange={(e) => setCurrentUserId(e.target.value)}
+          onChange={(e) => {
+            setCurrentUserId(e.target.value);
+            router.push("/");
+          }}
         >
           {ready ? (
             employees.map((employee) => (
