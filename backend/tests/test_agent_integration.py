@@ -567,6 +567,38 @@ def test_unresolved_intent_terminal(seed_counts, session, fake_embedder) -> None
     assert not final.get("recommendations")
 
 
+def test_unresolved_intent_survives_retrieval_noise(seed_counts, session, fake_embedder) -> None:
+    # #276 review (HIGH): #69 runs retrieval BEFORE C1, so a topic-bearing fragment
+    # is available even for an unidentifiable question. A retrieval-mediated topic
+    # (which never lifts confidence, #275) must NOT defeat the graceful "couldn't
+    # identify" terminal by making `topics` non-empty — the asker would otherwise be
+    # handed off to an expert on a topic they never actually expressed.
+    from tekijin.models.tables import Answer, Question
+
+    session.add(Question(id="q_noise", asker_id=2, body="CRMで顧客管理の履歴を残す", topics=[]))
+    session.flush()
+    session.add(Answer(id="a_noise", question_id="q_noise", responder_id=1, body="商談履歴を蓄積"))
+    session.flush()
+    retriever = _FakeRetriever(
+        answers=[{"qa_id": "a_noise", "score": 0.9, "responder_id": 1}],
+        people=[1],
+    )
+    agent = build_agent(fake_embedder, session, retriever=retriever)
+    cfg = _cfg("noise")
+
+    agent.invoke(_init("これについて教えてください"), cfg)  # no own topic -> ask
+    assert agent.get_state(cfg).next == ("ask",)
+    final = agent.invoke(Command(resume="やっぱりよくわかりません"), cfg)  # still vague -> capped
+    values = agent.get_state(cfg).values
+    # The retriever DID inject a spurious topic (mediation is active)...
+    assert "CRM・営業支援" in values["topics"]
+    # ...but the intent is still unresolved and reaches the graceful terminal,
+    # NOT a person hand-off on the noise topic.
+    assert final["intent_unresolved"] is True
+    assert "特定できませんでした" in final["answer"]
+    assert not final.get("recommendations")
+
+
 # --------------------------------------------------------------------------- #
 # fix I: a non-string resume is not interpolated into the question
 # --------------------------------------------------------------------------- #

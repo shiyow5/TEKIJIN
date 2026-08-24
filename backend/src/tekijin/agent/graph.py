@@ -139,6 +139,14 @@ def build_agent(
     # control fields on a fresh invoke; ``resume`` bypasses START, so mid-flow
     # interrupts keep their state. #69: retrieval runs BEFORE C1 so C1 classifies
     # the topic with the retrieved evidence's vocabulary in front of it.
+    #
+    # COST TRADE-OFF (accepted; #276 review MEDIUM, tracked in #277): because
+    # C4 now precedes C1, every question pays for a full embedding + hybrid retrieval
+    # pass BEFORE the ``scan_disallowed`` net / out_of_scope classification refuse it,
+    # and a clarification-needing question retrieves twice (raw + enriched). No data
+    # leaks (retrieval is internal; a refused run never surfaces it). A pre-C3 gate
+    # that short-circuits ``scan_disallowed`` traffic before retrieval is the planned
+    # optimisation; the LLM-classified off_topic cost is inherent to retrieve-then-classify.
     graph.add_edge(START, "reset")
     graph.add_edge("reset", "c3_embed")
     graph.add_edge("c3_embed", "c4_retrieve")

@@ -478,6 +478,21 @@ def test_context_does_not_move_question_type_or_confidence() -> None:
     assert mediated.confidence == base.confidence  # and confidence is not
 
 
+def test_context_topics_report_only_the_context_only_subset() -> None:
+    # #276 review: the mediated topic that came ONLY from context is reported in
+    # `context_topics` (a subset of `topics`), so the graph can tell it apart from a
+    # question-derived topic. A topic present in BOTH question and context is NOT
+    # context-only.
+    model = KeywordIntentModel()
+    # Question yields セキュリティ (UTM); context yields CRM (context-only) and also
+    # セキュリティ (already in the question -> not context-only).
+    result = model.analyze("UTMのセキュリティ相談", None, context=["CRMの顧客管理とUTMの話"])
+    assert "CRM・営業支援" in result.topics and "セキュリティ" in result.topics
+    assert result.context_topics == ["CRM・営業支援"]  # セキュリティ excluded (also in question)
+    # No context -> no context_topics.
+    assert model.analyze("UTMのセキュリティ相談", None).context_topics == []
+
+
 def test_context_never_pulls_an_out_of_scope_question_back_in() -> None:
     # Off-topic input stays out_of_scope even if a fragment mentions a topic —
     # context is reference evidence, not the user's ask.

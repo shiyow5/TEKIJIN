@@ -116,6 +116,7 @@ class AgentNodes:
             "out_of_scope": False,
             "sufficient": False,
             "topics": [],
+            "topics_from_question": [],
             "products": [],
             "situation": None,
             "question_type": _QUESTION_TYPE_DEFAULT,
@@ -157,6 +158,7 @@ class AgentNodes:
                 "question_type": _QUESTION_TYPE_DEFAULT,
                 "out_of_scope": True,
                 "intent_confidence": 0.0,
+                "topics_from_question": [],
             }
         # #69 topic mediation: C1 now runs AFTER C4 (retrieve-then-classify), so it
         # can classify with the retrieved evidence's vocabulary in front of it —
@@ -165,6 +167,12 @@ class AgentNodes:
         result = self._intent.analyze(
             state["question"], state.get("asker"), context=self._intent_context(state)
         )
+        # Topics the QUESTION itself yielded (full set minus the context-only ones):
+        # the graph uses this — not the mediated union — to judge whether the asker's
+        # own request was identifiable, so retrieval noise can't defeat the
+        # ``unresolved_intent`` graceful terminal (#276 review).
+        context_only = set(result.context_topics)
+        topics_from_question = [t for t in result.topics if t not in context_only]
         return {
             "topics": result.topics,
             "products": result.products,
@@ -172,13 +180,17 @@ class AgentNodes:
             "question_type": result.question_type,
             "out_of_scope": result.out_of_scope,
             "intent_confidence": result.confidence,
+            "topics_from_question": topics_from_question,
         }
 
     def _intent_context(self, state: AgentState) -> list[str] | None:
         """Fragment snippets of C4's top hits for C1 mediation, or ``None`` (#69).
 
-        ``None`` when no fragment source is wired (unit tests) or retrieval has not
-        run / found nothing — so C1 falls back to its context-free classification.
+        ``None`` when no fragment source is wired (the many unit tests that build
+        AgentNodes without one) or when C4 surfaced nothing to re-hydrate — so C1
+        falls back to its context-free classification. Under the compiled graph
+        ``retrieval`` is always populated (C4 runs immediately before C1); the
+        ``get``/empty guard keeps this correct for a directly-invoked node too.
         """
 
         if self._fragment_source is None:
@@ -212,11 +224,19 @@ class AgentNodes:
         # request (no topic, or confidence below threshold), which still clarifies.
         can_route = bool(intent.topics) and intent.confidence >= INTENT_CONFIDENCE_THRESHOLD
         sufficient = result.sufficient or capped or can_route
-        # If we have already asked once (capped) and STILL have no topic, the
-        # intent is unresolved. Rather than silently search on nothing and land in
-        # no_candidate, flag it so the graph routes to an explicit "couldn't
-        # identify the request" terminal (see _after_c2 / unresolved_intent).
-        intent_unresolved = capped and not (state.get("topics") or [])
+        # If we have already asked once (capped) and the QUESTION still yielded no
+        # topic of its own, the intent is unresolved. Rather than silently search on
+        # nothing and land in no_candidate, flag it so the graph routes to an
+        # explicit "couldn't identify the request" terminal (see _after_c2 /
+        # unresolved_intent). We check ``topics_from_question`` — NOT the mediated
+        # ``topics`` — so that a purely retrieval-mediated topic (#69 runs C4 before
+        # C1) cannot by itself defeat this terminal and hand the asker off on a topic
+        # they never expressed (#276 review). A genuine low-confidence question topic
+        # still proceeds (the #113 valve's "we have a topic to route on").
+        topics_from_question = state.get("topics_from_question")
+        if topics_from_question is None:  # directly-invoked node / pre-#69 state
+            topics_from_question = state.get("topics") or []
+        intent_unresolved = capped and not topics_from_question
         return {
             "sufficient": sufficient,
             "missing": result.missing,
