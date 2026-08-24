@@ -200,6 +200,32 @@ def test_bm25_cache_reuses_index_until_content_changes() -> None:
         clear_bm25_cache()
 
 
+def test_shared_tokenizer_is_thread_safe() -> None:
+    """A single SudachiTokenizer shared across threads (as the #56 cache does) must
+    not raise ``RuntimeError: Already borrowed`` — each thread gets its own
+    Tokenizer from the shared dictionary."""
+    import threading
+
+    tok = SudachiTokenizer()
+    tok.tokenize("初期化")  # warm the shared dictionary once
+    texts = ["RX-3000の設定変更", "たよれーる導入の見積", "VPN機器の3拠点接続"] * 60
+    errors: list[str] = []
+
+    def worker() -> None:
+        try:
+            for t in texts:
+                tok.tokenize(t)
+        except Exception as exc:  # noqa: BLE001 - record any concurrency failure
+            errors.append(repr(exc))
+
+    threads = [threading.Thread(target=worker) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == [], f"concurrent tokenize raised: {errors[:3]}"
+
+
 def test_bm25_cache_index_still_searches_correctly() -> None:
     from tekijin.retrieval.bm25_cache import cached_bm25_index, clear_bm25_cache
 
