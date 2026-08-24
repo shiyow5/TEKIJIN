@@ -356,3 +356,18 @@ def test_rank_rejects_aware_now() -> None:
     aware = dt.datetime(2026, 8, 21, 12, 0, 0, tzinfo=dt.timezone(dt.timedelta(hours=9)))
     with pytest.raises(ValueError, match="now must be naive"):
         scorer.rank(TOPIC, [1], asker_id=None, now=aware, top_k=3)
+
+
+def test_positive_weight_sum_matches_frontend_fit_ceiling() -> None:
+    """The frontend fit gauge (#240) normalises the composite score against the
+    sum of the POSITIVE scorer weights, hardcoded as MAX_COMPOSITE_SCORE = 0.9 in
+    `frontend/src/lib/fit.ts`. There is no runtime cross-language link, so guard it
+    here: if the weights change, this fails and flags that fit.ts must be updated
+    too (else the gauge silently mis-normalises)."""
+    from tekijin.scorer.weights import DEFAULT_WEIGHTS as w
+
+    positive_sum = w.topic_fit + w.recency + w.answer_quality + w.proximity
+    assert positive_sum == pytest.approx(0.9), (
+        f"positive weight sum {positive_sum} != 0.9; update MAX_COMPOSITE_SCORE in "
+        "frontend/src/lib/fit.ts to match."
+    )

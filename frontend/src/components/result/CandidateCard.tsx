@@ -30,10 +30,10 @@ export interface CandidateCardProps {
    */
   onSelect?: (personId: string) => void;
   /**
-   * Relative fit percentage across the shown candidates (#222), computed by the
-   * parent that knows every score. Drives the gauge's ring + number so cards
-   * differentiate instead of all showing the same saturated level. Omitted →
-   * the gauge falls back to the qualitative level's own magnitude.
+   * Absolute fit percentage from this candidate's own score (#240), normalised to
+   * the scorer's fit ceiling. Decoupled from the 高/中/低 confidence label, so a
+   * strong candidate on a never-asked topic still reads high. Drives the gauge's
+   * ring + number. Omitted → the gauge falls back to the level's own magnitude.
    */
   fitPercent?: number;
 }
