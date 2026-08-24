@@ -24,14 +24,23 @@ beforeEach(() => animateMock.mockReset());
 afterEach(() => vi.restoreAllMocks());
 
 describe("ConfidenceGauge", () => {
-  it("exposes the qualitative level as an accessible label and visible text", () => {
+  it("exposes the level + percent as an accessible label and shows both", () => {
     setReducedMotion(false);
     render(<ConfidenceGauge level="高" />);
-    // role=img with the same label the card showed as text — nothing depends on color.
-    expect(screen.getByRole("img", { name: "適合度 高" })).toBeInTheDocument();
+    // role=img label carries the level AND the concrete percent — nothing depends on color.
+    expect(screen.getByRole("img", { name: "適合度 高（100%）" })).toBeInTheDocument();
     expect(screen.getByText("高")).toBeInTheDocument();
-    // never surfaces a raw percentage.
-    expect(screen.queryByText(/%/)).not.toBeInTheDocument();
+    // The concrete number is shown inside the ring (円の中に数値, #適合度).
+    expect(screen.getByText("100")).toBeInTheDocument();
+  });
+
+  it("shows the level's matching number inside the ring (中=66, 低=33)", () => {
+    setReducedMotion(true);
+    const { rerender } = render(<ConfidenceGauge level="中" />);
+    expect(screen.getByText("66")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "適合度 中（66%）" })).toBeInTheDocument();
+    rerender(<ConfidenceGauge level="低" />);
+    expect(screen.getByText("33")).toBeInTheDocument();
   });
 
   it("animates the ring on mount when motion is allowed", async () => {
@@ -46,13 +55,14 @@ describe("ConfidenceGauge", () => {
     // Give the (skipped) effect a tick; the animation must never fire.
     await new Promise((r) => setTimeout(r, 20));
     expect(animateMock).not.toHaveBeenCalled();
-    expect(screen.getByRole("img", { name: "適合度 低" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "適合度 低（33%）" })).toBeInTheDocument();
   });
 
-  it("renders a neutral gauge for an unknown level without crashing", () => {
+  it("renders a neutral gauge (50) for an unknown level without crashing", () => {
     setReducedMotion(true);
     render(<ConfidenceGauge level="不明" />);
-    expect(screen.getByRole("img", { name: "適合度 不明" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "適合度 不明（50%）" })).toBeInTheDocument();
+    expect(screen.getByText("50")).toBeInTheDocument();
   });
 
   it("falls back to the final ring if anime.js fails to load", async () => {

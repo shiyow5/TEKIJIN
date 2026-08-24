@@ -4,15 +4,17 @@
  * Animated confidence gauge for a recommendation card (#139, proposal E).
  *
  * Renders the qualitative fit signal (適合度 高/中/低) as a radial ring that
- * sweeps to its level on mount — a richer read of the same signal the card
- * already showed as text. Deliberately driven by the QUALITATIVE level, never the
- * raw internal `score` (which is not a percentage and is never surfaced —
- * CandidateCard's contract).
+ * sweeps to its level on mount, with the matching PERCENTAGE shown in the centre
+ * of the ring (requested: 具体的な数値を円の中に). The percentage is derived from the
+ * qualitative level (高=100 / 中=66 / 低=33), i.e. exactly the magnitude the ring
+ * draws — it is NOT the raw internal `score` (a weighted ranking value, not a
+ * percentage), which stays unsurfaced per CandidateCard's contract.
  *
- * Accessibility: the ring is `role="img"` with the same text label, and the label
- * is also shown, so nothing depends on color/animation. `prefers-reduced-motion`
- * renders the final ring instantly (no sweep). anime.js is loaded lazily so it
- * never blocks first paint and stays out of the server bundle.
+ * Accessibility: the ring is `role="img"` with a text label carrying both the
+ * level and the percent, and the level is also shown, so nothing depends on
+ * color/animation. `prefers-reduced-motion` renders the final ring instantly (no
+ * sweep). anime.js is loaded lazily so it never blocks first paint and stays out
+ * of the server bundle.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -41,6 +43,8 @@ export function ConfidenceGauge({ level }: { level: string }) {
   const fraction = LEVEL_FRACTION[level] ?? 0.5;
   const colorClass = LEVEL_COLOR[level] ?? "text-on-surface-variant";
   const finalOffset = CIRCUMFERENCE * (1 - fraction);
+  // Concrete number shown inside the ring — the magnitude the ring draws.
+  const percent = Math.round(fraction * 100);
 
   const arcRef = useRef<SVGCircleElement | null>(null);
   // Start empty so the sweep is visible; reduced-motion jumps straight to final.
@@ -78,10 +82,10 @@ export function ConfidenceGauge({ level }: { level: string }) {
   return (
     <span
       role="img"
-      aria-label={`適合度 ${level}`}
+      aria-label={`適合度 ${level}（${percent}%）`}
       className={`inline-flex items-center gap-xs ${colorClass}`}
     >
-      <svg width="36" height="36" viewBox="0 0 40 40" aria-hidden="true" className="shrink-0">
+      <svg width="44" height="44" viewBox="0 0 40 40" aria-hidden="true" className="shrink-0">
         <circle
           cx="20"
           cy="20"
@@ -107,6 +111,17 @@ export function ConfidenceGauge({ level }: { level: string }) {
             strokeDashoffset: reduced ? finalOffset : CIRCUMFERENCE,
           }}
         />
+        {/* Concrete fit number inside the ring (円の中に数値). */}
+        <text
+          x="20"
+          y="20"
+          textAnchor="middle"
+          dominantBaseline="central"
+          className="fill-current font-bold"
+          style={{ fontSize: "11px" }}
+        >
+          {percent}
+        </text>
       </svg>
       <span className="font-bold text-xs">{level}</span>
     </span>
