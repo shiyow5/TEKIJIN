@@ -58,6 +58,20 @@ class Settings(BaseSettings):
     # reintroduce the structured-output breakage, so change it deliberately.
     llm_enable_thinking: bool = False
 
+    # Per-request timeout (seconds) for every LLM call (C1/C2/C7). A stuck vLLM
+    # request otherwise hangs the run and holds a backpressure slot forever, so a
+    # single GPU stall cascades into unavailability (#180 task 4). On timeout the
+    # call raises and the run surfaces a graceful error event, freeing the slot.
+    # ``None`` disables the bound (langchain's own default). The real Claude
+    # fallback on timeout is a separate, credential-gated follow-up.
+    llm_timeout_seconds: float | None = 60.0
+
+    # Client-side retries per LLM call. Default 0 so ``llm_timeout_seconds`` is a
+    # HARD per-request bound: ChatOpenAI defaults to 2 retries and retries on a
+    # timeout, which would make the real worst-case stall ``timeout × 3`` (~185s)
+    # and hold a backpressure slot ~3× longer than intended (#180 task 4 review).
+    llm_max_retries: int = 0
+
     # Which C1/C2/C7 implementation the API wires: "stub" = deterministic,
     # network-free defaults (CI/tests); "vllm" = real langchain-openai client
     # against ``llm_base_url``. A ``Literal`` so an invalid value is rejected at
