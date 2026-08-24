@@ -9,11 +9,18 @@ const updateHandoffDraftMock = vi.fn();
 const selectHandoffCandidateMock = vi.fn();
 const excludeHandoffCandidateMock = vi.fn();
 const regenerateHandoffDraftMock = vi.fn();
+const correctInterpretationMock = vi.fn();
 vi.mock("@/lib/api-client", () => ({
   updateHandoffDraft: (...args: unknown[]) => updateHandoffDraftMock(...args),
   selectHandoffCandidate: (...args: unknown[]) => selectHandoffCandidateMock(...args),
   excludeHandoffCandidate: (...args: unknown[]) => excludeHandoffCandidateMock(...args),
   regenerateHandoffDraft: (...args: unknown[]) => regenerateHandoffDraftMock(...args),
+  correctInterpretation: (...args: unknown[]) => correctInterpretationMock(...args),
+}));
+
+const routerPushMock = vi.fn();
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: routerPushMock }),
 }));
 
 beforeEach(() => {
@@ -24,6 +31,9 @@ beforeEach(() => {
   excludeHandoffCandidateMock.mockResolvedValue({ session_id: "s1", status: "reroute_queued" });
   regenerateHandoffDraftMock.mockReset();
   regenerateHandoffDraftMock.mockResolvedValue({ session_id: "s1", status: "redraft_queued" });
+  correctInterpretationMock.mockReset();
+  correctInterpretationMock.mockResolvedValue({ session_id: "s1", status: "reinterpret_queued" });
+  routerPushMock.mockReset();
 });
 
 // Fixtures use the REAL backend shapes: `confidence` is the Japanese fit signal
@@ -436,6 +446,54 @@ describe("ResultScreen — main line (person)", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "AIに下書きを作り直してもらう" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("下書きの作り直しに失敗しました");
+  });
+
+  it("corrects the AI interpretation and returns to the processing screen (#260)", async () => {
+    renderResult(
+      state({
+        route: { route: "person", reason: "", confidence: 0.9 },
+        recommend: { recommendations: THREE_CANDIDATES },
+        draft: { draft: "本文" },
+      }),
+    );
+    // The correction box is collapsed until the asker opens it.
+    fireEvent.click(
+      screen.getByRole("button", { name: "AIの理解が違いますか？補足して質問し直す" }),
+    );
+    fireEvent.change(screen.getByLabelText("AIの理解が違う場合は、補足して質問し直せます"), {
+      target: { value: "対象は情報システム部です" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "補足して質問し直す" }));
+
+    await waitFor(() =>
+      expect(correctInterpretationMock).toHaveBeenCalledWith({
+        session_id: "s1",
+        supplement: "対象は情報システム部です",
+      }),
+    );
+    // The whole pipeline re-runs over the shared stream, so we navigate back to
+    // the processing screen where the re-think is rendered.
+    await waitFor(() => expect(routerPushMock).toHaveBeenCalledWith("/session/s1"));
+  });
+
+  it("surfaces a retryable error when correcting the interpretation fails (#260)", async () => {
+    correctInterpretationMock.mockRejectedValueOnce(new Error("boom"));
+    renderResult(
+      state({
+        route: { route: "person", reason: "", confidence: 0.9 },
+        recommend: { recommendations: THREE_CANDIDATES },
+        draft: { draft: "本文" },
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "AIの理解が違いますか？補足して質問し直す" }),
+    );
+    fireEvent.change(screen.getByLabelText("AIの理解が違う場合は、補足して質問し直せます"), {
+      target: { value: "補足" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "補足して質問し直す" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("解釈の訂正に失敗しました");
+    expect(routerPushMock).not.toHaveBeenCalled();
   });
 
   it("surfaces a retryable error when the confirm POST fails", async () => {

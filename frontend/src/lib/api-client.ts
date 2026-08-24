@@ -16,6 +16,7 @@ import type {
   DocumentDetail,
   EmployeeListResponse,
   EmployeeSummary,
+  HandoffCorrectRequest,
   HandoffDraftRequest,
   HandoffExcludeRequest,
   HandoffRedraftRequest,
@@ -224,6 +225,21 @@ export function excludeHandoffCandidate(
   options: RequestOptions = {},
 ): Promise<AckResponse> {
   return postJson<AckResponse>("/handoff/exclude", request, options);
+}
+
+/**
+ * POST /handoff/correct — the asker corrects the AI's interpretation ("解釈の訂正",
+ * #260). The `supplement` is folded into the question and the whole pipeline
+ * re-runs from C1; the re-run streams over `/events`, so this only acks. Throws
+ * {@link ApiError} with 404 (no hand-off pending / already answered), 409
+ * (awaiting a clarification instead), or 422 (blank supplement / nothing to
+ * correct).
+ */
+export function correctInterpretation(
+  request: HandoffCorrectRequest,
+  options: RequestOptions = {},
+): Promise<AckResponse> {
+  return postJson<AckResponse>("/handoff/correct", request, options);
 }
 
 /**

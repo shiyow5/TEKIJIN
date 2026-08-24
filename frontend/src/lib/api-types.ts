@@ -88,6 +88,17 @@ export interface HandoffExcludeRequest {
 }
 
 /**
+ * POST /handoff/correct body — the asker corrects the AI's interpretation
+ * ("解釈の訂正", #260). The `supplement` is folded into the question and the whole
+ * pipeline re-runs from C1; the re-run streams over `/events`, so the response
+ * only acks.
+ */
+export interface HandoffCorrectRequest {
+  session_id: string;
+  supplement: string;
+}
+
+/**
  * POST /handoff/redraft body — the asker asks the AI to regenerate the hand-off
  * draft for the current send target ("下書きの作り直し", #260), discarding any saved
  * edit. The new draft arrives over the open `/events` stream, so the response

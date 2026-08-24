@@ -23,11 +23,17 @@
  * (keyed by the new top). The control is offered ONLY on the selected target —
  * the backend rejects excluding a non-target candidate (422) — so the reroute
  * always follows the person the asker actually named (no mis-send).
+ *
+ * "AIの理解を訂正する" calls `POST /handoff/correct` (#260): the asker adds a
+ * supplement, the whole pipeline re-runs from C1, and we navigate back to the
+ * processing screen where the shared stream shows the re-think (which may ask a
+ * fresh clarification or land on a new result).
  */
 
 import { CandidateCard } from "@/components/result/CandidateCard";
 import { DraftEditor } from "@/components/result/DraftEditor";
 import {
+  correctInterpretation,
   excludeHandoffCandidate,
   regenerateHandoffDraft,
   selectHandoffCandidate,
@@ -35,6 +41,7 @@ import {
 } from "@/lib/api-client";
 import type { Recommendation } from "@/lib/api-types";
 import { fitPercents } from "@/lib/fit";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 export interface PersonRouteViewProps {
@@ -50,6 +57,7 @@ const SEND_ERROR = "送信に失敗しました。時間をおいて、もう一
 const SELECT_ERROR = "候補の切り替えに失敗しました。時間をおいて、もう一度お試しください。";
 const EXCLUDE_ERROR = "候補の選び直しに失敗しました。時間をおいて、もう一度お試しください。";
 const REDRAFT_ERROR = "下書きの作り直しに失敗しました。時間をおいて、もう一度お試しください。";
+const CORRECT_ERROR = "解釈の訂正に失敗しました。時間をおいて、もう一度お試しください。";
 
 export function PersonRouteView({
   recommendations,
@@ -57,6 +65,7 @@ export function PersonRouteView({
   draft,
   sessionId,
 }: PersonRouteViewProps) {
+  const router = useRouter();
   const candidates = recommendations.slice(0, MAX_CANDIDATES);
   // Absolute fit % from each candidate's score, decoupled from the 高/中/低
   // confidence label (#240): a strong #1 on a never-asked topic (label 低) still
@@ -67,6 +76,9 @@ export function PersonRouteView({
   const [selecting, setSelecting] = useState(false);
   const [excluding, setExcluding] = useState(false);
   const [redrafting, setRedrafting] = useState(false);
+  const [correcting, setCorrecting] = useState(false);
+  const [correctOpen, setCorrectOpen] = useState(false);
+  const [correctText, setCorrectText] = useState("");
   // Bumping this remounts the DraftEditor (keyed on it), which discards the
   // asker's local edits and re-seeds from the AI draft — the point of "作り直し".
   const [redraftNonce, setRedraftNonce] = useState(0);
@@ -146,6 +158,36 @@ export function PersonRouteView({
       if (mounted.current) setError(REDRAFT_ERROR);
     } finally {
       if (mounted.current) setRedrafting(false);
+    }
+  }
+
+  async function handleCorrect() {
+    const supplement = correctText.trim();
+    if (
+      correcting ||
+      redrafting ||
+      selecting ||
+      excluding ||
+      sending ||
+      !sessionId ||
+      !supplement
+    ) {
+      return;
+    }
+    setCorrecting(true);
+    setError(null);
+    try {
+      await correctInterpretation({ session_id: sessionId, supplement });
+      // The whole pipeline re-runs from C1 over the shared stream; go back to the
+      // processing screen where the re-think (a fresh clarification or a new
+      // result) is rendered. Guard the unmount-crossing navigation.
+      if (mounted.current) router.push(`/session/${sessionId}`);
+    } catch {
+      // 404 = the hand-off was already answered/closed; 409 = a clarification is owed.
+      if (mounted.current) {
+        setError(CORRECT_ERROR);
+        setCorrecting(false);
+      }
     }
   }
 
@@ -254,9 +296,59 @@ export function PersonRouteView({
       <DraftEditor
         key={`${selectedPersonId}:${redraftNonce}`}
         initialDraft={localDraft}
-        disabled={sending || selecting || excluding || redrafting}
+        disabled={sending || selecting || excluding || redrafting || correcting}
         onSend={handleSend}
       />
+
+      {sessionId ? (
+        <div className="rounded-xl border border-outline-variant border-dashed bg-surface-container-lowest p-md">
+          {correctOpen ? (
+            <div className="flex flex-col gap-sm">
+              <label
+                htmlFor="interpretation-correction"
+                className="font-medium text-on-surface text-sm"
+              >
+                AIの理解が違う場合は、補足して質問し直せます
+              </label>
+              <textarea
+                id="interpretation-correction"
+                value={correctText}
+                onChange={(e) => setCorrectText(e.target.value)}
+                disabled={correcting}
+                maxLength={2000}
+                placeholder="例：対象は営業部ではなく情報システム部です／製品はUTMではなくVPNです"
+                className="h-24 w-full resize-none rounded-lg border border-outline-variant bg-surface p-sm text-on-surface text-sm outline-none focus:border-primary"
+              />
+              <div className="flex justify-end gap-sm">
+                <button
+                  type="button"
+                  onClick={() => setCorrectOpen(false)}
+                  disabled={correcting}
+                  className="min-h-[36px] rounded-lg px-md py-1 font-medium text-on-surface-variant text-sm transition-colors hover:text-on-surface disabled:opacity-50"
+                >
+                  やめる
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCorrect}
+                  disabled={correcting || correctText.trim().length === 0}
+                  className="inline-flex min-h-[36px] items-center rounded-lg bg-secondary-container px-md py-1 font-medium text-on-secondary-container text-sm transition-colors hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {correcting ? "質問し直しています…" : "補足して質問し直す"}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setCorrectOpen(true)}
+              className="font-medium text-on-surface-variant text-sm underline decoration-dotted underline-offset-2 transition-colors hover:text-on-surface"
+            >
+              AIの理解が違いますか？補足して質問し直す
+            </button>
+          )}
+        </div>
+      ) : null}
     </section>
   );
 }

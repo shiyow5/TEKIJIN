@@ -827,6 +827,88 @@ class AgentService:
         except Exception:  # noqa: BLE001 - best-effort signal; never fail the queued redraft
             logger.exception("failed to record c7 redraft feedback for session %s", session_id)
 
+    def correct_interpretation(
+        self, session_id: str, supplement: str, *, actor_id: int | None = None
+    ) -> None:
+        """Asker corrects the AI's interpretation ("解釈の訂正", #260).
+
+        Folds ``supplement`` into the question and re-runs the WHOLE pipeline from
+        C1 — the same "add context, re-understand" move as the ``ask → c1_intent``
+        clarification edge, but asker-initiated from the result screen. Implemented
+        by queuing a fresh invoke input (a dict, not a ``Command``): on the next
+        ``/events`` read that restarts the graph from ``reset`` (which clears the
+        per-question control fields — declined_ids / recommendations / route — so
+        the corrected question is scored cleanly), re-emitting understood → route →
+        recommend → draft (or a fresh ``followup`` if the correction made C2 want
+        one) over the stream.
+
+        The previously handed-off primary is stamped ``outcome="superseded"`` first,
+        so the abandoned recommendation stops showing as pending in that person's
+        ``/inbox`` and the dashboard-pending count (same rationale as an exclude —
+        distinct value since nobody declined). The correction is recorded as a
+        ``c1`` feedback signal (#237).
+
+        Validation mirrors :meth:`exclude_handoff_target`: the run must be paused at
+        ``send`` and not already answered / queued.
+        """
+
+        text = supplement.strip()
+        if not text:  # defense in depth; the request schema already rejects blanks
+            raise SessionInvalid("supplement must be a non-empty string")
+
+        with self._lock(session_id):
+            snapshot = self._snapshot(session_id)
+            next_nodes = tuple(snapshot.next)
+            if not next_nodes:
+                raise HandoffNotFound("no responder handoff for this session")
+            if next_nodes[0] != "send":
+                raise SessionConflict("session is not awaiting a responder outcome")
+            ctx = self._reg_get(session_id)
+            if ctx is not None and ctx.pending is not None:
+                raise HandoffNotFound("this handoff has already been answered")
+
+            values = snapshot.values
+            question = values.get("question")
+            asker = values.get("asker")
+            question_id = values.get("question_id")
+            if not isinstance(question, str) or not question.strip():
+                # A paused-at-send run always has a question; guard defensively so a
+                # corrupt checkpoint fails cleanly instead of enriching ``None``.
+                raise SessionInvalid("session has no question to correct")
+
+            # Terminate the abandoned hand-off so it drops out of the responder's
+            # /inbox and the dashboard-pending count (see exclude_handoff_target).
+            self._record_outcome(session_id, values, "superseded")
+
+            # Enrich the question exactly as the ``ask`` node does, then queue a
+            # FRESH invoke (dict input) so the stream restarts from reset → C1.
+            enriched = f"{question} {text}".strip()
+            ctx = self._reg_ensure(session_id)
+            ctx.pending = {
+                "question": enriched,
+                "asker": asker,
+                "now": self._now_factory(),
+                "question_id": question_id,
+            }
+            ctx.touched_at = self._clock()
+
+        # Record the correction as a c1 learning signal OUTSIDE the lock — append-only
+        # and best-effort (mirrors the c7 signals above): the re-run is already
+        # queued, so a feedback-write failure must not fail the request.
+        try:
+            with session_scope(self._session_factory) as fb_session:
+                record_feedback(
+                    fb_session,
+                    stage="c1",
+                    kind="interpretation_corrected",
+                    question_id=question_id if isinstance(question_id, str) else None,
+                    session_id=session_id,
+                    payload={"supplement": text},
+                    actor_id=actor_id,
+                )
+        except Exception:  # noqa: BLE001 - best-effort signal; never fail the queued re-run
+            logger.exception("failed to record c1 correction feedback for session %s", session_id)
+
     # -- /events : stream ------------------------------------------------- #
     def is_streamable(self, session_id: str) -> bool:
         """True if there is a queued run, a paused run, or a replayable terminal.
