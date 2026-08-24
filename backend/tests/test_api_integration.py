@@ -2220,6 +2220,79 @@ def test_deleted_question_drops_out_of_recent_list(seed_counts, engine, fake_emb
 
 
 # --------------------------------------------------------------------------- #
+# #159: POST /questions/{id}/resolve — the asker marks a question self-resolved
+# (人を介さず解決した), feeding the dashboard self-resolution rate
+# --------------------------------------------------------------------------- #
+def _set_route(engine, qid: str, route: str) -> None:
+    from sqlalchemy import update
+
+    with get_sessionmaker(engine)() as s:
+        s.execute(update(Question).where(Question.id == qid).values(route=route))
+        s.commit()
+
+
+def test_resolve_marks_self_resolution_and_shows_in_history(
+    seed_counts, engine, fake_embedder
+) -> None:
+    client = _client(engine, fake_embedder)
+    _insert_question(engine, "api_res1", 10)
+    resp = client.post("/questions/api_res1/resolve", headers=_user_headers(10))
+    assert resp.status_code == 200 and resp.json() == {"question_id": "api_res1", "resolved": True}
+
+    with get_sessionmaker(engine)() as s:
+        q = s.query(Question).filter(Question.id == "api_res1").first()
+        assert q.resolution_kind == "self" and q.resolved_at == NOW
+
+    # The asker's history now labels it a self-resolution.
+    item = next(
+        i
+        for i in client.get("/questions", params={"asker_id": "E010"}).json()["items"]
+        if i["question_id"] == "api_res1"
+    )
+    assert item["resolution"] == "self" and item["resolved"] is True
+
+
+def test_resolve_is_idempotent_and_first_wins(seed_counts, engine, fake_embedder) -> None:
+    client = _client(engine, fake_embedder)
+    _insert_question(engine, "api_res2", 10)
+    assert client.post("/questions/api_res2/resolve", headers=_user_headers(10)).status_code == 200
+    # Re-marking is a no-op that still acks; resolved_at is not moved.
+    assert client.post("/questions/api_res2/resolve", headers=_user_headers(10)).status_code == 200
+    with get_sessionmaker(engine)() as s:
+        q = s.query(Question).filter(Question.id == "api_res2").first()
+        assert q.resolution_kind == "self" and q.resolved_at == NOW
+
+
+def test_resolve_forbidden_for_non_owner(seed_counts, engine, fake_embedder) -> None:
+    client = _client(engine, fake_embedder)
+    _insert_question(engine, "api_res3", 10)
+    resp = client.post("/questions/api_res3/resolve", headers=_user_headers(11))
+    assert resp.status_code == 403
+    with get_sessionmaker(engine)() as s:
+        q = s.query(Question).filter(Question.id == "api_res3").first()
+        assert q.resolution_kind is None  # untouched
+
+
+def test_resolve_missing_question_returns_404(seed_counts, engine, fake_embedder) -> None:
+    client = _client(engine, fake_embedder)
+    assert client.post("/questions/api_missing/resolve").status_code == 404
+
+
+def test_self_resolution_counts_in_dashboard_rate(seed_counts, engine, fake_embedder) -> None:
+    client = _client(engine, fake_embedder)
+    _insert_question(engine, "api_res4", 10)
+    _set_route(engine, "api_res4", "person")  # a routed, person-bound question
+    with get_sessionmaker(engine)() as s:
+        before = dashboard_summary(s)["self_resolution_rate"]
+    client.post("/questions/api_res4/resolve", headers=_user_headers(10))
+    with get_sessionmaker(engine)() as s:
+        after = dashboard_summary(s)["self_resolution_rate"]
+    # The explicit self-resolution now counts in the numerator even though the
+    # route was "person" (the asker solved it without actually asking anyone).
+    assert after > before
+
+
+# --------------------------------------------------------------------------- #
 # #208: /questions honours a `limit` (history screen requests many, panel few)
 # --------------------------------------------------------------------------- #
 def test_questions_limit_caps_and_orders_newest_first(seed_counts, engine, fake_embedder) -> None:

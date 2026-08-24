@@ -76,6 +76,11 @@ function QuestionCard({ item, clickable }: { item: RecentQuestionItem; clickable
             <span className="text-on-surface text-sm">{item.responder_name}</span>
           </div>
         </div>
+      ) : item.resolution === "self" ? (
+        <div className="mt-auto flex items-center gap-sm border-outline-variant border-t pt-sm text-on-surface-variant text-sm">
+          <span aria-hidden="true">✅</span>
+          <span>自分で解決</span>
+        </div>
       ) : item.resolution === "document" ? (
         <div className="mt-auto flex items-center gap-sm border-outline-variant border-t pt-sm text-on-surface-variant text-sm">
           <span aria-hidden="true">📄</span>

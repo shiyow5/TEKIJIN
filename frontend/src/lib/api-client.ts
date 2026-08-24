@@ -33,6 +33,7 @@ import type {
   Principal,
   RecentQuestionItem,
   RecentQuestionsResponse,
+  ResolveQuestionResponse,
   ResumeRequest,
 } from "@/lib/api-types";
 import { getAuthToken } from "@/lib/auth-token";
@@ -329,6 +330,22 @@ export async function deleteQuestion(
 ): Promise<DeleteQuestionResponse> {
   return deleteJson<DeleteQuestionResponse>(
     `/questions/${encodeURIComponent(questionId)}`,
+    options,
+  );
+}
+
+/**
+ * POST /questions/{questionId}/resolve — mark one of the asker's own questions
+ * self-resolved ("人を介さず解決した", #159). Only the owning asker (or an admin) may;
+ * 403 otherwise, 404 for a missing question. Idempotent. Returns the ack.
+ */
+export async function resolveQuestion(
+  questionId: string,
+  options: RequestOptions = {},
+): Promise<ResolveQuestionResponse> {
+  return postJson<ResolveQuestionResponse>(
+    `/questions/${encodeURIComponent(questionId)}/resolve`,
+    {},
     options,
   );
 }

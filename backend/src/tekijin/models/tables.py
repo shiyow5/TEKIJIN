@@ -197,6 +197,12 @@ class Question(Base):
     # the API so the dashboard's average resolution time reflects live traffic, not
     # only seeded ``answers`` rows (#97). NULL while unresolved / pre-seeded.
     resolved_at: Mapped[dt.datetime | None] = mapped_column(DateTime)
+    # HOW the question was resolved when it did NOT go through a live hand-off:
+    # ``"self"`` = the asker marked it solved without asking a person (#159, e.g. a
+    # document answer or a past answer sufficed). NULL otherwise (still pending, or
+    # resolved by a person — that is derived from the accepted recommendation, not
+    # stored here). Feeds the dashboard's self-resolution rate alongside the route.
+    resolution_kind: Mapped[str | None] = mapped_column(String(16))
     created_at: Mapped[dt.datetime | None] = mapped_column(DateTime)
     embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM))
 

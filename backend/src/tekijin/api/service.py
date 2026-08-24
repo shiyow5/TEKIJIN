@@ -213,6 +213,11 @@ class AgentService:
     def session_factory(self) -> sessionmaker[Session]:
         return self._session_factory
 
+    def now(self) -> dt.datetime:
+        """The service's clock (injected in tests) — for route-level timestamps."""
+
+        return self._now_factory()
+
     def close(self) -> None:
         """Release long-lived resources at shutdown (checkpointer pool, engine)."""
 

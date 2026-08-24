@@ -11,9 +11,11 @@ vi.mock("@/components/CurrentUserProvider", () => ({
 
 const getRecentQuestionsMock = vi.fn();
 const deleteQuestionMock = vi.fn();
+const resolveQuestionMock = vi.fn();
 vi.mock("@/lib/api-client", () => ({
   getRecentQuestions: (...args: unknown[]) => getRecentQuestionsMock(...args),
   deleteQuestion: (...args: unknown[]) => deleteQuestionMock(...args),
+  resolveQuestion: (...args: unknown[]) => resolveQuestionMock(...args),
 }));
 
 function asUser(id: string | null): CurrentUserContextValue {
@@ -54,6 +56,8 @@ beforeEach(() => {
   useCurrentUserMock.mockReset();
   getRecentQuestionsMock.mockReset();
   deleteQuestionMock.mockReset();
+  resolveQuestionMock.mockReset();
+  resolveQuestionMock.mockResolvedValue({ question_id: "q2", resolved: true });
 });
 
 afterEach(() => {
@@ -100,6 +104,25 @@ describe("HistoryScreen", () => {
     await waitFor(() => expect(deleteQuestionMock).toHaveBeenCalledWith("q2"));
     await waitFor(() => expect(screen.queryByText("社内Wi-Fiの申請方法")).not.toBeInTheDocument());
     expect(screen.getByText("UTMの移行時の注意点")).toBeInTheDocument();
+  });
+
+  it("marks a pending question self-resolved after confirmation (#159)", async () => {
+    useCurrentUserMock.mockReturnValue(asUser("E001"));
+    getRecentQuestionsMock.mockResolvedValue(ITEMS);
+    render(<HistoryScreen />);
+
+    await waitFor(() => expect(screen.getByText("社内Wi-Fiの申請方法")).toBeInTheDocument());
+    // The pending item offers a self-resolve control; the resolved one does not.
+    expect(screen.getByText("取り次ぎ先を調整中")).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "「社内Wi-Fiの申請方法」を自分で解決済みにする" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "解決済みにする" }));
+
+    await waitFor(() => expect(resolveQuestionMock).toHaveBeenCalledWith("q2"));
+    // The row updates in place to the self-resolved state (no re-fetch).
+    await waitFor(() => expect(screen.getByText("自分で解決")).toBeInTheDocument());
+    expect(screen.getByText("社内Wi-Fiの申請方法")).toBeInTheDocument();
   });
 
   it("shows an empty state when there is no history", async () => {

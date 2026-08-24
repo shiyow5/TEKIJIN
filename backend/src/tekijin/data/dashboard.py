@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from tekijin.data.feedback import VALID_STAGES, feedback_counts_by_stage
@@ -124,11 +124,19 @@ def _self_resolution_rate(session: Session) -> float:
     )
     if not routed:
         return 0.0
+    # Numerator: an auxiliary self-resolving route (document) OR an explicit
+    # "自分で解決した" signal the asker gave without a live hand-off (#159).
     self_resolved = (
         session.scalar(
             select(func.count())
             .select_from(Question)
-            .where(Question.route.in_(_SELF_RESOLVED_ROUTES))
+            .where(
+                Question.route.isnot(None),
+                or_(
+                    Question.route.in_(_SELF_RESOLVED_ROUTES),
+                    Question.resolution_kind == "self",
+                ),
+            )
         )
         or 0
     )

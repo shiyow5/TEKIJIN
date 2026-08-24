@@ -51,6 +51,7 @@ def recent_questions_for_asker(
             Question.body,
             Question.status,
             Question.route,
+            Question.resolution_kind,
             Question.session_id,
             Question.created_at,
         )
@@ -91,14 +92,16 @@ def recent_questions_for_asker(
         answered.setdefault(qid, name)
 
     items: list[dict[str, Any]] = []
-    for qid, body, status, route, session_id, created_at in q_rows:
+    for qid, body, status, route, resolution_kind, session_id, created_at in q_rows:
         responder = accepted.get(qid) or answered.get(qid)
         by_person = qid in accepted or qid in answered or status == "answered"
-        # A person resolution wins; else the document route is a self-resolution
-        # (no human), per Question.route's self_resolution_rate semantics; else it
-        # is still awaiting a hand-off.
+        # Precedence: a person resolution wins (they actually got a human answer);
+        # else an explicit "自分で解決した" signal (#159); else the document route is
+        # a self-resolution (no human); else still awaiting a hand-off.
         if by_person:
             resolution = "person"
+        elif resolution_kind == "self":
+            resolution = "self"
         elif route == "document":
             resolution = "document"
         else:
