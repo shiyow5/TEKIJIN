@@ -1694,3 +1694,60 @@ def test_reroute_created_at_is_generation_time_not_ask_time(
     # /ask NOW (which is a fixed future date in these tests).
     assert all(t != NOW for t in times)
     assert max(times) > min(times)  # the reroute pass was inserted strictly later
+
+
+# --------------------------------------------------------------------------- #
+# GET /notifications, POST /notifications/ack : decline notifications (#E7)
+# --------------------------------------------------------------------------- #
+def test_notifications_lists_decline_then_ack_clears_it(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "nt1"})
+    _events(client, "nt1")  # pause at send for E001
+    assert client.get("/notifications", params={"asker_id": "E010"}).json()["items"] == []
+
+    client.post("/answer", json={"session_id": "nt1", "outcome": "declined"})
+    _events(client, "nt1")  # reroute (auto-advances to E002) -> pause at send again
+
+    body = client.get("/notifications", params={"asker_id": "E010"}).json()
+    assert len(body["items"]) == 1
+    item = body["items"][0]
+    # The declined person's real (seeded) name, not the _FakeScorer's fixture
+    # name — Recommendation rows only ever store employee_id in the DB.
+    assert item["declined_person_name"]
+    assert f"{item['declined_person_name']}さんに断られた" in item["message"]
+    assert item["session_id"] == "nt1"
+
+    ack = client.post("/notifications/ack", json={"asker_id": "E010", "ids": [item["id"]]})
+    assert ack.status_code == 200
+    assert ack.json()["acknowledged"] == 1
+
+    assert client.get("/notifications", params={"asker_id": "E010"}).json()["items"] == []
+    # Re-acking an already-seen id is a harmless no-op.
+    again = client.post("/notifications/ack", json={"asker_id": "E010", "ids": [item["id"]]})
+    assert again.json()["acknowledged"] == 0
+
+
+def test_notifications_scoped_to_the_owning_asker(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "nt2"})
+    _events(client, "nt2")
+    client.post("/answer", json={"session_id": "nt2", "outcome": "declined"})
+    _events(client, "nt2")
+
+    # A different asker cannot see or ack someone else's decline notification.
+    assert client.get("/notifications", params={"asker_id": "E011"}).json()["items"] == []
+    mine = client.get("/notifications", params={"asker_id": "E010"}).json()["items"]
+    notif_id = mine[0]["id"]
+    other_ack = client.post("/notifications/ack", json={"asker_id": "E011", "ids": [notif_id]})
+    assert other_ack.json()["acknowledged"] == 0
+    assert len(client.get("/notifications", params={"asker_id": "E010"}).json()["items"]) == 1

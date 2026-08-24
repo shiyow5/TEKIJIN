@@ -235,6 +235,10 @@ class Recommendation(Base):
     # Needed by the scorer's ``load`` calc (recommendations in the last 7 days,
     # technical-spec §5). DB stamps it at insert; indexed for the recency window.
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now(), index=True)
+    # When the asker acknowledged this decline in the notification bell (#E7).
+    # NULL means "not yet seen"; only ever set on a rank==1, outcome=='declined'
+    # row (the shape a decline notification is derived from).
+    declined_seen_at: Mapped[dt.datetime | None] = mapped_column(DateTime)
 
 
 class EvalRun(Base):

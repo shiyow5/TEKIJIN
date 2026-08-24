@@ -140,6 +140,39 @@ export interface RecentQuestionsResponse {
   items: RecentQuestionItem[];
 }
 
+/**
+ * One decline event the asker hasn't acknowledged yet (GET /notifications,
+ * schemas.py `DeclineNotification`). Paired with the automatic reroute
+ * (#206): by the time this is shown, the system has already moved on to
+ * the next candidate — it is informational, not a request to act (#E7).
+ */
+export interface DeclineNotification {
+  /** the declined Recommendation row's id — also the ack target. */
+  id: number;
+  question_id: string;
+  /** deep-link target; null for pre-session-tracking rows. */
+  session_id?: string | null;
+  message: string;
+  declined_person_name: string;
+  created_at?: string | null;
+}
+
+/** GET /notifications payload (schemas.py `NotificationsResponse`). */
+export interface NotificationsResponse {
+  items: DeclineNotification[];
+}
+
+/** POST /notifications/ack body — mark decline notifications as seen (#E7). */
+export interface NotificationAckRequest {
+  asker_id: EmployeeId;
+  ids: number[];
+}
+
+/** POST /notifications/ack response (schemas.py `NotificationAckResponse`). */
+export interface NotificationAckResponse {
+  acknowledged: number;
+}
+
 // --------------------------------------------------------------------------- //
 // domain models (shared by SSE data and final response)
 // --------------------------------------------------------------------------- //

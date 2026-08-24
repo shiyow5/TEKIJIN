@@ -18,6 +18,7 @@
 
 import { useAuth } from "@/components/AuthProvider";
 import { useCurrentUser } from "@/components/CurrentUserProvider";
+import { NotificationBell } from "@/components/NotificationBell";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 
@@ -80,6 +81,9 @@ export function AppHeader() {
       </div>
 
       <div className="flex flex-wrap items-center gap-sm">
+        {/* Decline notifications (#225). Logged out there is no acting user to
+            poll for, so the bell stays out of the tree entirely. */}
+        {principal ? <NotificationBell /> : null}
         {canSwitch ? (
           <label
             className="flex items-center gap-xs text-on-surface-variant text-xs"

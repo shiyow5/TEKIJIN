@@ -42,10 +42,13 @@ from tekijin.auth.deps import (
 )
 from tekijin.auth.principal import Principal
 from tekijin.data.dashboard import dashboard_summary
+from tekijin.data.db import session_scope
 from tekijin.data.documents import get_document
 from tekijin.data.history import recent_questions_for_asker
 from tekijin.data.inbox import pending_handoffs_for_responder
+from tekijin.data.notifications import pending_decline_notifications_for_asker
 from tekijin.data.repository import Repository
+from tekijin.data.writes import ack_decline_notifications
 
 logger = logging.getLogger(__name__)
 
@@ -374,6 +377,58 @@ def questions(
         return schemas.RecentQuestionsResponse(
             items=[schemas.RecentQuestionItem(**row) for row in rows]
         )
+
+
+@router.get("/notifications", response_model=schemas.NotificationsResponse)
+def notifications(
+    request: Request,
+    asker_id: str = Query(min_length=1),
+    principal: Principal = Depends(require_principal),
+) -> schemas.NotificationsResponse:
+    """Decline events the asker hasn't seen yet, newest first (#225).
+
+    Paired with the automatic reroute (#206): the system has already moved on
+    to the next candidate by the time this fires, so it is an informational
+    "here's what happened" surface, not a request for the asker to act.
+    ``asker_id`` accepts an int or the ``"E###"`` form (422 otherwise). A non-admin
+    may only read their own notifications; admin may read anyone's (#241, the same
+    rule as ``/questions``).
+    """
+
+    with _generic_500("GET /notifications"):
+        try:
+            aid = schemas.coerce_employee_id(asker_id)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422, detail="asker_id must be an int or 'E###'"
+            ) from exc
+        require_can_act_as(principal, aid)
+
+        with _service(request).session_factory() as session:
+            rows = pending_decline_notifications_for_asker(session, aid)
+        return schemas.NotificationsResponse(
+            items=[schemas.DeclineNotification(**row) for row in rows]
+        )
+
+
+@router.post("/notifications/ack", response_model=schemas.NotificationAckResponse)
+def ack_notifications(
+    req: schemas.NotificationAckRequest,
+    request: Request,
+    principal: Principal = Depends(require_principal),
+) -> schemas.NotificationAckResponse:
+    """Mark decline notifications as seen (#225).
+
+    Acking is a write on the asker's own rows, so it carries the same
+    act-as rule as the read above (#241) — without it any logged-in user could
+    silently clear someone else's unread notifications.
+    """
+
+    with _generic_500("POST /notifications/ack"):
+        require_can_act_as(principal, req.asker_id)
+        with session_scope(_service(request).session_factory) as session:
+            count = ack_decline_notifications(session, req.asker_id, req.ids)
+        return schemas.NotificationAckResponse(acknowledged=count)
 
 
 @router.get(
