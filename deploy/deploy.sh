@@ -80,15 +80,24 @@ build_frontend() {
 }
 
 restart_backend() {
-  # Stop the previous nohup uvicorn (best-effort; the run may not exist yet), then
-  # relaunch detached. vLLM/Postgres are separate processes and are not matched.
+  # Stop the previous uvicorn (best-effort; the run may not exist yet), then
+  # relaunch FULLY DETACHED from this deploy job. vLLM/Postgres are separate
+  # processes and are not matched.
+  #
+  # CRITICAL (#210): a plain `nohup … &` is NOT enough on a self-hosted runner.
+  # The Actions runner tags every process it spawns with the RUNNER_TRACKING_ID
+  # env var and KILLS all such processes when the job completes — so the backend
+  # passed the health check and then died the instant the deploy job finished.
+  # `setsid` puts it in its own session and `env -u RUNNER_TRACKING_ID` scrubs the
+  # tag, so the runner's post-job cleanup no longer reaps it.
   pkill -f 'deploy/start_backend.sh' 2>/dev/null || true
   pkill -f 'uvicorn tekijin.main:app' 2>/dev/null || true
   sleep 2
   (
     cd "$DEPLOY_DIR"
-    TEKIJIN_PORT="$PORT" TEKIJIN_VENV_PY="$VENV_PY" CUDA_VISIBLE_DEVICES="" \
-      nohup deploy/start_backend.sh >"${HOME}/backend.log" 2>&1 </dev/null &
+    setsid env -u RUNNER_TRACKING_ID \
+      TEKIJIN_PORT="$PORT" TEKIJIN_VENV_PY="$VENV_PY" CUDA_VISIBLE_DEVICES="" \
+      bash -c 'exec deploy/start_backend.sh' >"${HOME}/backend.log" 2>&1 </dev/null &
   )
 }
 
