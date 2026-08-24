@@ -50,12 +50,21 @@ function ChatThreadListItem({
         aria-current={active ? "true" : undefined}
         className={
           active
-            ? "flex w-full items-baseline justify-between gap-sm rounded-lg bg-secondary-container px-sm py-sm text-left text-on-secondary-container"
-            : "flex w-full items-baseline justify-between gap-sm rounded-lg px-sm py-sm text-left transition-colors hover:bg-surface-container-low"
+            ? "flex w-full items-start justify-between gap-sm rounded-lg bg-secondary-container px-sm py-sm text-left text-on-secondary-container"
+            : "flex w-full items-start justify-between gap-sm rounded-lg px-sm py-sm text-left transition-colors hover:bg-surface-container-low"
         }
       >
-        <span className="truncate font-bold text-on-surface text-sm">
-          {thread.counterpart.name ?? "匿名"}
+        <span className="flex min-w-0 flex-col gap-[2px]">
+          <span className="truncate font-bold text-on-surface text-sm">
+            {thread.counterpart.name ?? "匿名"}
+          </span>
+          {/* Two accepted requests with the same person are otherwise
+              indistinguishable in this list (#224 review). */}
+          {thread.question_title ? (
+            <span className="truncate text-on-surface-variant text-xs">
+              {thread.question_title}
+            </span>
+          ) : null}
         </span>
         {when ? (
           <span className="shrink-0 text-on-surface-variant text-xs tabular-nums">{when}</span>
@@ -70,14 +79,18 @@ function ChatThreadList({
   phase,
   selectedId,
   onSelect,
+  className,
 }: {
   threads: ChatThreadSummary[];
   phase: "loading" | "ready" | "error";
   selectedId: number | null;
   onSelect: (id: number) => void;
+  className: string;
 }) {
   return (
-    <div className="flex w-full max-w-xs shrink-0 flex-col gap-sm border-outline-variant border-r pr-md">
+    <div
+      className={`w-full flex-col gap-sm md:max-w-xs md:shrink-0 md:border-outline-variant md:border-r md:pr-md ${className}`}
+    >
       <h1 className="font-bold text-lg text-on-surface">チャット</h1>
       {phase === "loading" && threads.length === 0 ? (
         <p className="text-on-surface-variant text-sm">読み込み中…</p>
@@ -126,9 +139,13 @@ function ChatBubble({ message, mine }: { message: ChatMessage; mine: boolean }) 
 function ChatConversation({
   threadId,
   currentUserId,
+  className,
+  onBack,
 }: {
   threadId: number | null;
   currentUserId: string | null;
+  className: string;
+  onBack: () => void;
 }) {
   const { phase, detail, send, sending, sendError } = useChatThread(threadId, currentUserId);
   const [draft, setDraft] = useState("");
@@ -143,15 +160,26 @@ function ChatConversation({
 
   if (threadId === null) {
     return (
-      <div className="flex flex-1 items-center justify-center text-on-surface-variant text-sm">
-        左の一覧から会話を選択してください。
+      <div
+        className={`flex-1 items-center justify-center text-on-surface-variant text-sm ${className}`}
+      >
+        一覧から会話を選んでください。
       </div>
     );
   }
 
   return (
-    <div className="flex flex-1 flex-col gap-md pl-md">
+    <div className={`flex-1 flex-col gap-md md:pl-md ${className}`}>
       <header className="flex flex-col gap-xs border-outline-variant border-b pb-sm">
+        {/* Below `md` the two panes swap instead of sitting side by side, so the
+            conversation needs its own way back to the list (#254 の流儀に合わせる). */}
+        <button
+          type="button"
+          onClick={onBack}
+          className="-ml-xs self-start rounded-md px-xs py-1 text-on-surface-variant text-sm transition-colors hover:bg-surface-container-low md:hidden"
+        >
+          ← 一覧へ戻る
+        </button>
         <h2 className="font-bold text-on-surface">
           {detail?.counterpart.name ?? (phase === "loading" ? "読み込み中…" : "不明な相手")}
         </h2>
@@ -165,7 +193,7 @@ function ChatConversation({
           この会話の取得に失敗しました。時間をおいて再度お試しください。
         </p>
       ) : (
-        <ul className="flex flex-1 flex-col gap-sm overflow-y-auto">
+        <ul className="flex min-h-[12rem] flex-1 flex-col gap-sm overflow-y-auto">
           {detail?.messages.length ? (
             detail.messages.map((message) => (
               <ChatBubble
@@ -225,15 +253,32 @@ export function ChatScreen({ initialThreadId }: ChatScreenProps) {
     }
   }, [threads, selectedId]);
 
+  // Below `md` there is no room for two panes, so they take turns: the list
+  // until a thread is picked, then the conversation with a way back (#254).
+  const [showConversation, setShowConversation] = useState(initialThreadId != null);
+
   return (
-    <section className="mx-auto flex h-[calc(100vh-96px)] w-full max-w-5xl gap-md py-lg">
+    // Only the DESKTOP layout pins the height so the two panes scroll
+    // independently. At phone width the header is much taller (bell, switcher,
+    // logout, hamburger) and any fixed offset pushed the composer off-screen —
+    // so there the section grows naturally and the page scrolls instead.
+    <section className="mx-auto flex w-full max-w-5xl flex-col gap-md py-lg md:h-[calc(100dvh-9rem)] md:flex-row">
       <ChatThreadList
         threads={threads}
         phase={phase}
         selectedId={selectedId}
-        onSelect={setSelectedId}
+        onSelect={(id) => {
+          setSelectedId(id);
+          setShowConversation(true);
+        }}
+        className={showConversation ? "hidden md:flex" : "flex"}
       />
-      <ChatConversation threadId={selectedId} currentUserId={currentUserId} />
+      <ChatConversation
+        threadId={selectedId}
+        currentUserId={currentUserId}
+        onBack={() => setShowConversation(false)}
+        className={showConversation ? "flex" : "hidden md:flex"}
+      />
     </section>
   );
 }

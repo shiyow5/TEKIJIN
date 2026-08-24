@@ -6,7 +6,7 @@
  * (POST /handoff/draft carries the choice as `consult_method`).
  */
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { ConsultMethod } from "@/lib/api-types";
 
 export interface ConsultMethodDialogProps {
@@ -20,9 +20,38 @@ export function ConsultMethodDialog({
   onCancel,
   disabled = false,
 }: ConsultMethodDialogProps) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const firstButtonRef = useRef<HTMLButtonElement>(null);
+
+  // `aria-modal="true"` promises assistive tech that the rest of the page is
+  // inert, so the focus contract has to hold: move focus in on open, keep Tab
+  // inside, and hand it back to whatever opened us on close. Without this, Tab
+  // walked straight out of the dialog into the header nav.
+  useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
+    firstButtonRef.current?.focus();
+    return () => opener?.focus?.();
+  }, []);
+
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape" && !disabled) onCancel();
+      if (e.key === "Escape" && !disabled) {
+        onCancel();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const focusable = dialogRef.current?.querySelectorAll<HTMLElement>("button:not([disabled])");
+      if (!focusable || focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+      if (e.shiftKey && (active === first || !dialogRef.current?.contains(active))) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
     }
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
@@ -34,6 +63,7 @@ export function ConsultMethodDialog({
       matches this component's own onCancel/Escape handling; the native
       <dialog> element's imperative showModal()/close() API isn't needed here. */}
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby="consult-method-dialog-title"
@@ -45,6 +75,7 @@ export function ConsultMethodDialog({
         <p className="text-on-surface-variant text-sm">この依頼をどちらの方法で相談しますか。</p>
         <div className="flex flex-col gap-sm">
           <button
+            ref={firstButtonRef}
             type="button"
             disabled={disabled}
             onClick={() => onChoose("chat")}

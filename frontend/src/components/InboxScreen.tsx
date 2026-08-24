@@ -85,6 +85,9 @@ export function InboxScreen() {
   const { currentUserId, currentUser } = useCurrentUser();
   const [state, setState] = useState<InboxState>({ phase: "loading" });
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  // Below `md` the list and the detail take turns instead of sitting side by
+  // side — two panes do not fit at phone width (#254 の流儀に合わせる).
+  const [showDetail, setShowDetail] = useState(false);
 
   // `advanceToFirst` selects the fresh list's first item once it arrives —
   // done inside the same state update as the list itself (never as a separate
@@ -131,13 +134,20 @@ export function InboxScreen() {
     // チャットを開く CTA) up — just refresh the list in the background, and
     // leave the current selection alone.
     load(action !== "answer");
+    // Declining removes the item, so on mobile — where the detail replaces the
+    // list — go back rather than sitting on a pane about to be re-pointed.
+    if (action !== "answer") setShowDetail(false);
   }
 
   const who = currentUser?.name ? `${currentUser.name} さん宛て` : "あなた宛て";
 
   return (
     <section className="mx-auto flex w-full max-w-5xl gap-lg py-lg">
-      <div className="flex w-full max-w-sm shrink-0 flex-col gap-md">
+      <div
+        className={`w-full flex-col gap-md md:max-w-sm md:shrink-0 ${
+          showDetail ? "hidden md:flex" : "flex"
+        }`}
+      >
         <header className="flex flex-col gap-xs">
           <h1 className="font-bold text-2xl text-on-surface">受信箱</h1>
           <p className="text-on-surface-variant text-sm">{who}に届いた質問です。</p>
@@ -159,7 +169,10 @@ export function InboxScreen() {
                 key={item.session_id}
                 item={item}
                 active={item.session_id === selectedSessionId}
-                onSelect={() => setSelectedSessionId(item.session_id)}
+                onSelect={() => {
+                  setSelectedSessionId(item.session_id);
+                  setShowDetail(true);
+                }}
               />
             ))}
           </ul>
@@ -171,10 +184,27 @@ export function InboxScreen() {
       </div>
 
       {selectedSessionId ? (
-        <div className="min-w-0 flex-1 border-outline-variant border-l pl-lg">
+        <div
+          className={`min-w-0 flex-1 flex-col gap-sm md:border-outline-variant md:border-l md:pl-lg ${
+            showDetail ? "flex" : "hidden md:flex"
+          }`}
+        >
+          <button
+            type="button"
+            onClick={() => setShowDetail(false)}
+            className="-ml-xs self-start rounded-md px-xs py-1 text-on-surface-variant text-sm transition-colors hover:bg-surface-container-low md:hidden"
+          >
+            ← 受信箱へ戻る
+          </button>
           <AnswerScreen sessionId={selectedSessionId} onDone={handleDone} />
         </div>
-      ) : null}
+      ) : (
+        // The chat screen shows the same hint; keep the two split views
+        // consistent instead of leaving one half blank.
+        <div className="hidden flex-1 items-center justify-center border-outline-variant border-l pl-lg text-on-surface-variant text-sm md:flex">
+          一覧から質問を選んでください。
+        </div>
+      )}
     </section>
   );
 }

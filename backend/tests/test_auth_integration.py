@@ -127,6 +127,7 @@ def test_unauthenticated_requests_are_401(seed_counts, engine, fake_embedder) ->
     assert client.get("/employees").status_code == 401
     assert client.get("/questions?asker_id=1").status_code == 401
     assert client.get("/notifications?asker_id=1").status_code == 401
+    assert client.get("/messages/threads?employee_id=1").status_code == 401
     assert client.get("/inbox?responder_id=1").status_code == 401
     assert client.get("/events/whatever").status_code == 401
 
@@ -168,6 +169,22 @@ def test_user_cannot_act_as_another_employee(seed_counts, engine, fake_embedder)
     assert client.get(f"/questions?asker_id={emp.id}", headers=headers).status_code == 200
     assert client.get(f"/questions?asker_id={other}", headers=headers).status_code == 403
     assert client.get(f"/inbox?responder_id={other}", headers=headers).status_code == 403
+    # Chat threads are per-person; employee ids are the enumerable "E###" form, so
+    # without the act-as rule any logged-in user could read anyone's conversations
+    # and post as them (#224).
+    assert client.get(f"/messages/threads?employee_id={emp.id}", headers=headers).status_code == 200
+    assert client.get(f"/messages/threads?employee_id={other}", headers=headers).status_code == 403
+    assert (
+        client.get(f"/messages/threads/1?employee_id={other}", headers=headers).status_code == 403
+    )
+    assert (
+        client.post(
+            "/messages",
+            json={"thread_id": 1, "sender_id": other, "body": "なりすまし"},
+            headers=headers,
+        ).status_code
+        == 403
+    )
     # Decline notifications are the asker's own rows — reading or acking someone
     # else's must be refused, not just filtered (#225).
     assert client.get(f"/notifications?asker_id={emp.id}", headers=headers).status_code == 200

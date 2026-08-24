@@ -94,7 +94,7 @@ describe("ChatScreen", () => {
     await waitFor(() =>
       expect(screen.getByText("承諾済みの依頼がまだありません。")).toBeInTheDocument(),
     );
-    expect(screen.getByText("左の一覧から会話を選択してください。")).toBeInTheDocument();
+    expect(screen.getByText("一覧から会話を選んでください。")).toBeInTheDocument();
   });
 
   it("auto-selects the newest thread and shows its history, distinguishing sender/mine", async () => {
@@ -111,7 +111,7 @@ describe("ChatScreen", () => {
     expect(screen.getByText("承知しました")).toBeInTheDocument(); // the bubble (list shows name + time only)
   });
 
-  it("shows only the counterpart's name and timestamp in the list, not the question or preview", async () => {
+  it("shows the counterpart, the question title and the timestamp — but no message preview", async () => {
     useCurrentUserMock.mockReturnValue(asUser("E010"));
     getChatThreadsMock.mockResolvedValue([THREAD_A, THREAD_B]);
     getChatThreadMock.mockResolvedValue(DETAIL_A);
@@ -123,8 +123,10 @@ describe("ChatScreen", () => {
     const list = within(screen.getByRole("list", { name: "チャットスレッド一覧" }));
     expect(list.getByText("2026-08-24 10:00")).toBeInTheDocument(); // THREAD_A's last_message_at
     expect(list.getByText("2026-08-23 09:00")).toBeInTheDocument(); // THREAD_B's created_at fallback
-    expect(list.queryByText("VPN移行の相談")).not.toBeInTheDocument();
-    expect(list.queryByText("UTMの設定について")).not.toBeInTheDocument();
+    // The title is what tells two threads with the SAME person apart; the
+    // message preview stays out (it can carry content the list should not leak).
+    expect(list.getByText("VPN移行の相談")).toBeInTheDocument();
+    expect(list.getByText("UTMの設定について")).toBeInTheDocument();
     expect(list.queryByText("承知しました")).not.toBeInTheDocument(); // no last_message preview
   });
 
