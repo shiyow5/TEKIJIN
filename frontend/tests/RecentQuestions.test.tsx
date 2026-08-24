@@ -1,7 +1,7 @@
 import type { CurrentUserContextValue } from "@/components/CurrentUserProvider";
 import { RecentQuestions } from "@/components/RecentQuestions";
 import type { RecentQuestionItem } from "@/lib/api-types";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const useCurrentUserMock = vi.fn<() => CurrentUserContextValue>();
@@ -10,8 +10,10 @@ vi.mock("@/components/CurrentUserProvider", () => ({
 }));
 
 const getRecentQuestionsMock = vi.fn();
+const deleteQuestionMock = vi.fn();
 vi.mock("@/lib/api-client", () => ({
   getRecentQuestions: (...args: unknown[]) => getRecentQuestionsMock(...args),
+  deleteQuestion: (...args: unknown[]) => deleteQuestionMock(...args),
 }));
 
 function asUser(id: string | null): CurrentUserContextValue {
@@ -60,6 +62,7 @@ const ITEMS: RecentQuestionItem[] = [
 beforeEach(() => {
   useCurrentUserMock.mockReset();
   getRecentQuestionsMock.mockReset();
+  deleteQuestionMock.mockReset();
 });
 
 afterEach(() => {
@@ -130,6 +133,58 @@ describe("RecentQuestions", () => {
       expect(
         screen.getByText("履歴を取得できませんでした。時間をおいて再度お試しください。"),
       ).toBeInTheDocument(),
+    );
+  });
+
+  // --- #207: delete a past question ---------------------------------------- //
+  it("deletes a question after inline confirmation and drops it from the list", async () => {
+    useCurrentUserMock.mockReturnValue(asUser("E001"));
+    getRecentQuestionsMock.mockResolvedValue(ITEMS);
+    deleteQuestionMock.mockResolvedValue({ question_id: "q1", deleted: true });
+    render(<RecentQuestions />);
+
+    await waitFor(() => expect(screen.getByText("UTMの移行時の注意点")).toBeInTheDocument());
+    // First click only asks for confirmation — no delete call yet (not undoable).
+    fireEvent.click(screen.getByRole("button", { name: "「UTMの移行時の注意点」を削除" }));
+    expect(deleteQuestionMock).not.toHaveBeenCalled();
+    expect(screen.getByText("削除しますか？")).toBeInTheDocument();
+
+    // Confirm -> deletes by question_id and removes the card.
+    fireEvent.click(screen.getByRole("button", { name: "削除" }));
+    await waitFor(() => expect(deleteQuestionMock).toHaveBeenCalledWith("q1"));
+    await waitFor(() => expect(screen.queryByText("UTMの移行時の注意点")).not.toBeInTheDocument());
+    // The other questions are untouched.
+    expect(screen.getByText("社内Wi-Fiの申請方法")).toBeInTheDocument();
+  });
+
+  it("cancels the delete when 「やめる」 is chosen (item stays)", async () => {
+    useCurrentUserMock.mockReturnValue(asUser("E001"));
+    getRecentQuestionsMock.mockResolvedValue(ITEMS);
+    render(<RecentQuestions />);
+
+    await waitFor(() => expect(screen.getByText("UTMの移行時の注意点")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "「UTMの移行時の注意点」を削除" }));
+    fireEvent.click(screen.getByRole("button", { name: "やめる" }));
+    expect(deleteQuestionMock).not.toHaveBeenCalled();
+    expect(screen.getByText("UTMの移行時の注意点")).toBeInTheDocument();
+  });
+
+  it("keeps the question and flags an error when the delete fails", async () => {
+    useCurrentUserMock.mockReturnValue(asUser("E001"));
+    getRecentQuestionsMock.mockResolvedValue(ITEMS);
+    deleteQuestionMock.mockRejectedValue(new Error("boom"));
+    render(<RecentQuestions />);
+
+    await waitFor(() => expect(screen.getByText("UTMの移行時の注意点")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "「UTMの移行時の注意点」を削除" }));
+    fireEvent.click(screen.getByRole("button", { name: "削除" }));
+    await waitFor(() => expect(deleteQuestionMock).toHaveBeenCalledWith("q1"));
+    // The card is still there (delete failed) and the control shows the error marker.
+    expect(screen.getByText("UTMの移行時の注意点")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "「UTMの移行時の注意点」を削除" }),
+      ).toHaveTextContent("!"),
     );
   });
 });

@@ -14,7 +14,7 @@
  */
 
 import { useCurrentUser } from "@/components/CurrentUserProvider";
-import { getRecentQuestions } from "@/lib/api-client";
+import { deleteQuestion, getRecentQuestions } from "@/lib/api-client";
 import type { RecentQuestionItem } from "@/lib/api-types";
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -89,6 +89,69 @@ function QuestionCard({ item, clickable }: { item: RecentQuestionItem; clickable
   );
 }
 
+/** A two-step delete control for one recent question (#207).
+ *
+ * Lives as a sibling of the card's ``Link`` (not inside it) so a click never
+ * navigates. First click asks for confirmation inline — deleting a question is
+ * not undoable, so it must not be a single stray tap. On success the parent drops
+ * the item from the list; on failure the row stays and an error hint is shown.
+ */
+function DeleteQuestionButton({
+  questionId,
+  title,
+  onDeleted,
+}: {
+  questionId: string;
+  title: string;
+  onDeleted: (questionId: string) => void;
+}) {
+  const [phase, setPhase] = useState<"idle" | "confirm" | "deleting" | "error">("idle");
+
+  async function handleDelete() {
+    setPhase("deleting");
+    try {
+      await deleteQuestion(questionId);
+      onDeleted(questionId);
+    } catch {
+      setPhase("error");
+    }
+  }
+
+  if (phase === "confirm") {
+    return (
+      <div className="absolute bottom-2 right-2 z-10 flex items-center gap-xs rounded-full border border-outline-variant bg-surface-container-highest px-xs py-[2px] shadow-sm">
+        <span className="text-on-surface text-xs">削除しますか？</span>
+        <button
+          type="button"
+          onClick={handleDelete}
+          className="rounded-full bg-error px-xs py-[1px] font-bold text-on-error text-xs"
+        >
+          削除
+        </button>
+        <button
+          type="button"
+          onClick={() => setPhase("idle")}
+          className="rounded-full px-xs py-[1px] text-on-surface-variant text-xs hover:underline"
+        >
+          やめる
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      disabled={phase === "deleting"}
+      onClick={() => setPhase("confirm")}
+      aria-label={`「${title}」を削除`}
+      className="absolute bottom-2 right-2 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-outline-variant bg-surface-container-highest text-on-surface-variant text-xs leading-none hover:bg-error-container hover:text-on-error-container disabled:opacity-50"
+    >
+      {phase === "deleting" ? "…" : phase === "error" ? "!" : "✕"}
+    </button>
+  );
+}
+
 export function RecentQuestions() {
   const { currentUserId } = useCurrentUser();
   const [state, setState] = useState<RecentState>({ phase: "loading" });
@@ -112,6 +175,15 @@ export function RecentQuestions() {
     };
   }, [currentUserId]);
 
+  /** Drop a just-deleted question from the list without a full re-fetch (#207). */
+  function handleDeleted(questionId: string) {
+    setState((prev) =>
+      prev.phase === "ready" && prev.items
+        ? { phase: "ready", items: prev.items.filter((i) => i.question_id !== questionId) }
+        : prev,
+    );
+  }
+
   return (
     <section className="mt-lg w-full">
       <h2 className="mb-md px-xs font-bold text-on-surface text-xl">最近のあなたの質問</h2>
@@ -125,7 +197,7 @@ export function RecentQuestions() {
       ) : state.items && state.items.length > 0 ? (
         <ul className="grid grid-cols-1 gap-gutter md:grid-cols-2">
           {state.items.map((item) => (
-            <li key={item.question_id}>
+            <li key={item.question_id} className="relative">
               {item.session_id ? (
                 <Link
                   href={`/session/${encodeURIComponent(item.session_id)}`}
@@ -137,6 +209,11 @@ export function RecentQuestions() {
               ) : (
                 <QuestionCard item={item} clickable={false} />
               )}
+              <DeleteQuestionButton
+                questionId={item.question_id}
+                title={item.title}
+                onDeleted={handleDeleted}
+              />
             </li>
           ))}
         </ul>

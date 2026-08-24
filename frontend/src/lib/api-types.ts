@@ -50,6 +50,12 @@ export interface AckResponse {
   status: string;
 }
 
+/** DELETE /questions/{id} — acknowledgement that a past question was removed (#207). */
+export interface DeleteQuestionResponse {
+  question_id: string;
+  deleted: boolean;
+}
+
 /**
  * POST /handoff/draft body — persist the asker's edited hand-off draft (画面3) so
  * the responder (画面4) reads the edited text. Draft-only; it never changes the

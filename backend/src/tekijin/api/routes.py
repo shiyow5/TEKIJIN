@@ -44,11 +44,11 @@ from tekijin.auth.principal import Principal
 from tekijin.data.dashboard import dashboard_summary
 from tekijin.data.db import session_scope
 from tekijin.data.documents import get_document
-from tekijin.data.history import recent_questions_for_asker
+from tekijin.data.history import question_asker_id, recent_questions_for_asker
 from tekijin.data.inbox import pending_handoffs_for_responder
 from tekijin.data.notifications import pending_decline_notifications_for_asker
 from tekijin.data.repository import Repository
-from tekijin.data.writes import ack_decline_notifications
+from tekijin.data.writes import ack_decline_notifications, delete_question
 
 logger = logging.getLogger(__name__)
 
@@ -377,6 +377,33 @@ def questions(
         return schemas.RecentQuestionsResponse(
             items=[schemas.RecentQuestionItem(**row) for row in rows]
         )
+
+
+@router.delete("/questions/{question_id}", response_model=schemas.DeleteQuestionResponse)
+def delete_question_endpoint(
+    request: Request,
+    question_id: str,
+    principal: Principal = Depends(require_principal),
+) -> schemas.DeleteQuestionResponse:
+    """Delete one of the asker's own past questions and its history (#207).
+
+    Only the owning asker — or an admin (demo) — may delete. A missing question is
+    a 404; a question owned by someone else is a 403 (``require_can_act_as``). The
+    question and its FK children (answers / recommendations / events) are removed
+    in one transaction; the lookup and the delete share it so ownership cannot
+    change between the check and the write.
+    """
+
+    with _generic_500("DELETE /questions"):
+        with session_scope(_service(request).session_factory) as session:
+            owner = question_asker_id(session, question_id)
+            if owner is None:
+                raise HTTPException(status_code=404, detail="question not found")
+            require_can_act_as(principal, owner)
+            delete_question(session, question_id)
+        # Existence was just confirmed above and the delete ran in the same
+        # transaction, so the question is gone.
+        return schemas.DeleteQuestionResponse(question_id=question_id, deleted=True)
 
 
 @router.get("/notifications", response_model=schemas.NotificationsResponse)
