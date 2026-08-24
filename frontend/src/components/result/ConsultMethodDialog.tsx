@@ -63,8 +63,8 @@ export function ConsultMethodDialog({
       matches this component's own onCancel/Escape handling; the native
       <dialog> element's imperative showModal()/close() API isn't needed here. */}
       <div
-        ref={dialogRef}
         role="dialog"
+        ref={dialogRef}
         aria-modal="true"
         aria-labelledby="consult-method-dialog-title"
         className="flex w-full max-w-sm flex-col gap-md rounded-xl border border-outline-variant bg-surface-container-lowest p-lg shadow-md"

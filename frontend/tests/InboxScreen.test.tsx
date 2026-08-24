@@ -233,5 +233,4 @@ describe("InboxScreen", () => {
     const direct = screen.getByRole("button", { name: /森田 恵 さんからの質問/ });
     expect(within(direct).getByText("直接相談")).toBeInTheDocument();
   });
-
 });
