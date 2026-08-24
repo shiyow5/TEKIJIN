@@ -17,7 +17,7 @@ import { CandidateCard } from "@/components/result/CandidateCard";
 import { DraftEditor } from "@/components/result/DraftEditor";
 import { selectHandoffCandidate, updateHandoffDraft } from "@/lib/api-client";
 import type { Recommendation } from "@/lib/api-types";
-import { relativeFitPercents } from "@/lib/fit";
+import { fitPercents } from "@/lib/fit";
 import { useEffect, useRef, useState } from "react";
 
 export interface PersonRouteViewProps {
@@ -39,9 +39,10 @@ export function PersonRouteView({
   sessionId,
 }: PersonRouteViewProps) {
   const candidates = recommendations.slice(0, MAX_CANDIDATES);
-  // Relative fit % across the shown candidates so the gauges differentiate them
-  // instead of all pinning to the same saturated confidence level (#222).
-  const fitPercents = relativeFitPercents(candidates);
+  // Absolute fit % from each candidate's score, decoupled from the 高/中/低
+  // confidence label (#240): a strong #1 on a never-asked topic (label 低) still
+  // reads high, and the label rides along as a separate evidence badge.
+  const fitValues = fitPercents(candidates);
   const [selectedPersonId, setSelectedPersonId] = useState(candidates[0]?.person_id ?? null);
   const [localDraft, setLocalDraft] = useState(draft);
   const [selecting, setSelecting] = useState(false);
@@ -144,7 +145,7 @@ export function PersonRouteView({
               expanded={index === 0}
               selected={candidate.person_id === selectedPersonId}
               onSelect={sessionId ? handleSelect : undefined}
-              fitPercent={fitPercents[index]}
+              fitPercent={fitValues[index]}
             />
           ))}
         </div>

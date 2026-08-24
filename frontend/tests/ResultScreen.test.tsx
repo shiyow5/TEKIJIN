@@ -170,10 +170,10 @@ describe("ResultScreen — main line (person)", () => {
     expect(screen.getByText("田中")).toBeInTheDocument();
     // 4th candidate is truncated (max 3)
     expect(screen.queryByText("山田")).not.toBeInTheDocument();
-    // fit signal is the Japanese confidence label + its magnitude in the gauge
-    // (animated gauge, #139); the number shown is the level's magnitude, never the
-    // raw internal score, and the visible number carries no "%" sign.
-    expect(screen.getByRole("img", { name: "適合度 高（100%）" })).toBeInTheDocument();
+    // fit signal is the score-derived 適合度% in the gauge, with the confidence
+    // label as a separate badge (#240); 高梨's score 0.92 normalises to 100%. The
+    // visible ring number carries no "%" sign (the % lives only in the aria-label).
+    expect(screen.getByRole("img", { name: "適合度 100%・確信度 高" })).toBeInTheDocument();
     expect(screen.queryByText(/%/)).not.toBeInTheDocument();
     // reason labels (expanded top card shows detail)
     expect(screen.getByText("関連資格")).toBeInTheDocument();
