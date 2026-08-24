@@ -1,9 +1,12 @@
-# TEKIJIN local development stack.
+# TEKIJIN full local stack: db + backend + frontend, one `docker compose up`.
 #
-# LLM serving is NOT included here: it runs on an external vLLM server
-# (OpenAI-compatible /v1 API) on the DGX host. Point the backend at it via
-# the TEKIJIN_LLM_BASE_URL environment variable
-# (default: http://internship-dgx1:8080/v1).
+# LLM serving is NOT included here: the backend defaults to the deterministic
+# "stub" LLM backend (no vLLM needed to try the app). Point it at a real vLLM
+# server via TEKIJIN_LLM_BASE_URL / TEKIJIN_LLM_BACKEND=vllm if you have one
+# (default base URL: http://internship-dgx1:8080/v1).
+#
+# First boot downloads the dense embedding model (a few GB) unless you mount
+# your existing Hugging Face cache — see `backend`'s volumes below.
 
 services:
   db:
@@ -22,6 +25,37 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+  backend:
+    build:
+      context: ./backend
+    environment:
+      # Points at the `db` service by its in-network hostname (not localhost).
+      TEKIJIN_DATABASE_URL: postgresql+psycopg://tekijin:tekijin@db:5432/tekijin
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      # Reuse an already-downloaded embedding model instead of re-fetching it.
+      - ${HOME}/.cache/huggingface:/root/.cache/huggingface
+      # Fixtures for `docker compose exec backend python -m tekijin.data.seed`
+      # (only needed once, on a fresh `tekijin_pgdata` volume).
+      - ./fixtures/synthetic:/app/fixtures/synthetic:ro
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Baked into the browser bundle at build time — must be reachable from
+        # the USER's browser (the backend's published host port), never the
+        # in-network service name `backend`.
+        NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - backend
 
 volumes:
   tekijin_pgdata:

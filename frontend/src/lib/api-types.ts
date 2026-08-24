@@ -61,6 +61,24 @@ export interface HandoffDraftRequest {
 }
 
 /**
+ * POST /handoff/select body — the asker picks a different (of the currently
+ * shown) candidate as the hand-off target; the draft is regenerated for them
+ * (#200/#A1/#204).
+ */
+export interface HandoffSelectRequest {
+  session_id: string;
+  person_id: EmployeeId;
+}
+
+/** POST /handoff/select response (schemas.py `HandoffSelectResponse`). */
+export interface HandoffSelectResponse {
+  session_id: string;
+  responder: Recommendation;
+  draft: string;
+  recommendation_id: number;
+}
+
+/**
  * One employee for the current-user switcher (GET /employees). `id` is the
  * external "E###" form — the same shape accepted back as `asker_id` and used as
  * the responder id for the inbox, so a selection round-trips without conversion.
@@ -122,6 +140,60 @@ export interface RecentQuestionsResponse {
   items: RecentQuestionItem[];
 }
 
+/**
+ * One decline event the asker hasn't acknowledged yet (GET /notifications,
+ * schemas.py `DeclineNotification`). Paired with the automatic reroute
+ * (#206/#D5): by the time this is shown, the system has already moved on to
+ * the next candidate — it is informational, not a request to act (#E7).
+ */
+export interface DeclineNotification {
+  /** the declined Recommendation row's id — also the ack target. */
+  id: number;
+  question_id: string;
+  /** deep-link target; null for pre-session-tracking rows. */
+  session_id?: string | null;
+  message: string;
+  declined_person_name: string;
+  created_at?: string | null;
+}
+
+/** GET /notifications payload (schemas.py `NotificationsResponse`). */
+export interface NotificationsResponse {
+  items: DeclineNotification[];
+}
+
+/** POST /notifications/ack body — mark decline notifications as seen (#E7). */
+export interface NotificationAckRequest {
+  asker_id: EmployeeId;
+  ids: number[];
+}
+
+/** POST /notifications/ack response (schemas.py `NotificationAckResponse`). */
+export interface NotificationAckResponse {
+  acknowledged: number;
+}
+
+/** One chat message on a question's post-acceptance thread (schemas.py `MessageItem`, #E6). */
+export interface MessageItem {
+  id: number;
+  /** external "E###" form (schemas.format_employee_id). */
+  sender_id: string;
+  body: string;
+  created_at?: string | null;
+}
+
+/** GET /messages payload (schemas.py `MessagesResponse`). */
+export interface MessagesResponse {
+  items: MessageItem[];
+}
+
+/** POST /messages body — post one message on a session's chat thread (#E6). */
+export interface MessageCreateRequest {
+  session_id: string;
+  sender_id: EmployeeId;
+  body: string;
+}
+
 // --------------------------------------------------------------------------- //
 // domain models (shared by SSE data and final response)
 // --------------------------------------------------------------------------- //
@@ -139,6 +211,14 @@ export interface Recommendation {
   score: number;
   confidence: string;
   reasons: Reason[];
+  /**
+   * Continuous 0..1 fit value (the scorer's topic_fit), driving ONLY the
+   * ConfidenceGauge's ring fill — never rendered as a raw number/percentage.
+   * `confidence` (高/中/低) remains the primary user-facing signal (#205/#B3).
+   * Optional (defaults to the discrete per-level fill) so hand-built fixtures
+   * need not supply it.
+   */
+  confidence_score?: number;
 }
 
 // --------------------------------------------------------------------------- //

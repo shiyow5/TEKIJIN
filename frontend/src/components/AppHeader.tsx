@@ -16,6 +16,7 @@
  */
 
 import { useCurrentUser } from "@/components/CurrentUserProvider";
+import { NotificationBell } from "@/components/NotificationBell";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -66,42 +67,45 @@ export function AppHeader() {
         </nav>
       </div>
 
-      <label
-        className="flex items-center gap-xs text-on-surface-variant text-xs"
-        aria-busy={loading}
-        title="プロトタイプ用の擬似ログイン（認証なし）。動作確認のため利用者を切り替えます。"
-      >
-        <span className="rounded bg-surface-container-high px-xs py-[1px] text-on-surface-variant">
-          デモ用
-        </span>
-        <span>利用者を切替</span>
-        <select
-          aria-label="利用者を切替（デモ用の擬似ログイン）"
-          className="rounded-md border border-outline bg-surface-container-lowest px-sm py-xs text-sm disabled:text-on-surface-variant"
-          value={ready ? currentUserId : ""}
-          disabled={!ready}
-          onChange={(e) => setCurrentUserId(e.target.value)}
+      <div className="flex items-center gap-sm">
+        <NotificationBell />
+        <label
+          className="flex items-center gap-xs text-on-surface-variant text-xs"
+          aria-busy={loading}
+          title="プロトタイプ用の擬似ログイン（認証なし）。動作確認のため利用者を切り替えます。"
         >
-          {ready ? (
-            employees.map((employee) => (
-              <option key={employee.id} value={employee.id}>
-                {employee.dept ? `${employee.name}（${employee.dept}）` : employee.name}
-              </option>
-            ))
-          ) : (
-            <option value="">{loading ? "読み込み中…" : "利用できません"}</option>
-          )}
-        </select>
-        {error ? (
-          <button
-            type="button"
-            onClick={reload}
-            className="rounded-md border border-outline px-sm py-xs text-primary text-xs transition-colors hover:bg-surface-container-low"
+          <span className="rounded bg-surface-container-high px-xs py-[1px] text-on-surface-variant">
+            デモ用
+          </span>
+          <span>利用者を切替</span>
+          <select
+            aria-label="利用者を切替（デモ用の擬似ログイン）"
+            className="rounded-md border border-outline bg-surface-container-lowest px-sm py-xs text-sm disabled:text-on-surface-variant"
+            value={ready ? currentUserId : ""}
+            disabled={!ready}
+            onChange={(e) => setCurrentUserId(e.target.value)}
           >
-            利用者一覧の取得に失敗しました。再試行
-          </button>
-        ) : null}
-      </label>
+            {ready ? (
+              employees.map((employee) => (
+                <option key={employee.id} value={employee.id}>
+                  {employee.dept ? `${employee.name}（${employee.dept}）` : employee.name}
+                </option>
+              ))
+            ) : (
+              <option value="">{loading ? "読み込み中…" : "利用できません"}</option>
+            )}
+          </select>
+          {error ? (
+            <button
+              type="button"
+              onClick={reload}
+              className="rounded-md border border-outline px-sm py-xs text-primary text-xs transition-colors hover:bg-surface-container-low"
+            >
+              利用者一覧の取得に失敗しました。再試行
+            </button>
+          ) : null}
+        </label>
+      </div>
     </header>
   );
 }

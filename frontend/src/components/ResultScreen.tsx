@@ -13,6 +13,8 @@
  * placeholder is shown.
  */
 
+import { useCurrentUser } from "@/components/CurrentUserProvider";
+import { MessageThread } from "@/components/MessageThread";
 import { PersonRouteView } from "@/components/result/PersonRouteView";
 import { PriorAnswerView } from "@/components/result/PriorAnswerView";
 import { useOptionalSessionId, useOptionalSessionStream } from "@/components/SessionStreamProvider";
@@ -64,9 +66,15 @@ function terminalHeading(status: string): string {
 function ResultTerminal({
   done,
   message,
+  sessionId,
+  currentUserId,
+  otherPartyName,
 }: {
   done?: EventStreamState["done"];
   message?: EventStreamState["message"];
+  sessionId: string | null;
+  currentUserId: string | null;
+  otherPartyName?: string | null;
 }) {
   const heading = message ? terminalHeading(message.status) : "依頼は送信済みです";
   const body =
@@ -75,10 +83,21 @@ function ResultTerminal({
     (message
       ? "該当する回答が見つかりませんでした。"
       : "この依頼は送信済みです。返信があると通知でお知らせします。");
+  // `done` (c8_update) only ever fires on the accept path — a decline reroutes
+  // instead, never reaching C8 — so a thread here is always for an accepted
+  // hand-off, never a declined one (#E6).
+  const showThread = Boolean(done) && !message && sessionId !== null && currentUserId !== null;
   return (
     <section className="mx-auto flex w-full max-w-2xl flex-col gap-md py-lg text-center">
       <h1 className="font-bold text-2xl text-on-surface">{heading}</h1>
       <p className="whitespace-pre-wrap text-on-surface-variant">{body}</p>
+      {showThread && sessionId !== null && currentUserId !== null ? (
+        <MessageThread
+          sessionId={sessionId}
+          currentUserId={currentUserId}
+          otherPartyName={otherPartyName}
+        />
+      ) : null}
       <div className="flex justify-center">
         <a
           href="/questions"
@@ -124,6 +143,7 @@ export function ResultScreen({ streamState, sessionId }: ResultScreenProps) {
   const contextSessionId = useOptionalSessionId();
   const stream = streamState ?? contextStream ?? EMPTY_STREAM;
   const effectiveSessionId = sessionId ?? contextSessionId;
+  const { currentUserId } = useCurrentUser();
 
   const [forceMainLine, setForceMainLine] = useState(false);
 
@@ -139,7 +159,15 @@ export function ResultScreen({ streamState, sessionId }: ResultScreenProps) {
   // (sent / no_candidate / off_topic), or a completed session replayed after a
   // hard reload, must show its outcome rather than a stale route or 準備中.
   if (stream.terminal && (stream.done || stream.message)) {
-    return <ResultTerminal done={stream.done} message={stream.message} />;
+    return (
+      <ResultTerminal
+        done={stream.done}
+        message={stream.message}
+        sessionId={effectiveSessionId}
+        currentUserId={currentUserId}
+        otherPartyName={recommendations[0]?.name}
+      />
+    );
   }
 
   const hasMainLineData = recommendations.length > 0 || draft !== "";

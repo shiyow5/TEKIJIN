@@ -42,6 +42,7 @@ _TRUNCATE_ORDER: tuple[str, ...] = (
     "person_topic_edges",
     "events",
     "eval_runs",
+    "messages",
     "recommendations",
     "answers",
     "questions",
@@ -167,6 +168,18 @@ def _apply_schema_upgrades(engine: Engine) -> None:
         # Runtime resolution timestamp (#97): so avg resolution time counts live
         # accepts / self-resolutions, not only seeded answers rows.
         conn.execute(text("ALTER TABLE questions ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMP"))
+        # Soft-delete marker for the asker's own history view (#207/#F8).
+        conn.execute(text("ALTER TABLE questions ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP"))
+        # When the asker acknowledged a decline notification (#E7). ``IF EXISTS``
+        # on the table (not just the column) because a from-scratch schema
+        # upgrade test exercises this function against a minimal table set that
+        # does not include ``recommendations``.
+        conn.execute(
+            text(
+                "ALTER TABLE IF EXISTS recommendations "
+                "ADD COLUMN IF NOT EXISTS declined_seen_at TIMESTAMP"
+            )
+        )
         # Widen embedding columns to the current dim when an older DB is narrower.
         # Table/column names are a hard-coded allow-list spliced via format() —
         # never build them from external input (identifiers can't be bound).

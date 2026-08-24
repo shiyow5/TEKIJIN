@@ -178,24 +178,56 @@ def test_document_route_is_terminal(seed_counts, session, fake_embedder) -> None
 # decline -> reroute to the next candidate
 # --------------------------------------------------------------------------- #
 def test_decline_reroutes_to_next_candidate(seed_counts, session, fake_embedder) -> None:
-    for emp in (1, 2):
+    for emp in (1, 2, 3):
         _seed_skill(session, f"sk_dec_{emp}", emp)
-    retriever = _FakeRetriever(people=[1, 2])
+    retriever = _FakeRetriever(people=[1, 2, 3])
     agent = build_agent(fake_embedder, session, retriever=retriever)
     cfg = _cfg("decline")
 
     first = agent.invoke(_init(), cfg)
-    first_pick = first["recommendations"][0]["person_id"]
+    first_recs = first["recommendations"]
+    first_pick = first_recs[0]["person_id"]
+    surviving = first_recs[1:]  # ranks 2/3 as shown before the decline
 
-    # The first pick declines -> reroute excludes them and re-scores.
+    # The first pick declines -> reroute keeps ranks 2/3 exactly as shown,
+    # rather than rescoring everyone (#D5/#206). With only 3 people in the pool
+    # total, there is nobody left to backfill the freed slot with, so the kept
+    # 2 survivors are the whole result (the 4-candidate test below covers the
+    # backfill case).
     agent.invoke(Command(resume="declined"), cfg)
     rerouted = agent.get_state(cfg).values
     assert first_pick in rerouted["declined_ids"]
-    second_pick = rerouted["recommendations"][0]["person_id"]
+    new_recs = rerouted["recommendations"]
+    assert new_recs == surviving  # byte-identical survivors, nothing else
+    second_pick = new_recs[0]["person_id"]
     assert second_pick != first_pick
 
     final = agent.invoke(Command(resume="accepted"), cfg)
     assert "取り次ぎました" in final["answer"]
+
+
+def test_decline_reroute_backfills_only_freed_slot(seed_counts, session, fake_embedder) -> None:
+    # 4 eligible candidates so a genuinely fresh 4th person is available to
+    # backfill the slot freed by the decline, proving c6_score does not
+    # rescore ranks 2/3 on reroute (#D5/#206).
+    for emp in (1, 2, 3, 4):
+        _seed_skill(session, f"sk_dec4_{emp}", emp)
+    retriever = _FakeRetriever(people=[1, 2, 3, 4])
+    agent = build_agent(fake_embedder, session, retriever=retriever)
+    cfg = _cfg("decline4")
+
+    first = agent.invoke(_init(), cfg)
+    first_recs = first["recommendations"]
+    assert len(first_recs) == 3
+    former_second, former_third = first_recs[1], first_recs[2]
+
+    agent.invoke(Command(resume="declined"), cfg)
+    rerouted = agent.get_state(cfg).values["recommendations"]
+    assert len(rerouted) == 3
+    assert rerouted[0] == former_second
+    assert rerouted[1] == former_third
+    shown_before = {r["person_id"] for r in first_recs}
+    assert rerouted[2]["person_id"] not in shown_before  # fresh backfill
 
 
 def test_no_candidate_terminal(seed_counts, session, fake_embedder) -> None:

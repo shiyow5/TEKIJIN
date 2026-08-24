@@ -14,6 +14,7 @@
  * wiring only. A `sessionId` is the single input (from the route param).
  */
 
+import { MessageThread } from "@/components/MessageThread";
 import type { HandoffAction } from "@/hooks/useHandoff";
 import { useHandoff } from "@/hooks/useHandoff";
 import type { HandoffResponse, Reason } from "@/lib/api-types";
@@ -96,6 +97,7 @@ const DONE_BODY: Record<HandoffAction, string> = {
 
 export function AnswerScreen({ sessionId }: AnswerScreenProps) {
   const { phase, handoff, action, errorKind, submitError, submit } = useHandoff(sessionId);
+  const responderId = handoff?.responder?.person_id;
 
   if (phase === "loading") {
     return (
@@ -130,6 +132,14 @@ export function AnswerScreen({ sessionId }: AnswerScreenProps) {
       <Centered>
         <h1 className="font-bold text-2xl text-primary">{DONE_HEADING[action]}</h1>
         <p className="text-on-surface-variant">{DONE_BODY[action]}</p>
+        {/* Only the accept path opens a thread — a decline never connects the two. */}
+        {action === "answer" && responderId ? (
+          <MessageThread
+            sessionId={sessionId}
+            currentUserId={responderId}
+            otherPartyName={handoff?.asker.name}
+          />
+        ) : null}
         <BackLink />
       </Centered>
     );

@@ -12,10 +12,10 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
-from tekijin.models.tables import Employee, EvalRun, Event, Question, Recommendation
+from tekijin.models.tables import Employee, EvalRun, Event, Message, Question, Recommendation
 
 # One recorded run stage: (stage name, started_at, ended_at, meta).
 EventRow = tuple[str, dt.datetime, dt.datetime, dict[str, Any] | None]
@@ -169,6 +169,26 @@ def insert_shown_recommendations(
     return ids
 
 
+def reorder_recommendation_ranks(session: Session, ordered_ids: list[int]) -> None:
+    """Set ``rank`` (1-based) on these ``Recommendation`` rows to match ``ordered_ids``.
+
+    Used when the asker reselects a different shown candidate as the hand-off
+    target (#200/#A1): the durable checkpoint's ``recommendations`` order is the
+    source of truth for the *graph*, but ``GET /inbox`` reads the DB ``rank``
+    column directly (SQL-only, never consults the checkpoint) — so a reselect
+    must also sync this projection, or the newly-selected responder's inbox will
+    not show the pending handoff. ``ordered_ids`` are the specific row ids from
+    the current checkpoint's ``recommendation_ids`` (not a question-wide query),
+    so a decline+reroute's earlier rank==1 rows for the same question are never
+    touched by this.
+    """
+
+    for position, rec_id in enumerate(ordered_ids, start=1):
+        session.execute(
+            update(Recommendation).where(Recommendation.id == rec_id).values(rank=position)
+        )
+
+
 def latest_primary_recommendation(session: Session, question_id: str) -> int | None:
     """The id of the most recent rank-1 recommendation for a question, if any.
 
@@ -208,3 +228,80 @@ def set_recommendation_outcome(session: Session, recommendation_id: int, outcome
         .where(Recommendation.id == recommendation_id, Recommendation.outcome.is_(None))
         .values(outcome=outcome)
     )
+
+
+def ack_decline_notifications(session: Session, asker_id: int, ids: list[int]) -> int:
+    """Mark these decline notifications seen, scoped to ``asker_id``'s own questions (#E7).
+
+    Scoping by ``asker_id`` (via a subquery on the owning question) means one
+    asker can never acknowledge — and so hide — another asker's notification by
+    guessing an id. Returns the number of rows actually updated.
+    """
+
+    if not ids:
+        return 0
+    result = session.execute(
+        update(Recommendation)
+        .where(
+            Recommendation.id.in_(ids),
+            Recommendation.declined_seen_at.is_(None),
+            Recommendation.question_id.in_(
+                select(Question.id).where(Question.asker_id == asker_id)
+            ),
+        )
+        .values(declined_seen_at=func.now())
+    )
+    return result.rowcount or 0
+
+
+class QuestionHasPendingHandoff(Exception):
+    """The question has a live, unanswered hand-off — deletion is blocked (#207/#F8)."""
+
+
+def soft_delete_question(session: Session, question_id: str, asker_id: int) -> bool:
+    """Soft-delete a question owned by ``asker_id`` (#207/#F8).
+
+    Sets ``deleted_at`` rather than removing the row: ``Recommendation`` /
+    ``Answer`` / ``Event`` all hold a plain FK to ``questions.id`` with no
+    cascade, and the dashboard's aggregates read historical rows regardless of
+    deletion, so a hard delete would either FK-violate or silently distort
+    those aggregates. Raises :class:`QuestionHasPendingHandoff` (mapped to 409
+    at the API boundary) when a responder is currently being asked (a rank==1,
+    outcome-IS-NULL recommendation row) — deleting the question out from under
+    that live hand-off would orphan the responder's inbox item. Returns
+    ``False`` (a clean no-op) if the question does not exist, is not owned by
+    ``asker_id``, or was already deleted.
+    """
+
+    pending = session.execute(
+        select(Recommendation.id).where(
+            Recommendation.question_id == question_id,
+            Recommendation.rank == 1,
+            Recommendation.outcome.is_(None),
+        )
+    ).first()
+    if pending is not None:
+        raise QuestionHasPendingHandoff(question_id)
+
+    result = session.execute(
+        update(Question)
+        .where(
+            Question.id == question_id,
+            Question.asker_id == asker_id,
+            Question.deleted_at.is_(None),
+        )
+        .values(deleted_at=func.now())
+    )
+    return (result.rowcount or 0) > 0
+
+
+def insert_message(
+    session: Session, question_id: str, sender_employee_id: int, body: str
+) -> Message:
+    """Append one chat message to a question's post-acceptance thread (#E6)."""
+
+    row = Message(question_id=question_id, sender_employee_id=sender_employee_id, body=body)
+    session.add(row)
+    session.flush()
+    session.refresh(row)
+    return row

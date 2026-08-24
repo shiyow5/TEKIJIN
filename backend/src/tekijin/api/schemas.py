@@ -144,6 +144,53 @@ class HandoffDraftRequest(BaseModel):
         return trimmed
 
 
+class HandoffSelectRequest(BaseModel):
+    """Asker picks a different (of the currently shown) candidate as the
+    hand-off target, reordering it to primary and regenerating the draft for
+    them (#200/#A1)."""
+
+    session_id: str = Field(pattern=_SESSION_ID_PATTERN)
+    person_id: int
+
+    @field_validator("person_id", mode="before")
+    @classmethod
+    def _accept_e_prefixed_person_id(cls, value: object) -> int:
+        return _coerce_asker_id(value)
+
+
+class MessageCreateRequest(BaseModel):
+    """Post one chat message on an accepted question's thread (#E6)."""
+
+    session_id: str = Field(pattern=_SESSION_ID_PATTERN)
+    sender_id: int
+    body: str = Field(min_length=1)
+
+    @field_validator("sender_id", mode="before")
+    @classmethod
+    def _accept_e_prefixed_sender_id(cls, value: object) -> int:
+        return _coerce_asker_id(value)
+
+    @field_validator("body")
+    @classmethod
+    def _trim_nonempty(cls, value: str) -> str:
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("body must not be blank")
+        return trimmed
+
+
+class NotificationAckRequest(BaseModel):
+    """Mark decline notifications as seen for this asker (#E7)."""
+
+    asker_id: int
+    ids: list[int] = Field(min_length=1)
+
+    @field_validator("asker_id", mode="before")
+    @classmethod
+    def _accept_e_prefixed_asker_id(cls, value: object) -> int:
+        return _coerce_asker_id(value)
+
+
 # --------------------------------------------------------------------------- #
 # responses
 # --------------------------------------------------------------------------- #
@@ -188,6 +235,12 @@ class Recommendation(BaseModel):
     score: float
     confidence: str
     reasons: list[Reason] = Field(default_factory=list)
+    # Continuous 0..1 fit value (the scorer's topic_fit) driving ONLY the
+    # ConfidenceGauge's ring fill on the frontend — never rendered as a raw
+    # number/percentage in the UI. The discrete `confidence` label (高/中/低)
+    # remains the primary user-facing signal (#205/#B3). Defaults to 0.0 so
+    # hand-built recommendation dicts in tests need not supply it.
+    confidence_score: float = 0.0
 
 
 # --------------------------------------------------------------------------- #
@@ -227,6 +280,15 @@ class HandoffResponse(BaseModel):
     # on POST /answer so a stale outcome (after a reroute / from a competing tab)
     # is rejected instead of binding to a new candidate (#94). None if no primary.
     recommendation_id: int | None = None
+
+
+class HandoffSelectResponse(BaseModel):
+    """The new primary responder + regenerated draft after a reselect (#200/#A1/#204)."""
+
+    session_id: str
+    responder: Recommendation
+    draft: str
+    recommendation_id: int
 
 
 # --------------------------------------------------------------------------- #
@@ -282,6 +344,42 @@ class RecentQuestionsResponse(BaseModel):
     """The asker's most recent questions (newest first)."""
 
     items: list[RecentQuestionItem] = Field(default_factory=list)
+
+
+# --------------------------------------------------------------------------- #
+# decline notifications (GET /notifications, POST /notifications/ack) (#E7)
+# --------------------------------------------------------------------------- #
+class DeclineNotification(BaseModel):
+    """One not-yet-seen decline event for the asker (newest first)."""
+
+    id: int  # the declined Recommendation row's id (also the ack target)
+    question_id: str
+    session_id: str | None = None
+    message: str
+    declined_person_name: str
+    created_at: str | None = None
+
+
+class NotificationsResponse(BaseModel):
+    items: list[DeclineNotification] = Field(default_factory=list)
+
+
+class NotificationAckResponse(BaseModel):
+    acknowledged: int
+
+
+# --------------------------------------------------------------------------- #
+# messages (GET /messages, POST /messages) — post-acceptance chat (#E6)
+# --------------------------------------------------------------------------- #
+class MessageItem(BaseModel):
+    id: int
+    sender_id: str  # external "E###" form (see format_employee_id)
+    body: str
+    created_at: str | None = None
+
+
+class MessagesResponse(BaseModel):
+    items: list[MessageItem] = Field(default_factory=list)
 
 
 # --------------------------------------------------------------------------- #

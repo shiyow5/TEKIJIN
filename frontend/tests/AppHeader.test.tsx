@@ -1,6 +1,6 @@
 import { AppHeader } from "@/components/AppHeader";
 import type { CurrentUserContextValue } from "@/components/CurrentUserProvider";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const useCurrentUserMock = vi.fn<() => CurrentUserContextValue>();
@@ -11,6 +11,12 @@ vi.mock("@/components/CurrentUserProvider", () => ({
 const pathnameMock = vi.fn<() => string>();
 vi.mock("next/navigation", () => ({
   usePathname: () => pathnameMock(),
+}));
+
+const getNotificationsMock = vi.fn();
+vi.mock("@/lib/api-client", () => ({
+  getNotifications: (...args: unknown[]) => getNotificationsMock(...args),
+  ackNotifications: vi.fn(),
 }));
 
 const EMPLOYEES = [
@@ -30,6 +36,8 @@ const READY: CurrentUserContextValue = {
 
 beforeEach(() => {
   pathnameMock.mockReturnValue("/");
+  getNotificationsMock.mockReset();
+  getNotificationsMock.mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -175,5 +183,26 @@ describe("AppHeader", () => {
       "aria-current",
       "page",
     );
+  });
+
+  it("shows the decline-notification bell for the acting user (#E7)", async () => {
+    useCurrentUserMock.mockReturnValue(READY);
+    render(<AppHeader />);
+    await waitFor(() => expect(getNotificationsMock).toHaveBeenCalledWith("E001"));
+    expect(screen.getByRole("button", { name: "通知" })).toBeInTheDocument();
+  });
+
+  it("does not show the notification bell before a current user is resolved", () => {
+    useCurrentUserMock.mockReturnValue({
+      employees: [],
+      currentUserId: null,
+      currentUser: null,
+      setCurrentUserId: vi.fn(),
+      loading: true,
+      error: false,
+      reload: () => {},
+    });
+    render(<AppHeader />);
+    expect(screen.queryByRole("button", { name: /通知/ })).not.toBeInTheDocument();
   });
 });

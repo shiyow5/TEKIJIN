@@ -40,6 +40,26 @@ def _top_by_score(items: Sequence[Mapping[str, Any]]) -> Mapping[str, Any] | Non
     return max(items, key=lambda item: float(item.get("score", 0.0)))
 
 
+def draft_context(state: Mapping[str, Any]) -> tuple[list[str], dict[str, str]]:
+    """``(missing, known_values)`` for drafting a hand-off to a given responder.
+
+    Factored out of :meth:`AgentNodes.c7_draft` so the ``/handoff/select``
+    reselect path (#A1) can regenerate a draft for a different candidate using
+    the exact same slot logic, without duplicating it.
+    """
+
+    question_type = state.get("question_type", _QUESTION_TYPE_DEFAULT)
+    products = state.get("products") or []
+    known_values = collect_known_values(state["question"], question_type, products)
+    # A slot must never appear as both a filled premise and an open gap: drop
+    # from `missing` anything we now surface under known_values, so the draft
+    # cannot show the same slot as "確認済み" and "補足いただきたい" at once
+    # (defensive dedup — C2 already recomputes `missing` on the re-understood
+    # question via the ask->c1_intent edge, so they normally agree) (#175).
+    missing = [slot for slot in (state.get("missing") or []) if slot not in known_values]
+    return missing, known_values
+
+
 class AgentNodes:
     """Bundles the graph's node implementations around their dependencies."""
 
@@ -225,6 +245,11 @@ class AgentNodes:
         pinned = state.get("pinned_responder_id")
         asker = state.get("asker")
         asker_id = asker.get("id") if asker else None
+        # A non-empty `recommendations` on entry means this is a reroute backfill
+        # (see `reroute`, below): those candidates already survived a decline and
+        # keep their rank/score/reasons untouched — only the freed slot(s) are
+        # topped up from a fresh rank() call, never a full rescore (#D5/#206).
+        existing = state.get("recommendations") or []
         # prior_answer hands off to the pinned past responder — UNTIL they decline,
         # and never if the pin IS the asker (they cannot answer their own question).
         # In either case drop the pin and fall back to the general candidate pool
@@ -239,28 +264,28 @@ class AgentNodes:
             pool = [pinned]
         else:
             pool = retrieval.get("candidate_people") or []
-        candidates = [p for p in pool if p not in declined]
-        if not topics or not candidates:
-            return {"recommendations": []}
+        existing_ids = {r["person_id"] for r in existing}
+        candidates = [p for p in pool if p not in declined and p not in existing_ids]
+
+        top_k = 3
+        remaining = top_k - len(existing)
+        if not topics or remaining <= 0 or not candidates:
+            # Nothing to add: keep whatever survived the decline (possibly fewer
+            # than 3), or [] on a genuinely fresh run with no candidates at all.
+            return {"recommendations": existing}
+
         # All topics feed the scorer (aggregated topic_fit), not just topics[0].
-        result = self._scorer.rank(topics, candidates, asker_id, state["now"], top_k=3)
+        result = self._scorer.rank(topics, candidates, asker_id, state["now"], top_k=remaining)
         # The scorer now returns typed ScoredCandidate rows; AgentState keeps the
         # looser list[dict[str, Any]] (also written as plain dicts elsewhere), so
         # narrow the TypedDict-invariance gap with a cast — identical at runtime.
-        return {"recommendations": cast("list[dict[str, Any]]", result["recommendations"])}
+        fresh = cast("list[dict[str, Any]]", result["recommendations"])
+        return {"recommendations": existing + fresh}
 
     # -- C7: draft the request (LLM stub) ---------------------------------
     def c7_draft(self, state: AgentState) -> AgentState:
         top = (state.get("recommendations") or [])[0]
-        question_type = state.get("question_type", _QUESTION_TYPE_DEFAULT)
-        products = state.get("products") or []
-        known_values = collect_known_values(state["question"], question_type, products)
-        # A slot must never appear as both a filled premise and an open gap: drop
-        # from `missing` anything we now surface under known_values, so the draft
-        # cannot show the same slot as "確認済み" and "補足いただきたい" at once
-        # (defensive dedup — C2 already recomputes `missing` on the re-understood
-        # question via the ask->c1_intent edge, so they normally agree) (#175).
-        missing = [slot for slot in (state.get("missing") or []) if slot not in known_values]
+        missing, known_values = draft_context(state)
         draft = self._draft.draft(
             state["question"],
             top,
@@ -285,7 +310,11 @@ class AgentNodes:
         declined = list(state.get("declined_ids") or [])
         if recs:
             declined.append(recs[0]["person_id"])
-        return {"declined_ids": declined, "outcome": None, "draft": None, "recommendations": []}
+        # Keep the already-shown survivors (rank 2/3, unchanged) instead of
+        # wiping the whole set: c6_score backfills only the freed slot rather
+        # than rescoring everyone from scratch (#D5/#206).
+        kept = recs[1:]
+        return {"declined_ids": declined, "outcome": None, "draft": None, "recommendations": kept}
 
     # -- C8: graph update (minimal, deterministic) ------------------------
     def c8_update(self, state: AgentState) -> AgentState:

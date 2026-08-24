@@ -57,6 +57,7 @@ class ScoredCandidate(TypedDict):
     dept: str | None
     score: float
     confidence: str
+    confidence_score: float
     reasons: list[ScoredReason]
 
 
@@ -222,6 +223,10 @@ class ExpertiseScorer:
             "dept": employee_dept,
             "score": round(score, 4),
             "confidence": confidence_label(topic_fit, len(evidence)),
+            # Continuous 0..1 value driving the frontend gauge's fill only — the
+            # same topic_fit that confidence_label buckets into 高/中/低, so a
+            # candidate never visually contradicts its own label (#205/#B3).
+            "confidence_score": round(topic_fit, 4),
             "reasons": reasons,
         }
         return record, score

@@ -129,8 +129,10 @@ def _cleanup_api_rows(engine):
             text(r"DELETE FROM recommendations WHERE question_id LIKE 'api\_%' ESCAPE '\'")
         )
         # events reference questions (FK) and are now written at runtime (#177), so
-        # they must be removed before the questions they point at.
+        # they must be removed before the questions they point at. messages (#E6)
+        # likewise reference questions and must go before the questions delete.
         session.execute(text(r"DELETE FROM events WHERE question_id LIKE 'api\_%' ESCAPE '\'"))
+        session.execute(text(r"DELETE FROM messages WHERE question_id LIKE 'api\_%' ESCAPE '\'"))
         session.execute(text(r"DELETE FROM questions WHERE id LIKE 'api\_%' ESCAPE '\'"))
         session.commit()
     finally:
@@ -908,6 +910,89 @@ def test_handoff_draft_unexpected_error_is_generic_500(seed_counts, engine, fake
     assert "secret internal" not in resp.text  # detail logged, never leaked
 
 
+# --------------------------------------------------------------------------- #
+# POST /handoff/select : asker reselects a different shown candidate (#200/#A1)
+# --------------------------------------------------------------------------- #
+def test_handoff_select_reorders_and_redrafts(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2, 3], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2, 3)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "hs1"})
+    _events(client, "hs1")  # pause at send, drafted for E001
+    before = client.get("/handoff/hs1").json()
+    assert before["responder"]["person_id"] == "E001"
+
+    resp = client.post("/handoff/select", json={"session_id": "hs1", "person_id": "E003"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["responder"]["person_id"] == "E003"
+    assert "社員3" in body["draft"]
+    assert body["recommendation_id"] != before["recommendation_id"]
+
+    after = client.get("/handoff/hs1").json()
+    assert after["responder"]["person_id"] == "E003"
+    assert after["draft"] == body["draft"]
+    assert after["recommendation_id"] == body["recommendation_id"]
+
+    # /inbox reflects the DB rank sync: E003 now has the pending handoff, E001 no
+    # longer does.
+    assert client.get("/inbox", params={"responder_id": "E003"}).json()["items"]
+    assert client.get("/inbox", params={"responder_id": "E001"}).json()["items"] == []
+
+    assert (
+        client.post("/answer", json={"session_id": "hs1", "outcome": "accepted"}).status_code == 200
+    )
+
+
+def test_handoff_select_rejects_unknown_person_id(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "hs2"})
+    _events(client, "hs2")
+    resp = client.post("/handoff/select", json={"session_id": "hs2", "person_id": "E099"})
+    assert resp.status_code == 422
+
+
+def test_handoff_select_404_when_no_pending_handoff(seed_counts, engine, fake_embedder) -> None:
+    client = _client(engine, fake_embedder, retriever=_FakeRetriever(), scorer=_FakeScorer([]))
+    resp = client.post("/handoff/select", json={"session_id": "nope", "person_id": "E001"})
+    assert resp.status_code == 404
+
+
+def test_handoff_select_409_when_awaiting_clarification(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine, fake_embedder, retriever=_FakeRetriever(people=[1]), scorer=_FakeScorer(_recs(1))
+    )
+    client.post(
+        "/ask", json={"asker_id": 10, "question": "ネットワークの技術相談です", "session_id": "hs3"}
+    )
+    _events(client, "hs3")  # paused at ``ask`` (a clarification is owed to the asker)
+    resp = client.post("/handoff/select", json={"session_id": "hs3", "person_id": "E001"})
+    assert resp.status_code == 409
+
+
+def test_handoff_select_404_after_answered(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "hs4"})
+    _events(client, "hs4")
+    client.post("/answer", json={"session_id": "hs4", "outcome": "accepted"})
+    _events(client, "hs4")  # completed
+    resp = client.post("/handoff/select", json={"session_id": "hs4", "person_id": "E002"})
+    assert resp.status_code == 404
+
+
 def test_set_recommendation_outcome_is_idempotent(seed_counts, session) -> None:
     from tekijin.data.writes import set_recommendation_outcome
 
@@ -1582,3 +1667,206 @@ def test_reroute_created_at_is_generation_time_not_ask_time(
     # /ask NOW (which is a fixed future date in these tests).
     assert all(t != NOW for t in times)
     assert max(times) > min(times)  # the reroute pass was inserted strictly later
+
+
+# --------------------------------------------------------------------------- #
+# GET /notifications, POST /notifications/ack : decline notifications (#E7)
+# --------------------------------------------------------------------------- #
+def test_notifications_lists_decline_then_ack_clears_it(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "nt1"})
+    _events(client, "nt1")  # pause at send for E001
+    assert client.get("/notifications", params={"asker_id": "E010"}).json()["items"] == []
+
+    client.post("/answer", json={"session_id": "nt1", "outcome": "declined"})
+    _events(client, "nt1")  # reroute (auto-advances to E002) -> pause at send again
+
+    body = client.get("/notifications", params={"asker_id": "E010"}).json()
+    assert len(body["items"]) == 1
+    item = body["items"][0]
+    # The declined person's real (seeded) name, not the _FakeScorer's fixture
+    # name — Recommendation rows only ever store employee_id in the DB.
+    assert item["declined_person_name"]
+    assert f"{item['declined_person_name']}さんに断られた" in item["message"]
+    assert item["session_id"] == "nt1"
+
+    ack = client.post("/notifications/ack", json={"asker_id": "E010", "ids": [item["id"]]})
+    assert ack.status_code == 200
+    assert ack.json()["acknowledged"] == 1
+
+    assert client.get("/notifications", params={"asker_id": "E010"}).json()["items"] == []
+    # Re-acking an already-seen id is a harmless no-op.
+    again = client.post("/notifications/ack", json={"asker_id": "E010", "ids": [item["id"]]})
+    assert again.json()["acknowledged"] == 0
+
+
+def test_notifications_scoped_to_the_owning_asker(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "nt2"})
+    _events(client, "nt2")
+    client.post("/answer", json={"session_id": "nt2", "outcome": "declined"})
+    _events(client, "nt2")
+
+    # A different asker cannot see or ack someone else's decline notification.
+    assert client.get("/notifications", params={"asker_id": "E011"}).json()["items"] == []
+    mine = client.get("/notifications", params={"asker_id": "E010"}).json()["items"]
+    notif_id = mine[0]["id"]
+    other_ack = client.post("/notifications/ack", json={"asker_id": "E011", "ids": [notif_id]})
+    assert other_ack.json()["acknowledged"] == 0
+    assert len(client.get("/notifications", params={"asker_id": "E010"}).json()["items"]) == 1
+
+
+# --------------------------------------------------------------------------- #
+# GET /messages, POST /messages : post-acceptance chat thread (#E6)
+# --------------------------------------------------------------------------- #
+def test_messages_round_trip_after_acceptance(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine, fake_embedder, retriever=_FakeRetriever(people=[1]), scorer=_FakeScorer(_recs(1))
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "msg1"})
+    _events(client, "msg1")
+    client.post("/answer", json={"session_id": "msg1", "outcome": "accepted"})
+    _events(client, "msg1")
+
+    assert client.get("/messages", params={"session_id": "msg1"}).json()["items"] == []
+
+    from_asker = client.post(
+        "/messages",
+        json={"session_id": "msg1", "sender_id": "E010", "body": "よろしくお願いします"},
+    )
+    assert from_asker.status_code == 200
+    assert from_asker.json()["sender_id"] == "E010"
+
+    from_responder = client.post(
+        "/messages", json={"session_id": "msg1", "sender_id": "E001", "body": "承知しました"}
+    )
+    assert from_responder.status_code == 200
+
+    thread = client.get("/messages", params={"session_id": "msg1"}).json()["items"]
+    assert [m["body"] for m in thread] == ["よろしくお願いします", "承知しました"]
+    assert [m["sender_id"] for m in thread] == ["E010", "E001"]
+
+
+def test_messages_blocked_before_acceptance(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine, fake_embedder, retriever=_FakeRetriever(people=[1]), scorer=_FakeScorer(_recs(1))
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "msg2"})
+    _events(client, "msg2")  # paused at send — not yet accepted
+    resp = client.post(
+        "/messages", json={"session_id": "msg2", "sender_id": "E010", "body": "本文"}
+    )
+    assert resp.status_code == 409
+
+
+def test_messages_rejects_a_non_participant_sender(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine, fake_embedder, retriever=_FakeRetriever(people=[1]), scorer=_FakeScorer(_recs(1))
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "msg3"})
+    _events(client, "msg3")
+    client.post("/answer", json={"session_id": "msg3", "outcome": "accepted"})
+    _events(client, "msg3")
+    resp = client.post(
+        "/messages", json={"session_id": "msg3", "sender_id": "E099", "body": "本文"}
+    )
+    assert resp.status_code == 403
+
+
+def test_messages_unknown_session_404(seed_counts, engine, fake_embedder) -> None:
+    client = _client(engine, fake_embedder, retriever=_FakeRetriever(), scorer=_FakeScorer([]))
+    resp = client.post(
+        "/messages", json={"session_id": "nope", "sender_id": "E010", "body": "本文"}
+    )
+    assert resp.status_code == 404
+
+
+# --------------------------------------------------------------------------- #
+# GET /questions?limit, DELETE /questions/{id} : history + delete (#207/#208/#F8/#F9)
+# --------------------------------------------------------------------------- #
+def test_questions_limit_param_controls_result_count(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine, fake_embedder, retriever=_FakeRetriever(people=[1]), scorer=_FakeScorer(_recs(1))
+    )
+    for i in range(3):
+        client.post(
+            "/ask",
+            json={"asker_id": 10, "question": f"{GOOD_Q} その{i}", "session_id": f"lim{i}"},
+        )
+        _events(client, f"lim{i}")
+
+    default = client.get("/questions", params={"asker_id": "E010"}).json()["items"]
+    assert len(default) <= 5  # default limit unchanged
+
+    limited = client.get("/questions", params={"asker_id": "E010", "limit": 2}).json()["items"]
+    assert len(limited) == 2
+
+    wide = client.get("/questions", params={"asker_id": "E010", "limit": 50}).json()["items"]
+    assert len(wide) >= 3
+
+
+def test_delete_question_hides_it_from_the_questions_list(
+    seed_counts, engine, fake_embedder
+) -> None:
+    client = _client(
+        engine, fake_embedder, retriever=_FakeRetriever(people=[1]), scorer=_FakeScorer(_recs(1))
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "del1"})
+    _events(client, "del1")
+    client.post("/answer", json={"session_id": "del1", "outcome": "accepted"})
+    _events(client, "del1")  # resolved, no pending handoff left
+
+    before = client.get("/questions", params={"asker_id": "E010", "limit": 50}).json()["items"]
+    qid = next(i["question_id"] for i in before if i["session_id"] == "del1")
+
+    resp = client.delete(f"/questions/{qid}", params={"asker_id": "E010"})
+    assert resp.status_code == 204
+
+    after = client.get("/questions", params={"asker_id": "E010", "limit": 50}).json()["items"]
+    assert all(i["question_id"] != qid for i in after)
+
+    # Deleting again (already deleted) is a clean 404, not a silent success.
+    assert client.delete(f"/questions/{qid}", params={"asker_id": "E010"}).status_code == 404
+
+
+def test_delete_question_blocked_while_handoff_pending(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine, fake_embedder, retriever=_FakeRetriever(people=[1]), scorer=_FakeScorer(_recs(1))
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "del2"})
+    _events(client, "del2")  # paused at send — a responder is currently being asked
+
+    body = client.get("/questions", params={"asker_id": "E010", "limit": 50}).json()["items"]
+    qid = next(i["question_id"] for i in body if i["session_id"] == "del2")
+
+    resp = client.delete(f"/questions/{qid}", params={"asker_id": "E010"})
+    assert resp.status_code == 409
+
+
+def test_delete_question_rejects_a_non_owner(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine, fake_embedder, retriever=_FakeRetriever(people=[1]), scorer=_FakeScorer(_recs(1))
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "del3"})
+    _events(client, "del3")
+    client.post("/answer", json={"session_id": "del3", "outcome": "accepted"})
+    _events(client, "del3")
+
+    body = client.get("/questions", params={"asker_id": "E010", "limit": 50}).json()["items"]
+    qid = next(i["question_id"] for i in body if i["session_id"] == "del3")
+
+    resp = client.delete(f"/questions/{qid}", params={"asker_id": "E099"})
+    assert resp.status_code == 404
+    # Still visible to the real owner — the mismatched delete was a no-op.
+    still_there = client.get("/questions", params={"asker_id": "E010", "limit": 50}).json()["items"]
+    assert any(i["question_id"] == qid for i in still_there)

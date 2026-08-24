@@ -5,14 +5,33 @@ import type { EventStreamState } from "@/hooks/useEventStream";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const useCurrentUserMock = vi.fn();
+vi.mock("@/components/CurrentUserProvider", () => ({
+  useCurrentUser: () => useCurrentUserMock(),
+}));
+
 const updateHandoffDraftMock = vi.fn();
+const selectHandoffCandidateMock = vi.fn();
+const getMessagesMock = vi.fn();
+const postMessageMock = vi.fn();
 vi.mock("@/lib/api-client", () => ({
   updateHandoffDraft: (...args: unknown[]) => updateHandoffDraftMock(...args),
+  selectHandoffCandidate: (...args: unknown[]) => selectHandoffCandidateMock(...args),
+  getMessages: (...args: unknown[]) => getMessagesMock(...args),
+  postMessage: (...args: unknown[]) => postMessageMock(...args),
 }));
 
 beforeEach(() => {
   updateHandoffDraftMock.mockReset();
   updateHandoffDraftMock.mockResolvedValue({ session_id: "s1", status: "draft_saved" });
+  selectHandoffCandidateMock.mockReset();
+  getMessagesMock.mockReset();
+  getMessagesMock.mockResolvedValue([]);
+  postMessageMock.mockReset();
+  // Matches the real INERT default (no CurrentUserProvider ancestor) unless a
+  // test overrides it.
+  useCurrentUserMock.mockReset();
+  useCurrentUserMock.mockReturnValue({ currentUserId: null });
 });
 
 // Fixtures use the REAL backend shapes: `confidence` is the Japanese fit signal
@@ -64,6 +83,50 @@ describe("ResultScreen — terminal-only replay (hard reload)", () => {
     expect(screen.getByText("依頼は送信済みです")).toBeInTheDocument();
     expect(screen.queryByText("結果を準備中…")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "新しい質問をする" })).toBeInTheDocument();
+    // No current user resolved (no CurrentUserProvider ancestor in this test) ->
+    // no message thread rendered.
+    expect(screen.queryByPlaceholderText("メッセージを入力…")).not.toBeInTheDocument();
+  });
+
+  it("shows a message thread once the responder has accepted, for the current asker (#E6)", async () => {
+    useCurrentUserMock.mockReturnValue({ currentUserId: "E010" });
+    renderResult(
+      state({
+        terminal: true,
+        done: { status: "sent", answer: "高梨さんに取り次ぎました。回答をお待ちください。" },
+        recommend: { recommendations: [rec({ person_id: "E001", name: "高梨" })] },
+      }),
+    );
+    expect(screen.getByText("高梨さんとのメッセージ")).toBeInTheDocument();
+    await waitFor(() => expect(getMessagesMock).toHaveBeenCalledWith("s1"));
+
+    const input = screen.getByPlaceholderText("メッセージを入力…");
+    fireEvent.change(input, { target: { value: "よろしくお願いします" } });
+    postMessageMock.mockResolvedValue({
+      id: 1,
+      sender_id: "E010",
+      body: "よろしくお願いします",
+      created_at: null,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "送信" }));
+    await waitFor(() =>
+      expect(postMessageMock).toHaveBeenCalledWith({
+        session_id: "s1",
+        sender_id: "E010",
+        body: "よろしくお願いします",
+      }),
+    );
+  });
+
+  it("does not show a message thread for a non-accepted terminal (e.g. no_candidate)", () => {
+    useCurrentUserMock.mockReturnValue({ currentUserId: "E010" });
+    renderResult(
+      state({
+        terminal: true,
+        message: { status: "no_candidate", message: "該当者が見つかりませんでした" },
+      }),
+    );
+    expect(screen.queryByPlaceholderText("メッセージを入力…")).not.toBeInTheDocument();
   });
 
   it("shows a terminal message (off-topic / no candidate) replayed on reload", () => {
@@ -273,7 +336,69 @@ describe("ResultScreen — main line (person)", () => {
     expect(screen.getByText(/高梨さんに、この内容でお繋ぎしました/)).toBeInTheDocument();
   });
 
-  it("does not offer recipient reselection — only the top pick is confirmable (#174)", () => {
+  it("shows full reason detail on all three candidates, not just the top pick (#204/#A2)", () => {
+    renderResult(
+      state({
+        route: { route: "person", reason: "", confidence: 0.9 },
+        recommend: {
+          recommendations: [
+            THREE_CANDIDATES[0],
+            {
+              ...THREE_CANDIDATES[1],
+              reasons: [{ type: "proximity", detail: "同じ拠点（大阪）" }],
+            },
+            {
+              ...THREE_CANDIDATES[2],
+              reasons: [{ type: "load", detail: "今週の対応件数: 普通" }],
+            },
+          ],
+        },
+        draft: { draft: "本文" },
+      }),
+    );
+    // Rank 2/3 detail text used to be suppressed (only the label chip showed);
+    // now every shown candidate renders its full reason detail.
+    expect(screen.getByText(/同じ拠点（大阪）/)).toBeInTheDocument();
+    expect(screen.getByText(/今週の対応件数: 普通/)).toBeInTheDocument();
+  });
+
+  it("lets the asker pick any of the three candidates as the recipient (#200/#A1/#204/#C4)", async () => {
+    selectHandoffCandidateMock.mockResolvedValue({
+      session_id: "s1",
+      responder: THREE_CANDIDATES[1],
+      draft: "鈴木さん向けに調整した下書き",
+      recommendation_id: 42,
+    });
+    renderResult(
+      state({
+        route: { route: "person", reason: "", confidence: 0.9 },
+        recommend: { recommendations: THREE_CANDIDATES },
+        draft: { draft: "高梨さん向けの下書き" },
+      }),
+    );
+    // The top pick starts selected; every card offers a selection control now.
+    expect(screen.getByRole("button", { name: "選択中" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "選択する" })).toHaveLength(2);
+
+    fireEvent.click(screen.getAllByRole("button", { name: "選択する" })[0]); // 鈴木 (E002)
+    await waitFor(() =>
+      expect(selectHandoffCandidateMock).toHaveBeenCalledWith({
+        session_id: "s1",
+        person_id: "E002",
+      }),
+    );
+    // The regenerated draft (for the newly selected candidate) replaces the editor's text.
+    expect(await screen.findByLabelText<HTMLTextAreaElement>("聞き方の下書き")).toHaveValue(
+      "鈴木さん向けに調整した下書き",
+    );
+
+    // The send confirmation now names the selected candidate, not the original top pick.
+    fireEvent.click(screen.getByRole("button", { name: "この内容で依頼する" }));
+    expect(await screen.findByText(/鈴木さんに、この内容でお繋ぎしました/)).toBeInTheDocument();
+  });
+
+  it("surfaces a retryable error when reselecting a candidate fails", async () => {
+    selectHandoffCandidateMock.mockRejectedValueOnce(new Error("boom"));
     renderResult(
       state({
         route: { route: "person", reason: "", confidence: 0.9 },
@@ -281,10 +406,11 @@ describe("ResultScreen — main line (person)", () => {
         draft: { draft: "本文" },
       }),
     );
-    // The old per-candidate "選択する" reselect control is gone (it misdirected).
-    expect(screen.queryByRole("button", { name: "選択する" })).not.toBeInTheDocument();
-    // The top pick is shown as the recipient.
-    expect(screen.getByText("この方に依頼します")).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole("button", { name: "選択する" })[0]);
+    expect(await screen.findByRole("alert")).toHaveTextContent("候補の切り替えに失敗しました");
+    // Selection did not change on failure: still one "選択中" and two "選択する".
+    expect(screen.getByRole("button", { name: "選択中" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "選択する" })).toHaveLength(2);
   });
 
   it("surfaces a retryable error when the confirm POST fails", async () => {

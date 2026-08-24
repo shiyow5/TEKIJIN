@@ -2,10 +2,13 @@
  * One recommended person on the main-line result (product-spec 画面3).
  *
  * Shows the person id ("E###"), name, department, the fit signal (`confidence`
- * = 高/中/低 — the intended user-facing signal), and the evidence `reasons`. The
+ * = 高/中/低 — the intended user-facing signal, with the gauge's ring fill
+ * continuously varied by `confidence_score` so same-labeled candidates are
+ * still visually distinguishable — #205/#B3), and the evidence `reasons`. The
  * raw `score` is a weighted internal ranking value (not a percentage) and is
- * never shown. The top-ranked card is `expanded` (full reason detail); lower
- * ranks show compact reason labels.
+ * never shown. All three cards render full reason detail (#204/#A2) so they can
+ * be compared before choosing; `onSelect` lets the asker pick any of them as the
+ * hand-off target, not just the top pick (#200/#A1).
  */
 
 import { ConfidenceGauge } from "@/components/result/ConfidenceGauge";
@@ -19,9 +22,9 @@ export interface CandidateCardProps {
   /** Highlight this card (the confirmed recipient / top pick). */
   selected: boolean;
   /**
-   * Optional recipient-selection handler. When omitted the card is display-only
-   * (no "選択する" button) — the main line confirms to the top pick, so exposing a
-   * reselect control that the send does not honour is a misdirection (#174).
+   * Recipient-selection handler (#200/#A1). When omitted the card is
+   * display-only (no "選択する" button) — used when there is no session to act
+   * against (e.g. a static/replayed view).
    */
   onSelect?: (personId: string) => void;
 }
@@ -61,7 +64,7 @@ export function CandidateCard({
           <span aria-hidden="true" className="text-on-surface-variant text-xs">
             適合度
           </span>
-          <ConfidenceGauge level={candidate.confidence} />
+          <ConfidenceGauge level={candidate.confidence} fitScore={candidate.confidence_score} />
         </div>
       </div>
 

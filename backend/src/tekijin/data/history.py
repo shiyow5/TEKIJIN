@@ -41,7 +41,7 @@ def recent_questions_for_asker(
             Question.session_id,
             Question.created_at,
         )
-        .where(Question.asker_id == asker_id)
+        .where(Question.asker_id == asker_id, Question.deleted_at.is_(None))
         .order_by(Question.created_at.desc(), Question.id.desc())
         .limit(limit)
     ).all()

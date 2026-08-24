@@ -19,7 +19,7 @@ import contextlib
 import logging
 from collections.abc import Iterator
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from sse_starlette import EventSourceResponse
 
 from tekijin.api import schemas
@@ -32,10 +32,19 @@ from tekijin.api.service import (
     SessionInvalid,
 )
 from tekijin.data.dashboard import dashboard_summary
+from tekijin.data.db import session_scope
 from tekijin.data.documents import get_document
 from tekijin.data.history import recent_questions_for_asker
 from tekijin.data.inbox import pending_handoffs_for_responder
+from tekijin.data.messages import list_messages, question_participants, resolve_question_id
+from tekijin.data.notifications import pending_decline_notifications_for_asker
 from tekijin.data.repository import Repository
+from tekijin.data.writes import (
+    QuestionHasPendingHandoff,
+    ack_decline_notifications,
+    insert_message,
+    soft_delete_question,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +179,31 @@ def handoff_draft(req: schemas.HandoffDraftRequest, request: Request) -> schemas
     return schemas.AckResponse(session_id=req.session_id, status="draft_saved")
 
 
+@router.post("/handoff/select", response_model=schemas.HandoffSelectResponse)
+def handoff_select(
+    req: schemas.HandoffSelectRequest, request: Request
+) -> schemas.HandoffSelectResponse:
+    """Asker picks a different (of the currently shown) candidate as the hand-off
+    target; the draft is regenerated for them (#200/#A1/#204).
+
+    404 when no hand-off is pending (unknown / finished / already answered); 409
+    when the session is awaiting a clarification instead; 422 when ``person_id``
+    is not among the currently shown recommendations.
+    """
+
+    try:
+        return _service(request).select_handoff_candidate(req.session_id, req.person_id)
+    except HandoffNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SessionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except SessionInvalid as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:  # unexpected: log detail, return a generic 500
+        logger.exception("POST /handoff/select failed for session %s", req.session_id)
+        raise HTTPException(status_code=500, detail="内部エラーが発生しました") from exc
+
+
 @router.get("/dashboard", response_model=schemas.DashboardResponse)
 def dashboard(request: Request) -> schemas.DashboardResponse:
     """Aggregate load / topic mix / recent activity for the dashboard."""
@@ -244,11 +278,16 @@ def inbox(request: Request, responder_id: str = Query(min_length=1)) -> schemas.
 
 @router.get("/questions", response_model=schemas.RecentQuestionsResponse)
 def questions(
-    request: Request, asker_id: str = Query(min_length=1)
+    request: Request,
+    asker_id: str = Query(min_length=1),
+    limit: int = Query(default=5, ge=1, le=500),
 ) -> schemas.RecentQuestionsResponse:
     """The asker's own recent questions with resolution state (画面1 の一覧, #125).
 
-    ``asker_id`` accepts an int or the ``"E###"`` form (422 otherwise).
+    ``asker_id`` accepts an int or the ``"E###"`` form (422 otherwise). ``limit``
+    defaults to 5 (the "最近のあなたの質問" panel); the full history view (#208/#F9)
+    passes a larger value to see everything. Soft-deleted questions (#207/#F8)
+    are excluded.
     """
 
     with _generic_500("GET /questions"):
@@ -260,9 +299,135 @@ def questions(
             ) from exc
 
         with _service(request).session_factory() as session:
-            rows = recent_questions_for_asker(session, aid)
+            rows = recent_questions_for_asker(session, aid, limit=limit)
         return schemas.RecentQuestionsResponse(
             items=[schemas.RecentQuestionItem(**row) for row in rows]
+        )
+
+
+@router.delete("/questions/{question_id}", status_code=204)
+def delete_question(
+    question_id: str, request: Request, asker_id: str = Query(min_length=1)
+) -> Response:
+    """Soft-delete one of the asker's own past questions (#207/#F8).
+
+    ``asker_id`` accepts an int or the ``"E###"`` form (422 otherwise). 404 when
+    the question does not exist, is not owned by ``asker_id``, or was already
+    deleted. 409 when a responder is currently being asked (a live pending
+    hand-off) — reselect or wait for an outcome before deleting.
+    """
+
+    with _generic_500("DELETE /questions"):
+        try:
+            aid = schemas.coerce_employee_id(asker_id)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422, detail="asker_id must be an int or 'E###'"
+            ) from exc
+
+        try:
+            with session_scope(_service(request).session_factory) as session:
+                deleted = soft_delete_question(session, question_id, aid)
+        except QuestionHasPendingHandoff as exc:
+            raise HTTPException(
+                status_code=409, detail="対応中の依頼があるため削除できません"
+            ) from exc
+        if not deleted:
+            raise HTTPException(status_code=404, detail="question not found or already deleted")
+    return Response(status_code=204)
+
+
+@router.get("/notifications", response_model=schemas.NotificationsResponse)
+def notifications(
+    request: Request, asker_id: str = Query(min_length=1)
+) -> schemas.NotificationsResponse:
+    """Decline events the asker hasn't seen yet, newest first (#E7).
+
+    Paired with the automatic reroute (#206/#D5): the system has already moved
+    on to the next candidate by the time this fires, so it is an informational
+    "here's what happened" surface, not a request for the asker to act.
+    ``asker_id`` accepts an int or the ``"E###"`` form (422 otherwise).
+    """
+
+    with _generic_500("GET /notifications"):
+        try:
+            aid = schemas.coerce_employee_id(asker_id)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422, detail="asker_id must be an int or 'E###'"
+            ) from exc
+
+        with _service(request).session_factory() as session:
+            rows = pending_decline_notifications_for_asker(session, aid)
+        return schemas.NotificationsResponse(
+            items=[schemas.DeclineNotification(**row) for row in rows]
+        )
+
+
+@router.post("/notifications/ack", response_model=schemas.NotificationAckResponse)
+def ack_notifications(
+    req: schemas.NotificationAckRequest, request: Request
+) -> schemas.NotificationAckResponse:
+    """Mark decline notifications as seen (#E7)."""
+
+    with _generic_500("POST /notifications/ack"):
+        with session_scope(_service(request).session_factory) as session:
+            count = ack_decline_notifications(session, req.asker_id, req.ids)
+        return schemas.NotificationAckResponse(acknowledged=count)
+
+
+@router.get("/messages", response_model=schemas.MessagesResponse)
+def messages(request: Request, session_id: str = Query(min_length=1)) -> schemas.MessagesResponse:
+    """The chat thread for a session's question, oldest first (#E6).
+
+    Empty (not an error) for an unknown session or a question with no messages
+    yet, so a client can poll before the first message exists.
+    """
+
+    with _generic_500("GET /messages"):
+        with _service(request).session_factory() as session:
+            question_id = resolve_question_id(session, session_id)
+            rows = list_messages(session, question_id) if question_id is not None else []
+        return schemas.MessagesResponse(
+            items=[
+                schemas.MessageItem(
+                    id=row["id"],
+                    sender_id=schemas.format_employee_id(row["sender_employee_id"]),
+                    body=row["body"],
+                    created_at=row["created_at"],
+                )
+                for row in rows
+            ]
+        )
+
+
+@router.post("/messages", response_model=schemas.MessageItem)
+def post_message(req: schemas.MessageCreateRequest, request: Request) -> schemas.MessageItem:
+    """Post one chat message on a session's post-acceptance thread (#E6).
+
+    404 when the session is unknown; 409 when the question has no accepted
+    responder yet (the thread is not open); 403 when ``sender_id`` is neither
+    the asker nor the accepted responder.
+    """
+
+    with _generic_500("POST /messages"):
+        with session_scope(_service(request).session_factory) as session:
+            question_id = resolve_question_id(session, req.session_id)
+            if question_id is None:
+                raise HTTPException(status_code=404, detail="unknown session")
+            asker_id, responder_id = question_participants(session, question_id)
+            if responder_id is None:
+                raise HTTPException(status_code=409, detail="この質問はまだ受諾されていません")
+            if req.sender_id not in (asker_id, responder_id):
+                raise HTTPException(status_code=403, detail="この会話の参加者ではありません")
+            row = insert_message(session, question_id, req.sender_id, req.body)
+            message_id = row.id
+            created_at = row.created_at
+        return schemas.MessageItem(
+            id=message_id,
+            sender_id=schemas.format_employee_id(req.sender_id),
+            body=req.body,
+            created_at=created_at.isoformat() if created_at is not None else None,
         )
 
 

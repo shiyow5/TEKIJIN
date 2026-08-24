@@ -193,6 +193,10 @@ class Question(Base):
     # the API so the dashboard's average resolution time reflects live traffic, not
     # only seeded ``answers`` rows (#97). NULL while unresolved / pre-seeded.
     resolved_at: Mapped[dt.datetime | None] = mapped_column(DateTime)
+    # Soft-delete marker for the asker's own history view (#207/#F8). NULL means
+    # visible/live; set (never unset) when the asker deletes it. Kept rather than
+    # hard-deleted since Recommendation/Answer/Event hold plain FKs to this row.
+    deleted_at: Mapped[dt.datetime | None] = mapped_column(DateTime)
     created_at: Mapped[dt.datetime | None] = mapped_column(DateTime)
     embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM))
 
@@ -230,6 +234,27 @@ class Recommendation(Base):
     outcome: Mapped[str | None] = mapped_column(String(32))
     # Needed by the scorer's ``load`` calc (recommendations in the last 7 days,
     # technical-spec §5). DB stamps it at insert; indexed for the recency window.
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now(), index=True)
+    # When the asker acknowledged this decline in the notification bell (#E7).
+    # NULL means "not yet seen"; only ever set on a rank==1, outcome=='declined'
+    # row (the shape a decline notification is derived from).
+    declined_seen_at: Mapped[dt.datetime | None] = mapped_column(DateTime)
+
+
+class Message(Base):
+    """One chat message on a question's post-acceptance thread (#E6).
+
+    A simple, flat per-question thread — the two participants (asker and the
+    accepted responder) are derived from the question/recommendation rows, not
+    stored redundantly here.
+    """
+
+    __tablename__ = "messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    question_id: Mapped[str] = mapped_column(ForeignKey("questions.id"), index=True)
+    sender_employee_id: Mapped[int] = mapped_column(ForeignKey("employees.id"), index=True)
+    body: Mapped[str] = mapped_column(Text)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now(), index=True)
 
 
@@ -344,6 +369,7 @@ __all__ = [
     "Question",
     "Answer",
     "Recommendation",
+    "Message",
     "EvalRun",
     "Event",
     "ProjectMember",

@@ -121,6 +121,16 @@ describe("RecentQuestions", () => {
     await waitFor(() => expect(screen.getByText("まだ質問はありません。")).toBeInTheDocument());
   });
 
+  it("links to the full history view (#208/#F9)", () => {
+    useCurrentUserMock.mockReturnValue(asUser("E001"));
+    getRecentQuestionsMock.mockResolvedValue([]);
+    render(<RecentQuestions />);
+    expect(screen.getByRole("link", { name: "すべて見る" })).toHaveAttribute(
+      "href",
+      "/questions/history",
+    );
+  });
+
   it("shows an error note when the fetch fails", async () => {
     useCurrentUserMock.mockReturnValue(asUser("E001"));
     getRecentQuestionsMock.mockRejectedValue(new Error("network"));

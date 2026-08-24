@@ -5,9 +5,13 @@
  *
  * Renders the qualitative fit signal (適合度 高/中/低) as a radial ring that
  * sweeps to its level on mount — a richer read of the same signal the card
- * already showed as text. Deliberately driven by the QUALITATIVE level, never the
- * raw internal `score` (which is not a percentage and is never surfaced —
- * CandidateCard's contract).
+ * already showed as text. The ring's fill fraction prefers the continuous
+ * `fitScore` (0..1, the scorer's topic_fit) when given, falling back to a
+ * discrete per-level fraction otherwise — so two candidates sharing the same
+ * 高/中/低 label are still visually distinguishable (#205/#B3), without ever
+ * surfacing the raw internal `score`/a percentage number in the UI (still
+ * CandidateCard's contract — only the ring's fill varies, the text label does
+ * not become a number).
  *
  * Accessibility: the ring is `role="img"` with the same text label, and the label
  * is also shown, so nothing depends on color/animation. `prefers-reduced-motion`
@@ -37,8 +41,11 @@ function prefersReducedMotion(): boolean {
   );
 }
 
-export function ConfidenceGauge({ level }: { level: string }) {
-  const fraction = LEVEL_FRACTION[level] ?? 0.5;
+export function ConfidenceGauge({ level, fitScore }: { level: string; fitScore?: number }) {
+  const fraction =
+    typeof fitScore === "number" && Number.isFinite(fitScore)
+      ? Math.min(Math.max(fitScore, 0), 1)
+      : (LEVEL_FRACTION[level] ?? 0.5);
   const colorClass = LEVEL_COLOR[level] ?? "text-on-surface-variant";
   const finalOffset = CIRCUMFERENCE * (1 - fraction);
 

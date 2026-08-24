@@ -1,14 +1,20 @@
 import {
+  ackNotifications,
   advanceSession,
   ApiError,
+  deleteQuestion,
   getDashboard,
   getDocument,
   getEmployees,
   getHandoff,
   getInbox,
+  getMessages,
+  getNotifications,
   getRecentQuestions,
   postAnswer,
   postAsk,
+  postMessage,
+  selectHandoffCandidate,
 } from "@/lib/api-client";
 import type { AskRequest, HandoffResponse, ResumeRequest } from "@/lib/api-types";
 import { DEFAULT_API_BASE_URL } from "@/lib/config";
@@ -370,5 +376,136 @@ describe("getDocument", () => {
       name: "ApiError",
       status: 404,
     });
+  });
+});
+
+describe("getRecentQuestions limit", () => {
+  it("includes limit in the query string when provided", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ items: [] }));
+    await getRecentQuestions("E001", { limit: 200, fetchImpl });
+    const [url] = fetchImpl.mock.calls[0];
+    expect(url).toBe(`${DEFAULT_API_BASE_URL}/questions?asker_id=E001&limit=200`);
+  });
+});
+
+describe("deleteQuestion", () => {
+  it("DELETEs /questions/{id} with the asker_id query", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(null, { status: 204 }));
+    await deleteQuestion("q1", "E001", { fetchImpl });
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe(`${DEFAULT_API_BASE_URL}/questions/q1?asker_id=E001`);
+    expect(init?.method).toBe("DELETE");
+  });
+
+  it("throws ApiError with the 409 status when a handoff is pending", async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonResponse({ detail: "対応中" }, { ok: false, status: 409 }));
+    await expect(deleteQuestion("q1", "E001", { fetchImpl })).rejects.toMatchObject({
+      name: "ApiError",
+      status: 409,
+    });
+  });
+});
+
+describe("notifications", () => {
+  const ITEMS = [
+    {
+      id: 1,
+      question_id: "q1",
+      session_id: "s1",
+      message: "田中さんに断られたので次の候補に依頼してください",
+      declined_person_name: "田中",
+      created_at: "2026-08-20T10:00:00",
+    },
+  ];
+
+  it("GETs /notifications with the asker_id query and unwraps items", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ items: ITEMS }));
+    const result = await getNotifications("E001", { fetchImpl });
+    const [url] = fetchImpl.mock.calls[0];
+    expect(url).toBe(`${DEFAULT_API_BASE_URL}/notifications?asker_id=E001`);
+    expect(result).toEqual(ITEMS);
+  });
+
+  it("POSTs /notifications/ack with the asker_id and ids", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ acknowledged: 1 }));
+    const result = await ackNotifications({ asker_id: "E001", ids: [1] }, { fetchImpl });
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe(`${DEFAULT_API_BASE_URL}/notifications/ack`);
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(init?.body as string)).toEqual({ asker_id: "E001", ids: [1] });
+    expect(result).toEqual({ acknowledged: 1 });
+  });
+});
+
+describe("messages", () => {
+  const ITEMS = [{ id: 1, sender_id: "E001", body: "よろしくお願いします", created_at: null }];
+
+  it("GETs /messages with the session_id query and unwraps items", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ items: ITEMS }));
+    const result = await getMessages("s1", { fetchImpl });
+    const [url] = fetchImpl.mock.calls[0];
+    expect(url).toBe(`${DEFAULT_API_BASE_URL}/messages?session_id=s1`);
+    expect(result).toEqual(ITEMS);
+  });
+
+  it("POSTs /messages with session_id, sender_id and body", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(ITEMS[0]));
+    const result = await postMessage(
+      { session_id: "s1", sender_id: "E001", body: "よろしくお願いします" },
+      { fetchImpl },
+    );
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe(`${DEFAULT_API_BASE_URL}/messages`);
+    expect(init?.method).toBe("POST");
+    expect(result).toEqual(ITEMS[0]);
+  });
+
+  it("throws ApiError with the 403 status for a non-participant sender", async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonResponse({ detail: "forbidden" }, { ok: false, status: 403 }));
+    await expect(
+      postMessage({ session_id: "s1", sender_id: "E099", body: "本文" }, { fetchImpl }),
+    ).rejects.toMatchObject({ name: "ApiError", status: 403 });
+  });
+});
+
+describe("selectHandoffCandidate", () => {
+  it("POSTs /handoff/select with session_id and person_id", async () => {
+    const response = {
+      session_id: "s1",
+      responder: {
+        person_id: "E002",
+        name: "鈴木",
+        dept: null,
+        score: 0.5,
+        confidence: "中",
+        reasons: [],
+        confidence_score: 0.5,
+      },
+      draft: "鈴木さん向けの下書き",
+      recommendation_id: 42,
+    };
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(response));
+    const result = await selectHandoffCandidate(
+      { session_id: "s1", person_id: "E002" },
+      { fetchImpl },
+    );
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe(`${DEFAULT_API_BASE_URL}/handoff/select`);
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(init?.body as string)).toEqual({ session_id: "s1", person_id: "E002" });
+    expect(result).toEqual(response);
+  });
+
+  it("throws ApiError with the 422 status for an unknown person_id", async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonResponse({ detail: "unknown" }, { ok: false, status: 422 }));
+    await expect(
+      selectHandoffCandidate({ session_id: "s1", person_id: "E099" }, { fetchImpl }),
+    ).rejects.toMatchObject({ name: "ApiError", status: 422 });
   });
 });

@@ -11,13 +11,22 @@ import type {
   AckResponse,
   AskRequest,
   DashboardResponse,
+  DeclineNotification,
   DocumentDetail,
   EmployeeListResponse,
   EmployeeSummary,
   HandoffDraftRequest,
   HandoffResponse,
+  HandoffSelectRequest,
+  HandoffSelectResponse,
   InboxItem,
   InboxResponse,
+  MessageCreateRequest,
+  MessageItem,
+  MessagesResponse,
+  NotificationAckRequest,
+  NotificationAckResponse,
+  NotificationsResponse,
   RecentQuestionItem,
   RecentQuestionsResponse,
   ResumeRequest,
@@ -95,6 +104,21 @@ async function getJson<T>(path: string, options: RequestOptions = {}): Promise<T
   return (await response.json()) as T;
 }
 
+/** DELETE `{base}{path}`, throwing {@link ApiError} on non-2xx. No response body expected (204). */
+async function deleteRequest(path: string, options: RequestOptions = {}): Promise<void> {
+  const baseUrl = (options.baseUrl ?? getApiBaseUrl()).replace(/\/+$/, "");
+  const doFetch = options.fetchImpl ?? fetch;
+
+  const response = await doFetch(`${baseUrl}${path}`, {
+    method: "DELETE",
+    signal: options.signal,
+  });
+
+  if (!response.ok) {
+    throw new ApiError(response.status, await extractErrorMessage(response));
+  }
+}
+
 /**
  * POST /ask — start a question for a session. Returns the acknowledgement; the
  * actual stream flows over GET /events (subscribed via `useEventStream`).
@@ -126,6 +150,20 @@ export function updateHandoffDraft(
   options: RequestOptions = {},
 ): Promise<AckResponse> {
   return postJson<AckResponse>("/handoff/draft", request, options);
+}
+
+/**
+ * POST /handoff/select — the asker picks a different (of the currently shown)
+ * candidate as the hand-off target; the draft is regenerated for them
+ * (#200/#A1/#204). Throws {@link ApiError} with 404 (no hand-off pending /
+ * already answered), 409 (awaiting a clarification instead), or 422
+ * (`person_id` is not among the currently shown recommendations).
+ */
+export function selectHandoffCandidate(
+  request: HandoffSelectRequest,
+  options: RequestOptions = {},
+): Promise<HandoffSelectResponse> {
+  return postJson<HandoffSelectResponse>("/handoff/select", request, options);
 }
 
 /**
@@ -173,18 +211,91 @@ export async function getInbox(
   return body.items;
 }
 
+export interface GetRecentQuestionsOptions extends RequestOptions {
+  /** Cap on returned items; omitted uses the backend default (5, "最近のあなたの質問"). The full-history view (#208/#F9) passes a larger value. */
+  limit?: number;
+}
+
 /**
  * GET /questions — the asker's own recent questions with resolution state
  * (画面1 の "最近のあなたの質問"). `askerId` is the external "E###" form.
- * Returns the unwrapped items array, newest first.
+ * Returns the unwrapped items array, newest first. Soft-deleted questions
+ * (#207/#F8) are excluded by the backend.
  */
 export async function getRecentQuestions(
   askerId: string,
-  options: RequestOptions = {},
+  options: GetRecentQuestionsOptions = {},
 ): Promise<RecentQuestionItem[]> {
-  const query = `?asker_id=${encodeURIComponent(askerId)}`;
-  const body = await getJson<RecentQuestionsResponse>(`/questions${query}`, options);
+  const { limit, ...requestOptions } = options;
+  const params = new URLSearchParams({ asker_id: askerId });
+  if (limit !== undefined) params.set("limit", String(limit));
+  const body = await getJson<RecentQuestionsResponse>(
+    `/questions?${params.toString()}`,
+    requestOptions,
+  );
   return body.items;
+}
+
+/**
+ * DELETE /questions/{id} — soft-delete one of the asker's own past questions
+ * (#207/#F8). `askerId` is the external "E###" form. Throws {@link ApiError}
+ * with 404 (not found / not owned / already deleted) or 409 (a responder is
+ * currently being asked — a live pending hand-off blocks deletion).
+ */
+export function deleteQuestion(
+  questionId: string,
+  askerId: string,
+  options: RequestOptions = {},
+): Promise<void> {
+  const query = `?asker_id=${encodeURIComponent(askerId)}`;
+  return deleteRequest(`/questions/${encodeURIComponent(questionId)}${query}`, options);
+}
+
+/**
+ * GET /notifications — decline events the asker hasn't seen yet, newest first
+ * (#E7). `askerId` is the external "E###" form. Returns the unwrapped items array.
+ */
+export async function getNotifications(
+  askerId: string,
+  options: RequestOptions = {},
+): Promise<DeclineNotification[]> {
+  const query = `?asker_id=${encodeURIComponent(askerId)}`;
+  const body = await getJson<NotificationsResponse>(`/notifications${query}`, options);
+  return body.items;
+}
+
+/** POST /notifications/ack — mark decline notifications as seen (#E7). */
+export function ackNotifications(
+  request: NotificationAckRequest,
+  options: RequestOptions = {},
+): Promise<NotificationAckResponse> {
+  return postJson<NotificationAckResponse>("/notifications/ack", request, options);
+}
+
+/**
+ * GET /messages — a session's post-acceptance chat thread, oldest first (#E6).
+ * Empty (not an error) before the thread has any messages. Returns the
+ * unwrapped items array.
+ */
+export async function getMessages(
+  sessionId: string,
+  options: RequestOptions = {},
+): Promise<MessageItem[]> {
+  const query = `?session_id=${encodeURIComponent(sessionId)}`;
+  const body = await getJson<MessagesResponse>(`/messages${query}`, options);
+  return body.items;
+}
+
+/**
+ * POST /messages — post one chat message on a session's post-acceptance thread
+ * (#E6). Throws {@link ApiError} with 404 (unknown session), 409 (not yet
+ * accepted — the thread is not open), or 403 (sender is not a participant).
+ */
+export function postMessage(
+  request: MessageCreateRequest,
+  options: RequestOptions = {},
+): Promise<MessageItem> {
+  return postJson<MessageItem>("/messages", request, options);
 }
 
 /** Fetch one internal document's full content for the viewer (GET /documents/{id}, #143). */

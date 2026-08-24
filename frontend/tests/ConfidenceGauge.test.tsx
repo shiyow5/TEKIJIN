@@ -55,6 +55,34 @@ describe("ConfidenceGauge", () => {
     expect(screen.getByRole("img", { name: "適合度 不明" })).toBeInTheDocument();
   });
 
+  it("uses a continuous fitScore for the ring fill when provided (#205/#B3)", () => {
+    setReducedMotion(true);
+    const arc = () => document.querySelector("circle[stroke-linecap='round']") as SVGCircleElement;
+
+    const { rerender } = render(<ConfidenceGauge level="中" fitScore={0.9} />);
+    const highOffset = Number(arc().style.strokeDashoffset);
+
+    rerender(<ConfidenceGauge level="中" fitScore={0.3} />);
+    const lowOffset = Number(arc().style.strokeDashoffset);
+
+    // Same discrete label ("中"), different fitScore -> visibly different fill —
+    // this is exactly the "looks identical every time" bug this fixes. Higher
+    // fit -> more filled ring -> smaller stroke offset.
+    expect(highOffset).not.toBe(lowOffset);
+    expect(highOffset).toBeLessThan(lowOffset);
+    // Still never a raw number/percentage in the visible text.
+    expect(screen.queryByText(/%/)).not.toBeInTheDocument();
+    expect(screen.queryByText("0.9")).not.toBeInTheDocument();
+  });
+
+  it("falls back to the discrete per-level fraction when fitScore is omitted", () => {
+    setReducedMotion(true);
+    render(<ConfidenceGauge level="中" />);
+    const arc = document.querySelector("circle[stroke-linecap='round']") as SVGCircleElement;
+    const circumference = 2 * Math.PI * 16;
+    expect(Number(arc.style.strokeDashoffset)).toBeCloseTo(circumference * (1 - 0.66));
+  });
+
   it("falls back to the final ring if anime.js fails to load", async () => {
     setReducedMotion(false);
     animateMock.mockImplementation(() => {
