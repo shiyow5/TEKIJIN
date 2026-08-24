@@ -39,6 +39,23 @@ class SufficiencyResult:
     followup_question: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class AnswerabilityResult:
+    """Evidence-sufficiency verdict (#70): can the company answer this in-house?
+
+    ``confidence`` is a 0–100 score of whether the shown candidates' track record
+    is enough to answer the question — a SEPARATE judgement from topic
+    classification (CRAG/Self-RAG critique). A low score means "no adequate expert
+    in-house": the graph should reject to a graceful terminal instead of handing
+    off to a weak match. Measured (#65/#67 §6): asked as a NUMBER it rejects 4/5
+    of the untraceable cases at a 30–70 threshold (misreject 3/45); asked as a
+    boolean it over-rejects (18/45), so this must stay numeric.
+    """
+
+    confidence: int = 0
+    reason: str | None = None
+
+
 class IntentModel(Protocol):
     """C1: free-text question -> :class:`IntentResult` (structured).
 
@@ -63,6 +80,20 @@ class SufficiencyModel(Protocol):
     def check(
         self, question: str, intent: IntentResult, followup_count: int
     ) -> SufficiencyResult: ...
+
+
+class AnswerabilityModel(Protocol):
+    """Evidence-sufficiency critic (#70): rate 0–100 whether the company can answer.
+
+    Given the question and the shown candidates' track-record summaries, returns
+    an :class:`AnswerabilityResult`. This runs as a SEPARATE step from topic
+    classification (it can run in parallel with C1) — a plausible topic does not
+    imply an in-house expert, which is exactly why the untraceable cases (#70) are
+    unreachable by the classifier alone. ``candidate_evidence`` is a short summary
+    line per top candidate (empty when C6 found nobody).
+    """
+
+    def assess(self, question: str, candidate_evidence: Sequence[str]) -> AnswerabilityResult: ...
 
 
 class DraftModel(Protocol):

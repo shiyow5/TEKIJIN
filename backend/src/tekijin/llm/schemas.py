@@ -39,3 +39,17 @@ class SufficiencySchema(BaseModel):
         if not self.sufficient and not (self.followup_question or "").strip():
             raise ValueError("followup_question is required when sufficient is false")
         return self
+
+
+class AnswerabilitySchema(BaseModel):
+    """Evidence-sufficiency structured output (#70 critic).
+
+    ``confidence`` is deliberately an INTEGER 0–100, not a boolean: asked as a
+    yes/no the model over-rejects (18/45 vs 3/45 misreject as a number — #65/#67
+    §6). The graph compares it to an externalised threshold.
+    """
+
+    confidence: int = Field(
+        default=0, ge=0, le=100, description="社内の実績でこの相談に答えられる確度(0-100)"
+    )
+    reason: str | None = Field(default=None, description="判断の根拠を一言で（任意）")
