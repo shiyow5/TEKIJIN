@@ -17,10 +17,9 @@
  * of the server bundle.
  */
 
+import { levelFraction } from "@/lib/fit";
 import { useEffect, useRef, useState } from "react";
 
-/** Fraction of the ring each qualitative level fills. Unknown → half (neutral). */
-const LEVEL_FRACTION: Record<string, number> = { 高: 1, 中: 0.66, 低: 0.33 };
 /** Tailwind text-color token per level; the ring strokes `currentColor`. */
 const LEVEL_COLOR: Record<string, string> = {
   高: "text-primary",
@@ -39,12 +38,14 @@ function prefersReducedMotion(): boolean {
   );
 }
 
-export function ConfidenceGauge({ level }: { level: string }) {
-  const fraction = LEVEL_FRACTION[level] ?? 0.5;
+export function ConfidenceGauge({ level, percent }: { level: string; percent?: number }) {
+  // `percent` (relative fit across the shown candidates, #222) drives the ring +
+  // number when provided; otherwise fall back to the qualitative level's own
+  // magnitude. Color and the text label always come from the level.
+  const pct = Math.max(0, Math.min(percent ?? Math.round(levelFraction(level) * 100), 100));
+  const fraction = pct / 100;
   const colorClass = LEVEL_COLOR[level] ?? "text-on-surface-variant";
   const finalOffset = CIRCUMFERENCE * (1 - fraction);
-  // Concrete number shown inside the ring — the magnitude the ring draws.
-  const percent = Math.round(fraction * 100);
 
   const arcRef = useRef<SVGCircleElement | null>(null);
   // Start empty so the sweep is visible; reduced-motion jumps straight to final.
@@ -82,7 +83,7 @@ export function ConfidenceGauge({ level }: { level: string }) {
   return (
     <span
       role="img"
-      aria-label={`適合度 ${level}（${percent}%）`}
+      aria-label={`適合度 ${level}（${pct}%）`}
       className={`inline-flex items-center gap-xs ${colorClass}`}
     >
       <svg width="44" height="44" viewBox="0 0 40 40" aria-hidden="true" className="shrink-0">
@@ -120,7 +121,7 @@ export function ConfidenceGauge({ level }: { level: string }) {
           className="fill-current font-bold"
           style={{ fontSize: "11px" }}
         >
-          {percent}
+          {pct}
         </text>
       </svg>
       <span className="font-bold text-xs">{level}</span>

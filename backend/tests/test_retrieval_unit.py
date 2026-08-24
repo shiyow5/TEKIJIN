@@ -355,6 +355,32 @@ def test_embedder_fail_closed_in_production_without_pinned_revision(
         emb.SentenceTransformerEmbedder(model=_FakeModel())
 
 
+def test_embedder_fail_closed_skips_local_model_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    # A LOCAL model dir has no remote revision to pin and no moving-branch risk, so
+    # the #108 guard must not block production startup for it (#173).
+    import tekijin.retrieval.embedding as emb
+
+    local = str(tmp_path)  # an existing directory
+    prod = Settings(  # type: ignore[call-arg]
+        _env_file=None, app_env="production", embedding_model=local
+    )
+    monkeypatch.setattr(emb, "get_settings", lambda: prod)
+    embedder = emb.SentenceTransformerEmbedder(model=_FakeModel())  # must NOT raise
+    assert embedder._model_name == local
+
+
+def test_is_local_model_path_distinguishes_paths_from_repo_ids() -> None:
+    from tekijin.retrieval.embedding import _is_local_model_path
+
+    assert _is_local_model_path("/home/team_a/models/Nemotron-3-Embed-1B-BF16") is True
+    assert _is_local_model_path("./models/local") is True
+    assert _is_local_model_path("~/models/local") is True
+    # HF repo id: no path markers, does not exist on disk -> remote (guard applies).
+    assert _is_local_model_path("nvidia/Nemotron-3-Embed-1B-BF16") is False
+
+
 def test_embedder_production_allows_pinned_revision(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

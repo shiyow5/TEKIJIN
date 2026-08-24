@@ -24,6 +24,9 @@ from tekijin.api.service import (
     _SessionCtx,
 )
 from tekijin.app import create_app
+from tekijin.auth.principal import Principal
+from tekijin.auth.tokens import create_access_token
+from tekijin.config import get_settings
 from tekijin.data.dashboard import dashboard_summary
 from tekijin.data.db import get_sessionmaker
 from tekijin.models.tables import Answer, Event, Question, Recommendation
@@ -75,6 +78,40 @@ def _recs(*ids: int) -> list[dict]:
     ]
 
 
+# Every endpoint now requires auth (#241). These tests act as ADMIN by default so
+# they can drive any asker_id/responder_id (admin may impersonate anyone) — the
+# same freedom they had before auth. Non-admin restriction + login are covered by
+# dedicated tests below and in test_auth_integration.py.
+def _admin_headers() -> dict[str, str]:
+    settings = get_settings()
+    token = create_access_token(
+        Principal(employee_id=None, name="管理者", dept=None, is_admin=True),
+        secret=settings.auth_secret,
+        ttl_hours=1,
+    )
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _user_headers(
+    employee_id: int, *, name: str = "利用者", dept: str | None = None
+) -> dict[str, str]:
+    settings = get_settings()
+    token = create_access_token(
+        Principal(employee_id=employee_id, name=name, dept=dept, is_admin=False),
+        secret=settings.auth_secret,
+        ttl_hours=1,
+    )
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _app_client(service: AgentService) -> TestClient:
+    """A TestClient over ``create_app`` pre-authenticated as admin (default)."""
+
+    client = TestClient(create_app(agent_service=service))
+    client.headers.update(_admin_headers())
+    return client
+
+
 def _client(engine, embedder, *, retriever=None, scorer=None, checkpointer=None) -> TestClient:
     service = AgentService(
         session_factory=get_sessionmaker(engine),
@@ -87,7 +124,7 @@ def _client(engine, embedder, *, retriever=None, scorer=None, checkpointer=None)
         scorer=scorer,
         now_factory=lambda: NOW,
     )
-    return TestClient(create_app(agent_service=service))
+    return _app_client(service)
 
 
 def _parse_sse(text: str) -> list[tuple[str, dict]]:
@@ -510,7 +547,7 @@ def test_lifespan_startup_and_shutdown(seed_counts, engine, fake_embedder) -> No
         scorer=_FakeScorer([]),
         now_factory=lambda: NOW,
     )
-    with TestClient(create_app(agent_service=service)) as client:
+    with _app_client(service) as client:
         assert client.get("/health").status_code == 200
 
 
@@ -895,7 +932,7 @@ def test_handoff_draft_unexpected_error_is_generic_500(seed_counts, engine, fake
         raise RuntimeError("secret internal detail at 10.0.0.1")
 
     service.save_handoff_draft = _boom  # type: ignore[method-assign]
-    client = TestClient(create_app(agent_service=service))
+    client = _app_client(service)
     resp = client.post("/handoff/draft", json={"session_id": "anything", "draft": "本文"})
     assert resp.status_code == 500
     assert "内部エラー" in resp.text
@@ -949,7 +986,7 @@ def test_handoff_unexpected_error_is_generic_500(seed_counts, engine, fake_embed
         raise RuntimeError("secret internal detail at 10.0.0.1")
 
     service.get_handoff = _boom  # type: ignore[method-assign]
-    client = TestClient(create_app(agent_service=service))
+    client = _app_client(service)
     resp = client.get("/handoff/anything")
     assert resp.status_code == 500
     assert "内部エラー" in resp.text
@@ -1155,7 +1192,7 @@ def test_ask_unexpected_error_is_generic_500(seed_counts, engine, fake_embedder)
         raise RuntimeError("secret internal detail at 10.0.0.1")
 
     service.start_question = _boom  # type: ignore[method-assign]
-    client = TestClient(create_app(agent_service=service))
+    client = _app_client(service)
     resp = client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "b"})
     assert resp.status_code == 500
     assert "内部エラー" in resp.text
@@ -1169,7 +1206,7 @@ def test_answer_unexpected_error_is_generic_500(seed_counts, engine, fake_embedd
         raise RuntimeError("secret internal detail at 10.0.0.1")
 
     service.submit_resume = _boom  # type: ignore[method-assign]
-    client = TestClient(create_app(agent_service=service))
+    client = _app_client(service)
     resp = client.post("/answer", json={"session_id": "b", "outcome": "accepted"})
     assert resp.status_code == 500
     assert "secret internal" not in resp.text
@@ -1242,7 +1279,7 @@ def test_ask_sheds_with_503_when_saturated(seed_counts, engine, fake_embedder) -
     service = _svc(engine, fake_embedder, retriever=_FakeRetriever(), scorer=_FakeScorer([]))
     service._max_concurrent_runs = 1
     service._active_runs = 1  # a run is already executing → pool full
-    client = TestClient(create_app(agent_service=service))
+    client = _app_client(service)
     resp = client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "busy1"})
     assert resp.status_code == 503
     assert resp.headers.get("Retry-After") == "5"
@@ -1255,7 +1292,7 @@ def test_ask_admission_runs_before_db_lookup(seed_counts, engine, fake_embedder)
     service = _svc(engine, fake_embedder, retriever=_FakeRetriever(), scorer=_FakeScorer([]))
     service._max_concurrent_runs = 1
     service._active_runs = 1
-    client = TestClient(create_app(agent_service=service))
+    client = _app_client(service)
     resp = client.post("/ask", json={"asker_id": 999999, "question": GOOD_Q, "session_id": "busy2"})
     assert resp.status_code == 503
 
@@ -1266,7 +1303,7 @@ def test_ask_not_shed_when_backpressure_disabled(seed_counts, engine, fake_embed
     )
     service._max_concurrent_runs = 0  # 0 disables the gate
     service._active_runs = 100
-    client = TestClient(create_app(agent_service=service))
+    client = _app_client(service)
     resp = client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "ok1"})
     assert resp.status_code == 200
 
@@ -1280,7 +1317,7 @@ def test_active_runs_released_after_a_full_stream(seed_counts, engine, fake_embe
         scorer=_FakeScorer(_recs(1, 2, 3)),
     )
     service._max_concurrent_runs = 4
-    client = TestClient(create_app(agent_service=service))
+    client = _app_client(service)
     client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "s_bp"})
     _events(client, "s_bp")  # drain the stream fully
     assert service._active_runs == 0
@@ -1318,7 +1355,7 @@ def test_resume_not_shed_when_saturated(seed_counts, engine, fake_embedder) -> N
     service = _svc(engine, fake_embedder, retriever=_FakeRetriever(), scorer=_FakeScorer([]))
     service._max_concurrent_runs = 1
     service._active_runs = 1  # saturated
-    client = TestClient(create_app(agent_service=service))
+    client = _app_client(service)
     resp = client.post("/answer", json={"session_id": "no_such", "outcome": "accepted"})
     assert resp.status_code == 409  # SessionConflict, NOT 503
 
@@ -1330,7 +1367,7 @@ def test_ask_admitted_when_below_limit(seed_counts, engine, fake_embedder) -> No
     )
     service._max_concurrent_runs = 2
     service._active_runs = 1  # below the limit
-    client = TestClient(create_app(agent_service=service))
+    client = _app_client(service)
     resp = client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "under1"})
     assert resp.status_code == 200
 

@@ -4,6 +4,7 @@ import {
   HANDOFF,
   INBOX_ITEM,
   fulfillJson,
+  mockAuth,
   mockEmployees,
   mockInbox,
 } from "./support/mocks";
@@ -15,6 +16,7 @@ import {
  */
 test("inbox lists a pending handoff and links to the answer screen", async ({ page }) => {
   await mockEmployees(page);
+  await mockAuth(page);
   await mockInbox(page);
   await page.route(`${API_BASE}/handoff/**`, (route) =>
     fulfillJson(route, { ...HANDOFF, session_id: INBOX_ITEM.session_id }),
@@ -34,6 +36,7 @@ test("inbox lists a pending handoff and links to the answer screen", async ({ pa
 
 test("inbox shows an empty state when nothing is pending", async ({ page }) => {
   await mockEmployees(page);
+  await mockAuth(page);
   await mockInbox(page, []);
 
   await page.goto("/inbox");

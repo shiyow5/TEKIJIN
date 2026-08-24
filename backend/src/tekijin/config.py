@@ -18,6 +18,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _DEFAULT_FIXTURES_DIR = _REPO_ROOT / "fixtures" / "synthetic"
 
+# INSECURE development defaults for auth (#241). Named so the fail-closed startup
+# guard (``Settings.auth_enforced``) can detect "left at the default" without
+# duplicating the literal — mirroring the ``strict_durability`` pattern.
+DEV_AUTH_SECRET = "dev-insecure-change-me"
+DEV_ADMIN_PASSWORD = "tekijin-admin"
+
 
 class Settings(BaseSettings):
     """Runtime settings for the TEKIJIN backend.
@@ -197,6 +203,50 @@ class Settings(BaseSettings):
     # CORS allowed origins. Explicit (wildcard "*" + credentials is rejected by
     # browsers) and an immutable tuple so the cached singleton cannot be mutated.
     cors_origins: tuple[str, ...] = ("http://localhost:3000",)
+
+    # --- Authentication (#241) ------------------------------------------------ #
+    # HS256 signing secret for access tokens. The default is INSECURE (a fixed
+    # dev value) — set TEKIJIN_AUTH_SECRET to a long random string in any real
+    # deployment, or every issued token is forgeable. The startup guard
+    # ``auth_enforced()`` refuses to boot on this default outside development.
+    auth_secret: str = DEV_AUTH_SECRET
+
+    # Access-token lifetime in hours (the "失効" of a stateless JWT). Logout is a
+    # client-side token drop; there is no server session to revoke, so keep this
+    # modest. 12h covers a demo/work session without a mid-use expiry.
+    auth_token_ttl_hours: float = 12.0
+
+    # The single ADMIN account. It is NOT a DB employee (the seeded roster stays
+    # at 40 and the admin never becomes a recommendation candidate); it logs in
+    # with these credentials and impersonates any employee via the demo switcher.
+    # CHANGE admin_password in any real deployment (the default is a known value).
+    admin_email: str = "admin@tekijin.local"
+    admin_password: str = DEV_ADMIN_PASSWORD
+    admin_name: str = "管理者"
+
+    # Password seeded for EVERY employee (demo login). All synthetic, so a shared
+    # demo password is acceptable and documented; override per environment.
+    demo_user_password: str = "tekijin-demo"
+
+    # Login brute-force throttle: at most this many FAILED attempts per email
+    # within the rolling window before further attempts are refused (429).
+    login_max_attempts: int = 5
+    login_window_seconds: float = 300.0
+
+    # Fail-closed on insecure auth defaults (#241), mirroring ``strict_durability``.
+    # ``None`` (default) derives from ``app_env`` (enforced when not "development").
+    # A SEPARATE knob because the DGX host runs app_env=development for an unrelated
+    # reason (#108/#173), so set TEKIJIN_STRICT_AUTH=true there to still refuse a
+    # boot with the known default secret/admin password; or =false as an explicit
+    # escape hatch in a throwaway prod-flavored env.
+    strict_auth: bool | None = None
+
+    def auth_enforced(self) -> bool:
+        """True when insecure default auth secrets must be a hard startup error."""
+
+        if self.strict_auth is not None:
+            return self.strict_auth
+        return self.app_env != "development"
 
 
 @lru_cache

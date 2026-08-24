@@ -149,6 +149,26 @@ export const MESSAGE_FRAMES: SseFrame[] = [
   },
 ];
 
+/** The admin principal for GET /auth/me (auth is required app-wide, #241). */
+export const ADMIN_PRINCIPAL = { id: null, name: "管理者", dept: null, is_admin: true };
+
+/**
+ * Authenticate the E2E session (#241). Seeds a token in localStorage BEFORE the
+ * app scripts run (so AuthProvider restores a session) and stubs GET /auth/me +
+ * POST /auth/logout. Defaults to ADMIN so the demo switcher and dashboard — which
+ * the existing specs expect — are available. Every spec's setup calls this
+ * (right after mockEmployees); calling it more than once per page is harmless.
+ */
+export async function mockAuth(page: Page, principal: unknown = ADMIN_PRINCIPAL): Promise<void> {
+  await page.addInitScript(() => {
+    window.localStorage.setItem("tekijin.authToken", "e2e-token");
+  });
+  await page.route(`${API_BASE}/auth/me`, (route) => fulfillJson(route, principal));
+  await page.route(`${API_BASE}/auth/logout`, (route) =>
+    fulfillJson(route, { session_id: "", status: "logged_out" }),
+  );
+}
+
 /** Directory for the current-user switcher (GET /employees). */
 export const EMPLOYEES = [
   { id: "E001", name: "山田 太郎", dept: "営業部" },

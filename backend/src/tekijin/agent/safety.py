@@ -22,14 +22,21 @@ aggregate/exfiltration requests are.
 
 This is a NET, not a replacement for C1: it only ADDS rejections; softer out-of-scope
 cases (small talk, one's own leave balance, no available expert) stay the model's /
-C2's / C5's call. It is a substring matcher over NFKC-normalized text — synonyms
-outside the lists, romaji, or characters inserted inside a phrase can still slip past
-(documented limitation; deeper normalization is a follow-up).
+C2's / C5's call. It is a substring matcher over NFKC-normalized, WHITESPACE-STRIPPED
+text (#172), so space insertion inside a phrase ("年収を教え　て") no longer bypasses
+it; synonyms outside the lists, romaji, or NON-whitespace characters inserted inside a
+phrase can still slip past (documented limitation; those are a further follow-up).
 """
 
 from __future__ import annotations
 
+import re
 import unicodedata
+
+# Any run of Unicode whitespace, removed before matching so spacing can't split a
+# target/verb ("年収を教え て"). NFKC (applied first) has already folded the full-width
+# space U+3000 to a plain space, so ``\s`` covers it too.
+_WHITESPACE = re.compile(r"\s+")
 
 # Known prompt-injection / role-impersonation markers. Matching any ONE is enough.
 # English phrases are kept SPECIFIC (no bare "act as" / "disregard the") so ordinary
@@ -144,37 +151,45 @@ PROMPT_INJECTION = "prompt_injection"
 PII_OR_SECRET = "pii_or_secret_solicitation"
 
 
-def _has_any(haystack: str, needles: tuple[str, ...]) -> bool:
-    return any(n.lower() in haystack for n in needles)
+def _compact(text: str) -> str:
+    """Remove all whitespace so spacing inside a phrase cannot dodge a match (#172)."""
+
+    return _WHITESPACE.sub("", text)
+
+
+def _has_any(haystack_compact: str, needles: tuple[str, ...]) -> bool:
+    # Both sides are whitespace-stripped, so "ignore  previous" / "年収を教え て" still
+    # match "ignore previous" / "年収…教え". Needles are lower-cased to match ``low``.
+    return any(_compact(n.lower()) in haystack_compact for n in needles)
 
 
 def scan_disallowed(text: str | None) -> str | None:
     """Return a rejection reason for disallowed content, or ``None`` if clean.
 
     Reasons: ``"prompt_injection"`` or ``"pii_or_secret_solicitation"``. Text is
-    NFKC-normalized and lower-cased before matching (folds full-width tricks); markers
-    are matched as substrings.
+    NFKC-normalized, lower-cased, and WHITESPACE-STRIPPED before matching (folds
+    full-width tricks and space-insertion bypasses, #172); markers are substrings.
     """
 
     if not text:
         return None
-    low = unicodedata.normalize("NFKC", text).lower()
+    compact = _compact(unicodedata.normalize("NFKC", text).lower())
 
-    if _has_any(low, _INJECTION_PATTERNS):
+    if _has_any(compact, _INJECTION_PATTERNS):
         return PROMPT_INJECTION
 
-    has_solicitation = _has_any(low, _SOLICITATION)
+    has_solicitation = _has_any(compact, _SOLICITATION)
     if not has_solicitation:
         return None
-    has_possession = _has_any(low, _POSSESSION_MARKERS)
+    has_possession = _has_any(compact, _POSSESSION_MARKERS)
 
     # Rule A: others' personal data (needs a possession/scope marker).
-    if has_possession and _has_any(low, _PERSONAL_TARGETS):
+    if has_possession and _has_any(compact, _PERSONAL_TARGETS):
         return PII_OR_SECRET
 
     # Rule B: credentials/confidential (needs an others'/exfiltration marker), so
     # self-service phrasing ("自分のパスワードの再設定方法") is left alone.
-    if (has_possession or _has_any(low, _EXFIL_MARKERS)) and _has_any(low, _SECRET_TARGETS):
+    if (has_possession or _has_any(compact, _EXFIL_MARKERS)) and _has_any(compact, _SECRET_TARGETS):
         return PII_OR_SECRET
 
     return None

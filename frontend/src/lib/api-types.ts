@@ -314,3 +314,28 @@ export interface SseEventDataMap {
 }
 
 export type SseEventName = keyof SseEventDataMap;
+
+/**
+ * The authenticated principal (GET /auth/me, POST /auth/login). `id` is the
+ * external "E###" form for a regular user, or `null` for the admin (which is not
+ * a DB employee). `is_admin` gates the dashboard and the demo user switcher.
+ */
+export interface Principal {
+  id: string | null;
+  name: string;
+  dept?: string | null;
+  is_admin: boolean;
+}
+
+/** POST /auth/login request body. */
+export interface LoginRequest {
+  email: string;
+  password: string;
+}
+
+/** POST /auth/login response (schemas.py `LoginResponse`). */
+export interface LoginResponse {
+  access_token: string;
+  token_type: "bearer";
+  principal: Principal;
+}

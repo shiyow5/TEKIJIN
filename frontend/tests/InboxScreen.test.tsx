@@ -1,5 +1,5 @@
-import { InboxScreen } from "@/components/InboxScreen";
 import type { CurrentUserContextValue } from "@/components/CurrentUserProvider";
+import { InboxScreen } from "@/components/InboxScreen";
 import type { InboxItem } from "@/lib/api-types";
 import { render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -23,6 +23,7 @@ function asUser(id: string | null, name?: string): CurrentUserContextValue {
     loading: false,
     error: false,
     reload: vi.fn(),
+    canSwitch: false,
   };
 }
 

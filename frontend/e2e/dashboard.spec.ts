@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { API_BASE, DASHBOARD, fulfillJson, mockEmployees } from "./support/mocks";
+import { API_BASE, DASHBOARD, fulfillJson, mockAuth, mockEmployees } from "./support/mocks";
 
 /**
  * Dashboard (画面5, #134): the loaded aggregate view and the error fallback.
@@ -7,6 +7,7 @@ import { API_BASE, DASHBOARD, fulfillJson, mockEmployees } from "./support/mocks
 test.describe("dashboard", () => {
   test("renders the aggregate view", async ({ page }) => {
     await mockEmployees(page);
+    await mockAuth(page);
     await page.route(`${API_BASE}/dashboard`, (route) => fulfillJson(route, DASHBOARD));
 
     await page.goto("/dashboard");
@@ -20,6 +21,7 @@ test.describe("dashboard", () => {
 
   test("shows an error fallback when the aggregate fetch fails", async ({ page }) => {
     await mockEmployees(page);
+    await mockAuth(page);
     await page.route(`${API_BASE}/dashboard`, (route) =>
       fulfillJson(route, { detail: "boom" }, 500),
     );

@@ -3,6 +3,7 @@ import {
   API_BASE,
   DASHBOARD,
   fulfillJson,
+  mockAuth,
   mockEmployees,
   mockRecentQuestions,
 } from "./support/mocks";
@@ -18,6 +19,7 @@ import {
 // between them never hits a real backend.
 async function mockChrome(page: Page): Promise<void> {
   await mockEmployees(page);
+  await mockAuth(page);
   await mockRecentQuestions(page);
   await page.route(
     (url) => url.href.startsWith(`${API_BASE}/inbox`),

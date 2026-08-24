@@ -221,7 +221,7 @@ class ExpertiseScorer:
             "name": employee_name,
             "dept": employee_dept,
             "score": round(score, 4),
-            "confidence": confidence_label(topic_fit, len(evidence)),
+            "confidence": confidence_label(e.source_type for e in evidence),
             "reasons": reasons,
         }
         return record, score

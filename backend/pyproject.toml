@@ -14,6 +14,12 @@ ignore = []
 [tool.ruff.lint.isort]
 known-first-party = ["tekijin"]
 
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's dependency-injection idiom puts `Depends(...)` in argument defaults;
+# this is intentional and safe (FastAPI resolves it per request), so B008 must not
+# flag it. (ruff already treats fastapi.Query/Header/etc. as immutable.)
+extend-immutable-calls = ["fastapi.Depends"]
+
 [tool.ruff.format]
 quote-style = "double"
 

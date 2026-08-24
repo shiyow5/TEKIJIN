@@ -598,9 +598,11 @@ def test_apply_schema_upgrades_migrates_old_db(database_url: str) -> None:
     """`_apply_schema_upgrades` brings an OLD database up to the current schema.
 
     Simulates a DB created before #63 (embedding columns ``vector(1024)``,
-    ``questions`` without a ``route`` column) and asserts the guarded DDL:
-    widens every embedding column to ``vector(2048)`` (dropping stale, wrong-model
-    embeddings via ``USING NULL``), adds ``questions.route``, and is idempotent.
+    ``questions`` without a ``route`` column, ``employees`` without a
+    ``password_hash`` column) and asserts the guarded DDL: widens every embedding
+    column to ``vector(2048)`` (dropping stale, wrong-model embeddings via
+    ``USING NULL``), adds ``questions.route`` and ``employees.password_hash``, and
+    is idempotent.
     """
 
     schema = "mig_upgrade_test"
@@ -638,6 +640,8 @@ def test_apply_schema_upgrades_migrates_old_db(database_url: str) -> None:
                 conn.execute(
                     text(f"CREATE TABLE {table} (id int primary key, embedding vector(1024))")
                 )
+            # employees has no embedding column; it gets password_hash added (#241).
+            conn.execute(text("CREATE TABLE employees (id int primary key)"))
             stale = "[" + ",".join(["0.01"] * 1024) + "]"
             conn.execute(text(f"INSERT INTO documents (id, embedding) VALUES (1, '{stale}')"))
 
@@ -658,6 +662,14 @@ def test_apply_schema_upgrades_migrates_old_db(database_url: str) -> None:
                 {"s": schema},
             ).scalar()
             assert has_route == 1
+            has_password_hash = conn.execute(
+                text(
+                    "SELECT 1 FROM information_schema.columns WHERE table_schema = :s "
+                    "AND table_name = 'employees' AND column_name = 'password_hash'"
+                ),
+                {"s": schema},
+            ).scalar()
+            assert has_password_hash == 1
 
         # Idempotent: a second run is a no-op (still 2048, no error).
         _apply_schema_upgrades(eng)
