@@ -531,7 +531,10 @@ def feedback(
     a ``session_id`` requires being that session's asker/responder (or admin) while
     it is still live; a ``question_id`` requires being that question's asker (or
     admin). An UNKNOWN target link is silently dropped (recorded without it) rather
-    than 403'd, matching the rest of the app's no-enumeration-oracle stance.
+    than 403'd — so a known-not-owned target is a 403 while an unknown one is a 200,
+    the SAME 403-confirms-ownership shape ``DELETE /questions`` and the other
+    session-scoped endpoints already carry (no NEW enumeration oracle), and never
+    the FK ``IntegrityError`` → 500 oracle the pre-#263 code called out.
 
     Rate limited per actor (#263) so the append-only signal cannot be flooded.
     """
