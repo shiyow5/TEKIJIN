@@ -11,10 +11,13 @@ import {
 
 /**
  * Responder discovery journey (#123): /inbox lists the pending handoffs for the
- * current user, and clicking one deep-links to /answer/{session_id} — the route
- * the responder side previously had no in-app way to reach.
+ * current user, and shows the first one's full detail — question, selection
+ * reason, draft, and the accept/decline actions — right there, with no extra
+ * navigation. `/answer/{session_id}` still works as a standalone deep link.
  */
-test("inbox lists a pending handoff and links to the answer screen", async ({ page }) => {
+test("inbox lists a pending handoff and shows its detail without an extra click", async ({
+  page,
+}) => {
   await mockEmployees(page);
   await mockAuth(page);
   await mockInbox(page);
@@ -28,10 +31,12 @@ test("inbox lists a pending handoff and links to the answer screen", async ({ pa
   await expect(page.getByText(INBOX_ITEM.question)).toBeVisible();
   await expect(page.getByText("藤田 悠斗 さんからの質問")).toBeVisible();
 
-  await page.getByRole("link", { name: /藤田 悠斗 さんからの質問/ }).click();
-
-  await page.waitForURL(new RegExp(`/answer/${INBOX_ITEM.session_id}$`));
+  // The detail pane for the first (only) item renders automatically.
   await expect(page.getByRole("heading", { name: "あなたに届いた質問" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "引き受ける" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "今は難しい" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "自分より適任がいる" })).toBeVisible();
+  expect(page.url()).toContain("/inbox");
 });
 
 test("inbox shows an empty state when nothing is pending", async ({ page }) => {

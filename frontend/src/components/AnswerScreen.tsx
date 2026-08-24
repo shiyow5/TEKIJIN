@@ -19,9 +19,13 @@ import { useHandoff } from "@/hooks/useHandoff";
 import type { HandoffResponse, Reason } from "@/lib/api-types";
 import { reasonLabel } from "@/lib/reasons";
 import Link from "next/link";
+import { useEffect } from "react";
 
 export interface AnswerScreenProps {
   sessionId: string;
+  /** Fired once the responder's outcome lands, so an embedding page (the inbox's
+   * merged list+detail view) can refresh its list without a full navigation. */
+  onDone?: (action: HandoffAction) => void;
 }
 
 // One equal-size contract shared by all three actions, so declining is never a
@@ -107,8 +111,15 @@ const DONE_BODY: Record<HandoffAction, string> = {
   refer: "別の候補者を自動でお探しします。ご対応ありがとうございました。",
 };
 
-export function AnswerScreen({ sessionId }: AnswerScreenProps) {
+export function AnswerScreen({ sessionId, onDone }: AnswerScreenProps) {
   const { phase, handoff, action, errorKind, submitError, submit } = useHandoff(sessionId);
+
+  // onDone fires once per completed outcome (keyed on phase/action); an
+  // identity change in the caller's callback must not re-fire it.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: <explained above>
+  useEffect(() => {
+    if (phase === "done" && action) onDone?.(action);
+  }, [phase, action]);
 
   if (phase === "loading") {
     return (
@@ -147,7 +158,9 @@ export function AnswerScreen({ sessionId }: AnswerScreenProps) {
       <Centered>
         <h1 className="font-bold text-2xl text-primary">{DONE_HEADING[action]}</h1>
         <p className="text-on-surface-variant">{DONE_BODY[action]}</p>
-        {action === "answer" && handoff?.recommendation_id != null ? (
+        {action === "answer" &&
+        handoff?.recommendation_id != null &&
+        handoff.consult_method !== "direct" ? (
           <ChatCta href={`/chat?thread=${handoff.recommendation_id}`} label="チャットを開く" />
         ) : null}
         <BackLink />
