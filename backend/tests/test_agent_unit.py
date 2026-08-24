@@ -168,6 +168,8 @@ def test_after_c6_and_send_routers() -> None:
     assert graph_mod._after_c6({"recommendations": []}) == "no_candidate"
     assert graph_mod._after_send({"outcome": "declined"}) == "reroute"
     assert graph_mod._after_send({"outcome": "accepted"}) == "c8_update"
+    # redraft loops back through C7 to regenerate the draft (#260).
+    assert graph_mod._after_send(cast("AgentState", {"outcome": "redraft"})) == "c7_draft"
 
 
 def test_after_send_reconfirms_unexpected_outcome() -> None:

@@ -18,6 +18,7 @@ import type {
   EmployeeSummary,
   HandoffDraftRequest,
   HandoffExcludeRequest,
+  HandoffRedraftRequest,
   HandoffResponse,
   HandoffSelectRequest,
   HandoffSelectResponse,
@@ -223,6 +224,20 @@ export function excludeHandoffCandidate(
   options: RequestOptions = {},
 ): Promise<AckResponse> {
   return postJson<AckResponse>("/handoff/exclude", request, options);
+}
+
+/**
+ * POST /handoff/redraft — the asker asks the AI to regenerate the hand-off draft
+ * for the current send target ("下書きの作り直し", #260), discarding any saved edit.
+ * The new draft arrives over the open `/events` stream, so this only acks. Throws
+ * {@link ApiError} with 404 (no hand-off pending / already answered) or 409
+ * (awaiting a clarification instead).
+ */
+export function regenerateHandoffDraft(
+  request: HandoffRedraftRequest,
+  options: RequestOptions = {},
+): Promise<AckResponse> {
+  return postJson<AckResponse>("/handoff/redraft", request, options);
 }
 
 /**

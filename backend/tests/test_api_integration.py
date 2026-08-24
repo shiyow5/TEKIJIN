@@ -1143,6 +1143,127 @@ def test_handoff_exclude_404_after_answered(seed_counts, engine, fake_embedder) 
     assert resp.status_code == 404
 
 
+# --------------------------------------------------------------------------- #
+# POST /handoff/redraft : asker regenerates the hand-off draft ("作り直し", #260)
+# --------------------------------------------------------------------------- #
+class _CountingDraft:
+    """A draft model that tags each generation so a redraft is observably different
+    (the deterministic TemplateDraftModel would return identical text)."""
+
+    def __init__(self) -> None:
+        self.n = 0
+
+    def draft(self, question, top, asker, missing, *, situation, topics, known_values) -> str:
+        self.n += 1
+        return f"下書きv{self.n}（{top['name']}さんへ）"
+
+
+def _redraft_client(engine, fake_embedder, draft_model) -> TestClient:
+    service = AgentService(
+        session_factory=get_sessionmaker(engine),
+        checkpointer=MemorySaver(),
+        embedder=fake_embedder,
+        intent_model=KeywordIntentModel(),
+        sufficiency_model=RuleSufficiencyModel(),
+        draft_model=draft_model,
+        retriever=_FakeRetriever(people=[1, 2], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2)),
+        now_factory=lambda: NOW,
+    )
+    client = _app_client(service)
+    client.headers.update(_user_headers(10))  # act as the asker for a real actor_id
+    return client
+
+
+def test_handoff_redraft_regenerates_draft(seed_counts, engine, fake_embedder) -> None:
+    client = _redraft_client(engine, fake_embedder, _CountingDraft())
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "rd1"})
+    first = _events(client, "rd1")
+    first_drafts = [d["draft"] for e, d in first if e == "draft"]
+    assert first_drafts and "下書きv1" in first_drafts[-1]
+
+    resp = client.post("/handoff/redraft", json={"session_id": "rd1"})
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "redraft_queued"
+
+    # The redraft segment re-runs C7 (not C6) and re-emits just a fresh draft, then
+    # re-pauses at send — the same top candidate, a newly generated text.
+    second = _events(client, "rd1")
+    assert [e for e, _ in second] == ["draft"]
+    assert "下書きv2" in second[0][1]["draft"]
+
+    check = get_sessionmaker(engine)()
+    try:
+        # The regeneration is recorded as a c7 feedback signal with the discarded
+        # draft in the payload.
+        fb = (
+            check.query(Feedback).filter(Feedback.session_id == "rd1", Feedback.stage == "c7").all()
+        )
+        assert len(fb) == 1
+        assert fb[0].kind == "draft_regenerated"
+        assert fb[0].actor_id == 10
+        assert "下書きv1" in (fb[0].payload or {}).get("previous", "")
+    finally:
+        check.close()
+
+    # The regenerated hand-off still completes normally.
+    assert (
+        client.post("/answer", json={"session_id": "rd1", "outcome": "accepted"}).status_code == 200
+    )
+
+
+def test_handoff_redraft_404_when_no_pending_handoff(seed_counts, engine, fake_embedder) -> None:
+    client = _client(engine, fake_embedder, retriever=_FakeRetriever(), scorer=_FakeScorer([]))
+    resp = client.post("/handoff/redraft", json={"session_id": "nope"})
+    assert resp.status_code == 404
+
+
+def test_handoff_redraft_409_when_awaiting_clarification(
+    seed_counts, engine, fake_embedder
+) -> None:
+    client = _client(
+        engine, fake_embedder, retriever=_FakeRetriever(people=[1]), scorer=_FakeScorer(_recs(1))
+    )
+    client.post("/ask", json={"asker_id": 10, "question": VAGUE_Q, "session_id": "rd2"})
+    _events(client, "rd2")  # paused at ``ask`` (a clarification is owed to the asker)
+    resp = client.post("/handoff/redraft", json={"session_id": "rd2"})
+    assert resp.status_code == 409
+
+
+def test_handoff_redraft_404_after_answered(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "rd3"})
+    _events(client, "rd3")
+    client.post("/answer", json={"session_id": "rd3", "outcome": "accepted"})
+    _events(client, "rd3")  # completed
+    resp = client.post("/handoff/redraft", json={"session_id": "rd3"})
+    assert resp.status_code == 404
+
+
+def test_record_feedback_bounds_oversized_payload_values() -> None:
+    """Internal callers stash drafts in ``payload``; an oversized string is
+    truncated so the JSONB row cannot grow unbounded (bypasses the public 16KB
+    schema cap) (#260 review MEDIUM)."""
+    from tekijin.data.feedback import (
+        _MAX_PAYLOAD_VALUE_CHARS,
+        _TRUNCATION_MARK,
+        _bounded_payload,
+    )
+
+    assert _bounded_payload(None) is None
+    huge = "あ" * (_MAX_PAYLOAD_VALUE_CHARS + 500)
+    out = _bounded_payload({"previous": huge, "kept": "short", "n": 3})
+    assert out is not None
+    assert out["previous"] == huge[:_MAX_PAYLOAD_VALUE_CHARS] + _TRUNCATION_MARK
+    assert out["kept"] == "short"  # under the cap, untouched
+    assert out["n"] == 3  # non-string values pass through
+
+
 def test_set_recommendation_outcome_is_idempotent(seed_counts, session) -> None:
     from tekijin.data.writes import set_recommendation_outcome
 

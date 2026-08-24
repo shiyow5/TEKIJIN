@@ -12,6 +12,11 @@
  * to the pending hand-off (POST /handoff/draft), so the responder reads the
  * edited text — it is a real send, not a UI-only transition (#174).
  *
+ * "AIに下書きを作り直してもらう" calls `POST /handoff/redraft` (#260): the graph
+ * loops back through C7 for the same target and re-emits a fresh draft over the
+ * stream. It remounts the editor (discarding the asker's local edits) so the
+ * regenerated text replaces what they had.
+ *
  * "この人には聞かない" on the current send target calls `POST /handoff/exclude`
  * (#260): it declines the top pick and reroutes to a freshly-scored next
  * candidate, which arrives over the open `/events` stream and remounts this view
@@ -24,6 +29,7 @@ import { CandidateCard } from "@/components/result/CandidateCard";
 import { DraftEditor } from "@/components/result/DraftEditor";
 import {
   excludeHandoffCandidate,
+  regenerateHandoffDraft,
   selectHandoffCandidate,
   updateHandoffDraft,
 } from "@/lib/api-client";
@@ -43,6 +49,7 @@ const MAX_CANDIDATES = 3;
 const SEND_ERROR = "送信に失敗しました。時間をおいて、もう一度お試しください。";
 const SELECT_ERROR = "候補の切り替えに失敗しました。時間をおいて、もう一度お試しください。";
 const EXCLUDE_ERROR = "候補の選び直しに失敗しました。時間をおいて、もう一度お試しください。";
+const REDRAFT_ERROR = "下書きの作り直しに失敗しました。時間をおいて、もう一度お試しください。";
 
 export function PersonRouteView({
   recommendations,
@@ -59,6 +66,10 @@ export function PersonRouteView({
   const [localDraft, setLocalDraft] = useState(draft);
   const [selecting, setSelecting] = useState(false);
   const [excluding, setExcluding] = useState(false);
+  const [redrafting, setRedrafting] = useState(false);
+  // Bumping this remounts the DraftEditor (keyed on it), which discards the
+  // asker's local edits and re-seeds from the AI draft — the point of "作り直し".
+  const [redraftNonce, setRedraftNonce] = useState(0);
   const [sending, setSending] = useState(false);
   const [sentTo, setSentTo] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -82,7 +93,7 @@ export function PersonRouteView({
   }, []);
 
   async function handleSelect(personId: string) {
-    if (selecting || excluding || personId === selectedPersonId || !sessionId) return;
+    if (selecting || excluding || redrafting || personId === selectedPersonId || !sessionId) return;
     setSelecting(true);
     setError(null);
     try {
@@ -101,7 +112,7 @@ export function PersonRouteView({
   }
 
   async function handleExclude(personId: string) {
-    if (excluding || selecting || !sessionId) return;
+    if (excluding || selecting || redrafting || !sessionId) return;
     setExcluding(true);
     setError(null);
     try {
@@ -117,6 +128,24 @@ export function PersonRouteView({
         setError(EXCLUDE_ERROR);
         setExcluding(false);
       }
+    }
+  }
+
+  async function handleRedraft() {
+    if (redrafting || selecting || excluding || sending || !sessionId) return;
+    setRedrafting(true);
+    setError(null);
+    // Remount the editor now so the asker's edits are visibly discarded and the
+    // AI draft is shown; the regenerated text then streams in over /events (for a
+    // real model it differs; the deterministic stub reproduces the same draft).
+    setRedraftNonce((n) => n + 1);
+    try {
+      await regenerateHandoffDraft({ session_id: sessionId });
+    } catch {
+      // 404 = the hand-off was already answered/closed; 409 = a clarification is owed.
+      if (mounted.current) setError(REDRAFT_ERROR);
+    } finally {
+      if (mounted.current) setRedrafting(false);
     }
   }
 
@@ -209,10 +238,23 @@ export function PersonRouteView({
         </output>
       ) : null}
 
+      {sessionId ? (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={handleRedraft}
+            disabled={redrafting || selecting || excluding || sending}
+            className="min-h-[32px] rounded-lg px-sm py-1 font-medium text-primary text-xs underline decoration-dotted underline-offset-2 transition-colors hover:text-primary-container disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {redrafting ? "作り直しています…" : "AIに下書きを作り直してもらう"}
+          </button>
+        </div>
+      ) : null}
+
       <DraftEditor
-        key={selectedPersonId}
+        key={`${selectedPersonId}:${redraftNonce}`}
         initialDraft={localDraft}
-        disabled={sending || selecting || excluding}
+        disabled={sending || selecting || excluding || redrafting}
         onSend={handleSend}
       />
     </section>
