@@ -1,6 +1,7 @@
 import {
   ApiError,
   advanceSession,
+  correctInterpretation,
   deleteQuestion,
   excludeHandoffCandidate,
   getDashboard,
@@ -446,6 +447,34 @@ describe("excludeHandoffCandidate", () => {
     await expect(
       excludeHandoffCandidate({ session_id: "s1", person_id: "E003" }, { fetchImpl }),
     ).rejects.toMatchObject({ name: "ApiError", status: 422 });
+  });
+});
+
+describe("correctInterpretation", () => {
+  it("POSTs /handoff/correct with session_id and supplement and returns the ack (#260)", async () => {
+    const response = { session_id: "s1", status: "reinterpret_queued" };
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(response));
+    const result = await correctInterpretation(
+      { session_id: "s1", supplement: "対象は情報システム部です" },
+      { fetchImpl },
+    );
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe(`${DEFAULT_API_BASE_URL}/handoff/correct`);
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(init?.body as string)).toEqual({
+      session_id: "s1",
+      supplement: "対象は情報システム部です",
+    });
+    expect(result).toEqual(response);
+  });
+
+  it("throws ApiError with the 409 status when a clarification is owed", async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonResponse({ detail: "awaiting" }, { ok: false, status: 409 }));
+    await expect(
+      correctInterpretation({ session_id: "s1", supplement: "補足" }, { fetchImpl }),
+    ).rejects.toMatchObject({ name: "ApiError", status: 409 });
   });
 });
 

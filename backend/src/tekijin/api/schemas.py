@@ -178,6 +178,28 @@ class HandoffExcludeRequest(BaseModel):
         return _coerce_asker_id(value)
 
 
+class HandoffCorrectRequest(BaseModel):
+    """Asker corrects the AI's interpretation of their question ("解釈の訂正", #260).
+
+    The ``supplement`` is folded into the question and the whole pipeline re-runs
+    from C1 (re-understand → re-route → re-score → re-draft), exactly as the
+    ``ask → c1_intent`` clarification edge does — but asker-initiated from the
+    result screen rather than in response to a C2 followup. The re-run streams over
+    ``/events``; the response only acks.
+    """
+
+    session_id: str = Field(pattern=_SESSION_ID_PATTERN)
+    supplement: str = Field(min_length=1, max_length=2000)
+
+    @field_validator("supplement")
+    @classmethod
+    def _trim_nonempty(cls, value: str) -> str:
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("supplement must not be blank")
+        return trimmed
+
+
 class HandoffRedraftRequest(BaseModel):
     """Asker asks the AI to regenerate the hand-off draft ("下書きの作り直し", #260).
 

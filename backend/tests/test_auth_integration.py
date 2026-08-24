@@ -269,6 +269,24 @@ def test_non_participant_is_forbidden_on_session_endpoints(
         ).status_code
         == 403
     )
+    # Regenerating the draft rewrites the durable hand-off text (#260).
+    assert (
+        client.post(
+            "/handoff/redraft",
+            json={"session_id": "s1"},
+            headers=stranger,
+        ).status_code
+        == 403
+    )
+    # Correcting the interpretation re-runs the whole pipeline for the session (#260).
+    assert (
+        client.post(
+            "/handoff/correct",
+            json={"session_id": "s1", "supplement": "補足"},
+            headers=stranger,
+        ).status_code
+        == 403
+    )
 
     # The responder (id 1) passes the participant guard (then hits the normal
     # 404/flow, NOT 403).

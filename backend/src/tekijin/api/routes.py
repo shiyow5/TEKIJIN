@@ -330,6 +330,41 @@ def handoff_redraft(
     return schemas.AckResponse(session_id=req.session_id, status="redraft_queued")
 
 
+@router.post("/handoff/correct", response_model=schemas.AckResponse)
+def handoff_correct(
+    req: schemas.HandoffCorrectRequest,
+    request: Request,
+    principal: Principal = Depends(require_principal),
+) -> schemas.AckResponse:
+    """Asker corrects the AI's interpretation of their question ("解釈の訂正", #260).
+
+    Folds the ``supplement`` into the question and re-runs the pipeline from C1;
+    the re-run streams over the open ``/events`` connection, so this only acks. 404
+    when no hand-off is pending (unknown / finished / already answered); 409 when
+    the session is awaiting a clarification instead; 422 when there is no question
+    to correct. Object-level auth (#241): only the session's asker/responder (or
+    admin), the same rule as ``/handoff/draft``. The correction is recorded as a
+    ``c1`` feedback signal (#237).
+    """
+
+    asker_id, responder_id = _service(request).session_participants(req.session_id)
+    require_session_participant(principal, asker_id, responder_id)
+    try:
+        _service(request).correct_interpretation(
+            req.session_id, req.supplement, actor_id=principal.employee_id
+        )
+    except HandoffNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SessionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except SessionInvalid as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:  # unexpected: log detail, return a generic 500
+        logger.exception("POST /handoff/correct failed for session %s", req.session_id)
+        raise HTTPException(status_code=500, detail="内部エラーが発生しました") from exc
+    return schemas.AckResponse(session_id=req.session_id, status="reinterpret_queued")
+
+
 @router.get(
     "/dashboard",
     response_model=schemas.DashboardResponse,

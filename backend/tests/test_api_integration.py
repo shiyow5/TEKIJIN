@@ -1245,6 +1245,100 @@ def test_handoff_redraft_404_after_answered(seed_counts, engine, fake_embedder) 
     assert resp.status_code == 404
 
 
+# --------------------------------------------------------------------------- #
+# POST /handoff/correct : asker corrects the AI's interpretation ("解釈の訂正"),
+# re-running the whole pipeline from C1 with an added supplement (#260)
+# --------------------------------------------------------------------------- #
+def test_handoff_correct_reruns_pipeline_from_c1(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    client.headers.update(_user_headers(10))  # act as the asker for a real actor_id
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "hc1"})
+    first = _events(client, "hc1")
+    assert first[2][1]["recommendations"][0]["person_id"] == "E001"
+
+    resp = client.post(
+        "/handoff/correct",
+        json={"session_id": "hc1", "supplement": "実は対象は5拠点で機器はUTMです"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "reinterpret_queued"
+
+    # The correction restarts the WHOLE pipeline (reset → C1 → … → send), so the
+    # segment re-emits the full understood/route/recommend/draft sequence.
+    second = [e for e, _ in _events(client, "hc1")]
+    assert second == ["understood", "route", "recommend", "draft"]
+
+    # The enriched question now drives the run (visible on the responder handoff).
+    handoff = client.get("/handoff/hc1").json()
+    assert "5拠点" in handoff["question"]
+
+    check = get_sessionmaker(engine)()
+    try:
+        # The correction is recorded as a c1 feedback signal with the supplement.
+        fb = (
+            check.query(Feedback).filter(Feedback.session_id == "hc1", Feedback.stage == "c1").all()
+        )
+        assert len(fb) == 1
+        assert fb[0].kind == "interpretation_corrected"
+        assert fb[0].actor_id == 10
+        assert "5拠点" in (fb[0].payload or {}).get("supplement", "")
+
+        # The abandoned original hand-off row is terminated ("superseded") so it
+        # stops showing as pending; the re-run's fresh row is the live one.
+        q = check.query(Question).filter(Question.session_id == "hc1").first()
+        e1_rows = (
+            check.query(Recommendation)
+            .filter(Recommendation.question_id == q.id, Recommendation.employee_id == 1)
+            .order_by(Recommendation.id)
+            .all()
+        )
+        assert any(r.outcome == "superseded" for r in e1_rows)
+        assert e1_rows[-1].outcome is None  # the newest (re-run) row is live/pending
+    finally:
+        check.close()
+
+    # The re-interpreted hand-off still completes normally.
+    assert (
+        client.post("/answer", json={"session_id": "hc1", "outcome": "accepted"}).status_code == 200
+    )
+
+
+def test_handoff_correct_rejects_blank_supplement(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "hc2"})
+    _events(client, "hc2")
+    resp = client.post("/handoff/correct", json={"session_id": "hc2", "supplement": "   "})
+    assert resp.status_code == 422  # schema rejects a blank supplement
+
+
+def test_handoff_correct_404_when_no_pending_handoff(seed_counts, engine, fake_embedder) -> None:
+    client = _client(engine, fake_embedder, retriever=_FakeRetriever(), scorer=_FakeScorer([]))
+    resp = client.post("/handoff/correct", json={"session_id": "nope", "supplement": "補足"})
+    assert resp.status_code == 404
+
+
+def test_handoff_correct_409_when_awaiting_clarification(
+    seed_counts, engine, fake_embedder
+) -> None:
+    client = _client(
+        engine, fake_embedder, retriever=_FakeRetriever(people=[1]), scorer=_FakeScorer(_recs(1))
+    )
+    client.post("/ask", json={"asker_id": 10, "question": VAGUE_Q, "session_id": "hc3"})
+    _events(client, "hc3")  # paused at ``ask`` (a clarification is owed to the asker)
+    resp = client.post("/handoff/correct", json={"session_id": "hc3", "supplement": "補足"})
+    assert resp.status_code == 409
+
+
 def test_record_feedback_bounds_oversized_payload_values() -> None:
     """Internal callers stash drafts in ``payload``; an oversized string is
     truncated so the JSONB row cannot grow unbounded (bypasses the public 16KB
