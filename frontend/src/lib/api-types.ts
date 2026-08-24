@@ -139,6 +139,14 @@ export interface Recommendation {
   score: number;
   confidence: string;
   reasons: Reason[];
+  /**
+   * Continuous 0..1 fit value (the scorer's topic_fit), driving ONLY the
+   * ConfidenceGauge's ring fill / centre number — never a raw internal
+   * `score`/percentage. `confidence` (高/中/低) remains the primary
+   * user-facing signal (#205). Optional (falls back to the discrete
+   * per-level value) so hand-built fixtures need not supply it.
+   */
+  confidence_score?: number;
 }
 
 // --------------------------------------------------------------------------- //

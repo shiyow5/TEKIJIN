@@ -65,6 +65,33 @@ describe("ConfidenceGauge", () => {
     expect(screen.getByText("50")).toBeInTheDocument();
   });
 
+  it("uses the continuous fitScore for the ring/number when provided (#205)", () => {
+    setReducedMotion(true);
+    const { rerender } = render(<ConfidenceGauge level="中" fitScore={0.9} />);
+    expect(screen.getByText("90")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "適合度 中（90%）" })).toBeInTheDocument();
+
+    // Same discrete label ("中"), different fitScore -> visibly different
+    // number/fill — this is exactly the "looks identical every time" bug fix.
+    rerender(<ConfidenceGauge level="中" fitScore={0.3} />);
+    expect(screen.getByText("30")).toBeInTheDocument();
+    expect(screen.queryByText("66")).not.toBeInTheDocument();
+  });
+
+  it("clamps an out-of-range fitScore into 0..1", () => {
+    setReducedMotion(true);
+    const { rerender } = render(<ConfidenceGauge level="高" fitScore={1.5} />);
+    expect(screen.getByText("100")).toBeInTheDocument();
+    rerender(<ConfidenceGauge level="低" fitScore={-0.2} />);
+    expect(screen.getByText("0")).toBeInTheDocument();
+  });
+
+  it("falls back to the discrete per-level percent when fitScore is omitted", () => {
+    setReducedMotion(true);
+    render(<ConfidenceGauge level="中" />);
+    expect(screen.getByText("66")).toBeInTheDocument();
+  });
+
   it("falls back to the final ring if anime.js fails to load", async () => {
     setReducedMotion(false);
     animateMock.mockImplementation(() => {

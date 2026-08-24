@@ -4,11 +4,15 @@
  * Animated confidence gauge for a recommendation card (#139, proposal E).
  *
  * Renders the qualitative fit signal (適合度 高/中/低) as a radial ring that
- * sweeps to its level on mount, with the matching PERCENTAGE shown in the centre
- * of the ring (requested: 具体的な数値を円の中に). The percentage is derived from the
- * qualitative level (高=100 / 中=66 / 低=33), i.e. exactly the magnitude the ring
- * draws — it is NOT the raw internal `score` (a weighted ranking value, not a
- * percentage), which stays unsurfaced per CandidateCard's contract.
+ * sweeps to its level on mount, with a PERCENTAGE shown in the centre of the
+ * ring (requested: 具体的な数値を円の中に). The percentage prefers the continuous
+ * `fitScore` (0..1, the scorer's topic_fit) when given, so two candidates
+ * sharing the same 高/中/低 label are still visibly distinguishable (#205) —
+ * falling back to the qualitative level's own magnitude (高=100 / 中=66 /
+ * 低=33) when `fitScore` is omitted. Either way this is NOT the raw internal
+ * composite `score` (a weighted ranking value, not a percentage, and pulled
+ * negative by the load penalty), which stays unsurfaced per CandidateCard's
+ * contract.
  *
  * Accessibility: the ring is `role="img"` with a text label carrying both the
  * level and the percent, and the level is also shown, so nothing depends on
@@ -39,8 +43,11 @@ function prefersReducedMotion(): boolean {
   );
 }
 
-export function ConfidenceGauge({ level }: { level: string }) {
-  const fraction = LEVEL_FRACTION[level] ?? 0.5;
+export function ConfidenceGauge({ level, fitScore }: { level: string; fitScore?: number }) {
+  const fraction =
+    typeof fitScore === "number" && Number.isFinite(fitScore)
+      ? Math.min(Math.max(fitScore, 0), 1)
+      : (LEVEL_FRACTION[level] ?? 0.5);
   const colorClass = LEVEL_COLOR[level] ?? "text-on-surface-variant";
   const finalOffset = CIRCUMFERENCE * (1 - fraction);
   // Concrete number shown inside the ring — the magnitude the ring draws.

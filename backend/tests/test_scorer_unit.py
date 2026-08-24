@@ -279,6 +279,51 @@ def test_confidence_label_thresholds() -> None:
     assert features.confidence_label(0.1, 1) == "低"
 
 
+def test_score_person_confidence_score_equals_topic_fit() -> None:
+    # confidence_score must be the exact topic_fit that confidence_label buckets
+    # into 高/中/低, and must strictly increase with more matching evidence — the
+    # frontend gauge fill relies on this to never contradict the discrete label
+    # (#205/#B3).
+    from tekijin.data.repository import Repository
+
+    scorer = ExpertiseScorer(Repository(None))  # type: ignore[arg-type]
+
+    thin_skills = [_skill(TOPIC)]
+    rich_skills = [_skill(TOPIC, source="self")]
+    rich_certs = [_cert("ネットワークスペシャリスト")]
+
+    def score(skills, certs):
+        record, _ = scorer._score_person(
+            topics=[TOPIC],
+            employee_id=1,
+            employee_name="社員1",
+            employee_dept="営業部",
+            employee_branch=None,
+            certifications=certs,
+            skills=skills,
+            memberships=[],
+            answers=[],
+            load_count=0,
+            asker_branch=None,
+            now=NOW,
+        )
+        return record
+
+    thin = score(thin_skills, [])
+    rich = score(rich_skills, rich_certs)
+
+    thin_evidence = collect_topic_evidence([TOPIC], [], thin_skills, [], [])
+    rich_evidence = collect_topic_evidence([TOPIC], rich_certs, rich_skills, [], [])
+    assert thin["confidence_score"] == round(edge_weight(thin_evidence), 4)
+    assert rich["confidence_score"] == round(edge_weight(rich_evidence), 4)
+    assert thin["confidence"] == features.confidence_label(
+        edge_weight(thin_evidence), len(thin_evidence)
+    )
+    # More evidence -> strictly higher confidence_score, even if both land in the
+    # same discrete 高/中/低 bucket (this is exactly the "looks fixed" bug fix).
+    assert rich["confidence_score"] > thin["confidence_score"]
+
+
 # --------------------------------------------------------------------------- #
 # reason-detail helpers (static, DB-free)
 # --------------------------------------------------------------------------- #

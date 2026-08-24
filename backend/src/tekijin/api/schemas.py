@@ -188,6 +188,12 @@ class Recommendation(BaseModel):
     score: float
     confidence: str
     reasons: list[Reason] = Field(default_factory=list)
+    # Continuous 0..1 fit value (the scorer's topic_fit) driving ONLY the
+    # ConfidenceGauge's ring fill / centre number on the frontend — never a raw
+    # number/percentage in the UI. The discrete `confidence` label (高/中/低)
+    # remains the primary user-facing signal (#205/#B3). Defaults to 0.0 so
+    # hand-built recommendation dicts in tests need not supply it.
+    confidence_score: float = 0.0
 
 
 # --------------------------------------------------------------------------- #

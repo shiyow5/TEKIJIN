@@ -114,7 +114,15 @@ def test_rank_output_shape_and_top_k(seed_counts, session) -> None:
     assert set(result) == {"recommendations"}
     assert len(recs) == 3
     for rec in recs:
-        assert set(rec) == {"person_id", "name", "dept", "score", "confidence", "reasons"}
+        assert set(rec) == {
+            "person_id",
+            "name",
+            "dept",
+            "score",
+            "confidence",
+            "confidence_score",
+            "reasons",
+        }
         assert isinstance(rec["person_id"], int)
         assert isinstance(rec["score"], float)
         assert rec["confidence"] in {"高", "中", "低"}
