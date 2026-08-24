@@ -403,6 +403,41 @@ def test_vllm_intent_adapter_converts_schema() -> None:
     )
 
 
+def test_vllm_intent_prompt_fences_context_fragments() -> None:
+    # #69: retrieved fragments are injected into C1's prompt inside a <context>
+    # fence, and the system prompt tells the model they are reference data.
+    context = ["過去のQ&A: CRMで商談履歴を残す方法 / SFAに蓄積します"]
+    messages = VllmIntentModel.prompt("履歴を残したい", None, context=context)
+    system = next(msg for role, msg in messages if role == "system")
+    human = next(msg for role, msg in messages if role == "human")
+    assert "<context>" in human and "</context>" in human
+    assert "CRMで商談履歴を残す方法" in human
+    assert "context" in system.lower()  # the fence is explained as reference data
+
+
+def test_vllm_intent_prompt_omits_context_block_when_absent() -> None:
+    # Without fragments the prompt is unchanged (no empty <context> fence).
+    messages = VllmIntentModel.prompt("履歴を残したい", None)
+    human = next(msg for role, msg in messages if role == "human")
+    assert "<context>" not in human
+
+
+def test_vllm_intent_forwards_context_to_the_model() -> None:
+    # analyze() threads `context` through to prompt(); the model sees the fence.
+    class _Capturing:
+        def __init__(self) -> None:
+            self.prompt = None
+
+        def invoke(self, prompt):
+            self.prompt = prompt
+            return IntentSchema(topics=["CRM・営業支援"], confidence=0.7)
+
+    model = _Capturing()
+    VllmIntentModel(model=model).analyze("履歴を残したい", None, context=["CRMの商談履歴"])
+    rendered = " ".join(msg for _role, msg in model.prompt)
+    assert "<context>" in rendered and "CRMの商談履歴" in rendered
+
+
 def test_is_uninformative_intent_detects_empty_call() -> None:
     # A default-everything schema == the ``{}`` an injection attempt triggers (#118).
     assert _is_uninformative_intent(IntentSchema()) is True

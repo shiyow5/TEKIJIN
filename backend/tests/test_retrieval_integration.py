@@ -41,6 +41,59 @@ def test_list_profiles(seed_counts, session) -> None:
     assert ids == sorted(ids)  # ordered by employee id
 
 
+def test_answers_by_ids_resolves_a_subset(seed_counts, session) -> None:
+    repo = Repository(session)
+    all_answers = repo.list_answers()
+    wanted = [all_answers[0].id, all_answers[5].id]
+    resolved = repo.answers_by_ids(wanted)
+    assert set(resolved) == set(wanted)
+    assert resolved[wanted[0]].body == all_answers[0].body
+    # Unknown ids are simply absent; empty input queries nothing.
+    assert repo.answers_by_ids([*wanted, "does-not-exist"]).keys() == set(wanted)
+    assert repo.answers_by_ids([]) == {}
+
+
+def test_questions_by_ids_resolves_a_subset(seed_counts, session) -> None:
+    repo = Repository(session)
+    all_questions = repo.list_questions()
+    wanted = [all_questions[1].id, all_questions[3].id]
+    resolved = repo.questions_by_ids(wanted)
+    assert set(resolved) == set(wanted)
+    assert resolved[wanted[0]].body == all_questions[1].body
+    assert repo.questions_by_ids([]) == {}
+
+
+def test_documents_by_ids_resolves_a_subset(seed_counts, session) -> None:
+    repo = Repository(session)
+    all_documents = repo.list_documents()
+    wanted = [all_documents[0].id]
+    resolved = repo.documents_by_ids(wanted)
+    assert set(resolved) == set(wanted)
+    assert resolved[wanted[0]].title == all_documents[0].title
+    assert repo.documents_by_ids([]) == {}
+
+
+def test_collect_context_fragments_over_live_repository(seed_counts, session) -> None:
+    # End-to-end of the #69 read path: a RetrievalResult's ids re-hydrate to text.
+    from tekijin.agent.state import empty_retrieval
+    from tekijin.retrieval.fragments import collect_context_fragments
+
+    repo = Repository(session)
+    answer = repo.list_answers()[0]
+    document = repo.list_documents()[0]
+    retrieval = empty_retrieval()
+    retrieval["past_answers"] = [
+        {"qa_id": answer.id, "score": 0.9, "responder_id": answer.responder_id}
+    ]
+    retrieval["documents"] = [{"doc_id": document.id, "score": 0.7}]
+
+    fragments = collect_context_fragments(repo, retrieval)
+    assert fragments  # non-empty
+    joined = "\n".join(fragments)
+    if answer.body:
+        assert answer.body[:20] in joined
+
+
 # --------------------------------------------------------------------------- #
 # dense search
 # --------------------------------------------------------------------------- #

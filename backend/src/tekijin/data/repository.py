@@ -190,10 +190,37 @@ class Repository:
         rows = self._session.scalars(select(Answer).order_by(Answer.id)).all()
         return [AnswerDTO.from_row(r) for r in rows]
 
+    def answers_by_ids(self, ids: Sequence[str]) -> dict[str, AnswerDTO]:
+        """Resolve several answers by id in one query (#69 fragment rehydration).
+
+        Keyed by id; unknown ids are simply absent. Empty ids → ``{}`` (no query).
+        """
+
+        if not ids:
+            return {}
+        rows = self._session.scalars(select(Answer).where(Answer.id.in_(ids)))
+        return {row.id: AnswerDTO.from_row(row) for row in rows}
+
+    def questions_by_ids(self, ids: Sequence[str]) -> dict[str, QuestionDTO]:
+        """Resolve several questions by id in one query (#69 fragment rehydration)."""
+
+        if not ids:
+            return {}
+        rows = self._session.scalars(select(Question).where(Question.id.in_(ids)))
+        return {row.id: QuestionDTO.from_row(row) for row in rows}
+
     # -- documents -------------------------------------------------------- #
     def list_documents(self) -> list[DocumentDTO]:
         rows = self._session.scalars(select(Document).order_by(Document.id)).all()
         return [DocumentDTO.from_row(r) for r in rows]
+
+    def documents_by_ids(self, ids: Sequence[str]) -> dict[str, DocumentDTO]:
+        """Resolve several documents by id in one query (#69 fragment rehydration)."""
+
+        if not ids:
+            return {}
+        rows = self._session.scalars(select(Document).where(Document.id.in_(ids)))
+        return {row.id: DocumentDTO.from_row(row) for row in rows}
 
     # -- projects --------------------------------------------------------- #
     def list_projects_with_members(self) -> list[ProjectWithMembersDTO]:

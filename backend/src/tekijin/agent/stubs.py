@@ -10,6 +10,7 @@ is a pure function of its inputs, so runs are reproducible.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from typing import Any
 
 from tekijin.agent.protocols import IntentResult, SufficiencyResult
@@ -157,9 +158,30 @@ def _mention_index(lowered_question: str, product: str) -> int:
 class KeywordIntentModel:
     """C1 stub: extract topics/products and classify by keyword tables."""
 
-    def analyze(self, question: str, asker: dict[str, Any] | None) -> IntentResult:
+    def analyze(
+        self,
+        question: str,
+        asker: dict[str, Any] | None,
+        *,
+        context: Sequence[str] | None = None,
+    ) -> IntentResult:
         out_of_scope = _contains_any(question, OUT_OF_SCOPE_KEYWORDS)
-        topics = [t for t, kws in TOPIC_KEYWORDS.items() if _contains_any(question, kws)]
+        question_topics = {t for t, kws in TOPIC_KEYWORDS.items() if _contains_any(question, kws)}
+        # #69 topic mediation: a retrieved fragment that names a canonical topic
+        # keyword surfaces that topic even when the QUESTION worded it differently
+        # (the #116 vocabulary-mismatch bridge). Context only ADDS topics and never
+        # pulls an off-topic question back in-scope — it is reference evidence, not
+        # the user's ask, so out_of_scope / products / question_type stay driven by
+        # the question alone.
+        context_topics: set[str] = set()
+        if context and not out_of_scope:
+            context_text = " ".join(context)
+            context_topics = {
+                t for t, kws in TOPIC_KEYWORDS.items() if _contains_any(context_text, kws)
+            }
+        matched = question_topics | context_topics
+        # Emit in canonical vocabulary order regardless of which source matched.
+        topics = [t for t in TOPIC_KEYWORDS if t in matched]
         products = [p for p in PRODUCT_KEYWORDS if _keyword_matches(p, question)]
         question_type = self._classify(question, topics, products, out_of_scope)
 

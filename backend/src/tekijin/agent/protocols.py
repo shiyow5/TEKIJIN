@@ -40,9 +40,21 @@ class SufficiencyResult:
 
 
 class IntentModel(Protocol):
-    """C1: free-text question -> :class:`IntentResult` (structured)."""
+    """C1: free-text question -> :class:`IntentResult` (structured).
 
-    def analyze(self, question: str, asker: dict[str, Any] | None) -> IntentResult: ...
+    ``context`` (optional, #69) carries short text snippets of the retrieved
+    evidence (past Q&A / documents) so C1 can classify the topic with that
+    vocabulary in front of it — the retrieve-then-classify order. It is reference
+    data, never the user's ask; ``None`` reproduces the pre-#69 behaviour.
+    """
+
+    def analyze(
+        self,
+        question: str,
+        asker: dict[str, Any] | None,
+        *,
+        context: Sequence[str] | None = None,
+    ) -> IntentResult: ...
 
 
 class SufficiencyModel(Protocol):
