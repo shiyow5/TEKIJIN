@@ -28,11 +28,18 @@ test("inbox lists a pending handoff and shows its detail without an extra click"
   await page.goto("/inbox");
 
   await expect(page.getByRole("heading", { name: "受信箱" })).toBeVisible();
-  await expect(page.getByText(INBOX_ITEM.question)).toBeVisible();
-  await expect(page.getByText("藤田 悠斗 さんからの質問")).toBeVisible();
+
+  // Scope the list assertions to the item's button. The question now appears
+  // twice on this page — once in the list, once as the detail pane's heading —
+  // and a bare getByText would resolve to both. It races, too: whether the
+  // second one exists yet depends on when the handoff fetch lands.
+  const listItem = page.getByRole("button", { name: /藤田 悠斗 さんからの質問/ });
+  await expect(listItem).toBeVisible();
+  await expect(listItem).toContainText(INBOX_ITEM.question);
 
   // The detail pane for the first (only) item renders automatically.
   await expect(page.getByRole("heading", { name: "あなたに届いた質問" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: INBOX_ITEM.question })).toBeVisible();
   await expect(page.getByRole("button", { name: "引き受ける" })).toBeVisible();
   await expect(page.getByRole("button", { name: "今は難しい" })).toBeVisible();
   await expect(page.getByRole("button", { name: "自分より適任がいる" })).toBeVisible();
