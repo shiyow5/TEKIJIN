@@ -66,6 +66,12 @@ class Settings(BaseSettings):
     # fallback on timeout is a separate, credential-gated follow-up.
     llm_timeout_seconds: float | None = 60.0
 
+    # Client-side retries per LLM call. Default 0 so ``llm_timeout_seconds`` is a
+    # HARD per-request bound: ChatOpenAI defaults to 2 retries and retries on a
+    # timeout, which would make the real worst-case stall ``timeout × 3`` (~185s)
+    # and hold a backpressure slot ~3× longer than intended (#180 task 4 review).
+    llm_max_retries: int = 0
+
     # Which C1/C2/C7 implementation the API wires: "stub" = deterministic,
     # network-free defaults (CI/tests); "vllm" = real langchain-openai client
     # against ``llm_base_url``. A ``Literal`` so an invalid value is rejected at

@@ -88,6 +88,10 @@ def _openai_model_kwargs(settings: Settings) -> dict[str, Any]:
         "base_url": settings.llm_base_url,
         "api_key": settings.llm_api_key,
         "extra_body": _thinking_extra_body(settings),
+        # Pin retries so the timeout is a hard bound: ChatOpenAI defaults to 2
+        # retries and retries on timeout, which would make the worst-case stall
+        # timeout × 3 and hold a backpressure slot ~3× too long (#180 review).
+        "max_retries": settings.llm_max_retries,
     }
     if settings.llm_timeout_seconds is not None:
         kwargs["timeout"] = settings.llm_timeout_seconds

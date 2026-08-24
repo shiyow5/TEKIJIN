@@ -459,9 +459,19 @@ def test_openai_model_kwargs_wires_timeout() -> None:
     assert "timeout" not in _openai_model_kwargs(_settings(llm_timeout_seconds=None))
 
 
+def test_openai_model_kwargs_pins_retries_for_a_hard_timeout() -> None:
+    from tekijin.llm.vllm import _openai_model_kwargs
+
+    # #180 review: retries must be pinned (default 0) so timeout is a hard bound,
+    # not timeout × (ChatOpenAI's default 2 retries + 1).
+    assert _openai_model_kwargs(_settings())["max_retries"] == 0
+    assert _openai_model_kwargs(_settings(llm_max_retries=1))["max_retries"] == 1
+
+
 def test_llm_timeout_default_is_bounded() -> None:
     # A finite default so a stuck vLLM call cannot hang a run indefinitely (#180).
     assert _settings().llm_timeout_seconds == 60.0
+    assert _settings().llm_max_retries == 0  # hard bound by default
 
 
 def test_vllm_intent_raises_on_empty_structured_output() -> None:
