@@ -1,0 +1,155 @@
+#!/usr/bin/env bash
+# Deploy TEKIJIN to the DGX from a self-hosted-runner checkout (#203).
+#
+# Runs ON the DGX (a self-hosted GitHub Actions runner, user team_a). The runner
+# has checked out the develop commit into $GITHUB_WORKSPACE; this script syncs that
+# tree into the live deploy dir, rebuilds the frontend, restarts the backend, and
+# health-checks. On failure it restores the previous release (rollback).
+#
+# HARD RULES (shared GPU host):
+#   * vLLM (tekijin_vllm) and Postgres (tekijin_app_pg) are NEVER touched — the GPU
+#     is occupied and a restart would drop the model / the DB. Only the backend
+#     (nohup uvicorn on :18000) and the frontend container are cycled.
+#   * No sudo: the runner user is not root. Restart is process/docker level only.
+#
+# Everything is overridable via env (defaults match the DGX):
+#   TEKIJIN_DEPLOY_DIR         live deploy dir           (/home/team_a/TEKIJIN)
+#   TEKIJIN_VENV_PY            backend venv python       (…/tekijin-bench/.venv/bin/python)
+#   TEKIJIN_API_BASE_URL       baked into the frontend   (http://100.118.131.67:18000)
+#   TEKIJIN_FRONTEND_CONTAINER frontend container name   (tekijin_frontend)
+#   TEKIJIN_PORT               backend port              (18000)
+#   TEKIJIN_FRONTEND_PORT      frontend port             (13000)
+set -euo pipefail
+
+SRC="${GITHUB_WORKSPACE:-$(pwd)}"
+DEPLOY_DIR="${TEKIJIN_DEPLOY_DIR:-/home/team_a/TEKIJIN}"
+VENV_PY="${TEKIJIN_VENV_PY:-python3}"
+API_BASE_URL="${TEKIJIN_API_BASE_URL:-http://100.118.131.67:18000}"
+FRONTEND_CONTAINER="${TEKIJIN_FRONTEND_CONTAINER:-tekijin_frontend}"
+PORT="${TEKIJIN_PORT:-18000}"
+FRONTEND_PORT="${TEKIJIN_FRONTEND_PORT:-13000}"
+BACKUP_DIR="${DEPLOY_DIR}.prev"
+
+# Files that live ONLY in the deployed copy (secrets, build output, installed deps)
+# and must survive a --delete sync. Note: excluded paths in the destination are
+# left untouched by rsync --delete, so .env / .next / node_modules are preserved.
+RSYNC_EXCLUDES=(
+  --exclude .git
+  --exclude node_modules
+  --exclude .venv
+  --exclude .next
+  --exclude .env
+  --exclude analysis
+  --exclude test-results
+)
+
+log() { echo "[deploy] $(date -u +%H:%M:%S) $*"; }
+
+sync_tree() { # $1=from $2=to
+  rsync -a --delete "${RSYNC_EXCLUDES[@]}" "$1/" "$2/"
+}
+
+# True (0) if a requirements file differs between SRC and the live dir (or is
+# missing in the live dir) — i.e. dependencies need a pip sync. cmp is quiet.
+deps_changed() {
+  local req
+  for req in requirements.txt requirements-ml.txt; do
+    if ! cmp -s "${SRC}/backend/${req}" "${DEPLOY_DIR}/backend/${req}"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+pip_sync() {
+  log "requirements changed -> syncing backend deps into the venv"
+  "$VENV_PY" -m pip install -q -r "${DEPLOY_DIR}/backend/requirements.txt"
+  "$VENV_PY" -m pip install -q -r "${DEPLOY_DIR}/backend/requirements-ml.txt"
+}
+
+build_frontend() {
+  # Build INSIDE the same image the container runs, against the bind-mounted source,
+  # so `next start` picks up the fresh .next on restart. NEXT_PUBLIC_* must be baked
+  # at build time (it is inlined into the bundle), so it is passed here, not to the
+  # running container.
+  docker run --rm \
+    -v "${DEPLOY_DIR}/frontend:/app" -w /app \
+    -e "NEXT_PUBLIC_API_BASE_URL=${API_BASE_URL}" \
+    node:20-slim bash -lc 'npm ci && npm run build'
+  docker restart "$FRONTEND_CONTAINER"
+}
+
+restart_backend() {
+  # Stop the previous nohup uvicorn (best-effort; the run may not exist yet), then
+  # relaunch detached. vLLM/Postgres are separate processes and are not matched.
+  pkill -f 'deploy/start_backend.sh' 2>/dev/null || true
+  pkill -f 'uvicorn tekijin.main:app' 2>/dev/null || true
+  sleep 2
+  (
+    cd "$DEPLOY_DIR"
+    TEKIJIN_PORT="$PORT" TEKIJIN_VENV_PY="$VENV_PY" CUDA_VISIBLE_DEVICES="" \
+      nohup deploy/start_backend.sh >"${HOME}/backend.log" 2>&1 </dev/null &
+  )
+}
+
+health_check() {
+  # Poll until BOTH the backend /health and the frontend root answer 200, or give up.
+  local i code fcode
+  for i in $(seq 1 40); do
+    code=$(curl -fsS -o /dev/null -w '%{http_code}' "http://127.0.0.1:${PORT}/health" 2>/dev/null || echo 000)
+    fcode=$(curl -fsS -o /dev/null -w '%{http_code}' "http://127.0.0.1:${FRONTEND_PORT}/" 2>/dev/null || echo 000)
+    if [ "$code" = "200" ] && [ "$fcode" = "200" ]; then
+      return 0
+    fi
+    sleep 3
+  done
+  log "health check failed (backend=${code} frontend=${fcode})"
+  return 1
+}
+
+# --------------------------------------------------------------------------- #
+main() {
+  log "source=${SRC} -> deploy=${DEPLOY_DIR}"
+
+  local need_pip=1
+  deps_changed || need_pip=0
+
+  log "snapshot current release -> ${BACKUP_DIR}"
+  mkdir -p "$BACKUP_DIR"
+  sync_tree "$DEPLOY_DIR" "$BACKUP_DIR"
+
+  log "sync new release"
+  sync_tree "$SRC" "$DEPLOY_DIR"
+
+  if [ "$need_pip" = 1 ]; then
+    pip_sync
+  else
+    log "requirements unchanged -> skipping pip"
+  fi
+
+  log "rebuild frontend"
+  build_frontend
+
+  log "restart backend"
+  restart_backend
+
+  if health_check; then
+    log "OK — backend :${PORT} and frontend :${FRONTEND_PORT} healthy"
+    return 0
+  fi
+
+  log "UNHEALTHY — rolling back to the previous release"
+  sync_tree "$BACKUP_DIR" "$DEPLOY_DIR"
+  # The rollback tree's requirements are the previous ones; resync if they differ
+  # from what is now installed is out of scope — restore source + rebuild + restart.
+  build_frontend || true
+  restart_backend
+  if health_check; then
+    log "rolled back successfully"
+  else
+    log "ROLLBACK ALSO UNHEALTHY — manual intervention required"
+  fi
+  return 1
+}
+
+main "$@"
