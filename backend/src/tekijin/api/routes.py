@@ -7,10 +7,12 @@ interrupt kind are validated against the durable checkpointer state (409/422), s
 a stray /ask cannot overwrite a paused run and an outcome cannot be mis-delivered
 to a clarification.
 
-Read endpoints (dashboard/employees/inbox/questions/documents) have NO auth in the
-prototype (all data is synthetic) and uniformly mask unexpected errors as a generic
-500 via ``_generic_500`` — see docs/adr/0005-read-endpoint-auth-and-error-wrapping.md
-for the auth seam (``require_reader``) and error policy (#146).
+All endpoints now require authentication (#241): reads and writes go through the
+``require_principal`` / ``require_admin`` seam in ``tekijin.auth.deps`` (the concrete
+realization of the ``require_reader`` seam ADR-0005 anticipated). ``/dashboard`` and
+``/employees`` are admin-only; ``/ask``, ``/questions`` and ``/inbox`` additionally
+bind identity so a non-admin may only act as themselves (``require_can_act_as``).
+Unexpected errors are uniformly masked as a generic 500 via ``_generic_500`` (#146).
 """
 
 from __future__ import annotations
@@ -31,7 +33,13 @@ from tekijin.api.service import (
     SessionConflict,
     SessionInvalid,
 )
-from tekijin.auth.deps import require_admin, require_can_act_as, require_principal
+from tekijin.auth.deps import (
+    require_admin,
+    require_can_act_as,
+    require_principal,
+    require_principal_sse,
+    require_session_participant,
+)
 from tekijin.auth.principal import Principal
 from tekijin.data.dashboard import dashboard_summary
 from tekijin.data.documents import get_document
@@ -102,14 +110,20 @@ def ask(
     return schemas.AckResponse(session_id=req.session_id, status="accepted")
 
 
-@router.post(
-    "/answer",
-    response_model=schemas.AckResponse,
-    dependencies=[Depends(require_principal)],
-)
-def answer(req: schemas.ResumeRequest, request: Request) -> schemas.AckResponse:
-    """Resume a paused run: a responder outcome or a clarification reply."""
+@router.post("/answer", response_model=schemas.AckResponse)
+def answer(
+    req: schemas.ResumeRequest,
+    request: Request,
+    principal: Principal = Depends(require_principal),
+) -> schemas.AckResponse:
+    """Resume a paused run: a responder outcome or a clarification reply.
 
+    Object-level auth (#241): only the session's asker/responder (or admin) may
+    resume it — a non-participant is 403 even with a valid token and session id.
+    """
+
+    asker_id, responder_id = _service(request).session_participants(req.session_id)
+    require_session_participant(principal, asker_id, responder_id)
     try:
         _service(request).submit_resume(
             req.session_id,
@@ -127,40 +141,53 @@ def answer(req: schemas.ResumeRequest, request: Request) -> schemas.AckResponse:
     return schemas.AckResponse(session_id=req.session_id, status="resumed")
 
 
-@router.get("/events/{session_id}", dependencies=[Depends(require_principal)])
-def events(session_id: str, request: Request) -> EventSourceResponse:
+@router.get("/events/{session_id}")
+def events(
+    session_id: str,
+    request: Request,
+    principal: Principal = Depends(require_principal_sse),
+) -> EventSourceResponse:
     """SSE stream of the queued run's node updates (model-definition §4).
 
     Returns 404 only when there is neither a queued run nor a paused run for the
     session; a paused session reconnects (re-emits its pending interrupt).
 
-    A browser ``EventSource`` cannot send an ``Authorization`` header, so this
-    endpoint accepts the token as a ``?token=`` query parameter (handled inside
-    ``require_principal``).
+    A browser ``EventSource`` cannot send an ``Authorization`` header, so this is
+    the ONE endpoint that accepts the token as a ``?token=`` query parameter
+    (``require_principal_sse``). Object-level auth (#241): only the session's
+    asker/responder (or admin) may open the stream.
     """
 
     service = _service(request)
+    asker_id, responder_id = service.session_participants(session_id)
+    require_session_participant(principal, asker_id, responder_id)
     if not service.is_streamable(session_id):
         raise HTTPException(status_code=404, detail="no active run for this session")
     return EventSourceResponse(service.stream_events(session_id))
 
 
-@router.get(
-    "/handoff/{session_id}",
-    response_model=schemas.HandoffResponse,
-    dependencies=[Depends(require_principal)],
-)
-def handoff(session_id: str, request: Request) -> schemas.HandoffResponse:
+@router.get("/handoff/{session_id}", response_model=schemas.HandoffResponse)
+def handoff(
+    session_id: str,
+    request: Request,
+    principal: Principal = Depends(require_principal),
+) -> schemas.HandoffResponse:
     """Responder-facing handoff payload for a session paused at ``send``.
 
     Read-only view of the durable state (product-spec 画面4): the question, the
     asker, the filled-in slots, why this responder was chosen, the draft, and the
     responder's past-answer reuse. 404 when no handoff is pending (unknown /
     finished); 409 when the session is awaiting a clarification instead.
+
+    Object-level auth (#241): only the session's asker/responder (or admin) may
+    read it — a non-participant is 403 even with a valid session id.
     """
 
+    service = _service(request)
+    asker_id, responder_id = service.session_participants(session_id)
+    require_session_participant(principal, asker_id, responder_id)
     try:
-        return _service(request).get_handoff(session_id)
+        return service.get_handoff(session_id)
     except HandoffNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except SessionConflict as exc:
@@ -170,21 +197,24 @@ def handoff(session_id: str, request: Request) -> schemas.HandoffResponse:
         raise HTTPException(status_code=500, detail="内部エラーが発生しました") from exc
 
 
-@router.post(
-    "/handoff/draft",
-    response_model=schemas.AckResponse,
-    dependencies=[Depends(require_principal)],
-)
-def handoff_draft(req: schemas.HandoffDraftRequest, request: Request) -> schemas.AckResponse:
+@router.post("/handoff/draft", response_model=schemas.AckResponse)
+def handoff_draft(
+    req: schemas.HandoffDraftRequest,
+    request: Request,
+    principal: Principal = Depends(require_principal),
+) -> schemas.AckResponse:
     """Persist the asker's edited hand-off draft (画面3) so the responder (画面4)
     reads the edited text (#174).
 
     Draft-only: never touches the recommendation/outcome state. 404 when no
     hand-off is pending (unknown / finished / already answered); 409 when the
     session is awaiting a clarification instead. A blank draft is rejected by the
-    request schema (422) before it reaches the service.
+    request schema (422) before it reaches the service. Object-level auth (#241):
+    only the session's asker/responder (or admin) may edit the draft.
     """
 
+    asker_id, responder_id = _service(request).session_participants(req.session_id)
+    require_session_participant(principal, asker_id, responder_id)
     try:
         _service(request).save_handoff_draft(req.session_id, req.draft)
     except HandoffNotFound as exc:

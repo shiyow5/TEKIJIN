@@ -15,9 +15,33 @@ from tekijin.api.health import router as health_router
 from tekijin.api.routes import router as api_router
 from tekijin.api.service import AgentService
 from tekijin.auth.service import LoginRateLimiter
-from tekijin.config import get_settings
+from tekijin.config import DEV_ADMIN_PASSWORD, DEV_AUTH_SECRET, Settings, get_settings
 
 logger = logging.getLogger(__name__)
+
+
+def _enforce_secure_auth(settings: Settings) -> None:
+    """Refuse to start on the INSECURE default auth secrets when auth is enforced.
+
+    Without this, forgetting ``TEKIJIN_AUTH_SECRET`` in a non-dev deploy would boot
+    silently with a publicly-known JWT signing secret — anyone could forge an admin
+    token offline. Mirrors the ``durability_enforced`` fail-closed pattern (#241).
+    """
+
+    if not settings.auth_enforced():
+        return
+    insecure = []
+    if settings.auth_secret == DEV_AUTH_SECRET:
+        insecure.append("TEKIJIN_AUTH_SECRET")
+    if settings.admin_password == DEV_ADMIN_PASSWORD:
+        insecure.append("TEKIJIN_ADMIN_PASSWORD")
+    if insecure:
+        raise RuntimeError(
+            "Refusing to start with insecure default auth credentials "
+            f"({', '.join(insecure)}) while auth is enforced "
+            f"(app_env={settings.app_env!r}, strict_auth={settings.strict_auth!r}). "
+            "Set them to strong values, or set TEKIJIN_STRICT_AUTH=false to override."
+        )
 
 
 @asynccontextmanager
@@ -38,6 +62,7 @@ def create_app(agent_service: AgentService | None = None) -> FastAPI:
     """
 
     settings = get_settings()
+    _enforce_secure_auth(settings)
     app = FastAPI(title="TEKIJIN", version=__version__, lifespan=_lifespan)
 
     # Explicit origins: a wildcard origin combined with allow_credentials=True is

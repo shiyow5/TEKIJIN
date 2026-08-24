@@ -192,9 +192,9 @@ export function getDashboard(options: RequestOptions = {}): Promise<DashboardRes
 }
 
 /**
- * GET /employees — the employee directory for the current-user switcher. The
- * prototype has no auth, so the acting user is chosen from this list. Returns the
- * unwrapped array (ids in the external "E###" form).
+ * GET /employees — the employee directory for the ADMIN's demo user switcher
+ * (admin-only, #241). Returns the unwrapped array (ids in the external "E###"
+ * form). Regular users never call this.
  */
 export async function getEmployees(options: RequestOptions = {}): Promise<EmployeeSummary[]> {
   const body = await getJson<EmployeeListResponse>("/employees", options);

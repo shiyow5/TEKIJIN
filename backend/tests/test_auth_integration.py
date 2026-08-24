@@ -10,9 +10,21 @@ from sqlalchemy import select
 from tekijin.agent.stubs import KeywordIntentModel, RuleSufficiencyModel, TemplateDraftModel
 from tekijin.api.service import AgentService
 from tekijin.app import create_app
+from tekijin.auth.principal import Principal
+from tekijin.auth.tokens import create_access_token
 from tekijin.config import get_settings
 from tekijin.data.db import get_sessionmaker
 from tekijin.models.tables import Employee
+
+
+def _bearer(employee_id: int | None, *, is_admin: bool = False) -> dict[str, str]:
+    """Mint a bearer header for an arbitrary principal (bypassing login)."""
+    token = create_access_token(
+        Principal(employee_id=employee_id, name="t", dept=None, is_admin=is_admin),
+        secret=get_settings().auth_secret,
+        ttl_hours=1,
+    )
+    return {"Authorization": f"Bearer {token}"}
 
 
 def _raw_client(engine, embedder) -> TestClient:
@@ -163,7 +175,7 @@ def test_user_cannot_act_as_another_employee(seed_counts, engine, fake_embedder)
     assert ask.status_code == 403
 
 
-# --- SSE token-in-query transport ------------------------------------------- #
+# --- SSE token-in-query transport (scoped to /events only) ------------------ #
 def test_events_accepts_token_as_query_param(seed_counts, engine, fake_embedder) -> None:
     client = _raw_client(engine, fake_embedder)
     emp = _an_employee(engine)
@@ -173,3 +185,60 @@ def test_events_accepts_token_as_query_param(seed_counts, engine, fake_embedder)
     # so a missing session surfaces as 404 (not 401).
     assert client.get("/events/nope").status_code == 401
     assert client.get(f"/events/nope?token={token}").status_code == 404
+
+
+def test_query_token_is_rejected_on_non_events_routes(seed_counts, engine, fake_embedder) -> None:
+    """?token= is an /events-only workaround; other routes must NOT accept it in
+    the URL (keeps the token out of access logs) — they require the header."""
+    client = _raw_client(engine, fake_embedder)
+    emp = _an_employee(engine)
+    token = _login(client, emp.email, get_settings().demo_user_password).json()["access_token"]
+
+    # A valid token in the query string does NOT authenticate /questions.
+    assert client.get(f"/questions?asker_id={emp.id}&token={token}").status_code == 401
+    # The same token in the header does.
+    assert (
+        client.get(
+            f"/questions?asker_id={emp.id}",
+            headers={"Authorization": f"Bearer {token}"},
+        ).status_code
+        == 200
+    )
+
+
+# --- object-level session authorization (#241 review HIGH) ------------------ #
+def test_non_participant_is_forbidden_on_session_endpoints(
+    seed_counts, engine, fake_embedder
+) -> None:
+    """A logged-in employee who is neither the asker nor the responder of a session
+    cannot read its handoff / resume it / open its stream — even with a valid token
+    and the session id (the rerouted-away-responder gap)."""
+    client = _raw_client(engine, fake_embedder)
+    # Simulate an existing session owned by asker=10, responder=1.
+    client.app.state.agent_service.session_participants = lambda _sid: (10, 1)
+
+    stranger = _bearer(999)  # neither 10 nor 1
+    assert client.get("/handoff/s1", headers=stranger).status_code == 403
+    assert client.get("/events/s1", headers=stranger).status_code == 403
+    assert (
+        client.post(
+            "/answer",
+            json={"session_id": "s1", "outcome": "accepted"},
+            headers=stranger,
+        ).status_code
+        == 403
+    )
+    assert (
+        client.post(
+            "/handoff/draft",
+            json={"session_id": "s1", "draft": "hi"},
+            headers=stranger,
+        ).status_code
+        == 403
+    )
+
+    # The responder (id 1) passes the participant guard (then hits the normal
+    # 404/flow, NOT 403).
+    assert client.get("/handoff/s1", headers=_bearer(1)).status_code != 403
+    # Admin passes the guard too.
+    assert client.get("/handoff/s1", headers=_bearer(None, is_admin=True)).status_code != 403

@@ -23,10 +23,15 @@ from collections import defaultdict, deque
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from tekijin.auth.passwords import verify_password
+from tekijin.auth.passwords import hash_password, verify_password
 from tekijin.auth.principal import Principal
 from tekijin.config import Settings
 from tekijin.models.tables import Employee
+
+# A throwaway hash verified against when the email is unknown, so a non-existent
+# account costs the SAME PBKDF2 work as a wrong password on a real one — closing
+# the login timing side-channel that would otherwise enumerate valid emails (#241).
+_DUMMY_HASH = hash_password("timing-equalizer-not-a-real-credential")
 
 
 def _norm_email(email: str) -> str:
@@ -59,7 +64,12 @@ def authenticate(
         return Principal(employee_id=None, name=settings.admin_name, dept=None, is_admin=True)
 
     row = session.scalars(select(Employee).where(func.lower(Employee.email) == normalized)).first()
-    if row is None or not verify_password(password, row.password_hash):
+    if row is None:
+        # Verify against a dummy hash so an unknown email costs the same as a wrong
+        # password (constant-time-ish w.r.t. email existence — no enumeration).
+        verify_password(password, _DUMMY_HASH)
+        return None
+    if not verify_password(password, row.password_hash):
         return None
     return Principal(employee_id=row.id, name=row.name, dept=row.department, is_admin=False)
 

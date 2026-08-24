@@ -23,28 +23,27 @@ _UNAUTHENTICATED = HTTPException(
 )
 
 
-def _extract_token(request: Request) -> str | None:
+def _extract_token(request: Request, *, allow_query: bool) -> str | None:
     header = request.headers.get("Authorization")
     if header:
         scheme, _, value = header.partition(" ")
         if scheme.lower() == "bearer" and value.strip():
             return value.strip()
-    # SSE fallback: EventSource cannot send headers, so /events carries ?token=.
-    query_token = request.query_params.get("token")
-    return query_token.strip() if query_token and query_token.strip() else None
+    # SSE-only fallback: a browser EventSource cannot send an Authorization header,
+    # so /events (and only /events) accepts ?token=. Scoping it here keeps the token
+    # out of query strings — and thus access/proxy logs — on every other route.
+    if allow_query:
+        query_token = request.query_params.get("token")
+        if query_token and query_token.strip():
+            return query_token.strip()
+    return None
 
 
-def require_principal(request: Request) -> Principal:
-    """Resolve the authenticated principal or raise 401.
-
-    The resolved principal is cached on ``request.state`` so a handler depending on
-    both ``require_principal`` and ``require_admin`` decodes the token once.
-    """
-
+def _resolve_principal(request: Request, *, allow_query: bool) -> Principal:
     cached = getattr(request.state, "principal", None)
     if isinstance(cached, Principal):
         return cached
-    token = _extract_token(request)
+    token = _extract_token(request, allow_query=allow_query)
     if token is None:
         raise _UNAUTHENTICATED
     try:
@@ -57,6 +56,27 @@ def require_principal(request: Request) -> Principal:
         ) from exc
     request.state.principal = principal
     return principal
+
+
+def require_principal(request: Request) -> Principal:
+    """Resolve the authenticated principal from the ``Authorization`` header, or 401.
+
+    The resolved principal is cached on ``request.state`` so a handler depending on
+    both ``require_principal`` and ``require_admin`` decodes the token once.
+    """
+
+    return _resolve_principal(request, allow_query=False)
+
+
+def require_principal_sse(request: Request) -> Principal:
+    """Like :func:`require_principal`, but ALSO accepts a ``?token=`` query param.
+
+    ONLY for the SSE ``/events`` stream, where a browser ``EventSource`` cannot set
+    an ``Authorization`` header. No other route should use this — a token in the URL
+    can leak into logs.
+    """
+
+    return _resolve_principal(request, allow_query=True)
 
 
 def require_admin(request: Request) -> Principal:
@@ -75,4 +95,30 @@ def require_can_act_as(principal: Principal, employee_id: int) -> None:
         raise HTTPException(
             status_code=403,
             detail="他の利用者として操作する権限がありません。",
+        )
+
+
+def require_session_participant(
+    principal: Principal,
+    asker_id: int | None,
+    responder_id: int | None,
+) -> None:
+    """Object-level auth for the session-scoped endpoints (#241).
+
+    Raise 403 unless ``principal`` is admin or the session's asker/responder. If the
+    session is unknown (both ids ``None``) NOTHING is raised — the handler then
+    returns its own 404 rather than a 403 that would confirm nothing exists. This
+    also revokes a rerouted-away responder: after a decline the responder id becomes
+    the NEW candidate, so the old one is no longer a participant.
+    """
+
+    if principal.is_admin:
+        return
+    participants = {pid for pid in (asker_id, responder_id) if pid is not None}
+    if not participants:
+        return  # unknown session — let the handler 404
+    if principal.employee_id not in participants:
+        raise HTTPException(
+            status_code=403,
+            detail="このセッションにアクセスする権限がありません。",
         )
