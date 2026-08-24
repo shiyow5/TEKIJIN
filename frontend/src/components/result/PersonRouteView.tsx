@@ -3,10 +3,11 @@
 /**
  * Main-line result (route === "person"): the person is the answer, so this
  * leads with the candidate cards and a sendable draft. Up to three candidates
- * are shown, all with full reason detail so they can be compared (#204/#A2);
- * the asker may pick any of them as the recipient, not just the top pick
- * (#200/#A1) — picking one calls `POST /handoff/select`, which reorders the
- * durable hand-off target and regenerates the draft for that person (#204/#C4).
+ * are shown; the asker may pick any of them as the recipient, not just the top
+ * pick (#200) — picking one calls `POST /handoff/select`, which reorders the
+ * durable hand-off target and regenerates the draft for that person. Only the
+ * top card is `expanded`; the comparison signals 距離/現在の負荷 are surfaced on
+ * every card by `CandidateCard` itself (#204).
  * "この内容で依頼する" then persists the (possibly further-edited) draft text
  * to the pending hand-off (POST /handoff/draft), so the responder reads the
  * edited text — it is a real send, not a UI-only transition (#174).
@@ -140,7 +141,7 @@ export function PersonRouteView({
               key={candidate.person_id}
               candidate={candidate}
               rank={index + 1}
-              expanded
+              expanded={index === 0}
               selected={candidate.person_id === selectedPersonId}
               onSelect={sessionId ? handleSelect : undefined}
               fitPercent={fitPercents[index]}

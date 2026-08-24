@@ -627,11 +627,18 @@ class AgentService:
 
                 selected = recs.pop(index)
                 reordered = [selected, *recs]
-                if len(rec_ids) == len(reordered):
-                    sid = rec_ids.pop(index)
-                    new_ids = [sid, *rec_ids]
-                else:  # defensive: ids/recommendations out of sync (should not happen)
-                    new_ids = rec_ids
+                if len(rec_ids) != len(reordered):
+                    # Both lists are built from the same c6_score batch, so this
+                    # cannot happen today. Fail loudly rather than reordering only
+                    # `recommendations`: a silent desync would leave
+                    # `primary_recommendation_id` on the OLD top pick, so the
+                    # responder's accept/decline would land on a different row
+                    # than the person the UI shows.
+                    raise SessionInvalid(
+                        "recommendation ids are out of sync with the shown recommendations"
+                    )
+                sid = rec_ids.pop(index)
+                new_ids = [sid, *rec_ids]
 
                 missing, known_values = draft_context(values)
                 new_draft = self._draft.draft(
