@@ -13,6 +13,7 @@ import {
   postAnswer,
   postAsk,
   regenerateHandoffDraft,
+  resolveQuestion,
   selectHandoffCandidate,
 } from "@/lib/api-client";
 import type { AskRequest, HandoffResponse, ResumeRequest } from "@/lib/api-types";
@@ -475,6 +476,30 @@ describe("correctInterpretation", () => {
     await expect(
       correctInterpretation({ session_id: "s1", supplement: "補足" }, { fetchImpl }),
     ).rejects.toMatchObject({ name: "ApiError", status: 409 });
+  });
+});
+
+describe("resolveQuestion", () => {
+  it("POSTs /questions/{id}/resolve and returns the ack (#159)", async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonResponse({ question_id: "q1", resolved: true }));
+    const result = await resolveQuestion("q1", { fetchImpl });
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe(`${DEFAULT_API_BASE_URL}/questions/q1/resolve`);
+    expect(init?.method).toBe("POST");
+    expect(result).toEqual({ question_id: "q1", resolved: true });
+  });
+
+  it("url-encodes the id and throws ApiError with the 403 status for a non-owner", async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonResponse({ detail: "forbidden" }, { ok: false, status: 403 }));
+    await expect(resolveQuestion("a b/c", { fetchImpl })).rejects.toMatchObject({
+      name: "ApiError",
+      status: 403,
+    });
+    expect(fetchImpl.mock.calls[0][0]).toBe(`${DEFAULT_API_BASE_URL}/questions/a%20b%2Fc/resolve`);
   });
 });
 

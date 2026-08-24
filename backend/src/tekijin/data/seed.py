@@ -178,6 +178,11 @@ def _apply_schema_upgrades(engine: Engine) -> None:
             text("ALTER TABLE employees ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255)")
         )
         conn.execute(text("ALTER TABLE questions ADD COLUMN IF NOT EXISTS route VARCHAR(32)"))
+        # Self-resolution UX signal (#159): the asker marked the question solved
+        # without a live hand-off. Older DBs get it here; fresh ones via create_all.
+        conn.execute(
+            text("ALTER TABLE questions ADD COLUMN IF NOT EXISTS resolution_kind VARCHAR(16)")
+        )
         # The graph thread_id for an API-created question (responder inbox → handoff
         # deep link). Added for #123; older DBs get it here, fresh ones via create_all.
         conn.execute(text("ALTER TABLE questions ADD COLUMN IF NOT EXISTS session_id VARCHAR(64)"))

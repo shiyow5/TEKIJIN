@@ -241,6 +241,13 @@ class DeleteQuestionResponse(BaseModel):
     deleted: bool
 
 
+class ResolveQuestionResponse(BaseModel):
+    """Acknowledgement for POST /questions/{id}/resolve (#159 self-resolution)."""
+
+    question_id: str
+    resolved: bool
+
+
 class FeedbackRequest(BaseModel):
     """The asking side's correction of an AI output (#237 Phase 1).
 
@@ -394,6 +401,7 @@ class RecentQuestionItem(BaseModel):
 
     ``resolution`` says HOW it was resolved (or that it is still pending):
     ``"person"`` a responder took it (accepted rec / answer row),
+    ``"self"`` the asker marked it solved without asking anyone (#159),
     ``"document"`` the document route self-resolved it (no human),
     ``"pending"`` still awaiting a hand-off. ``resolved`` is the boolean shortcut
     ``resolution != "pending"``.
@@ -402,7 +410,7 @@ class RecentQuestionItem(BaseModel):
     question_id: str
     title: str
     resolved: bool = False
-    resolution: Literal["person", "document", "pending"] = "pending"
+    resolution: Literal["person", "self", "document", "pending"] = "pending"
     responder_name: str | None = None
     # Deep-link target for re-viewing the result (/session/{session_id} replays
     # the run over /events). ``None`` for seeded history with no live session.

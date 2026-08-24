@@ -49,7 +49,7 @@ from tekijin.data.history import question_asker_id, recent_questions_for_asker
 from tekijin.data.inbox import pending_handoffs_for_responder
 from tekijin.data.notifications import pending_decline_notifications_for_asker
 from tekijin.data.repository import Repository
-from tekijin.data.writes import ack_decline_notifications, delete_question
+from tekijin.data.writes import ack_decline_notifications, delete_question, mark_self_resolved
 
 logger = logging.getLogger(__name__)
 
@@ -511,6 +511,32 @@ def delete_question_endpoint(
         # Existence was just confirmed above and the delete ran in the same
         # transaction, so the question is gone.
         return schemas.DeleteQuestionResponse(question_id=question_id, deleted=True)
+
+
+@router.post("/questions/{question_id}/resolve", response_model=schemas.ResolveQuestionResponse)
+def resolve_question_endpoint(
+    request: Request,
+    question_id: str,
+    principal: Principal = Depends(require_principal),
+) -> schemas.ResolveQuestionResponse:
+    """Mark one of the asker's own questions self-resolved (#159).
+
+    The "人を介さず解決した" UX signal: the asker got what they needed from a
+    document / past answer and did not ask a person. Only the owning asker — or an
+    admin — may mark it; a missing question is a 404, someone else's is a 403
+    (``require_can_act_as``). Idempotent (first-wins): re-marking, or marking a
+    question a responder already resolved, is a no-op that still acks. Feeds the
+    dashboard self-resolution rate.
+    """
+
+    with _generic_500("POST /questions/{id}/resolve"):
+        with session_scope(_service(request).session_factory) as session:
+            owner = question_asker_id(session, question_id)
+            if owner is None:
+                raise HTTPException(status_code=404, detail="question not found")
+            require_can_act_as(principal, owner)
+            mark_self_resolved(session, question_id, _service(request).now())
+        return schemas.ResolveQuestionResponse(question_id=question_id, resolved=True)
 
 
 @router.post("/feedback", response_model=schemas.FeedbackAck)

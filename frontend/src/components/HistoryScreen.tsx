@@ -11,6 +11,7 @@
 
 import { useCurrentUser } from "@/components/CurrentUserProvider";
 import { QuestionDeleteButton } from "@/components/QuestionDeleteButton";
+import { QuestionResolveButton } from "@/components/QuestionResolveButton";
 import { getRecentQuestions } from "@/lib/api-client";
 import type { RecentQuestionItem } from "@/lib/api-types";
 import Link from "next/link";
@@ -32,9 +33,10 @@ function formatDate(iso: string | null | undefined): string | null {
   return `${iso.slice(0, 10)} ${iso.slice(11, 16)}`;
 }
 
-/** The resolution line: responder name, document self-resolve, or pending. */
+/** The resolution line: responder name, self / document self-resolve, or pending. */
 function resolutionNote(item: RecentQuestionItem): string {
   if (item.responder_name) return `回答者: ${item.responder_name}`;
+  if (item.resolution === "self") return "自分で解決";
   if (item.resolution === "document") return "社内文書で回答";
   return "取り次ぎ先を調整中";
 }
@@ -42,9 +44,11 @@ function resolutionNote(item: RecentQuestionItem): string {
 function HistoryRow({
   item,
   onDeleted,
+  onResolved,
 }: {
   item: RecentQuestionItem;
   onDeleted: (questionId: string) => void;
+  onResolved: (questionId: string) => void;
 }) {
   const date = formatDate(item.created_at);
   return (
@@ -74,6 +78,15 @@ function HistoryRow({
         ) : (
           <span className="text-on-surface-variant">履歴のみ</span>
         )}
+        {/* A still-pending question can be marked self-resolved (#159): the asker
+            got what they needed without asking a person. */}
+        {item.resolution === "pending" ? (
+          <QuestionResolveButton
+            questionId={item.question_id}
+            title={item.title}
+            onResolved={onResolved}
+          />
+        ) : null}
       </div>
       <QuestionDeleteButton
         questionId={item.question_id}
@@ -116,11 +129,27 @@ export function HistoryScreen() {
     );
   }
 
+  /** Mark a just-self-resolved question in place (#159) without a full re-fetch. */
+  function handleResolved(questionId: string) {
+    setState((prev) =>
+      prev.phase === "ready" && prev.items
+        ? {
+            phase: "ready",
+            items: prev.items.map((i) =>
+              i.question_id === questionId
+                ? { ...i, resolved: true, resolution: "self" as const }
+                : i,
+            ),
+          }
+        : prev,
+    );
+  }
+
   return (
     <section className="mx-auto w-full max-w-3xl px-md py-lg">
       <h1 className="mb-xs font-bold text-2xl text-on-surface">質問履歴</h1>
       <p className="mb-lg text-on-surface-variant text-sm">
-        これまでにあなたが投稿した質問の一覧です。不要になった質問は削除できます。
+        これまでにあなたが投稿した質問の一覧です。自分で解決できた質問は「自分で解決した」で記録でき、不要になった質問は削除できます。
       </p>
 
       {state.phase === "loading" ? (
@@ -132,7 +161,12 @@ export function HistoryScreen() {
       ) : state.items && state.items.length > 0 ? (
         <ul className="flex flex-col gap-sm">
           {state.items.map((item) => (
-            <HistoryRow key={item.question_id} item={item} onDeleted={handleDeleted} />
+            <HistoryRow
+              key={item.question_id}
+              item={item}
+              onDeleted={handleDeleted}
+              onResolved={handleResolved}
+            />
           ))}
         </ul>
       ) : (

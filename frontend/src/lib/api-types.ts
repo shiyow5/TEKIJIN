@@ -56,6 +56,12 @@ export interface DeleteQuestionResponse {
   deleted: boolean;
 }
 
+/** POST /questions/{id}/resolve — acknowledgement of a self-resolution (#159). */
+export interface ResolveQuestionResponse {
+  question_id: string;
+  resolved: boolean;
+}
+
 /**
  * POST /handoff/draft body — persist the asker's edited hand-off draft (画面3) so
  * the responder (画面4) reads the edited text. Draft-only; it never changes the
@@ -160,7 +166,7 @@ export interface InboxResponse {
  * took it, "document" the document route self-resolved it (no human), "pending"
  * still awaiting a hand-off.
  */
-export type QuestionResolution = "person" | "document" | "pending";
+export type QuestionResolution = "person" | "self" | "document" | "pending";
 
 export interface RecentQuestionItem {
   question_id: string;
