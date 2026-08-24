@@ -233,6 +233,12 @@ class Settings(BaseSettings):
     login_max_attempts: int = 5
     login_window_seconds: float = 300.0
 
+    # Feedback flood throttle (#263): at most this many POST /feedback per actor
+    # within the rolling window before further posts are refused (429). Feedback is
+    # an append-only learning signal, so this bounds metric/learning-signal spam.
+    feedback_max_per_window: int = 60
+    feedback_window_seconds: float = 60.0
+
     # Fail-closed on insecure auth defaults (#241), mirroring ``strict_durability``.
     # ``None`` (default) derives from ``app_env`` (enforced when not "development").
     # A SEPARATE knob because the DGX host runs app_env=development for an unrelated

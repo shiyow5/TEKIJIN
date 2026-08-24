@@ -519,24 +519,44 @@ def feedback(
     request: Request,
     principal: Principal = Depends(require_principal),
 ) -> schemas.FeedbackAck:
-    """Record the asking side's correction of an AI output (#237 Phase 1).
+    """Record the asking side's correction of an AI output (#237 Phase 1, hardened #263).
 
     The signal the runtime used to discard: "the interpretation / recommendation /
     draft is wrong". ``actor_id`` is taken from the authenticated principal (never
-    the body), so feedback cannot be attributed to another user. Authorization is
-    intentionally light per the issue scope — any authenticated user may record
-    their own feedback; it is a learning signal, not a state mutation.
+    the body), so feedback cannot be attributed to another user.
+
+    Object-level authorization (#263): feedback is append-only, but a link to
+    someone else's ``question_id`` / ``session_id`` would let a user pollute that
+    target's learning signal / metrics. So a caller may only tag a target they own:
+    a ``session_id`` requires being that session's asker/responder (or admin) while
+    it is still live; a ``question_id`` requires being that question's asker (or
+    admin). An UNKNOWN target link is silently dropped (recorded without it) rather
+    than 403'd, matching the rest of the app's no-enumeration-oracle stance.
+
+    Rate limited per actor (#263) so the append-only signal cannot be flooded.
     """
+
+    limiter = request.app.state.feedback_rate_limiter
+    if not limiter.allow(f"feedback:{principal.employee_id}"):
+        raise HTTPException(status_code=429, detail="フィードバックの送信が多すぎます。")
+
+    # Session-scoped auth: only a live-session participant (or admin) may tag it.
+    if req.session_id is not None:
+        asker_id, responder_id = _service(request).session_participants(req.session_id)
+        require_session_participant(principal, asker_id, responder_id)
 
     with _generic_500("POST /feedback"):
         with session_scope(_service(request).session_factory) as session:
-            # A dangling question_id would raise an FK IntegrityError → 500, which
-            # also leaks whether that id exists (an enumeration oracle the rest of
-            # the app avoids, cf. require_session_participant). Drop an unknown link
-            # instead: record the signal without confirming existence.
+            # Question-scoped auth: a KNOWN question may be tagged only by its owner
+            # (or admin); an UNKNOWN id is dropped (no FK IntegrityError → 500, and
+            # no existence oracle), recording the signal without the link.
             question_id = req.question_id
-            if question_id is not None and question_asker_id(session, question_id) is None:
-                question_id = None
+            if question_id is not None:
+                owner = question_asker_id(session, question_id)
+                if owner is None:
+                    question_id = None
+                else:
+                    require_can_act_as(principal, owner)
             record_feedback(
                 session,
                 stage=req.stage,

@@ -2248,6 +2248,84 @@ def test_feedback_endpoint_records_with_actor_from_principal(
     assert row.actor_id == 10
 
 
+def test_feedback_owner_may_tag_their_question_stranger_gets_403(
+    seed_counts, engine, fake_embedder
+) -> None:
+    # q_0001 is owned by asker_id 33 (fixtures). Object-level auth (#263).
+    client = _client(engine, fake_embedder)
+    owner = client.post(
+        "/feedback",
+        json={"stage": "c1", "kind": "x", "question_id": "q_0001"},
+        headers=_user_headers(33),
+    )
+    assert owner.status_code == 200
+    # A non-owner cannot tag someone else's question (would pollute its signal).
+    stranger = client.post(
+        "/feedback",
+        json={"stage": "c1", "kind": "x", "question_id": "q_0001"},
+        headers=_user_headers(10),
+    )
+    assert stranger.status_code == 403
+    # Only the owner's row was recorded, with the link kept.
+    rows = _feedback_rows(engine)
+    assert len(rows) == 1 and rows[0].actor_id == 33 and rows[0].question_id == "q_0001"
+
+
+def test_feedback_unknown_question_id_is_dropped_not_403(
+    seed_counts, engine, fake_embedder
+) -> None:
+    # An unknown id must not 403 (that would be an existence oracle) nor 500 (FK) —
+    # the link is dropped and the signal still recorded (#263, preserves #237).
+    client = _client(engine, fake_embedder)
+    resp = client.post(
+        "/feedback",
+        json={"stage": "c1", "kind": "x", "question_id": "q_does_not_exist"},
+        headers=_user_headers(10),
+    )
+    assert resp.status_code == 200
+    rows = _feedback_rows(engine)
+    assert len(rows) == 1 and rows[0].question_id is None
+
+
+def test_feedback_non_participant_cannot_tag_a_live_session(
+    seed_counts, engine, fake_embedder
+) -> None:
+    client = _client(
+        engine, fake_embedder, retriever=_FakeRetriever(people=[1]), scorer=_FakeScorer(_recs(1))
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "fbauth"})
+    _events(client, "fbauth")  # live session, asker=10 / responder=E001
+    # A stranger (not asker/responder) cannot tag the live session.
+    stranger = client.post(
+        "/feedback",
+        json={"stage": "c6", "kind": "x", "session_id": "fbauth"},
+        headers=_user_headers(999),
+    )
+    assert stranger.status_code == 403
+    # The asker can.
+    ok = client.post(
+        "/feedback",
+        json={"stage": "c6", "kind": "x", "session_id": "fbauth"},
+        headers=_user_headers(10),
+    )
+    assert ok.status_code == 200
+
+
+def test_feedback_is_rate_limited_per_actor(seed_counts, engine, fake_embedder) -> None:
+    from tekijin.api.rate_limit import SlidingWindowLimiter
+
+    client = _client(engine, fake_embedder)
+    # Shrink the limiter so the flood guard trips deterministically.
+    client.app.state.feedback_rate_limiter = SlidingWindowLimiter(max_events=2, window_seconds=60.0)
+    body = {"stage": "c1", "kind": "x"}
+    assert client.post("/feedback", json=body, headers=_user_headers(10)).status_code == 200
+    assert client.post("/feedback", json=body, headers=_user_headers(10)).status_code == 200
+    # Third within the window is refused.
+    assert client.post("/feedback", json=body, headers=_user_headers(10)).status_code == 429
+    # A DIFFERENT actor is tracked independently (not penalised by 10's flood).
+    assert client.post("/feedback", json=body, headers=_user_headers(11)).status_code == 200
+
+
 def test_feedback_endpoint_rejects_an_unknown_stage(seed_counts, engine, fake_embedder) -> None:
     client = _client(engine, fake_embedder)
     resp = client.post("/feedback", json={"stage": "c9", "kind": "x"}, headers=_user_headers(10))
