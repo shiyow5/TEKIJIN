@@ -209,6 +209,31 @@ def test_document_route_is_terminal(seed_counts, session, fake_embedder) -> None
     assert not _is_paused(agent, cfg)  # terminal, no interrupt
 
 
+def test_document_route_offers_a_person_fallback(seed_counts, session, fake_embedder) -> None:
+    # #279: a document-routed question that DOES have an expert behind the weak
+    # profile no longer dead-ends at zero person-recall. C6 runs on the document
+    # route too, so the DOCUMENT terminal cites the doc AND names a fallback person
+    # — while staying terminal (self-resolution first, no hand-off interrupt).
+    for emp in (1, 2):
+        _seed_skill(session, f"sk_docfb_{emp}", emp)  # real topic evidence
+    retriever = _FakeRetriever(
+        documents=[{"doc_id": "doc_0007", "score": 0.05}],
+        document_confidence=0.8,  # strongly on-topic document
+        people_confidence=0.2,  # weak profile match -> document route
+        people=[1, 2],
+    )
+    agent = build_agent(fake_embedder, session, retriever=retriever)
+    cfg = _cfg("docfb")
+    state = agent.invoke(_init(), cfg)
+
+    assert state["route"] == DOCUMENT
+    assert state["document_id"] == "doc_0007"
+    assert state["recommendations"]  # C6 ranked the fallback experts
+    assert state["recommendations"][0]["name"] in state["answer"]  # named as a backstop
+    assert "doc_0007" in state["answer"]  # document is still the main line
+    assert not _is_paused(agent, cfg)  # terminal — no send interrupt
+
+
 # --------------------------------------------------------------------------- #
 # decline -> reroute to the next candidate
 # --------------------------------------------------------------------------- #

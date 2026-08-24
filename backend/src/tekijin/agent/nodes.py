@@ -348,10 +348,15 @@ class AgentNodes:
         top = _top_by_score(docs)
         doc_id = top["doc_id"] if top else None
         where = f"（文書ID: {doc_id}）" if doc_id else ""
-        return {
-            "answer": f"社内文書に該当がありそうです{where}。該当箇所をご確認ください。",
-            "document_id": doc_id,
-        }
+        answer = f"社内文書に該当がありそうです{where}。該当箇所をご確認ください。"
+        # #279: C6 ran on the document route too, so a real expert behind a
+        # weak-profile document is offered as a fallback rather than dead-ending
+        # at zero person-recall. Self-resolution stays the main line (no hand-off
+        # interrupt); the person is a "if this does not solve it" backstop.
+        recs = state.get("recommendations") or []
+        if recs:
+            answer += f"（解決しない場合は{recs[0]['name']}さんにも取り次げます）"
+        return {"answer": answer, "document_id": doc_id}
 
     def no_candidate(self, state: AgentState) -> AgentState:
         return {
