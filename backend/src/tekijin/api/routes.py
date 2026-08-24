@@ -355,12 +355,15 @@ def inbox(
 def questions(
     request: Request,
     asker_id: str = Query(min_length=1),
+    limit: int = Query(5, ge=1, le=200),
     principal: Principal = Depends(require_principal),
 ) -> schemas.RecentQuestionsResponse:
     """The asker's own recent questions with resolution state (画面1 の一覧, #125).
 
     ``asker_id`` accepts an int or the ``"E###"`` form (422 otherwise). A non-admin
-    may only read their own questions; admin may read anyone's (demo).
+    may only read their own questions; admin may read anyone's (demo). ``limit``
+    (default 5, the question screen's small recap; the history screen #208 requests
+    up to 200) caps how many newest-first questions are returned.
     """
 
     with _generic_500("GET /questions"):
@@ -373,7 +376,7 @@ def questions(
         require_can_act_as(principal, aid)
 
         with _service(request).session_factory() as session:
-            rows = recent_questions_for_asker(session, aid)
+            rows = recent_questions_for_asker(session, aid, limit=limit)
         return schemas.RecentQuestionsResponse(
             items=[schemas.RecentQuestionItem(**row) for row in rows]
         )

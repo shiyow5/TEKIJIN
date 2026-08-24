@@ -1838,3 +1838,43 @@ def test_deleted_question_drops_out_of_recent_list(seed_counts, engine, fake_emb
     client.delete("/questions/api_del4")
     after = client.get("/questions", params={"asker_id": "E010"}).json()["items"]
     assert all(i["question_id"] != "api_del4" for i in after)
+
+
+# --------------------------------------------------------------------------- #
+# #208: /questions honours a `limit` (history screen requests many, panel few)
+# --------------------------------------------------------------------------- #
+def test_questions_limit_caps_and_orders_newest_first(seed_counts, engine, fake_embedder) -> None:
+    client = _client(engine, fake_embedder)
+    # Seven questions strictly newer than any seeded row (created_at in the future),
+    # so they are deterministically the newest regardless of seed history.
+    factory = get_sessionmaker(engine)
+    with factory() as s:
+        for i in range(7):
+            s.add(
+                Question(
+                    id=f"api_hist{i}",
+                    asker_id=10,
+                    body=f"履歴テスト{i}",
+                    topics=[],
+                    status="open",
+                    created_at=NOW + dt.timedelta(minutes=i),
+                    session_id=None,
+                )
+            )
+        s.commit()
+
+    # limit=3 -> exactly the 3 newest (hist6, hist5, hist4), newest first.
+    got = client.get("/questions", params={"asker_id": "E010", "limit": 3}).json()["items"]
+    assert [i["question_id"] for i in got] == ["api_hist6", "api_hist5", "api_hist4"]
+
+    # A larger limit returns more of them (all 7 api_ ones are newest).
+    many = client.get("/questions", params={"asker_id": "E010", "limit": 50}).json()["items"]
+    top7 = [i["question_id"] for i in many[:7]]
+    assert top7 == [f"api_hist{i}" for i in range(6, -1, -1)]
+
+
+def test_questions_limit_is_validated(seed_counts, engine, fake_embedder) -> None:
+    client = _client(engine, fake_embedder)
+    # Out-of-range limits are rejected (1..200).
+    assert client.get("/questions", params={"asker_id": "E010", "limit": 0}).status_code == 422
+    assert client.get("/questions", params={"asker_id": "E010", "limit": 201}).status_code == 422

@@ -334,6 +334,16 @@ describe("getRecentQuestions", () => {
     expect(result).toEqual(ITEMS);
   });
 
+  it("appends a limit query when given (history screen, #208)", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ items: ITEMS }));
+
+    await getRecentQuestions("E001", { fetchImpl, limit: 200 });
+
+    expect(fetchImpl.mock.calls[0][0]).toBe(
+      `${DEFAULT_API_BASE_URL}/questions?asker_id=E001&limit=200`,
+    );
+  });
+
   it("throws ApiError on a non-2xx response", async () => {
     const fetchImpl = vi
       .fn<typeof fetch>()
