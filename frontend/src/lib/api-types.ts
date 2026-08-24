@@ -35,6 +35,12 @@ export interface AskRequest {
 export type Outcome = "accepted" | "declined";
 
 /**
+ * The asker's chosen consultation method. "chat" is the implicit default — an
+ * unset value from the backend is always coalesced to it.
+ */
+export type ConsultMethod = "direct" | "chat";
+
+/**
  * Exactly one of `outcome` or `reply` — encoded as a discriminated union so a
  * caller (the #38 answer screen) cannot construct a payload with both or neither,
  * matching the backend's `_exactly_one` validator. The `never` on the unused arm
@@ -70,6 +76,8 @@ export interface ResolveQuestionResponse {
 export interface HandoffDraftRequest {
   session_id: string;
   draft: string;
+  /** Defaults to "chat" server-side when omitted. */
+  consult_method?: ConsultMethod;
 }
 
 /**
@@ -268,6 +276,8 @@ export interface HandoffResponse {
   helpful_answer_count: number;
   /** Generation token echoed back on POST /answer so a stale outcome 409s (#94). */
   recommendation_id?: number | null;
+  /** The asker's chosen consultation method; "chat" until they choose otherwise. */
+  consult_method?: ConsultMethod;
 }
 
 // --------------------------------------------------------------------------- //

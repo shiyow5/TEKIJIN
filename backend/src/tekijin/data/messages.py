@@ -47,7 +47,14 @@ def thread_parties(session: Session, thread_id: int) -> dict[str, Any] | None:
         .join(Question, Recommendation.question_id == Question.id)
         .join(Employee, Employee.id == Question.asker_id)
         .join(Responder, Responder.id == Recommendation.employee_id)
-        .where(Recommendation.id == thread_id, Recommendation.outcome == "accepted")
+        .where(
+            Recommendation.id == thread_id,
+            Recommendation.outcome == "accepted",
+            # A "direct" consultation never gets a chat thread — never even
+            # existed for its own two parties. NULL (never chosen) falls back
+            # to "chat", the implicit default.
+            func.coalesce(Question.consult_method, "chat") != "direct",
+        )
     ).first()
     if row is None:
         return None
@@ -137,6 +144,9 @@ def threads_for_employee(session: Session, employee_id: int) -> list[dict[str, A
         .where(
             Recommendation.outcome == "accepted",
             (Question.asker_id == employee_id) | (Recommendation.employee_id == employee_id),
+            # "Direct" consultations never get a chat thread; NULL falls back
+            # to "chat", the implicit default.
+            func.coalesce(Question.consult_method, "chat") != "direct",
         )
         .order_by(
             func.coalesce(

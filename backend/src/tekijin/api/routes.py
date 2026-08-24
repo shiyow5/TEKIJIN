@@ -228,7 +228,7 @@ def handoff_draft(
     require_session_participant(principal, asker_id, responder_id)
     try:
         _service(request).save_handoff_draft(
-            req.session_id, req.draft, actor_id=principal.employee_id
+            req.session_id, req.draft, req.consult_method, actor_id=principal.employee_id
         )
     except HandoffNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

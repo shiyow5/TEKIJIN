@@ -13,6 +13,10 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 Outcome = Literal["accepted", "declined"]
 
+# The asker's chosen consultation method. "chat" is the implicit default: an
+# unset/legacy value is coalesced to it everywhere it is read.
+ConsultMethod = Literal["direct", "chat"]
+
 # session_id doubles as the ``/events/{session_id}`` path segment and the graph
 # ``thread_id``; constrain it to path-safe characters (no ``/``) so a created
 # session is always reachable over GET /events.
@@ -134,6 +138,9 @@ class HandoffDraftRequest(BaseModel):
 
     session_id: str = Field(pattern=_SESSION_ID_PATTERN)
     draft: str = Field(min_length=1)
+    # Defaults to "chat" so a client that predates this field (or an asker who
+    # cancels the method popup) keeps the pre-existing implicit behaviour.
+    consult_method: ConsultMethod = "chat"
 
     @field_validator("draft")
     @classmethod
@@ -357,6 +364,9 @@ class HandoffResponse(BaseModel):
     # on POST /answer so a stale outcome (after a reroute / from a competing tab)
     # is rejected instead of binding to a new candidate (#94). None if no primary.
     recommendation_id: int | None = None
+    # The asker's chosen consultation method; "chat" until they choose otherwise
+    # via POST /handoff/draft.
+    consult_method: ConsultMethod = "chat"
 
 
 class HandoffSelectResponse(BaseModel):

@@ -192,6 +192,12 @@ class Question(Base):
     # API when C5 emits, so the dashboard can report the self-resolution rate
     # (補助経路で人を介さず解決した割合). NULL for pre-seeded/unrouted questions.
     route: Mapped[str | None] = mapped_column(String(32))
+    # The asker's chosen consultation method ("direct" | "chat"), set via
+    # POST /handoff/draft when confirming the hand-off. Lives on the question
+    # (not the recommendation) so it survives a decline+reroute, which creates
+    # a NEW Recommendation row for the same question. NULL (never set) is
+    # treated as "chat" everywhere — the implicit pre-existing default.
+    consult_method: Mapped[str | None] = mapped_column(String(32))
     # When the question was resolved at runtime — a responder accepted the hand-off
     # (C8) or a self-resolving terminal (document) was reached. Set first-wins by
     # the API so the dashboard's average resolution time reflects live traffic, not

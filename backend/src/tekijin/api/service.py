@@ -60,7 +60,8 @@ from tekijin.api.events import (
 )
 from tekijin.data.db import session_scope
 from tekijin.data.feedback import record_feedback
-from tekijin.data.handoff import employee_brief, responder_reuse_stats
+from tekijin.data.handoff import employee_brief, question_consult_method, responder_reuse_stats
+from tekijin.data.messages import create_message
 from tekijin.data.writes import (
     employee_exists,
     insert_shown_recommendations,
@@ -72,6 +73,7 @@ from tekijin.data.writes import (
     reorder_recommendation_ranks,
     set_recommendation_outcome,
     update_question_body,
+    update_question_consult_method,
     update_question_route,
     update_question_topics,
 )
@@ -491,6 +493,20 @@ class AgentService:
             # resolution time (first-wins) for the dashboard's avg-resolution (#97).
             if outcome == "accepted" and question_id is not None:
                 mark_question_resolved(session, question_id, self._now_factory())
+                # Seed the chat with the asker's own request text (the hand-off
+                # draft) as its first message, so the responder opens the thread
+                # already seeing what they were asked — not an empty conversation.
+                # Skipped for "direct" (no chat thread exists at all).
+                if question_consult_method(session, question_id) != "direct":
+                    draft = (values.get("draft") or "").strip()
+                    asker_id = (values.get("asker") or {}).get("id")
+                    if draft and asker_id is not None:
+                        # Real wall-clock, not self._now_factory(): this message
+                        # must sort before whatever a human sends next via
+                        # POST /messages, which always timestamps with
+                        # dt.datetime.now() (routes.py) regardless of the
+                        # graph's (possibly injected/frozen) clock.
+                        create_message(session, primary, asker_id, draft, dt.datetime.now())
             return "recorded", outcome
 
     # -- /handoff : responder-facing view (product-spec 画面4) ------------- #
@@ -544,6 +560,10 @@ class AgentService:
                     **{**primary, "person_id": schemas.format_employee_id(primary["person_id"])}
                 )
                 reuse = responder_reuse_stats(session, primary["person_id"])
+            # SQL, not the checkpoint: the asker's method choice must also be
+            # visible to the inbox / chat gating, which never read the graph
+            # state, so it lives only in Question.consult_method.
+            consult_method = question_consult_method(session, values.get("question_id"))
 
         return schemas.HandoffResponse(
             session_id=session_id,
@@ -562,12 +582,25 @@ class AgentService:
             reuse_count=reuse["reuse_count"],
             helpful_answer_count=reuse["helpful_answer_count"],
             recommendation_id=values.get("primary_recommendation_id"),
+            consult_method=consult_method,
         )
 
     def save_handoff_draft(
-        self, session_id: str, draft: str, *, actor_id: int | None = None
+        self,
+        session_id: str,
+        draft: str,
+        consult_method: str,
+        *,
+        actor_id: int | None = None,
     ) -> None:
-        """Persist the asker's edited hand-off ``draft`` (画面3 → 画面4) (#174).
+        """Persist the asker's edited hand-off ``draft`` (画面3 → 画面4) (#174) and
+        their chosen consultation method (#245).
+
+        ``consult_method`` goes to SQL (``Question.consult_method``), not the
+        checkpoint: the inbox and the chat-thread gating are SQL-only, so that is
+        the only place they can see it. It lives on the QUESTION rather than the
+        recommendation so it survives a decline+reroute, which creates a new
+        rank-1 recommendation row for the same question.
 
         Only the durable ``draft`` value is updated, never the recommendation ids
         or the accept/decline outcome, so the responder-side lifecycle (#94) is
@@ -604,6 +637,9 @@ class AgentService:
                 generated = state.values.get("draft")
                 question_id = state.values.get("question_id")
                 graph.update_state(config, {"draft": text})
+                if question_id is not None:
+                    update_question_consult_method(session, question_id, consult_method)
+                    session.commit()
             finally:
                 session.close()
         # Record the edit as C7 feedback OUTSIDE the graph session/lock: it is an

@@ -63,6 +63,10 @@ test.describe("asker flow", () => {
     await expect(draft).toHaveValue(PERSON_ROUTE_DRAFT);
     await page.getByRole("button", { name: "この内容で依頼する" }).click();
 
+    // Choosing the consultation method is a popup step after the send button.
+    await expect(page.getByRole("dialog", { name: "相談方法を選んでください" })).toBeVisible();
+    await page.getByRole("button", { name: "チャットで相談する" }).click();
+
     await expect(page.getByRole("heading", { name: "依頼を送りました" })).toBeVisible();
   });
 

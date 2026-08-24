@@ -716,6 +716,166 @@ def test_message_thread_appears_for_both_parties_after_acceptance(
     assert asker_threads[0]["question_title"] == GOOD_Q
 
 
+def test_accepted_thread_is_seeded_with_the_asker_draft_as_first_message(
+    seed_counts, engine, fake_embedder
+) -> None:
+    # The asker's own request text (the hand-off draft) must be visible in the
+    # chat, not just implied by the question preview — so the responder opens
+    # the thread already seeing what they were asked.
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2, 3], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2, 3)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "msg-seed1"})
+    _events(client, "msg-seed1")
+    draft = client.get("/handoff/msg-seed1").json()["draft"]
+    assert draft
+
+    client.post("/answer", json={"session_id": "msg-seed1", "outcome": "accepted"})
+    _events(client, "msg-seed1")
+    thread_id = client.get("/messages/threads", params={"employee_id": "E010"}).json()["items"][0][
+        "thread_id"
+    ]
+
+    detail = client.get(f"/messages/threads/{thread_id}", params={"employee_id": "E001"}).json()
+    assert detail["messages"][0]["body"] == draft
+    assert detail["messages"][0]["sender_id"] == "E010"
+
+    listing = client.get("/messages/threads", params={"employee_id": "E001"}).json()["items"][0]
+    assert listing["last_message"] == draft
+
+
+def test_direct_consultation_gets_no_seeded_message(seed_counts, engine, fake_embedder) -> None:
+    # No chat thread exists at all for "direct", so there is nothing to seed —
+    # covered here as a guard against the seeding write itself erroring out.
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2, 3], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2, 3)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "msg-seed2"})
+    _events(client, "msg-seed2")
+    client.post(
+        "/handoff/draft",
+        json={"session_id": "msg-seed2", "draft": "本文", "consult_method": "direct"},
+    )
+    answered = client.post("/answer", json={"session_id": "msg-seed2", "outcome": "accepted"})
+    assert answered.status_code == 200
+    _events(client, "msg-seed2")
+
+    threads = client.get("/messages/threads", params={"employee_id": "E010"}).json()["items"]
+    assert all(t["question_title"] != GOOD_Q for t in threads)
+
+
+# --------------------------------------------------------------------------- #
+# consultation method: 直接相談 / チャットで相談
+# --------------------------------------------------------------------------- #
+def test_consult_method_defaults_to_chat_when_never_set(seed_counts, engine, fake_embedder) -> None:
+    # Backward compatibility: an asker who never calls POST /handoff/draft (or a
+    # client that predates this field) behaves exactly as before — "chat" everywhere.
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2, 3], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2, 3)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "cm-default"})
+    _events(client, "cm-default")
+
+    assert client.get("/handoff/cm-default").json()["consult_method"] == "chat"
+
+    client.post("/answer", json={"session_id": "cm-default", "outcome": "accepted"})
+    _events(client, "cm-default")
+    threads = client.get("/messages/threads", params={"employee_id": "E010"}).json()["items"]
+    assert any(t["question_title"] == GOOD_Q for t in threads)
+
+
+def test_consult_method_direct_is_visible_before_acceptance(
+    seed_counts, engine, fake_embedder
+) -> None:
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2, 3], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2, 3)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "cm-direct1"})
+    _events(client, "cm-direct1")
+
+    saved = client.post(
+        "/handoff/draft",
+        json={"session_id": "cm-direct1", "draft": "本文", "consult_method": "direct"},
+    )
+    assert saved.status_code == 200
+
+    assert client.get("/handoff/cm-direct1").json()["consult_method"] == "direct"
+
+
+def test_consult_method_direct_never_gets_a_chat_thread(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2, 3], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2, 3)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "cm-direct2"})
+    _events(client, "cm-direct2")
+    client.post(
+        "/handoff/draft",
+        json={"session_id": "cm-direct2", "draft": "本文", "consult_method": "direct"},
+    )
+    # The accepted recommendation id doubles as the thread id (#224's scheme);
+    # capture it before accepting — GET /handoff 404s once the outcome lands.
+    thread_id = client.get("/handoff/cm-direct2").json()["recommendation_id"]
+    assert thread_id is not None
+
+    client.post("/answer", json={"session_id": "cm-direct2", "outcome": "accepted"})
+    _events(client, "cm-direct2")
+
+    asker_threads = client.get("/messages/threads", params={"employee_id": "E010"}).json()["items"]
+    responder_threads = client.get("/messages/threads", params={"employee_id": "E001"}).json()[
+        "items"
+    ]
+    assert all(t["question_title"] != GOOD_Q for t in asker_threads)
+    assert all(t["question_title"] != GOOD_Q for t in responder_threads)
+
+    # Even knowing the id, a "direct" consultation's thread is 404 for both parties.
+    assert (
+        client.get(f"/messages/threads/{thread_id}", params={"employee_id": "E010"}).status_code
+        == 404
+    )
+    assert (
+        client.post(
+            "/messages", json={"thread_id": thread_id, "sender_id": "E010", "body": "hi"}
+        ).status_code
+        == 404
+    )
+
+
+def test_consult_method_survives_decline_and_reroute(seed_counts, engine, fake_embedder) -> None:
+    # consult_method lives on the Question (not the Recommendation), so it must
+    # carry over to the NEW rank-1 recommendation a decline+reroute creates.
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "cm-reroute"})
+    _events(client, "cm-reroute")
+    client.post(
+        "/handoff/draft",
+        json={"session_id": "cm-reroute", "draft": "本文", "consult_method": "direct"},
+    )
+
+    client.post("/answer", json={"session_id": "cm-reroute", "outcome": "declined"})
+    _events(client, "cm-reroute")
+    assert client.get("/handoff/cm-reroute").json()["consult_method"] == "direct"
+
+
 def test_send_and_list_messages_round_trip(seed_counts, engine, fake_embedder) -> None:
     client = _client(
         engine,
@@ -746,8 +906,13 @@ def test_send_and_list_messages_round_trip(seed_counts, engine, fake_embedder) -
         detail = client.get(
             f"/messages/threads/{thread_id}", params={"employee_id": employee_id}
         ).json()
-        assert [m["body"] for m in detail["messages"]] == ["よろしくお願いします", "承知しました"]
-        assert [m["sender_id"] for m in detail["messages"]] == ["E010", "E001"]
+        # The first message is auto-seeded from the asker's hand-off draft at
+        # acceptance time, so the responder opens the thread already seeing what
+        # they were asked, not an empty conversation.
+        bodies = [m["body"] for m in detail["messages"]]
+        assert bodies[1:] == ["よろしくお願いします", "承知しました"]
+        assert bodies[0]  # non-empty draft text
+        assert [m["sender_id"] for m in detail["messages"]] == ["E010", "E010", "E001"]
 
     listing = client.get("/messages/threads", params={"employee_id": "E010"}).json()["items"][0]
     assert listing["last_message"] == "承知しました"
@@ -1087,7 +1252,7 @@ def test_save_handoff_draft_rejects_blank_at_the_service(
     svc.start_question("hd5", 10, GOOD_Q)
     list(svc.stream_events("hd5"))  # pause at send
     with pytest.raises(SessionInvalid):
-        svc.save_handoff_draft("hd5", "   ")
+        svc.save_handoff_draft("hd5", "   ", "chat")
 
 
 def test_save_handoff_draft_gone_once_outcome_queued(seed_counts, engine, fake_embedder) -> None:
@@ -1100,7 +1265,7 @@ def test_save_handoff_draft_gone_once_outcome_queued(seed_counts, engine, fake_e
     list(svc.stream_events("hd6"))  # pause at send
     svc.submit_resume("hd6", outcome="accepted")  # queue the resume (not drained)
     with pytest.raises(HandoffNotFound):
-        svc.save_handoff_draft("hd6", "編集後の本文")
+        svc.save_handoff_draft("hd6", "編集後の本文", "chat")
 
 
 def test_handoff_draft_unexpected_error_is_generic_500(seed_counts, engine, fake_embedder) -> None:

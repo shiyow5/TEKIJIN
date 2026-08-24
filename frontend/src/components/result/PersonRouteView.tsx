@@ -31,6 +31,7 @@
  */
 
 import { CandidateCard } from "@/components/result/CandidateCard";
+import { ConsultMethodDialog } from "@/components/result/ConsultMethodDialog";
 import { DraftEditor } from "@/components/result/DraftEditor";
 import {
   correctInterpretation,
@@ -39,7 +40,7 @@ import {
   selectHandoffCandidate,
   updateHandoffDraft,
 } from "@/lib/api-client";
-import type { Recommendation } from "@/lib/api-types";
+import type { ConsultMethod, Recommendation } from "@/lib/api-types";
 import { fitPercents } from "@/lib/fit";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
@@ -84,6 +85,9 @@ export function PersonRouteView({
   const [redraftNonce, setRedraftNonce] = useState(0);
   const [sending, setSending] = useState(false);
   const [sentTo, setSentTo] = useState<string | null>(null);
+  // Holds the draft text between pressing "この内容で依頼する" and picking a
+  // consultation method in the popup; null means the popup is closed (#245).
+  const [pendingDraft, setPendingDraft] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const topPersonId = candidates[0]?.person_id ?? null;
@@ -199,7 +203,7 @@ export function PersonRouteView({
     }
   }
 
-  async function handleSend(text: string) {
+  async function handleSend(text: string, consultMethod: ConsultMethod) {
     if (!sessionId) {
       setError(SEND_ERROR);
       return;
@@ -207,7 +211,11 @@ export function PersonRouteView({
     setSending(true);
     setError(null);
     try {
-      await updateHandoffDraft({ session_id: sessionId, draft: text });
+      await updateHandoffDraft({
+        session_id: sessionId,
+        draft: text,
+        consult_method: consultMethod,
+      });
       const selected = candidates.find((c) => c.person_id === selectedPersonId);
       if (mounted.current) setSentTo(selected?.name ?? candidates[0]?.name ?? "ご担当者");
     } catch {
@@ -217,6 +225,13 @@ export function PersonRouteView({
     } finally {
       if (mounted.current) setSending(false);
     }
+  }
+
+  function handleChooseConsultMethod(consultMethod: ConsultMethod) {
+    if (pendingDraft === null) return;
+    const text = pendingDraft;
+    setPendingDraft(null);
+    void handleSend(text, consultMethod);
   }
 
   if (sentTo !== null) {
@@ -305,7 +320,7 @@ export function PersonRouteView({
         key={`${selectedPersonId}:${redraftNonce}`}
         initialDraft={localDraft}
         disabled={sending || selecting || excluding || redrafting || correcting}
-        onSend={handleSend}
+        onSend={(text) => setPendingDraft(text)}
       />
 
       {sessionId ? (
@@ -356,6 +371,14 @@ export function PersonRouteView({
             </button>
           )}
         </div>
+      ) : null}
+
+      {pendingDraft !== null ? (
+        <ConsultMethodDialog
+          onChoose={handleChooseConsultMethod}
+          onCancel={() => setPendingDraft(null)}
+          disabled={sending}
+        />
       ) : null}
     </section>
   );

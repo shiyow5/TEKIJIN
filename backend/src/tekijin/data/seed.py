@@ -202,6 +202,10 @@ def _apply_schema_upgrades(engine: Engine) -> None:
                 "ALTER TABLE IF EXISTS recommendations "
                 "ADD COLUMN IF NOT EXISTS declined_seen_at TIMESTAMP"
             )
+        # Asker's chosen consultation method ("direct" | "chat"); NULL treated
+        # as "chat" everywhere.
+        conn.execute(
+            text("ALTER TABLE questions ADD COLUMN IF NOT EXISTS consult_method VARCHAR(32)")
         )
         # Widen embedding columns to the current dim when an older DB is narrower.
         # Table/column names are a hard-coded allow-list spliced via format() —
