@@ -383,6 +383,20 @@ def test_context_fragments_surface_a_topic_the_question_missed() -> None:
     assert "CRM・営業支援" in result.topics
 
 
+def test_context_does_not_move_question_type_or_confidence() -> None:
+    # #275 review (HIGH): context ONLY adds to the emitted topics that feed C6.
+    # question_type and confidence stay driven by the user's actual question, so a
+    # merely topic-adjacent retrieval hit cannot force a needless C2 follow-up or
+    # lift confidence past the clarify threshold for the wrong reason.
+    model = KeywordIntentModel()
+    question = "取引先とのやり取りの履歴をまとめて残したい"  # no question-side topic/product
+    base = model.analyze(question, None)
+    mediated = model.analyze(question, None, context=["CRMで商談履歴を蓄積します"])
+    assert "CRM・営業支援" in mediated.topics  # topics ARE mediated
+    assert mediated.question_type == base.question_type  # but type is not
+    assert mediated.confidence == base.confidence  # and confidence is not
+
+
 def test_context_never_pulls_an_out_of_scope_question_back_in() -> None:
     # Off-topic input stays out_of_scope even if a fragment mentions a topic —
     # context is reference evidence, not the user's ask.
