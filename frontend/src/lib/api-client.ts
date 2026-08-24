@@ -16,6 +16,8 @@ import type {
   EmployeeSummary,
   HandoffDraftRequest,
   HandoffResponse,
+  HandoffSelectRequest,
+  HandoffSelectResponse,
   InboxItem,
   InboxResponse,
   LoginRequest,
@@ -168,6 +170,20 @@ export function updateHandoffDraft(
   options: RequestOptions = {},
 ): Promise<AckResponse> {
   return postJson<AckResponse>("/handoff/draft", request, options);
+}
+
+/**
+ * POST /handoff/select — the asker picks a different (of the currently shown)
+ * candidate as the hand-off target; the draft is regenerated for them
+ * (#200/#A1/#204). Throws {@link ApiError} with 404 (no hand-off pending /
+ * already answered), 409 (awaiting a clarification instead), or 422
+ * (`person_id` is not among the currently shown recommendations).
+ */
+export function selectHandoffCandidate(
+  request: HandoffSelectRequest,
+  options: RequestOptions = {},
+): Promise<HandoffSelectResponse> {
+  return postJson<HandoffSelectResponse>("/handoff/select", request, options);
 }
 
 /**

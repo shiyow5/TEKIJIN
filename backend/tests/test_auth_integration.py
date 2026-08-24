@@ -236,6 +236,16 @@ def test_non_participant_is_forbidden_on_session_endpoints(
         ).status_code
         == 403
     )
+    # Reselecting the hand-off target rewrites the durable primary, so it carries
+    # the same participant rule as the draft edit (#200).
+    assert (
+        client.post(
+            "/handoff/select",
+            json={"session_id": "s1", "person_id": "E002"},
+            headers=stranger,
+        ).status_code
+        == 403
+    )
 
     # The responder (id 1) passes the participant guard (then hits the normal
     # 404/flow, NOT 403).

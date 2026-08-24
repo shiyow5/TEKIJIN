@@ -8,6 +8,9 @@
  * ranks show compact reason labels — EXCEPT the two comparison signals 距離
  * (proximity) and 現在の負荷 (load), whose values are shown on every card so the
  * asker can actually compare 2nd/3rd against the top pick (#204).
+ *
+ * `onSelect` lets the asker hand off to any of the shown candidates, not only
+ * the top pick (#200).
  */
 
 import { ConfidenceGauge } from "@/components/result/ConfidenceGauge";
@@ -21,9 +24,9 @@ export interface CandidateCardProps {
   /** Highlight this card (the confirmed recipient / top pick). */
   selected: boolean;
   /**
-   * Optional recipient-selection handler. When omitted the card is display-only
-   * (no "選択する" button) — the main line confirms to the top pick, so exposing a
-   * reselect control that the send does not honour is a misdirection (#174).
+   * Recipient-selection handler (#200/#A1). When omitted the card is
+   * display-only (no "選択する" button) — used when there is no session to act
+   * against (e.g. a static/replayed view).
    */
   onSelect?: (personId: string) => void;
   /**

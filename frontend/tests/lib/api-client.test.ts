@@ -9,6 +9,7 @@ import {
   getRecentQuestions,
   postAnswer,
   postAsk,
+  selectHandoffCandidate,
 } from "@/lib/api-client";
 import type { AskRequest, HandoffResponse, ResumeRequest } from "@/lib/api-types";
 import { DEFAULT_API_BASE_URL } from "@/lib/config";
@@ -370,5 +371,42 @@ describe("getDocument", () => {
       name: "ApiError",
       status: 404,
     });
+  });
+});
+
+describe("selectHandoffCandidate", () => {
+  it("POSTs /handoff/select with session_id and person_id", async () => {
+    const response = {
+      session_id: "s1",
+      responder: {
+        person_id: "E002",
+        name: "鈴木",
+        dept: null,
+        score: 0.5,
+        confidence: "中",
+        reasons: [],
+      },
+      draft: "鈴木さん向けの下書き",
+      recommendation_id: 42,
+    };
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(response));
+    const result = await selectHandoffCandidate(
+      { session_id: "s1", person_id: "E002" },
+      { fetchImpl },
+    );
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe(`${DEFAULT_API_BASE_URL}/handoff/select`);
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(init?.body as string)).toEqual({ session_id: "s1", person_id: "E002" });
+    expect(result).toEqual(response);
+  });
+
+  it("throws ApiError with the 422 status for an unknown person_id", async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonResponse({ detail: "unknown" }, { ok: false, status: 422 }));
+    await expect(
+      selectHandoffCandidate({ session_id: "s1", person_id: "E099" }, { fetchImpl }),
+    ).rejects.toMatchObject({ name: "ApiError", status: 422 });
   });
 });

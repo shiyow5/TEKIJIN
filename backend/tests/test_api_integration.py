@@ -939,6 +939,87 @@ def test_handoff_draft_unexpected_error_is_generic_500(seed_counts, engine, fake
     assert "secret internal" not in resp.text  # detail logged, never leaked
 
 
+# --------------------------------------------------------------------------- #
+# POST /handoff/select : asker reselects a different shown candidate (#200/#A1)
+# --------------------------------------------------------------------------- #
+def test_handoff_select_reorders_and_redrafts(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2, 3], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2, 3)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "hs1"})
+    _events(client, "hs1")  # pause at send, drafted for E001
+    before = client.get("/handoff/hs1").json()
+    assert before["responder"]["person_id"] == "E001"
+
+    resp = client.post("/handoff/select", json={"session_id": "hs1", "person_id": "E003"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["responder"]["person_id"] == "E003"
+    assert "社員3" in body["draft"]
+    assert body["recommendation_id"] != before["recommendation_id"]
+
+    after = client.get("/handoff/hs1").json()
+    assert after["responder"]["person_id"] == "E003"
+    assert after["draft"] == body["draft"]
+    assert after["recommendation_id"] == body["recommendation_id"]
+
+    # /inbox reflects the DB rank sync: E003 now has the pending handoff, E001 no
+    # longer does.
+    assert client.get("/inbox", params={"responder_id": "E003"}).json()["items"]
+    assert client.get("/inbox", params={"responder_id": "E001"}).json()["items"] == []
+
+    assert (
+        client.post("/answer", json={"session_id": "hs1", "outcome": "accepted"}).status_code == 200
+    )
+
+
+def test_handoff_select_rejects_unknown_person_id(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "hs2"})
+    _events(client, "hs2")
+    resp = client.post("/handoff/select", json={"session_id": "hs2", "person_id": "E099"})
+    assert resp.status_code == 422
+
+
+def test_handoff_select_404_when_no_pending_handoff(seed_counts, engine, fake_embedder) -> None:
+    client = _client(engine, fake_embedder, retriever=_FakeRetriever(), scorer=_FakeScorer([]))
+    resp = client.post("/handoff/select", json={"session_id": "nope", "person_id": "E001"})
+    assert resp.status_code == 404
+
+
+def test_handoff_select_409_when_awaiting_clarification(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine, fake_embedder, retriever=_FakeRetriever(people=[1]), scorer=_FakeScorer(_recs(1))
+    )
+    client.post("/ask", json={"asker_id": 10, "question": VAGUE_Q, "session_id": "hs3"})
+    _events(client, "hs3")  # paused at ``ask`` (a clarification is owed to the asker)
+    resp = client.post("/handoff/select", json={"session_id": "hs3", "person_id": "E001"})
+    assert resp.status_code == 409
+
+
+def test_handoff_select_404_after_answered(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "hs4"})
+    _events(client, "hs4")
+    client.post("/answer", json={"session_id": "hs4", "outcome": "accepted"})
+    _events(client, "hs4")  # completed
+    resp = client.post("/handoff/select", json={"session_id": "hs4", "person_id": "E002"})
+    assert resp.status_code == 404
+
+
 def test_set_recommendation_outcome_is_idempotent(seed_counts, session) -> None:
     from tekijin.data.writes import set_recommendation_outcome
 

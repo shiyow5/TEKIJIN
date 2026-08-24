@@ -61,6 +61,24 @@ export interface HandoffDraftRequest {
 }
 
 /**
+ * POST /handoff/select body — the asker picks a different (of the currently
+ * shown) candidate as the hand-off target; the draft is regenerated for them
+ * (#200/#A1/#204).
+ */
+export interface HandoffSelectRequest {
+  session_id: string;
+  person_id: EmployeeId;
+}
+
+/** POST /handoff/select response (schemas.py `HandoffSelectResponse`). */
+export interface HandoffSelectResponse {
+  session_id: string;
+  responder: Recommendation;
+  draft: string;
+  recommendation_id: number;
+}
+
+/**
  * One employee for the current-user switcher (GET /employees). `id` is the
  * external "E###" form — the same shape accepted back as `asker_id` and used as
  * the responder id for the inbox, so a selection round-trips without conversion.
