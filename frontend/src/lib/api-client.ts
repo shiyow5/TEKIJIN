@@ -12,6 +12,7 @@ import type {
   AskRequest,
   DashboardResponse,
   DeclineNotification,
+  DeleteQuestionResponse,
   DocumentDetail,
   EmployeeListResponse,
   EmployeeSummary,
@@ -101,6 +102,24 @@ async function getJson<T>(path: string, options: RequestOptions = {}): Promise<T
 
   const response = await doFetch(`${baseUrl}${path}`, {
     method: "GET",
+    headers: { ...authHeaders() },
+    signal: options.signal,
+  });
+
+  if (!response.ok) {
+    throw new ApiError(response.status, await extractErrorMessage(response));
+  }
+
+  return (await response.json()) as T;
+}
+
+/** DELETE `{base}{path}` as JSON, throwing {@link ApiError} on non-2xx. */
+async function deleteJson<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const baseUrl = (options.baseUrl ?? getApiBaseUrl()).replace(/\/+$/, "");
+  const doFetch = options.fetchImpl ?? fetch;
+
+  const response = await doFetch(`${baseUrl}${path}`, {
+    method: "DELETE",
     headers: { ...authHeaders() },
     signal: options.signal,
   });
@@ -247,6 +266,21 @@ export async function getRecentQuestions(
   const query = `?asker_id=${encodeURIComponent(askerId)}`;
   const body = await getJson<RecentQuestionsResponse>(`/questions${query}`, options);
   return body.items;
+}
+
+/**
+ * DELETE /questions/{questionId} — remove one of the asker's own past questions
+ * and its history (#207). Only the owning asker (or an admin) may delete; the API
+ * answers 403 otherwise and 404 for a missing question. Returns the acknowledgement.
+ */
+export async function deleteQuestion(
+  questionId: string,
+  options: RequestOptions = {},
+): Promise<DeleteQuestionResponse> {
+  return deleteJson<DeleteQuestionResponse>(
+    `/questions/${encodeURIComponent(questionId)}`,
+    options,
+  );
 }
 
 /**

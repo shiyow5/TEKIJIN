@@ -180,6 +180,13 @@ class AckResponse(BaseModel):
     status: str
 
 
+class DeleteQuestionResponse(BaseModel):
+    """Acknowledgement for DELETE /questions/{id} (#207)."""
+
+    question_id: str
+    deleted: bool
+
+
 class EmployeeSummary(BaseModel):
     """One employee for the current-user switcher (id / name / dept).
 

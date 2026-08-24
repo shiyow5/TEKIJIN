@@ -172,6 +172,8 @@ def _cleanup_api_rows(engine):
         # events reference questions (FK) and are now written at runtime (#177), so
         # they must be removed before the questions they point at.
         session.execute(text(r"DELETE FROM events WHERE question_id LIKE 'api\_%' ESCAPE '\'"))
+        # answers also FK questions (the #207 delete tests insert api_ answers).
+        session.execute(text(r"DELETE FROM answers WHERE question_id LIKE 'api\_%' ESCAPE '\'"))
         session.execute(text(r"DELETE FROM questions WHERE id LIKE 'api\_%' ESCAPE '\'"))
         session.commit()
     finally:
@@ -1751,3 +1753,88 @@ def test_notifications_scoped_to_the_owning_asker(seed_counts, engine, fake_embe
     other_ack = client.post("/notifications/ack", json={"asker_id": "E011", "ids": [notif_id]})
     assert other_ack.json()["acknowledged"] == 0
     assert len(client.get("/notifications", params={"asker_id": "E010"}).json()["items"]) == 1
+
+
+# --------------------------------------------------------------------------- #
+# #207: delete a past question (and its FK children), owner/admin only
+# --------------------------------------------------------------------------- #
+def _insert_question(engine, qid: str, asker_id: int, *, with_children: bool = False) -> None:
+    """Directly seed one ``api_``-prefixed question (optionally with FK children)
+    so the delete tests do not depend on driving the whole SSE flow."""
+
+    factory = get_sessionmaker(engine)
+    with factory() as s:
+        s.add(
+            Question(
+                id=qid,
+                asker_id=asker_id,
+                body="削除テスト用の質問",
+                topics=[],
+                status="open",
+                created_at=NOW,
+                session_id=None,
+            )
+        )
+        s.flush()  # the question must exist before its FK children insert
+        if with_children:
+            s.add(Answer(id=f"{qid}_a", question_id=qid, responder_id=1, body="回答本文"))
+            s.add(Recommendation(question_id=qid, employee_id=1, rank=1, score=0.9))
+            s.add(Event(question_id=qid, stage="c1", started_at=NOW, ended_at=NOW, meta=None))
+        s.commit()
+
+
+def _counts_for(engine, qid: str) -> tuple[int, int, int, int]:
+    factory = get_sessionmaker(engine)
+    with factory() as s:
+        return (
+            s.query(Question).filter(Question.id == qid).count(),
+            s.query(Answer).filter(Answer.question_id == qid).count(),
+            s.query(Recommendation).filter(Recommendation.question_id == qid).count(),
+            s.query(Event).filter(Event.question_id == qid).count(),
+        )
+
+
+def test_delete_question_removes_it_and_its_children(seed_counts, engine, fake_embedder) -> None:
+    client = _client(engine, fake_embedder)  # admin
+    _insert_question(engine, "api_del1", 10, with_children=True)
+    assert _counts_for(engine, "api_del1") == (1, 1, 1, 1)
+
+    resp = client.delete("/questions/api_del1")
+    assert resp.status_code == 200
+    assert resp.json() == {"question_id": "api_del1", "deleted": True}
+    # question and ALL its FK children are gone.
+    assert _counts_for(engine, "api_del1") == (0, 0, 0, 0)
+
+
+def test_owner_can_delete_their_own_question(seed_counts, engine, fake_embedder) -> None:
+    client = _client(engine, fake_embedder)
+    _insert_question(engine, "api_del2", 10)
+    resp = client.delete("/questions/api_del2", headers=_user_headers(10))
+    assert resp.status_code == 200
+    assert _counts_for(engine, "api_del2")[0] == 0
+
+
+def test_delete_question_forbidden_for_non_owner(seed_counts, engine, fake_embedder) -> None:
+    client = _client(engine, fake_embedder)
+    _insert_question(engine, "api_del3", 10)
+    # employee 11 is not the asker and not an admin -> 403, row untouched.
+    resp = client.delete("/questions/api_del3", headers=_user_headers(11))
+    assert resp.status_code == 403
+    assert _counts_for(engine, "api_del3")[0] == 1
+
+
+def test_delete_missing_question_returns_404(seed_counts, engine, fake_embedder) -> None:
+    client = _client(engine, fake_embedder)
+    resp = client.delete("/questions/api_does_not_exist")
+    assert resp.status_code == 404
+
+
+def test_deleted_question_drops_out_of_recent_list(seed_counts, engine, fake_embedder) -> None:
+    client = _client(engine, fake_embedder)
+    _insert_question(engine, "api_del4", 10)
+    before = client.get("/questions", params={"asker_id": "E010"}).json()["items"]
+    assert any(i["question_id"] == "api_del4" for i in before)
+
+    client.delete("/questions/api_del4")
+    after = client.get("/questions", params={"asker_id": "E010"}).json()["items"]
+    assert all(i["question_id"] != "api_del4" for i in after)

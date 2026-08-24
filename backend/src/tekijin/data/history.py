@@ -23,6 +23,19 @@ from sqlalchemy.orm import Session
 from tekijin.models.tables import Answer, Employee, Question, Recommendation
 
 
+def question_asker_id(session: Session, question_id: str) -> int | None:
+    """The ``asker_id`` that owns ``question_id`` (None if no such question).
+
+    Used to authorize deletion (#207): only the owning asker — or an admin — may
+    delete a question. Returning None lets the caller answer a missing id with 404
+    before any authorization or write happens.
+    """
+
+    return session.execute(
+        select(Question.asker_id).where(Question.id == question_id)
+    ).scalar_one_or_none()
+
+
 def recent_questions_for_asker(
     session: Session, asker_id: int, *, limit: int = 5
 ) -> list[dict[str, Any]]:

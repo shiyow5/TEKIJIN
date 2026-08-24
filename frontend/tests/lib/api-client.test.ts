@@ -1,6 +1,7 @@
 import {
   advanceSession,
   ApiError,
+  deleteQuestion,
   getDashboard,
   getDocument,
   getEmployees,
@@ -408,5 +409,43 @@ describe("selectHandoffCandidate", () => {
     await expect(
       selectHandoffCandidate({ session_id: "s1", person_id: "E099" }, { fetchImpl }),
     ).rejects.toMatchObject({ name: "ApiError", status: 422 });
+  });
+});
+
+describe("deleteQuestion", () => {
+  it("DELETEs {base}/questions/{id} with auth headers and returns the ack (#207)", async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonResponse({ question_id: "api_del1", deleted: true }));
+
+    const result = await deleteQuestion("api_del1", { fetchImpl });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe(`${DEFAULT_API_BASE_URL}/questions/api_del1`);
+    expect(init?.method).toBe("DELETE");
+    expect(result).toEqual({ question_id: "api_del1", deleted: true });
+  });
+
+  it("URL-encodes the question id", async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonResponse({ question_id: "a/b", deleted: true }));
+
+    await deleteQuestion("a/b", { fetchImpl });
+
+    expect(fetchImpl.mock.calls[0][0]).toBe(`${DEFAULT_API_BASE_URL}/questions/a%2Fb`);
+  });
+
+  it("throws ApiError on a non-2xx response (403/404)", async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        jsonResponse({ detail: "question not found" }, { ok: false, status: 404 }),
+      );
+
+    await expect(deleteQuestion("nope", { fetchImpl })).rejects.toMatchObject({
+      status: 404,
+    });
   });
 });
