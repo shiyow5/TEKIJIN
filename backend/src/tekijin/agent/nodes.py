@@ -236,6 +236,11 @@ class AgentNodes:
         pinned = state.get("pinned_responder_id")
         asker = state.get("asker")
         asker_id = asker.get("id") if asker else None
+        # A non-empty `recommendations` on entry means this is a reroute backfill
+        # (see `reroute`, below): those candidates already survived a decline and
+        # keep their rank/score/reasons untouched — only the freed slot(s) are
+        # topped up from a fresh rank() call, never a full rescore (#D5/#206).
+        existing = state.get("recommendations") or []
         # prior_answer hands off to the pinned past responder — UNTIL they decline,
         # and never if the pin IS the asker (they cannot answer their own question).
         # In either case drop the pin and fall back to the general candidate pool
@@ -250,15 +255,23 @@ class AgentNodes:
             pool = [pinned]
         else:
             pool = retrieval.get("candidate_people") or []
-        candidates = [p for p in pool if p not in declined]
-        if not topics or not candidates:
-            return {"recommendations": []}
+        existing_ids = {r["person_id"] for r in existing}
+        candidates = [p for p in pool if p not in declined and p not in existing_ids]
+
+        top_k = 3
+        remaining = top_k - len(existing)
+        if not topics or remaining <= 0 or not candidates:
+            # Nothing to add: keep whatever survived the decline (possibly fewer
+            # than 3), or [] on a genuinely fresh run with no candidates at all.
+            return {"recommendations": existing}
+
         # All topics feed the scorer (aggregated topic_fit), not just topics[0].
-        result = self._scorer.rank(topics, candidates, asker_id, state["now"], top_k=3)
+        result = self._scorer.rank(topics, candidates, asker_id, state["now"], top_k=remaining)
         # The scorer now returns typed ScoredCandidate rows; AgentState keeps the
         # looser list[dict[str, Any]] (also written as plain dicts elsewhere), so
         # narrow the TypedDict-invariance gap with a cast — identical at runtime.
-        return {"recommendations": cast("list[dict[str, Any]]", result["recommendations"])}
+        fresh = cast("list[dict[str, Any]]", result["recommendations"])
+        return {"recommendations": existing + fresh}
 
     # -- C7: draft the request (LLM stub) ---------------------------------
     def c7_draft(self, state: AgentState) -> AgentState:
@@ -296,7 +309,11 @@ class AgentNodes:
         declined = list(state.get("declined_ids") or [])
         if recs:
             declined.append(recs[0]["person_id"])
-        return {"declined_ids": declined, "outcome": None, "draft": None, "recommendations": []}
+        # Keep the already-shown survivors (rank 2/3, unchanged) instead of
+        # wiping the whole set: c6_score backfills only the freed slot rather
+        # than rescoring everyone from scratch (#D5/#206).
+        kept = recs[1:]
+        return {"declined_ids": declined, "outcome": None, "draft": None, "recommendations": kept}
 
     # -- C8: graph update (minimal, deterministic) ------------------------
     def c8_update(self, state: AgentState) -> AgentState:
