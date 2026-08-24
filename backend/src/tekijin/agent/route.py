@@ -12,11 +12,18 @@ Threshold rationale is **model-specific** — cosine absolute values depend on t
 embedding. These constants are calibrated to Nemotron-3-Embed-1B, whose cosines
 are heavily compressed (observed range ~0.04–0.57 on the eval corpus, not the
 0.6–0.95 spread of e5/BERT-style encoders). See ``docs/adr/0004`` and
-``fixtures/synthetic/eval/route_calibration.json`` (#90). Calibrated bands
-(routed-set accuracy 0.821 vs 0.696 majority):
+``fixtures/synthetic/eval/route_calibration.json`` (#90, recalibrated on the
+66-item basis in #191). Calibrated bands (routed-set accuracy 0.818 vs 0.742
+majority, 66-item basis):
 
-* ``DOCUMENT_SIM`` = 0.30 — a document is on-topic enough to be the demotion
-  target (document-gold mean 0.349 vs ~0.14–0.17 elsewhere; catches 7/10).
+* ``DOCUMENT_SIM`` = 0.28 — a document is on-topic enough to be the demotion
+  target. Recalibrated 0.30→0.28 in #191: on the current corpus 0.30 both dipped
+  document recall to 4/10 and pushed the single-route share to 0.95 (the collapse
+  ceiling); 0.28 restores recall to 5/10, lifts overall accuracy 0.803→0.818, and
+  drops the share back to 0.94. The three lowest document golds (conf
+  0.166/0.177/0.189) cannot be recovered without collapsing accuracy below the
+  majority baseline — that is the corpus-count-routing job (#116/#119), not a
+  threshold job.
 * ``PERSON_WEAK_SIM`` = 0.40 — profile match below this counts as weak, letting a
   document take over (sits inside the observed 0.053–0.454 people range).
 * ``PRIOR_ANSWER_SIM`` = 0.55 — **deliberately above the observed answer-cosine
@@ -53,8 +60,9 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 # Nemotron because answer_confidence cannot separate it. Corpus-count routing is
 # the real fix (#119).
 PRIOR_ANSWER_SIM = 0.55
-# A document must be on-topic enough to be the demotion target.
-DOCUMENT_SIM = 0.30
+# A document must be on-topic enough to be the demotion target. Recalibrated
+# 0.30→0.28 on the 66-item basis (#191); see the module docstring.
+DOCUMENT_SIM = 0.28
 # Below this profile similarity the person signal counts as weak (a document may
 # then take over). All three are cosine-similarity constants, tunable on eval.
 PERSON_WEAK_SIM = 0.40
