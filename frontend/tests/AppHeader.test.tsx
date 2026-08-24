@@ -50,7 +50,8 @@ describe("AppHeader", () => {
     });
     render(<AppHeader />);
     expect(screen.getByText("TEKIJIN")).toBeInTheDocument();
-    expect(screen.getByText("たずねーる")).toBeInTheDocument();
+    // The retired "たずねーる" subtitle must no longer render (#196).
+    expect(screen.queryByText("たずねーる")).not.toBeInTheDocument();
   });
 
   it("populates the switcher from the directory and reflects the current user", () => {

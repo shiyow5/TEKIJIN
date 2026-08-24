@@ -39,7 +39,6 @@ export function AppHeader() {
       <div className="flex flex-wrap items-center gap-md">
         <Link href="/" className="flex items-baseline gap-sm">
           <span className="font-bold text-on-surface text-xl">TEKIJIN</span>
-          <span className="text-on-surface-variant text-sm">たずねーる</span>
         </Link>
         <nav aria-label="メインナビゲーション">
           <ul className="flex items-center gap-xs">

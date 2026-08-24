@@ -116,10 +116,7 @@ export default function HomePage() {
         <span className="rounded-full bg-secondary-container px-sm py-xs font-bold text-on-secondary-container text-xs">
           回答の出所は、常に人。
         </span>
-        <h1 className="flex flex-wrap items-baseline justify-center gap-sm font-bold text-4xl text-on-surface tracking-tight">
-          TEKIJIN
-          <span className="font-normal text-on-surface-variant text-xl">たずねーる</span>
-        </h1>
+        <h1 className="font-bold text-4xl text-on-surface tracking-tight">TEKIJIN</h1>
         <p className="max-w-2xl text-on-surface-variant leading-relaxed">
           社内の「訊きづらさ」を溶かす、質問と回答のマッチング支援ツール。
           AIが最適な相手を見つけて取り次ぎ、回答はその人自身が返します。
