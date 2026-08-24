@@ -382,10 +382,12 @@ def task_misrec(url, out):
                     "margin_to_next": (
                         round(rec["score"] - nxt, 4) if nxt is not None else None
                     ),
-                    # confidence_label が見ている2つの素性
+                    # 旧 confidence_label が見ていた「量」素性（#110 で不採用。
+                    # 較正の突き合わせ用に残す）
                     "topic_fit": round(edge_weight(ev), 4),
                     "evidence_count": len(ev),
-                    # 証拠の内訳。「量」ではなく「種類」で効くかを見るため
+                    # 証拠の内訳。#110 の confidence_label はこの「種類」で効く
+                    # （answer の有無・project の有無）
                     "evidence_sources": dict(
                         collections.Counter(e.source_type for e in ev)
                     ),
