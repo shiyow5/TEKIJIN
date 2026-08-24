@@ -1245,6 +1245,25 @@ def test_handoff_redraft_404_after_answered(seed_counts, engine, fake_embedder) 
     assert resp.status_code == 404
 
 
+def test_record_feedback_bounds_oversized_payload_values() -> None:
+    """Internal callers stash drafts in ``payload``; an oversized string is
+    truncated so the JSONB row cannot grow unbounded (bypasses the public 16KB
+    schema cap) (#260 review MEDIUM)."""
+    from tekijin.data.feedback import (
+        _MAX_PAYLOAD_VALUE_CHARS,
+        _TRUNCATION_MARK,
+        _bounded_payload,
+    )
+
+    assert _bounded_payload(None) is None
+    huge = "あ" * (_MAX_PAYLOAD_VALUE_CHARS + 500)
+    out = _bounded_payload({"previous": huge, "kept": "short", "n": 3})
+    assert out is not None
+    assert out["previous"] == huge[:_MAX_PAYLOAD_VALUE_CHARS] + _TRUNCATION_MARK
+    assert out["kept"] == "short"  # under the cap, untouched
+    assert out["n"] == 3  # non-string values pass through
+
+
 def test_set_recommendation_outcome_is_idempotent(seed_counts, session) -> None:
     from tekijin.data.writes import set_recommendation_outcome
 

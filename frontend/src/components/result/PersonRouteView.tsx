@@ -132,7 +132,7 @@ export function PersonRouteView({
   }
 
   async function handleRedraft() {
-    if (redrafting || selecting || excluding || !sessionId) return;
+    if (redrafting || selecting || excluding || sending || !sessionId) return;
     setRedrafting(true);
     setError(null);
     // Remount the editor now so the asker's edits are visibly discarded and the

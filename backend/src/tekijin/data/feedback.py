@@ -19,6 +19,28 @@ from tekijin.models.tables import Feedback
 # draft (C7). Validated at the API boundary; kept here so the set has one home.
 VALID_STAGES: tuple[str, ...] = ("c1", "c6", "c7")
 
+# Defense-in-depth bound on stored payload string values (drafts / free text). The
+# public POST /feedback schema already caps the whole payload at 16KB, but the
+# INTERNAL callers (implicit c7 draft_edited / draft_regenerated signals, which
+# stash generated drafts) bypass that schema — so cap here too, per-string, to keep
+# the JSONB column from growing unbounded on an unusually long AI draft.
+_MAX_PAYLOAD_VALUE_CHARS = 8000
+_TRUNCATION_MARK = "…[truncated]"
+
+
+def _bounded_payload(payload: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Return ``payload`` with any oversized string value truncated (immutable copy)."""
+
+    if payload is None:
+        return None
+    bounded: dict[str, Any] = {}
+    for key, value in payload.items():
+        if isinstance(value, str) and len(value) > _MAX_PAYLOAD_VALUE_CHARS:
+            bounded[key] = value[:_MAX_PAYLOAD_VALUE_CHARS] + _TRUNCATION_MARK
+        else:
+            bounded[key] = value
+    return bounded
+
 
 def record_feedback(
     session: Session,
@@ -31,7 +53,11 @@ def record_feedback(
     payload: dict[str, Any] | None = None,
     actor_id: int | None = None,
 ) -> None:
-    """Insert one feedback row (see :class:`tekijin.models.tables.Feedback`)."""
+    """Insert one feedback row (see :class:`tekijin.models.tables.Feedback`).
+
+    ``payload`` string values are bounded (:data:`_MAX_PAYLOAD_VALUE_CHARS`) so an
+    internal caller stashing a long draft cannot write an unbounded JSONB row.
+    """
 
     session.add(
         Feedback(
@@ -40,7 +66,7 @@ def record_feedback(
             question_id=question_id,
             session_id=session_id,
             target=target,
-            payload=payload,
+            payload=_bounded_payload(payload),
             actor_id=actor_id,
         )
     )
