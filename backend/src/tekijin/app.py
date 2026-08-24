@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from tekijin import __version__
 from tekijin.api.auth_routes import router as auth_router
 from tekijin.api.health import router as health_router
+from tekijin.api.rate_limit import SlidingWindowLimiter
 from tekijin.api.routes import router as api_router
 from tekijin.api.service import AgentService
 from tekijin.auth.service import LoginRateLimiter
@@ -86,6 +87,11 @@ def create_app(agent_service: AgentService | None = None) -> FastAPI:
     app.state.login_rate_limiter = LoginRateLimiter(
         max_attempts=settings.login_max_attempts,
         window_seconds=settings.login_window_seconds,
+    )
+    # In-process feedback flood throttle (#263), per actor, across the process.
+    app.state.feedback_rate_limiter = SlidingWindowLimiter(
+        max_events=settings.feedback_max_per_window,
+        window_seconds=settings.feedback_window_seconds,
     )
 
     app.include_router(health_router)
