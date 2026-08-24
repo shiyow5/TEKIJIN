@@ -24,6 +24,13 @@ export interface CandidateCardProps {
    * reselect control that the send does not honour is a misdirection (#174).
    */
   onSelect?: (personId: string) => void;
+  /**
+   * Relative fit percentage across the shown candidates (#222), computed by the
+   * parent that knows every score. Drives the gauge's ring + number so cards
+   * differentiate instead of all showing the same saturated level. Omitted →
+   * the gauge falls back to the qualitative level's own magnitude.
+   */
+  fitPercent?: number;
 }
 
 function avatarInitial(name: string): string {
@@ -36,6 +43,7 @@ export function CandidateCard({
   expanded,
   selected,
   onSelect,
+  fitPercent,
 }: CandidateCardProps) {
   return (
     <article
@@ -61,7 +69,7 @@ export function CandidateCard({
           <span aria-hidden="true" className="text-on-surface-variant text-xs">
             適合度
           </span>
-          <ConfidenceGauge level={candidate.confidence} />
+          <ConfidenceGauge level={candidate.confidence} percent={fitPercent} />
         </div>
       </div>
 
