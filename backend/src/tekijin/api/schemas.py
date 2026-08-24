@@ -416,3 +416,31 @@ class DashboardResponse(BaseModel):
     latest_eval: EvalSnapshot | None = None  # 推薦精度（未計測なら None）
     answers_per_responder: list[ResponderLoad] = Field(default_factory=list)
     topic_distribution: list[TopicCount] = Field(default_factory=list)
+
+
+# --------------------------------------------------------------------------- #
+# auth (#241)
+# --------------------------------------------------------------------------- #
+class LoginRequest(BaseModel):
+    """Credentials posted to ``POST /auth/login`` (email + password)."""
+
+    email: str = Field(min_length=1, max_length=320)
+    password: str = Field(min_length=1, max_length=1024)
+
+
+class PrincipalResponse(BaseModel):
+    """The authenticated identity. ``id`` is ``None`` for the admin (not an
+    employee); otherwise the external ``"E###"`` form."""
+
+    id: str | None
+    name: str
+    dept: str | None
+    is_admin: bool
+
+
+class LoginResponse(BaseModel):
+    """A successful login: the bearer token plus the resolved principal."""
+
+    access_token: str
+    token_type: Literal["bearer"] = "bearer"
+    principal: PrincipalResponse

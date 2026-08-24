@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { API_BASE, fulfillJson, mockEmployees } from "./support/mocks";
+import { API_BASE, fulfillJson, mockAuth, mockEmployees } from "./support/mocks";
 
 /**
  * Document viewer (#143): the `/documents/[id]` route that the document-route
@@ -18,6 +18,7 @@ const DOC = {
 test.describe("document viewer", () => {
   test("renders the cited document's title, body and metadata", async ({ page }) => {
     await mockEmployees(page);
+    await mockAuth(page);
     await page.route(`${API_BASE}/documents/doc_001`, (route) => fulfillJson(route, DOC));
 
     await page.goto("/documents/doc_001");
@@ -31,6 +32,7 @@ test.describe("document viewer", () => {
 
   test("shows a not-found state for an unknown document", async ({ page }) => {
     await mockEmployees(page);
+    await mockAuth(page);
     await page.route(`${API_BASE}/documents/nope`, (route) =>
       fulfillJson(route, { detail: "document not found" }, 404),
     );

@@ -1,5 +1,12 @@
 import { expect, test } from "@playwright/test";
-import { API_BASE, HANDOFF, fulfillJson, mockEmployees, mockInbox } from "./support/mocks";
+import {
+  API_BASE,
+  HANDOFF,
+  fulfillJson,
+  mockAuth,
+  mockEmployees,
+  mockInbox,
+} from "./support/mocks";
 
 /**
  * Responder journey (#134): /answer/{session_id}. On mount the screen loads the
@@ -19,6 +26,7 @@ function mockHandoff(page: Parameters<typeof mockEmployees>[0]) {
 test.describe("responder flow", () => {
   test("引き受ける で受諾する", async ({ page }) => {
     await mockEmployees(page);
+    await mockAuth(page);
     await mockHandoff(page);
     let answerBody: unknown = null;
     await page.route(`${API_BASE}/answer`, async (route) => {
@@ -42,6 +50,7 @@ test.describe("responder flow", () => {
 
   test("今は難しい で辞退する", async ({ page }) => {
     await mockEmployees(page);
+    await mockAuth(page);
     await mockHandoff(page);
     let answerBody: unknown = null;
     await page.route(`${API_BASE}/answer`, async (route) => {
@@ -61,6 +70,7 @@ test.describe("responder flow", () => {
 
   test("ハンドオフが無い（404）と終了メッセージを出す", async ({ page }) => {
     await mockEmployees(page);
+    await mockAuth(page);
     await page.route(`${API_BASE}/handoff/**`, (route) =>
       fulfillJson(route, { detail: "no responder handoff" }, 404),
     );
@@ -75,6 +85,7 @@ test.describe("responder flow", () => {
 
   test("受諾後に受信箱へ戻れる", async ({ page }) => {
     await mockEmployees(page);
+    await mockAuth(page);
     await mockHandoff(page);
     await mockInbox(page, []);
     await page.route(`${API_BASE}/answer`, (route) =>

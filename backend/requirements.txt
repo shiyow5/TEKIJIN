@@ -44,3 +44,8 @@ langchain-openai==0.2.14
 sse-starlette==2.2.1
 # Pinned: the PostgresSaver checkpointer uses a psycopg connection pool.
 psycopg-pool==3.3.1
+
+# Auth (#241): JWT access tokens (HS256). Pure-Python, CI-light. Password hashing
+# uses the standard library (PBKDF2 via hashlib) — no bcrypt/argon2 C extension —
+# so nothing else is added here and the ARM64 deploy needs no extra wheel.
+pyjwt==2.10.1

@@ -19,6 +19,7 @@ from pathlib import Path
 from sqlalchemy import Engine, text
 from sqlalchemy.orm import Session
 
+from tekijin.auth.passwords import hash_password
 from tekijin.config import get_settings
 from tekijin.data.db import (
     Base,
@@ -75,7 +76,21 @@ def seed_session(session: Session, fixtures_dir: Path) -> dict[str, int]:
         # Flush per group so FK-dependent inserts see their parents.
         session.flush()
         counts[logical_name] = len(rows)
+    _seed_passwords(session)
     return counts
+
+
+def _seed_passwords(session: Session) -> None:
+    """Give every seeded employee the demo login password (#241).
+
+    All employees share one demo password (the data is synthetic and the password
+    is documented), so a single PBKDF2 hash is computed once and applied to the
+    whole roster. The admin is NOT an employee, so it is untouched here — it
+    authenticates against ``settings.admin_password`` directly.
+    """
+
+    encoded = hash_password(get_settings().demo_user_password)
+    session.execute(text("UPDATE employees SET password_hash = :hash"), {"hash": encoded})
 
 
 def apply_migrations(
@@ -157,6 +172,11 @@ def _apply_schema_upgrades(engine: Engine) -> None:
     # interpolating it into the SQL is safe.
     dim = get_settings().embedding_dim
     with engine.begin() as conn:
+        # Login password hash (#241). Older DBs (persistent volume) get it here;
+        # a fresh create_all already builds it. NULL until _seed_passwords runs.
+        conn.execute(
+            text("ALTER TABLE employees ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255)")
+        )
         conn.execute(text("ALTER TABLE questions ADD COLUMN IF NOT EXISTS route VARCHAR(32)"))
         # The graph thread_id for an API-created question (responder inbox → handoff
         # deep link). Added for #123; older DBs get it here, fresh ones via create_all.

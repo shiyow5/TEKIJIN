@@ -18,11 +18,21 @@ import type {
   HandoffResponse,
   InboxItem,
   InboxResponse,
+  LoginRequest,
+  LoginResponse,
+  Principal,
   RecentQuestionItem,
   RecentQuestionsResponse,
   ResumeRequest,
 } from "@/lib/api-types";
+import { getAuthToken } from "@/lib/auth-token";
 import { getApiBaseUrl } from "@/lib/config";
+
+/** Authorization header for the current token, or an empty object when logged out. */
+function authHeaders(): Record<string, string> {
+  const token = getAuthToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
 
 /** Error thrown for a non-2xx API response, carrying the HTTP status. */
 export class ApiError extends Error {
@@ -66,7 +76,7 @@ async function postJson<T>(path: string, body: unknown, options: RequestOptions 
 
   const response = await doFetch(`${baseUrl}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify(body),
     signal: options.signal,
   });
@@ -85,6 +95,7 @@ async function getJson<T>(path: string, options: RequestOptions = {}): Promise<T
 
   const response = await doFetch(`${baseUrl}${path}`, {
     method: "GET",
+    headers: { ...authHeaders() },
     signal: options.signal,
   });
 
@@ -93,6 +104,37 @@ async function getJson<T>(path: string, options: RequestOptions = {}): Promise<T
   }
 
   return (await response.json()) as T;
+}
+
+/**
+ * POST /auth/login — exchange email+password for a bearer token + the principal.
+ * Throws {@link ApiError} with 401 (bad credentials) or 429 (rate limited).
+ */
+export function postLogin(
+  request: LoginRequest,
+  options: RequestOptions = {},
+): Promise<LoginResponse> {
+  return postJson<LoginResponse>("/auth/login", request, options);
+}
+
+/**
+ * GET /auth/me — the principal for the current token (session restore). Throws
+ * {@link ApiError} with 401 when the token is missing/expired.
+ */
+export function getMe(options: RequestOptions = {}): Promise<Principal> {
+  return getJson<Principal>("/auth/me", options);
+}
+
+/**
+ * POST /auth/logout — stateless server ack; the caller drops the local token.
+ * Best-effort: a transport error is swallowed (logout still clears the token).
+ */
+export async function postLogout(options: RequestOptions = {}): Promise<void> {
+  try {
+    await postJson<AckResponse>("/auth/logout", {}, options);
+  } catch {
+    // The token is cleared client-side regardless; nothing to surface.
+  }
 }
 
 /**
@@ -150,9 +192,9 @@ export function getDashboard(options: RequestOptions = {}): Promise<DashboardRes
 }
 
 /**
- * GET /employees — the employee directory for the current-user switcher. The
- * prototype has no auth, so the acting user is chosen from this list. Returns the
- * unwrapped array (ids in the external "E###" form).
+ * GET /employees — the employee directory for the ADMIN's demo user switcher
+ * (admin-only, #241). Returns the unwrapped array (ids in the external "E###"
+ * form). Regular users never call this.
  */
 export async function getEmployees(options: RequestOptions = {}): Promise<EmployeeSummary[]> {
   const body = await getJson<EmployeeListResponse>("/employees", options);
@@ -217,6 +259,7 @@ export async function advanceSession(
   try {
     const response = await doFetch(`${baseUrl}/events/${encodeURIComponent(sessionId)}`, {
       method: "GET",
+      headers: { ...authHeaders() },
       signal: options.signal,
     });
     await response.text();

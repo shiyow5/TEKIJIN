@@ -317,6 +317,25 @@ class AgentService:
 
         return tuple(self._snapshot(session_id).next)
 
+    def session_participants(self, session_id: str) -> tuple[int | None, int | None]:
+        """``(asker_id, responder_id)`` for a session, from the durable state (#241).
+
+        Object-level authorization for the session-scoped endpoints (``/handoff``,
+        ``/answer``, ``/events``): a non-admin may only touch a session they are a
+        participant of. The asker is set at ``/ask``; the responder is the current
+        primary recommendation (it changes on a decline/reroute, so a rerouted-away
+        responder is no longer a participant). Both are ``None`` for an unknown
+        session — the caller then falls through to the handler's normal 404 rather
+        than turning a missing session into a 403.
+        """
+
+        snapshot = self._snapshot(session_id)
+        values = getattr(snapshot, "values", None) or {}
+        asker_id = (values.get("asker") or {}).get("id")
+        recs = values.get("recommendations") or []
+        responder_id = recs[0]["person_id"] if recs else None
+        return (asker_id, responder_id)
+
     # -- /ask : start a new question -------------------------------------- #
     def start_question(self, session_id: str, asker_id: int, question: str) -> None:
         """Queue a NEW question; reject (409) if the session is busy or paused.
