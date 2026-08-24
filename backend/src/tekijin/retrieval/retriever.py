@@ -30,9 +30,9 @@ from sqlalchemy.orm import Session
 from tekijin.config import get_settings
 from tekijin.data.repository import Repository
 from tekijin.retrieval import dense
+from tekijin.retrieval.bm25_cache import cached_bm25_index
 from tekijin.retrieval.embedding import QUERY, Embedder
 from tekijin.retrieval.fusion import rrf
-from tekijin.retrieval.sparse import BM25Index
 
 if TYPE_CHECKING:  # pragma: no cover - typing only (avoids agent<-retrieval cycle)
     from tekijin.agent.state import DocumentHit, PastAnswer, RetrievalResult
@@ -172,13 +172,18 @@ class HybridRetriever:
         for a in answers:
             answers_by_question.setdefault(a.question_id, []).append(a.id)
 
-        answer_index = BM25Index.build(
-            (a.id, self._answer_text(a, question_body_by_id)) for a in answers
+        # Content-signature cache (#56): identical corpora reuse the built index,
+        # skipping SudachiPy tokenization + BM25 fit (a write changes the pairs and
+        # rebuilds automatically). The tokenizer/dictionary is shared per process.
+        answer_index = cached_bm25_index(
+            "answers", ((a.id, self._answer_text(a, question_body_by_id)) for a in answers)
         )
-        document_index = BM25Index.build(
-            (d.id, f"{d.title or ''} {d.body or ''}") for d in documents
+        document_index = cached_bm25_index(
+            "documents", ((d.id, f"{d.title or ''} {d.body or ''}") for d in documents)
         )
-        profile_index = BM25Index.build((p.employee_id, p.description or "") for p in profiles)
+        profile_index = cached_bm25_index(
+            "profiles", ((p.employee_id, p.description or "") for p in profiles)
+        )
 
         # Dense searches (each returns (id, cosine_similarity), best-first).
         answer_hits = self._dense_hits(query_vec, "answers")

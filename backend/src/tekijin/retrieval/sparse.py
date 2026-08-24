@@ -14,6 +14,7 @@ SudachiPy and ``rank_bm25`` are imported lazily so importing this module is chea
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Iterable, Sequence
 from typing import Any, Protocol
 
@@ -24,23 +25,51 @@ class Tokenizer(Protocol):
     def tokenize(self, text: str) -> list[str]: ...  # pragma: no cover - protocol stub
 
 
+# One SudachiPy dictionary per process (the ~30-40 ms cost), lazily loaded under a
+# lock and shared thereafter. The dictionary is immutable and safe to share; the
+# per-thread Tokenizer is created from it (see below).
+_DICT_LOCK = threading.Lock()
+_DICTIONARY: Any | None = None
+
+
+def _shared_dictionary() -> Any:
+    global _DICTIONARY
+    if _DICTIONARY is None:
+        with _DICT_LOCK:
+            if _DICTIONARY is None:  # double-checked; the load is the expensive part
+                from sudachipy import dictionary
+
+                _DICTIONARY = dictionary.Dictionary()
+    return _DICTIONARY
+
+
 class SudachiTokenizer:
     """SudachiPy tokenizer in split mode C (compound-preserving).
 
-    The dictionary is built lazily on first use and reused thereafter.
+    A SudachiPy ``Tokenizer`` is NOT safe to share across threads — concurrent
+    ``tokenize`` on one instance raises ``RuntimeError: Already borrowed``. Since
+    the C4 index cache (#56) shares one ``SudachiTokenizer`` across concurrent
+    graph runs, each thread gets its OWN ``Tokenizer`` (via ``threading.local``)
+    created from the single shared, immutable dictionary — so the expensive
+    dictionary load still happens once per process while tokenization stays
+    thread-safe.
     """
 
     def __init__(self) -> None:
-        self._tokenizer: Any | None = None
+        self._local = threading.local()
         self._mode: Any | None = None
 
     def _ensure(self) -> Any:
-        if self._tokenizer is None:
-            from sudachipy import dictionary, tokenizer
+        tk = getattr(self._local, "tokenizer", None)
+        if tk is None:
+            from sudachipy import tokenizer
 
-            self._tokenizer = dictionary.Dictionary().create()
+            tk = _shared_dictionary().create()
+            self._local.tokenizer = tk
+            # Mode is a constant enum; assigning the same value from several threads
+            # is a benign, idempotent race.
             self._mode = tokenizer.Tokenizer.SplitMode.C
-        return self._tokenizer
+        return tk
 
     def tokenize(self, text: str) -> list[str]:
         tk = self._ensure()
