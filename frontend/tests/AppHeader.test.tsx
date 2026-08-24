@@ -2,7 +2,7 @@ import { AppHeader } from "@/components/AppHeader";
 import type { AuthContextValue } from "@/components/AuthProvider";
 import type { CurrentUserContextValue } from "@/components/CurrentUserProvider";
 import type { Principal } from "@/lib/api-types";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const useCurrentUserMock = vi.fn<() => CurrentUserContextValue>();
@@ -21,6 +21,12 @@ const replaceMock = vi.fn();
 vi.mock("next/navigation", () => ({
   usePathname: () => pathnameMock(),
   useRouter: () => ({ push: pushMock, replace: replaceMock }),
+}));
+
+const getNotificationsMock = vi.fn();
+vi.mock("@/lib/api-client", () => ({
+  getNotifications: (...args: unknown[]) => getNotificationsMock(...args),
+  ackNotifications: vi.fn(),
 }));
 
 const EMPLOYEES = [
@@ -59,6 +65,8 @@ const ADMIN_READY = ctx({
 beforeEach(() => {
   pathnameMock.mockReturnValue("/");
   useAuthMock.mockReturnValue(auth(ADMIN));
+  getNotificationsMock.mockReset();
+  getNotificationsMock.mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -188,5 +196,26 @@ describe("AppHeader", () => {
       "aria-current",
       "page",
     );
+  });
+
+  it("shows the decline-notification bell for the acting user (#225)", async () => {
+    useCurrentUserMock.mockReturnValue(ADMIN_READY);
+    render(<AppHeader />);
+    await waitFor(() => expect(getNotificationsMock).toHaveBeenCalledWith("E001"));
+    expect(screen.getByRole("button", { name: "通知" })).toBeInTheDocument();
+  });
+
+  it("does not show the notification bell before a current user is resolved", () => {
+    useCurrentUserMock.mockReturnValue(ctx({ loading: true }));
+    render(<AppHeader />);
+    expect(screen.queryByRole("button", { name: /通知/ })).not.toBeInTheDocument();
+  });
+
+  it("does not mount the bell at all when logged out (#241: nobody to poll for)", () => {
+    useAuthMock.mockReturnValue(auth(null as unknown as Principal));
+    useCurrentUserMock.mockReturnValue(ADMIN_READY);
+    render(<AppHeader />);
+    expect(screen.queryByRole("button", { name: /通知/ })).not.toBeInTheDocument();
+    expect(getNotificationsMock).not.toHaveBeenCalled();
   });
 });

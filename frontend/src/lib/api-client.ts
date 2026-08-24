@@ -11,6 +11,7 @@ import type {
   AckResponse,
   AskRequest,
   DashboardResponse,
+  DeclineNotification,
   DocumentDetail,
   EmployeeListResponse,
   EmployeeSummary,
@@ -22,6 +23,9 @@ import type {
   InboxResponse,
   LoginRequest,
   LoginResponse,
+  NotificationAckRequest,
+  NotificationAckResponse,
+  NotificationsResponse,
   Principal,
   RecentQuestionItem,
   RecentQuestionsResponse,
@@ -243,6 +247,27 @@ export async function getRecentQuestions(
   const query = `?asker_id=${encodeURIComponent(askerId)}`;
   const body = await getJson<RecentQuestionsResponse>(`/questions${query}`, options);
   return body.items;
+}
+
+/**
+ * GET /notifications — decline events the asker hasn't seen yet, newest first
+ * (#E7). `askerId` is the external "E###" form. Returns the unwrapped items array.
+ */
+export async function getNotifications(
+  askerId: string,
+  options: RequestOptions = {},
+): Promise<DeclineNotification[]> {
+  const query = `?asker_id=${encodeURIComponent(askerId)}`;
+  const body = await getJson<NotificationsResponse>(`/notifications${query}`, options);
+  return body.items;
+}
+
+/** POST /notifications/ack — mark decline notifications as seen (#E7). */
+export function ackNotifications(
+  request: NotificationAckRequest,
+  options: RequestOptions = {},
+): Promise<NotificationAckResponse> {
+  return postJson<NotificationAckResponse>("/notifications/ack", request, options);
 }
 
 /** Fetch one internal document's full content for the viewer (GET /documents/{id}, #143). */

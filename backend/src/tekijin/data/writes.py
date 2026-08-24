@@ -12,7 +12,7 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from tekijin.models.tables import Employee, EvalRun, Event, Question, Recommendation
@@ -228,3 +228,27 @@ def set_recommendation_outcome(session: Session, recommendation_id: int, outcome
         .where(Recommendation.id == recommendation_id, Recommendation.outcome.is_(None))
         .values(outcome=outcome)
     )
+
+
+def ack_decline_notifications(session: Session, asker_id: int, ids: list[int]) -> int:
+    """Mark these decline notifications seen, scoped to ``asker_id``'s own questions (#E7).
+
+    Scoping by ``asker_id`` (via a subquery on the owning question) means one
+    asker can never acknowledge — and so hide — another asker's notification by
+    guessing an id. Returns the number of rows actually updated.
+    """
+
+    if not ids:
+        return 0
+    result = session.execute(
+        update(Recommendation)
+        .where(
+            Recommendation.id.in_(ids),
+            Recommendation.declined_seen_at.is_(None),
+            Recommendation.question_id.in_(
+                select(Question.id).where(Question.asker_id == asker_id)
+            ),
+        )
+        .values(declined_seen_at=func.now())
+    )
+    return result.rowcount or 0

@@ -147,7 +147,7 @@ class HandoffDraftRequest(BaseModel):
 class HandoffSelectRequest(BaseModel):
     """Asker picks a different (of the currently shown) candidate as the
     hand-off target, reordering it to primary and regenerating the draft for
-    them (#200/#A1)."""
+    them (#200)."""
 
     session_id: str = Field(pattern=_SESSION_ID_PATTERN)
     person_id: int
@@ -155,6 +155,18 @@ class HandoffSelectRequest(BaseModel):
     @field_validator("person_id", mode="before")
     @classmethod
     def _accept_e_prefixed_person_id(cls, value: object) -> int:
+        return _coerce_asker_id(value)
+
+
+class NotificationAckRequest(BaseModel):
+    """Mark decline notifications as seen for this asker (#225)."""
+
+    asker_id: int
+    ids: list[int] = Field(min_length=1)
+
+    @field_validator("asker_id", mode="before")
+    @classmethod
+    def _accept_e_prefixed_asker_id(cls, value: object) -> int:
         return _coerce_asker_id(value)
 
 
@@ -305,6 +317,28 @@ class RecentQuestionsResponse(BaseModel):
     """The asker's most recent questions (newest first)."""
 
     items: list[RecentQuestionItem] = Field(default_factory=list)
+
+
+# --------------------------------------------------------------------------- #
+# decline notifications (GET /notifications, POST /notifications/ack) (#E7)
+# --------------------------------------------------------------------------- #
+class DeclineNotification(BaseModel):
+    """One not-yet-seen decline event for the asker (newest first)."""
+
+    id: int  # the declined Recommendation row's id (also the ack target)
+    question_id: str
+    session_id: str | None = None
+    message: str
+    declined_person_name: str
+    created_at: str | None = None
+
+
+class NotificationsResponse(BaseModel):
+    items: list[DeclineNotification] = Field(default_factory=list)
+
+
+class NotificationAckResponse(BaseModel):
+    acknowledged: int
 
 
 # --------------------------------------------------------------------------- #
