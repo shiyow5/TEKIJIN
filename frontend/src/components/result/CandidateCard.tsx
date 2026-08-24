@@ -30,6 +30,12 @@ export interface CandidateCardProps {
    */
   onSelect?: (personId: string) => void;
   /**
+   * Exclusion handler (#260, "この人には聞かない"). Provided only for the current
+   * send target: excluding reroutes to a freshly-scored next candidate. When
+   * omitted the control is hidden (a non-target card cannot be excluded).
+   */
+  onExclude?: (personId: string) => void;
+  /**
    * Absolute fit percentage from this candidate's own score (#240), normalised to
    * the scorer's fit ceiling. Decoupled from the 高/中/低 confidence label, so a
    * strong candidate on a never-asked topic still reads high. Drives the gauge's
@@ -48,6 +54,7 @@ export function CandidateCard({
   expanded,
   selected,
   onSelect,
+  onExclude,
   fitPercent,
 }: CandidateCardProps) {
   return (
@@ -105,18 +112,31 @@ export function CandidateCard({
       )}
 
       {onSelect ? (
-        <button
-          type="button"
-          onClick={() => onSelect(candidate.person_id)}
-          aria-pressed={selected}
-          className={`mt-auto min-h-[40px] rounded-lg px-md py-2 font-medium text-sm transition-colors ${
-            selected
-              ? "bg-primary text-on-primary"
-              : "border border-primary text-primary hover:bg-surface-container-low"
-          }`}
-        >
-          {selected ? "選択中" : "選択する"}
-        </button>
+        <div className="mt-auto flex flex-col gap-xs">
+          <button
+            type="button"
+            onClick={() => onSelect(candidate.person_id)}
+            aria-pressed={selected}
+            className={`min-h-[40px] rounded-lg px-md py-2 font-medium text-sm transition-colors ${
+              selected
+                ? "bg-primary text-on-primary"
+                : "border border-primary text-primary hover:bg-surface-container-low"
+            }`}
+          >
+            {selected ? "選択中" : "選択する"}
+          </button>
+          {/* Exclusion is offered only on the current send target (#260): declining
+              them reroutes to a freshly-scored next candidate. */}
+          {onExclude ? (
+            <button
+              type="button"
+              onClick={() => onExclude(candidate.person_id)}
+              className="min-h-[32px] rounded-lg px-md py-1 font-medium text-on-surface-variant text-xs underline decoration-dotted underline-offset-2 transition-colors hover:text-on-surface"
+            >
+              この人には聞かない
+            </button>
+          ) : null}
+        </div>
       ) : rank === 1 ? (
         <span className="mt-auto rounded-lg bg-secondary-container px-md py-2 text-center font-medium text-on-secondary-container text-sm">
           この方に依頼します

@@ -705,6 +705,67 @@ class AgentService:
             recommendation_id=(new_ids[0] if new_ids else 0),
         )
 
+    def exclude_handoff_target(
+        self, session_id: str, person_id: int, *, actor_id: int | None = None
+    ) -> None:
+        """Asker excludes the current send target ("この人には聞かない") → reroute (#260).
+
+        Queues the same reroute a responder decline drives (``_after_send`` →
+        ``reroute`` → ``c6_score`` → ``c7_draft`` → ``send``), so the freshly-scored
+        next candidate and its regenerated draft arrive over the open ``/events``
+        stream — reusing the graph's decline machinery and its persistence
+        unchanged. Unlike a responder decline, it does NOT stamp the shown
+        recommendation ``outcome=declined`` (nobody was actually asked); the
+        exclusion is recorded as a ``c6`` feedback signal (#237 Phase 1) instead.
+
+        Validation mirrors :meth:`select_handoff_candidate`: the run must be paused
+        at ``send`` and not already answered / queued. ``person_id`` must be the
+        current primary (the reroute path only ever declines the top pick), else
+        422 — so an exclusion never silently reroutes a candidate other than the
+        one the asker named (no mis-send).
+        """
+
+        with self._lock(session_id):
+            snapshot = self._snapshot(session_id)
+            next_nodes = tuple(snapshot.next)
+            if not next_nodes:
+                raise HandoffNotFound("no responder handoff for this session")
+            if next_nodes[0] != "send":
+                raise SessionConflict("session is not awaiting a responder outcome")
+            ctx = self._reg_get(session_id)
+            if ctx is not None and ctx.pending is not None:
+                raise HandoffNotFound("this handoff has already been answered")
+
+            recs = snapshot.values.get("recommendations") or []
+            primary = recs[0] if recs else None
+            if primary is None or primary["person_id"] != person_id:
+                raise SessionInvalid("person_id is not the current hand-off target")
+
+            question_id = snapshot.values.get("question_id")
+
+            # Queue the reroute exactly as a responder decline does; the open
+            # /events reader consumes it and re-scores / re-drafts the next pick.
+            ctx = self._reg_ensure(session_id)
+            ctx.pending = Command(resume="declined")
+            ctx.touched_at = self._clock()
+
+        # Record the exclusion as a c6 learning signal OUTSIDE the lock — append-only
+        # and best-effort: the reroute is already queued, so a feedback-write failure
+        # must not fail the request (mirrors the c7 draft-edit signal above).
+        try:
+            with session_scope(self._session_factory) as fb_session:
+                record_feedback(
+                    fb_session,
+                    stage="c6",
+                    kind="person_excluded",
+                    question_id=question_id if isinstance(question_id, str) else None,
+                    session_id=session_id,
+                    target=schemas.format_employee_id(person_id),
+                    actor_id=actor_id,
+                )
+        except Exception:  # noqa: BLE001 - best-effort signal; never fail the queued reroute
+            logger.exception("failed to record c6 exclude feedback for session %s", session_id)
+
     # -- /events : stream ------------------------------------------------- #
     def is_streamable(self, session_id: str) -> bool:
         """True if there is a queued run, a paused run, or a replayable terminal.

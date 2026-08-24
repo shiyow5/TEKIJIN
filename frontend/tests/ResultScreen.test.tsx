@@ -7,15 +7,19 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const updateHandoffDraftMock = vi.fn();
 const selectHandoffCandidateMock = vi.fn();
+const excludeHandoffCandidateMock = vi.fn();
 vi.mock("@/lib/api-client", () => ({
   updateHandoffDraft: (...args: unknown[]) => updateHandoffDraftMock(...args),
   selectHandoffCandidate: (...args: unknown[]) => selectHandoffCandidateMock(...args),
+  excludeHandoffCandidate: (...args: unknown[]) => excludeHandoffCandidateMock(...args),
 }));
 
 beforeEach(() => {
   updateHandoffDraftMock.mockReset();
   updateHandoffDraftMock.mockResolvedValue({ session_id: "s1", status: "draft_saved" });
   selectHandoffCandidateMock.mockReset();
+  excludeHandoffCandidateMock.mockReset();
+  excludeHandoffCandidateMock.mockResolvedValue({ session_id: "s1", status: "reroute_queued" });
 });
 
 // Fixtures use the REAL backend shapes: `confidence` is the Japanese fit signal
@@ -352,6 +356,45 @@ describe("ResultScreen — main line (person)", () => {
     // Selection did not change on failure: still one "選択中" and two "選択する".
     expect(screen.getByRole("button", { name: "選択中" })).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "選択する" })).toHaveLength(2);
+  });
+
+  it("excludes the send target via 'この人には聞かない' and shows the reroute status (#260)", async () => {
+    renderResult(
+      state({
+        route: { route: "person", reason: "", confidence: 0.9 },
+        recommend: { recommendations: THREE_CANDIDATES },
+        draft: { draft: "高梨さん向けの下書き" },
+      }),
+    );
+    // The control is offered ONLY on the current send target (the selected top).
+    expect(screen.getAllByRole("button", { name: "この人には聞かない" })).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "この人には聞かない" }));
+    await waitFor(() =>
+      expect(excludeHandoffCandidateMock).toHaveBeenCalledWith({
+        session_id: "s1",
+        person_id: THREE_CANDIDATES[0].person_id,
+      }),
+    );
+    // The freshly-scored candidate arrives over the stream (remount); meanwhile the
+    // asker sees a pending status and the send button is disabled.
+    expect(await screen.findByRole("status")).toHaveTextContent("別の方を選び直しています");
+    expect(screen.getByRole("button", { name: "この内容で依頼する" })).toBeDisabled();
+  });
+
+  it("surfaces a retryable error when excluding the send target fails (#260)", async () => {
+    excludeHandoffCandidateMock.mockRejectedValueOnce(new Error("boom"));
+    renderResult(
+      state({
+        route: { route: "person", reason: "", confidence: 0.9 },
+        recommend: { recommendations: THREE_CANDIDATES },
+        draft: { draft: "本文" },
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "この人には聞かない" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("候補の選び直しに失敗しました");
+    // The send button is re-enabled on failure so the asker can retry / send anyway.
+    expect(screen.getByRole("button", { name: "この内容で依頼する" })).not.toBeDisabled();
   });
 
   it("surfaces a retryable error when the confirm POST fails", async () => {

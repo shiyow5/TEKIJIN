@@ -1025,6 +1025,113 @@ def test_handoff_select_404_after_answered(seed_counts, engine, fake_embedder) -
     assert resp.status_code == 404
 
 
+# --------------------------------------------------------------------------- #
+# POST /handoff/exclude : asker excludes the send target ("この人には聞かない"),
+# rerouting to a freshly-scored next candidate and recording c6 feedback (#260)
+# --------------------------------------------------------------------------- #
+def test_handoff_exclude_reroutes_to_next_candidate(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    # Act as the asker (employee 10), not admin, so the recorded actor_id is real
+    # (admin's principal has no employee_id).
+    client.headers.update(_user_headers(10))
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "hx1"})
+    first = _events(client, "hx1")  # pause at send, drafted for E001
+    assert first[2][1]["recommendations"][0]["person_id"] == "E001"
+
+    # Asker excludes the current send target; the reroute is queued, not streamed
+    # synchronously (the open /events stream picks it up), so this acks like /answer.
+    resp = client.post("/handoff/exclude", json={"session_id": "hx1", "person_id": "E001"})
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "reroute_queued"
+
+    # The next /events segment re-scores excluding E001 and re-drafts for E002 —
+    # the same shape a responder decline produces, but asker-initiated.
+    second = _events(client, "hx1")
+    assert [e for e, _ in second] == ["recommend", "draft"]
+    assert second[0][1]["recommendations"][0]["person_id"] == "E002"
+
+    check = get_sessionmaker(engine)()
+    try:
+        # The exclusion is recorded as a c6 feedback signal (#237 Phase 1 table).
+        fb = (
+            check.query(Feedback).filter(Feedback.session_id == "hx1", Feedback.stage == "c6").all()
+        )
+        assert len(fb) == 1
+        assert fb[0].kind == "person_excluded"
+        assert fb[0].target == "E001"
+        assert fb[0].actor_id == 10  # the asker (from the authenticated principal)
+
+        # An asker exclusion is NOT a responder decline: E001's shown row keeps
+        # outcome=NULL (nobody was actually asked), unlike POST /answer declined.
+        q = check.query(Question).filter(Question.session_id == "hx1").first()
+        e1_rows = (
+            check.query(Recommendation)
+            .filter(Recommendation.question_id == q.id, Recommendation.employee_id == 1)
+            .all()
+        )
+        assert e1_rows and all(r.outcome is None for r in e1_rows)
+    finally:
+        check.close()
+
+    # The rerouted hand-off still completes normally.
+    assert (
+        client.post("/answer", json={"session_id": "hx1", "outcome": "accepted"}).status_code == 200
+    )
+
+
+def test_handoff_exclude_rejects_non_primary_person(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2, 3], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2, 3)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "hx2"})
+    _events(client, "hx2")  # primary is E001
+    # Only the send target may be excluded via the reroute path; a shown-but-not-
+    # target candidate is rejected (422) rather than silently declining E001.
+    resp = client.post("/handoff/exclude", json={"session_id": "hx2", "person_id": "E003"})
+    assert resp.status_code == 422
+
+
+def test_handoff_exclude_404_when_no_pending_handoff(seed_counts, engine, fake_embedder) -> None:
+    client = _client(engine, fake_embedder, retriever=_FakeRetriever(), scorer=_FakeScorer([]))
+    resp = client.post("/handoff/exclude", json={"session_id": "nope", "person_id": "E001"})
+    assert resp.status_code == 404
+
+
+def test_handoff_exclude_409_when_awaiting_clarification(
+    seed_counts, engine, fake_embedder
+) -> None:
+    client = _client(
+        engine, fake_embedder, retriever=_FakeRetriever(people=[1]), scorer=_FakeScorer(_recs(1))
+    )
+    client.post("/ask", json={"asker_id": 10, "question": VAGUE_Q, "session_id": "hx3"})
+    _events(client, "hx3")  # paused at ``ask`` (a clarification is owed to the asker)
+    resp = client.post("/handoff/exclude", json={"session_id": "hx3", "person_id": "E001"})
+    assert resp.status_code == 409
+
+
+def test_handoff_exclude_404_after_answered(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "hx4"})
+    _events(client, "hx4")
+    client.post("/answer", json={"session_id": "hx4", "outcome": "accepted"})
+    _events(client, "hx4")  # completed
+    resp = client.post("/handoff/exclude", json={"session_id": "hx4", "person_id": "E001"})
+    assert resp.status_code == 404
+
+
 def test_set_recommendation_outcome_is_idempotent(seed_counts, session) -> None:
     from tekijin.data.writes import set_recommendation_outcome
 
