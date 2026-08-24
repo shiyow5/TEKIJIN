@@ -1,7 +1,7 @@
 import type { CurrentUserContextValue } from "@/components/CurrentUserProvider";
 import { InboxScreen } from "@/components/InboxScreen";
-import type { InboxItem } from "@/lib/api-types";
-import { render, screen, waitFor } from "@testing-library/react";
+import type { HandoffResponse, InboxItem } from "@/lib/api-types";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const useCurrentUserMock = vi.fn<() => CurrentUserContextValue>();
@@ -10,8 +10,22 @@ vi.mock("@/components/CurrentUserProvider", () => ({
 }));
 
 const getInboxMock = vi.fn();
+const getHandoffMock = vi.fn();
+const postAnswerMock = vi.fn();
+const advanceSessionMock = vi.fn();
 vi.mock("@/lib/api-client", () => ({
   getInbox: (...args: unknown[]) => getInboxMock(...args),
+  getHandoff: (...args: unknown[]) => getHandoffMock(...args),
+  postAnswer: (...args: unknown[]) => postAnswerMock(...args),
+  advanceSession: (...args: unknown[]) => advanceSessionMock(...args),
+  ApiError: class ApiError extends Error {
+    readonly status: number;
+    constructor(status: number, message: string) {
+      super(message);
+      this.name = "ApiError";
+      this.status = status;
+    }
+  },
 }));
 
 function asUser(id: string | null, name?: string): CurrentUserContextValue {
@@ -33,12 +47,51 @@ const ITEM: InboxItem = {
   question: "UTM の移行時に気をつけることは？",
   topics: ["ネットワーク", "セキュリティ"],
   asker: { id: "E010", name: "藤田 悠斗", dept: "第3営業部" },
+  consult_method: "chat",
   created_at: "2026-08-23T09:30:00",
 };
+
+const ITEM2: InboxItem = {
+  session_id: "sess-43",
+  question_id: "api_q2",
+  question: "VPN の帯域制限について",
+  topics: ["ネットワーク"],
+  asker: { id: "E011", name: "森田 恵", dept: "広報部" },
+  // The two items differ so the list badge is visibly per-item (#245).
+  consult_method: "direct",
+  created_at: "2026-08-23T10:00:00",
+};
+
+function handoffFor(item: InboxItem): HandoffResponse {
+  return {
+    session_id: item.session_id,
+    question: item.question,
+    asker: item.asker,
+    topics: item.topics,
+    products: [],
+    missing: [],
+    responder: {
+      person_id: "E001",
+      name: "高梨 健太",
+      dept: "技術部",
+      score: 0.9,
+      confidence: "高",
+      reasons: [{ type: "cert", detail: "情報処理安全確保支援士" }],
+    },
+    draft: `${item.asker.name}さん向けの下書きです。`,
+    reuse_count: 3,
+    helpful_answer_count: 1,
+  };
+}
 
 beforeEach(() => {
   useCurrentUserMock.mockReset();
   getInboxMock.mockReset();
+  getHandoffMock.mockReset();
+  postAnswerMock.mockReset();
+  advanceSessionMock.mockReset();
+  postAnswerMock.mockResolvedValue({ session_id: "sess-42", status: "resumed" });
+  advanceSessionMock.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -53,9 +106,10 @@ describe("InboxScreen", () => {
     expect(getInboxMock).not.toHaveBeenCalled();
   });
 
-  it("fetches the inbox for the current user and links each item to its answer page", async () => {
+  it("fetches the inbox and shows the first item's detail without an extra click", async () => {
     useCurrentUserMock.mockReturnValue(asUser("E001", "高梨 健太"));
     getInboxMock.mockResolvedValue([ITEM]);
+    getHandoffMock.mockResolvedValue(handoffFor(ITEM));
     render(<InboxScreen />);
 
     await waitFor(() => expect(getInboxMock).toHaveBeenCalledWith("E001"));
@@ -65,8 +119,75 @@ describe("InboxScreen", () => {
     expect(screen.getByText("ネットワーク")).toBeInTheDocument();
     expect(screen.getByText("2026-08-23 09:30")).toBeInTheDocument();
 
-    const link = screen.getByRole("link", { name: /藤田 悠斗 さんからの質問/ });
-    expect(link).toHaveAttribute("href", "/answer/sess-42");
+    // The detail pane (AnswerScreen) renders for the first item with no click.
+    await waitFor(() => expect(getHandoffMock).toHaveBeenCalledWith("sess-42"));
+    expect(await screen.findByRole("heading", { name: "あなたに届いた質問" })).toBeInTheDocument();
+    expect(screen.getByText("あなたが選ばれた理由")).toBeInTheDocument();
+    expect(screen.getByText("依頼内容（下書き）")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "引き受ける" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "今は難しい" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "自分より適任がいる" })).toBeInTheDocument();
+  });
+
+  it("switches the detail pane when a different item is clicked", async () => {
+    useCurrentUserMock.mockReturnValue(asUser("E001", "高梨 健太"));
+    getInboxMock.mockResolvedValue([ITEM, ITEM2]);
+    getHandoffMock.mockImplementation((sessionId: string) =>
+      Promise.resolve(handoffFor(sessionId === ITEM.session_id ? ITEM : ITEM2)),
+    );
+    render(<InboxScreen />);
+
+    await waitFor(() => expect(getHandoffMock).toHaveBeenCalledWith(ITEM.session_id));
+    // The question appears both in the list preview and the detail heading;
+    // scope to the heading (level 2, per AnswerScreen) to pick the detail pane.
+    expect(
+      await screen.findByRole("heading", { name: ITEM.question, level: 2 }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /森田 恵 さんからの質問/ }));
+
+    await waitFor(() => expect(getHandoffMock).toHaveBeenCalledWith(ITEM2.session_id));
+    expect(
+      await screen.findByRole("heading", { name: ITEM2.question, level: 2 }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps the accepted item's confirmation visible and drops it from the list", async () => {
+    useCurrentUserMock.mockReturnValue(asUser("E001", "高梨 健太"));
+    getInboxMock.mockResolvedValueOnce([ITEM]).mockResolvedValueOnce([]);
+    getHandoffMock.mockResolvedValue(handoffFor(ITEM));
+    render(<InboxScreen />);
+
+    await screen.findByRole("button", { name: "引き受ける" });
+    fireEvent.click(screen.getByRole("button", { name: "引き受ける" }));
+
+    expect(await screen.findByRole("heading", { name: /お引き受け/ })).toBeInTheDocument();
+    await waitFor(() => expect(getInboxMock).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(screen.getByText("いまは届いている質問はありません。")).toBeInTheDocument(),
+    );
+    // The confirmation stays up even though the item is gone from the list.
+    expect(screen.getByRole("heading", { name: /お引き受け/ })).toBeInTheDocument();
+  });
+
+  it("drops the item immediately (no lingering confirmation) when 今は難しい is clicked", async () => {
+    useCurrentUserMock.mockReturnValue(asUser("E001", "高梨 健太"));
+    getInboxMock.mockResolvedValueOnce([ITEM, ITEM2]).mockResolvedValueOnce([ITEM2]);
+    getHandoffMock.mockImplementation((sessionId: string) =>
+      Promise.resolve(handoffFor(sessionId === ITEM.session_id ? ITEM : ITEM2)),
+    );
+    render(<InboxScreen />);
+
+    await screen.findByRole("button", { name: "今は難しい" });
+    fireEvent.click(screen.getByRole("button", { name: "今は難しい" }));
+
+    // No "承知しました" confirmation lingers for the declined item; the pane
+    // moves straight to the next pending item's detail.
+    await waitFor(() => expect(getInboxMock).toHaveBeenCalledTimes(2));
+    expect(
+      await screen.findByRole("heading", { name: ITEM2.question, level: 2 }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "承知しました" })).not.toBeInTheDocument();
   });
 
   it("shows an empty state when there are no pending handoffs", async () => {
@@ -90,8 +211,26 @@ describe("InboxScreen", () => {
   it("falls back to 匿名 when the asker has no name", async () => {
     useCurrentUserMock.mockReturnValue(asUser("E001", "高梨 健太"));
     getInboxMock.mockResolvedValue([{ ...ITEM, asker: { id: "E010" }, topics: [] }]);
+    getHandoffMock.mockResolvedValue(handoffFor(ITEM));
     render(<InboxScreen />);
 
     await waitFor(() => expect(screen.getByText("匿名 さんからの質問")).toBeInTheDocument());
+  });
+  it("labels each item with the asker's chosen consultation method (#245)", async () => {
+    useCurrentUserMock.mockReturnValue(asUser("E001"));
+    getInboxMock.mockResolvedValue([ITEM, ITEM2]);
+    getHandoffMock.mockImplementation((sessionId: string) =>
+      Promise.resolve(handoffFor(sessionId === ITEM.session_id ? ITEM : ITEM2)),
+    );
+    render(<InboxScreen />);
+
+    // The responder must be able to tell BEFORE accepting: "直接相談" never
+    // opens a chat thread, so it changes what accepting commits them to.
+    // Both badges live on the list buttons themselves, so the responder sees
+    // them without opening anything.
+    const chat = await screen.findByRole("button", { name: /藤田 悠斗 さんからの質問/ });
+    expect(within(chat).getByText("チャットで相談")).toBeInTheDocument();
+    const direct = screen.getByRole("button", { name: /森田 恵 さんからの質問/ });
+    expect(within(direct).getByText("直接相談")).toBeInTheDocument();
   });
 });

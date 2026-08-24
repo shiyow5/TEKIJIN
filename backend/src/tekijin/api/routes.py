@@ -18,6 +18,7 @@ Unexpected errors are uniformly masked as a generic 500 via ``_generic_500`` (#1
 from __future__ import annotations
 
 import contextlib
+import datetime as dt
 import logging
 from collections.abc import Iterator
 
@@ -47,6 +48,12 @@ from tekijin.data.documents import get_document
 from tekijin.data.feedback import record_feedback
 from tekijin.data.history import question_asker_id, recent_questions_for_asker
 from tekijin.data.inbox import pending_handoffs_for_responder
+from tekijin.data.messages import (
+    create_message,
+    messages_for_thread,
+    thread_parties,
+    threads_for_employee,
+)
 from tekijin.data.notifications import pending_decline_notifications_for_asker
 from tekijin.data.repository import Repository
 from tekijin.data.writes import ack_decline_notifications, delete_question, mark_self_resolved
@@ -221,7 +228,7 @@ def handoff_draft(
     require_session_participant(principal, asker_id, responder_id)
     try:
         _service(request).save_handoff_draft(
-            req.session_id, req.draft, actor_id=principal.employee_id
+            req.session_id, req.draft, req.consult_method, actor_id=principal.employee_id
         )
     except HandoffNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -448,6 +455,7 @@ def inbox(
                         name=row["asker_name"],
                         dept=row["asker_dept"],
                     ),
+                    consult_method=row["consult_method"],
                     created_at=row["created_at"],
                 )
                 for row in rows
@@ -649,6 +657,135 @@ def ack_notifications(
         with session_scope(_service(request).session_factory) as session:
             count = ack_decline_notifications(session, req.asker_id, req.ids)
         return schemas.NotificationAckResponse(acknowledged=count)
+
+
+def _coerce_employee_id_or_422(value: str, *, field: str) -> int:
+    try:
+        return schemas.coerce_employee_id(value)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"{field} must be an int or 'E###'") from exc
+
+
+def _counterpart(parties: dict, employee_id: int) -> schemas.HandoffAsker:
+    is_asker = employee_id == parties["asker_id"]
+    return schemas.HandoffAsker(
+        id=schemas.format_employee_id(parties["responder_id"] if is_asker else parties["asker_id"]),
+        name=parties["responder_name"] if is_asker else parties["asker_name"],
+        dept=parties["responder_dept"] if is_asker else parties["asker_dept"],
+    )
+
+
+@router.get("/messages/threads", response_model=schemas.MessageThreadListResponse)
+def message_threads(
+    request: Request,
+    employee_id: str = Query(min_length=1),
+    principal: Principal = Depends(require_principal),
+) -> schemas.MessageThreadListResponse:
+    """Accepted chat threads where ``employee_id`` is a party, newest activity first (#224).
+
+    A non-admin may only list their own threads (#241, the same act-as rule as
+    ``/questions`` and ``/inbox``). Without it the party check below would still
+    pass for any id the caller cares to name — employee ids are the enumerable
+    ``E###`` form, so that would expose everyone's conversations.
+    """
+
+    with _generic_500("GET /messages/threads"):
+        eid = _coerce_employee_id_or_422(employee_id, field="employee_id")
+        require_can_act_as(principal, eid)
+        with _service(request).session_factory() as session:
+            rows = threads_for_employee(session, eid)
+        return schemas.MessageThreadListResponse(
+            items=[
+                schemas.MessageThreadSummary(
+                    thread_id=row["thread_id"],
+                    question_id=row["question_id"],
+                    question_title=row["question_title"],
+                    counterpart=schemas.HandoffAsker(
+                        id=schemas.format_employee_id(row["counterpart_id"]),
+                        name=row["counterpart_name"],
+                        dept=row["counterpart_dept"],
+                    ),
+                    last_message=row["last_message"],
+                    last_message_at=row["last_message_at"],
+                    created_at=row["created_at"],
+                )
+                for row in rows
+            ]
+        )
+
+
+@router.get("/messages/threads/{thread_id}", response_model=schemas.MessageThreadDetail)
+def message_thread_detail(
+    thread_id: int,
+    request: Request,
+    employee_id: str = Query(min_length=1),
+    principal: Principal = Depends(require_principal),
+) -> schemas.MessageThreadDetail:
+    """One thread's full history (#224). 404 if unaccepted or ``employee_id`` isn't a party.
+
+    Non-parties get the same 404 as an unknown thread — never a 403 — so the
+    response cannot be used to confirm a thread exists to someone uninvolved.
+    Acting as someone else is refused first (403, #241): the 404-for-non-parties
+    rule protects third parties, it is not a substitute for authenticating the
+    caller.
+    """
+
+    with _generic_500("GET /messages/threads/{thread_id}"):
+        eid = _coerce_employee_id_or_422(employee_id, field="employee_id")
+        require_can_act_as(principal, eid)
+        with _service(request).session_factory() as session:
+            parties = thread_parties(session, thread_id)
+            if parties is None or eid not in (parties["asker_id"], parties["responder_id"]):
+                raise HTTPException(status_code=404, detail="thread not found")
+            rows = messages_for_thread(session, thread_id)
+        return schemas.MessageThreadDetail(
+            thread_id=thread_id,
+            question_id=parties["question_id"],
+            question_title=parties["question_title"],
+            counterpart=_counterpart(parties, eid),
+            messages=[
+                schemas.MessageItem(
+                    id=row["id"],
+                    thread_id=thread_id,
+                    sender_id=schemas.format_employee_id(row["sender_id"]),
+                    body=row["body"],
+                    created_at=row["created_at"],
+                )
+                for row in rows
+            ],
+        )
+
+
+@router.post("/messages", response_model=schemas.MessageItem)
+def send_message(
+    req: schemas.MessageSendRequest,
+    request: Request,
+    principal: Principal = Depends(require_principal),
+) -> schemas.MessageItem:
+    """Send one chat message on an accepted thread (#224). 404 if unaccepted or non-party.
+
+    ``sender_id`` is bound to the authenticated principal (#241): without this a
+    party could post as the OTHER party, and anyone could post as anyone.
+    """
+
+    with _generic_500("POST /messages"):
+        require_can_act_as(principal, req.sender_id)
+        with session_scope(_service(request).session_factory) as session:
+            parties = thread_parties(session, req.thread_id)
+            if parties is None or req.sender_id not in (
+                parties["asker_id"],
+                parties["responder_id"],
+            ):
+                raise HTTPException(status_code=404, detail="thread not found")
+            now = dt.datetime.now()  # noqa: DTZ005 - naive is intentional, matches created_at
+            row = create_message(session, req.thread_id, req.sender_id, req.body, now)
+        return schemas.MessageItem(
+            id=row["id"],
+            thread_id=row["thread_id"],
+            sender_id=schemas.format_employee_id(row["sender_id"]),
+            body=row["body"],
+            created_at=row["created_at"],
+        )
 
 
 @router.get(

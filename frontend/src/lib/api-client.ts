@@ -10,6 +10,10 @@
 import type {
   AckResponse,
   AskRequest,
+  ChatMessage,
+  ChatThreadDetail,
+  ChatThreadListResponse,
+  ChatThreadSummary,
   DashboardResponse,
   DeclineNotification,
   DeleteQuestionResponse,
@@ -35,6 +39,7 @@ import type {
   RecentQuestionsResponse,
   ResolveQuestionResponse,
   ResumeRequest,
+  SendMessageRequest,
 } from "@/lib/api-types";
 import { getAuthToken } from "@/lib/auth-token";
 import { getApiBaseUrl } from "@/lib/config";
@@ -369,6 +374,45 @@ export function ackNotifications(
   options: RequestOptions = {},
 ): Promise<NotificationAckResponse> {
   return postJson<NotificationAckResponse>("/notifications/ack", request, options);
+}
+
+/**
+ * GET /messages/threads — accepted chat threads where `employeeId` is a party
+ * (asker or the accepted responder), newest activity first (#224).
+ */
+export async function getChatThreads(
+  employeeId: string,
+  options: RequestOptions = {},
+): Promise<ChatThreadSummary[]> {
+  const query = `?employee_id=${encodeURIComponent(employeeId)}`;
+  const body = await getJson<ChatThreadListResponse>(`/messages/threads${query}`, options);
+  return body.items;
+}
+
+/**
+ * GET /messages/threads/{threadId} — one thread's full history, oldest first
+ * (#224). Throws {@link ApiError} with status 404 if the thread isn't accepted
+ * or `employeeId` isn't a party.
+ */
+export function getChatThread(
+  threadId: number,
+  employeeId: string,
+  options: RequestOptions = {},
+): Promise<ChatThreadDetail> {
+  const query = `?employee_id=${encodeURIComponent(employeeId)}`;
+  return getJson<ChatThreadDetail>(`/messages/threads/${threadId}${query}`, options);
+}
+
+/**
+ * POST /messages — send one chat message on an accepted thread (#224). Throws
+ * {@link ApiError} with status 404 (unaccepted thread / non-party sender) or
+ * 422 (blank body).
+ */
+export function postMessage(
+  request: SendMessageRequest,
+  options: RequestOptions = {},
+): Promise<ChatMessage> {
+  return postJson<ChatMessage>("/messages", request, options);
 }
 
 /** Fetch one internal document's full content for the viewer (GET /documents/{id}, #143). */

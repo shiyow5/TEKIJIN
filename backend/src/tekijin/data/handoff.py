@@ -12,7 +12,7 @@ from __future__ import annotations
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from tekijin.models.tables import Answer, Employee
+from tekijin.models.tables import Answer, Employee, Question
 
 
 def employee_brief(session: Session, employee_id: int) -> tuple[str | None, str | None]:
@@ -22,6 +22,22 @@ def employee_brief(session: Session, employee_id: int) -> tuple[str | None, str 
         select(Employee.name, Employee.department).where(Employee.id == employee_id)
     ).first()
     return (row[0], row[1]) if row else (None, None)
+
+
+def question_consult_method(session: Session, question_id: str | None) -> str:
+    """The asker's chosen consultation method for ``question_id``.
+
+    ``None`` question_id (shouldn't happen for a live handoff) or an unset /
+    unknown column value both fall back to ``"chat"`` — the implicit default,
+    so old and in-flight requests behave exactly as before this field existed.
+    """
+
+    if question_id is None:
+        return "chat"
+    value = session.execute(
+        select(Question.consult_method).where(Question.id == question_id)
+    ).scalar_one_or_none()
+    return value or "chat"
 
 
 def responder_reuse_stats(session: Session, responder_id: int) -> dict[str, int]:

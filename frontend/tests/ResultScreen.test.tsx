@@ -254,6 +254,8 @@ describe("ResultScreen — main line (person)", () => {
       />,
     );
     fireEvent.click(screen.getByRole("button", { name: "この内容で依頼する" }));
+    // Sending now goes through the consultation-method popup (#245).
+    fireEvent.click(screen.getByRole("button", { name: "チャットで相談する" }));
     expect(await screen.findByText("依頼を送りました")).toBeInTheDocument();
 
     // The recipient declines → reroute to a new person. The stale success
@@ -283,12 +285,16 @@ describe("ResultScreen — main line (person)", () => {
     const textarea = screen.getByLabelText<HTMLTextAreaElement>("聞き方の下書き");
     fireEvent.change(textarea, { target: { value: "編集後の依頼文" } });
     fireEvent.click(screen.getByRole("button", { name: "この内容で依頼する" }));
+    // Sending now goes through the consultation-method popup (#245).
+    fireEvent.click(screen.getByRole("button", { name: "チャットで相談する" }));
 
     // The edited text is persisted for this session, and the top pick is the recipient.
     await waitFor(() =>
       expect(updateHandoffDraftMock).toHaveBeenCalledWith({
         session_id: "s1",
         draft: "編集後の依頼文",
+        // The popup's choice rides along with the draft save (#245).
+        consult_method: "chat",
       }),
     );
     expect(await screen.findByText("依頼を送りました")).toBeInTheDocument();
@@ -353,6 +359,8 @@ describe("ResultScreen — main line (person)", () => {
 
     // The send confirmation now names the selected candidate, not the original top pick.
     fireEvent.click(screen.getByRole("button", { name: "この内容で依頼する" }));
+    // Sending now goes through the consultation-method popup (#245).
+    fireEvent.click(screen.getByRole("button", { name: "チャットで相談する" }));
     expect(await screen.findByText(/鈴木さんに、この内容でお繋ぎしました/)).toBeInTheDocument();
   });
 
@@ -549,6 +557,8 @@ describe("ResultScreen — main line (person)", () => {
       }),
     );
     fireEvent.click(screen.getByRole("button", { name: "この内容で依頼する" }));
+    // Sending now goes through the consultation-method popup (#245).
+    fireEvent.click(screen.getByRole("button", { name: "チャットで相談する" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("送信に失敗しました");
     // Still on the route view (not the sent-confirmation), so the asker can retry.
     expect(screen.queryByText("依頼を送りました")).not.toBeInTheDocument();
@@ -571,6 +581,8 @@ describe("ResultScreen — main line (person)", () => {
     });
     const { rerender } = render(<ResultScreen sessionId="s1" streamState={first} />);
     fireEvent.click(screen.getByRole("button", { name: "この内容で依頼する" }));
+    // Sending now goes through the consultation-method popup (#245).
+    fireEvent.click(screen.getByRole("button", { name: "チャットで相談する" }));
 
     // Reroute to a new top candidate BEFORE the POST resolves -> remount.
     rerender(

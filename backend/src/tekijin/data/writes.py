@@ -106,6 +106,18 @@ def update_question_body(session: Session, question_id: str, body: str) -> None:
     session.execute(update(Question).where(Question.id == question_id).values(body=body))
 
 
+def update_question_consult_method(session: Session, question_id: str, consult_method: str) -> None:
+    """Record the asker's chosen consultation method ("direct" | "chat").
+
+    Lives on the question (not the recommendation) so it survives a decline+
+    reroute, which creates a new rank-1 recommendation for the same question.
+    """
+
+    session.execute(
+        update(Question).where(Question.id == question_id).values(consult_method=consult_method)
+    )
+
+
 def record_events(session: Session, question_id: str, rows: list[EventRow]) -> None:
     """Persist per-stage run timing (technical-spec §7) — the latency KPI source.
 

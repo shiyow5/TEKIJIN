@@ -125,6 +125,32 @@ describe("AnswerScreen", () => {
     expect(back).toHaveAttribute("href", "/inbox");
   });
 
+  it("links to the chat thread after accepting when a recommendation_id is present (#224)", async () => {
+    getHandoffMock.mockResolvedValue({
+      ...HANDOFF,
+      recommendation_id: 42,
+    } satisfies HandoffResponse);
+    render(<AnswerScreen sessionId="s1" />);
+    await screen.findByText("UTM移行時の注意点について");
+    fireEvent.click(screen.getByRole("button", { name: "引き受ける" }));
+
+    const chatLink = await screen.findByRole("link", { name: "チャットを開く" });
+    expect(chatLink).toHaveAttribute("href", "/chat?thread=42");
+  });
+
+  it("does not show a chat link after declining (#224: only 引き受ける opens a thread)", async () => {
+    getHandoffMock.mockResolvedValue({
+      ...HANDOFF,
+      recommendation_id: 42,
+    } satisfies HandoffResponse);
+    render(<AnswerScreen sessionId="s1" />);
+    await screen.findByText("UTM移行時の注意点について");
+    fireEvent.click(screen.getByRole("button", { name: "今は難しい" }));
+
+    await screen.findByRole("link", { name: "受信箱へ戻る" });
+    expect(screen.queryByRole("link", { name: "チャットを開く" })).toBeNull();
+  });
+
   it("sends declined when 今は難しい is clicked", async () => {
     getHandoffMock.mockResolvedValue(HANDOFF);
     render(<AnswerScreen sessionId="s1" />);
@@ -166,6 +192,23 @@ describe("AnswerScreen", () => {
     render(<AnswerScreen sessionId="s1" />);
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/読み込みに失敗/);
+  });
+
+  it("links to the chat list on a 'gone' load (#224: recovery after reload)", async () => {
+    const { ApiError } = await import("@/lib/api-client");
+    getHandoffMock.mockRejectedValue(new ApiError(404, "no responder handoff"));
+    render(<AnswerScreen sessionId="s1" />);
+
+    const chatLink = await screen.findByRole("link", { name: "チャット一覧を見る" });
+    expect(chatLink).toHaveAttribute("href", "/chat");
+  });
+
+  it("does not link to the chat list on a generic (non-'gone') load error", async () => {
+    getHandoffMock.mockRejectedValue(new Error("network"));
+    render(<AnswerScreen sessionId="s1" />);
+
+    await screen.findByRole("alert");
+    expect(screen.queryByRole("link", { name: "チャット一覧を見る" })).toBeNull();
   });
 
   it("handles a handoff with no responder, empty slots and no reasons", async () => {

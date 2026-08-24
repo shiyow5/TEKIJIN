@@ -14,14 +14,19 @@
  * wiring only. A `sessionId` is the single input (from the route param).
  */
 
+import { ConsultMethodBadge } from "@/components/ConsultMethodBadge";
 import type { HandoffAction } from "@/hooks/useHandoff";
 import { useHandoff } from "@/hooks/useHandoff";
 import type { HandoffResponse, Reason } from "@/lib/api-types";
 import { reasonLabel } from "@/lib/reasons";
 import Link from "next/link";
+import { useEffect } from "react";
 
 export interface AnswerScreenProps {
   sessionId: string;
+  /** Fired once the responder's outcome lands, so an embedding page (the inbox's
+   * merged list+detail view) can refresh its list without a full navigation. */
+  onDone?: (action: HandoffAction) => void;
 }
 
 // One equal-size contract shared by all three actions, so declining is never a
@@ -49,6 +54,19 @@ function BackLink() {
         className="min-h-[48px] rounded-full bg-primary px-lg py-sm font-bold text-on-primary shadow-md transition-colors hover:bg-primary-container"
       >
         受信箱へ戻る
+      </Link>
+    </div>
+  );
+}
+
+function ChatCta({ href, label }: { href: string; label: string }) {
+  return (
+    <div className="flex justify-center">
+      <Link
+        href={href}
+        className="min-h-[48px] rounded-full border border-primary px-lg py-sm font-bold text-primary shadow-sm transition-colors hover:bg-primary-container hover:text-on-primary-container"
+      >
+        {label}
       </Link>
     </div>
   );
@@ -94,8 +112,15 @@ const DONE_BODY: Record<HandoffAction, string> = {
   refer: "別の候補者を自動でお探しします。ご対応ありがとうございました。",
 };
 
-export function AnswerScreen({ sessionId }: AnswerScreenProps) {
+export function AnswerScreen({ sessionId, onDone }: AnswerScreenProps) {
   const { phase, handoff, action, errorKind, submitError, submit } = useHandoff(sessionId);
+
+  // onDone fires once per completed outcome (keyed on phase/action); an
+  // identity change in the caller's callback must not re-fire it.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: <explained above>
+  useEffect(() => {
+    if (phase === "done" && action) onDone?.(action);
+  }, [phase, action]);
 
   if (phase === "loading") {
     return (
@@ -120,6 +145,10 @@ export function AnswerScreen({ sessionId }: AnswerScreenProps) {
         >
           {message}
         </div>
+        {/* "gone" is this issue's other gap: reloading after an accept 404s here
+            with no way back to the conversation. The chat list finds it without
+            needing the (now-consumed) session id (#224). */}
+        {errorKind === "gone" ? <ChatCta href="/chat" label="チャット一覧を見る" /> : null}
         <BackLink />
       </Centered>
     );
@@ -130,6 +159,11 @@ export function AnswerScreen({ sessionId }: AnswerScreenProps) {
       <Centered>
         <h1 className="font-bold text-2xl text-primary">{DONE_HEADING[action]}</h1>
         <p className="text-on-surface-variant">{DONE_BODY[action]}</p>
+        {action === "answer" &&
+        handoff?.recommendation_id != null &&
+        handoff.consult_method !== "direct" ? (
+          <ChatCta href={`/chat?thread=${handoff.recommendation_id}`} label="チャットを開く" />
+        ) : null}
         <BackLink />
       </Centered>
     );
@@ -157,9 +191,12 @@ export function AnswerScreen({ sessionId }: AnswerScreenProps) {
       </header>
 
       <article className="flex flex-col gap-sm rounded-xl border border-outline-variant bg-surface-container-lowest p-md shadow-sm">
-        <div className="flex items-center gap-sm text-on-surface-variant text-sm">
+        <div className="flex flex-wrap items-center gap-sm text-on-surface-variant text-sm">
           <span className="font-medium text-on-surface">{askerName}さん</span>
           {askerMeta ? <span>（{askerMeta}）</span> : null}
+          {/* Shown BEFORE the accept/decline buttons: "直接相談" never opens a
+              chat, so it changes what accepting commits you to (#245). */}
+          <ConsultMethodBadge method={hf.consult_method ?? "chat"} />
         </div>
         <h2 className="font-bold text-lg text-on-surface leading-snug">{hf.question}</h2>
         {slots.length > 0 ? (

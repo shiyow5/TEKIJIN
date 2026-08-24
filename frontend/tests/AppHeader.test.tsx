@@ -150,6 +150,7 @@ describe("AppHeader", () => {
       "href",
       "/dashboard",
     );
+    expect(within(nav).getByRole("link", { name: "チャット" })).toHaveAttribute("href", "/chat");
   });
 
   // --- regular user: no switcher, no dashboard -------------------------------- #

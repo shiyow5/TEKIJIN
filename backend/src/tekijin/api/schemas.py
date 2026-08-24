@@ -13,6 +13,10 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 Outcome = Literal["accepted", "declined"]
 
+# The asker's chosen consultation method. "chat" is the implicit default: an
+# unset/legacy value is coalesced to it everywhere it is read.
+ConsultMethod = Literal["direct", "chat"]
+
 # session_id doubles as the ``/events/{session_id}`` path segment and the graph
 # ``thread_id``; constrain it to path-safe characters (no ``/``) so a created
 # session is always reachable over GET /events.
@@ -134,6 +138,9 @@ class HandoffDraftRequest(BaseModel):
 
     session_id: str = Field(pattern=_SESSION_ID_PATTERN)
     draft: str = Field(min_length=1)
+    # Defaults to "chat" so a client that predates this field (or an asker who
+    # cancels the method popup) keeps the pre-existing implicit behaviour.
+    consult_method: ConsultMethod = "chat"
 
     @field_validator("draft")
     @classmethod
@@ -357,6 +364,9 @@ class HandoffResponse(BaseModel):
     # on POST /answer so a stale outcome (after a reroute / from a competing tab)
     # is rejected instead of binding to a new candidate (#94). None if no primary.
     recommendation_id: int | None = None
+    # The asker's chosen consultation method; "chat" until they choose otherwise
+    # via POST /handoff/draft.
+    consult_method: ConsultMethod = "chat"
 
 
 class HandoffSelectResponse(BaseModel):
@@ -384,6 +394,10 @@ class InboxItem(BaseModel):
     question: str
     topics: list[str] = Field(default_factory=list)
     asker: HandoffAsker
+    # Shown as a badge in the list so the responder can tell, BEFORE accepting,
+    # whether accepting opens a chat or means they will be approached directly
+    # (#245). Absent on the question = the implicit default, "chat".
+    consult_method: ConsultMethod = "chat"
     created_at: str | None = None
 
 
@@ -444,6 +458,69 @@ class NotificationsResponse(BaseModel):
 
 class NotificationAckResponse(BaseModel):
     acknowledged: int
+
+
+# --------------------------------------------------------------------------- #
+# chat (GET/POST /messages) — accepted-recommendation threads (#224)
+# --------------------------------------------------------------------------- #
+class MessageSendRequest(BaseModel):
+    """Send one chat message on an accepted-recommendation thread."""
+
+    thread_id: int
+    sender_id: int
+    # Unlike /ask and /handoff/draft (one per session), chat is a repeat-send
+    # surface, so an unbounded body is a storage-growth foot-gun rather than a
+    # theoretical one. 2000 chars is well past any real message.
+    body: str = Field(min_length=1, max_length=2000)
+
+    @field_validator("sender_id", mode="before")
+    @classmethod
+    def _accept_e_prefixed_id(cls, value: object) -> int:
+        return _coerce_asker_id(value)
+
+    @field_validator("body")
+    @classmethod
+    def _trim_nonempty(cls, value: str) -> str:
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("body must not be blank")
+        return trimmed
+
+
+class MessageItem(BaseModel):
+    """One chat message, sender in the external ``"E###"`` form."""
+
+    id: int
+    thread_id: int
+    sender_id: str
+    body: str
+    created_at: str
+
+
+class MessageThreadSummary(BaseModel):
+    """One accepted thread for the chat list (newest activity first)."""
+
+    thread_id: int
+    question_id: str
+    question_title: str
+    counterpart: HandoffAsker
+    last_message: str | None = None
+    last_message_at: str | None = None
+    created_at: str
+
+
+class MessageThreadListResponse(BaseModel):
+    items: list[MessageThreadSummary] = Field(default_factory=list)
+
+
+class MessageThreadDetail(BaseModel):
+    """One thread's full history, oldest first."""
+
+    thread_id: int
+    question_id: str
+    question_title: str
+    counterpart: HandoffAsker
+    messages: list[MessageItem] = Field(default_factory=list)
 
 
 # --------------------------------------------------------------------------- #

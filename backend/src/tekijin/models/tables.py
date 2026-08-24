@@ -192,6 +192,12 @@ class Question(Base):
     # API when C5 emits, so the dashboard can report the self-resolution rate
     # (補助経路で人を介さず解決した割合). NULL for pre-seeded/unrouted questions.
     route: Mapped[str | None] = mapped_column(String(32))
+    # The asker's chosen consultation method ("direct" | "chat"), set via
+    # POST /handoff/draft when confirming the hand-off. Lives on the question
+    # (not the recommendation) so it survives a decline+reroute, which creates
+    # a NEW Recommendation row for the same question. NULL (never set) is
+    # treated as "chat" everywhere — the implicit pre-existing default.
+    consult_method: Mapped[str | None] = mapped_column(String(32))
     # When the question was resolved at runtime — a responder accepted the hand-off
     # (C8) or a self-resolving terminal (document) was reached. Set first-wins by
     # the API so the dashboard's average resolution time reflects live traffic, not
@@ -245,6 +251,25 @@ class Recommendation(Base):
     # NULL means "not yet seen"; only ever set on a rank==1, outcome=='declined'
     # row (the shape a decline notification is derived from).
     declined_seen_at: Mapped[dt.datetime | None] = mapped_column(DateTime)
+
+
+class Message(Base):
+    """A chat message on an accepted recommendation (承諾後のやり取り, #224).
+
+    ``recommendation_id`` doubles as the thread id: a decline+reroute creates a
+    NEW rank-1 recommendation row rather than mutating the old one, and only
+    one recommendation per question ever reaches ``outcome == "accepted"``, so
+    the accepted ``Recommendation.id`` is a stable, unique key for "this
+    accepted collaboration's chat" (no separate thread table needed).
+    """
+
+    __tablename__ = "messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    recommendation_id: Mapped[int] = mapped_column(ForeignKey("recommendations.id"), index=True)
+    sender_id: Mapped[int] = mapped_column(ForeignKey("employees.id"), index=True)
+    body: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now(), index=True)
 
 
 class EvalRun(Base):
@@ -382,6 +407,7 @@ __all__ = [
     "Question",
     "Answer",
     "Recommendation",
+    "Message",
     "EvalRun",
     "Event",
     "ProjectMember",

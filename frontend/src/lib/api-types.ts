@@ -35,6 +35,12 @@ export interface AskRequest {
 export type Outcome = "accepted" | "declined";
 
 /**
+ * The asker's chosen consultation method. "chat" is the implicit default — an
+ * unset value from the backend is always coalesced to it.
+ */
+export type ConsultMethod = "direct" | "chat";
+
+/**
  * Exactly one of `outcome` or `reply` — encoded as a discriminated union so a
  * caller (the #38 answer screen) cannot construct a payload with both or neither,
  * matching the backend's `_exactly_one` validator. The `never` on the unused arm
@@ -70,6 +76,8 @@ export interface ResolveQuestionResponse {
 export interface HandoffDraftRequest {
   session_id: string;
   draft: string;
+  /** Defaults to "chat" server-side when omitted. */
+  consult_method?: ConsultMethod;
 }
 
 /**
@@ -148,6 +156,8 @@ export interface InboxItem {
   question: string;
   topics: string[];
   asker: HandoffAsker;
+  /** How the asker chose to be helped (#245); absent on the question = "chat". */
+  consult_method: ConsultMethod;
   created_at?: string | null;
 }
 
@@ -268,6 +278,56 @@ export interface HandoffResponse {
   helpful_answer_count: number;
   /** Generation token echoed back on POST /answer so a stale outcome 409s (#94). */
   recommendation_id?: number | null;
+  /** The asker's chosen consultation method; "chat" until they choose otherwise. */
+  consult_method?: ConsultMethod;
+}
+
+// --------------------------------------------------------------------------- //
+// chat (GET/POST /messages) — accepted-recommendation threads (#224)
+// --------------------------------------------------------------------------- //
+
+/** POST /messages body — send one chat message on an accepted thread. */
+export interface SendMessageRequest {
+  thread_id: number;
+  sender_id: EmployeeId;
+  body: string;
+}
+
+/** One chat message (schemas.py `MessageItem`). `sender_id` is the external "E###" form. */
+export interface ChatMessage {
+  id: number;
+  thread_id: number;
+  sender_id: string;
+  body: string;
+  created_at: string;
+}
+
+/**
+ * One accepted thread for the chat list (schemas.py `MessageThreadSummary`),
+ * newest activity first. `thread_id` is the accepted `Recommendation.id`.
+ */
+export interface ChatThreadSummary {
+  thread_id: number;
+  question_id: string;
+  question_title: string;
+  counterpart: HandoffAsker;
+  last_message?: string | null;
+  last_message_at?: string | null;
+  created_at: string;
+}
+
+/** GET /messages/threads payload (schemas.py `MessageThreadListResponse`). */
+export interface ChatThreadListResponse {
+  items: ChatThreadSummary[];
+}
+
+/** GET /messages/threads/{id} payload (schemas.py `MessageThreadDetail`), oldest-first history. */
+export interface ChatThreadDetail {
+  thread_id: number;
+  question_id: string;
+  question_title: string;
+  counterpart: HandoffAsker;
+  messages: ChatMessage[];
 }
 
 // --------------------------------------------------------------------------- //
