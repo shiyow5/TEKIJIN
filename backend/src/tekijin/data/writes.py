@@ -92,6 +92,20 @@ def update_question_route(session: Session, question_id: str, route: str) -> Non
     session.execute(update(Question).where(Question.id == question_id).values(route=route))
 
 
+def update_question_body(session: Session, question_id: str, body: str) -> None:
+    """Persist an enriched question body (#268).
+
+    A clarification reply (``ask`` node) or an interpretation correction (#260)
+    folds extra context into the in-graph question. Without this, ``Question.body``
+    stayed the ORIGINAL text while ``GET /handoff`` showed the enriched one — so the
+    responder's ``/inbox`` preview and the asker's ``/history`` displayed a
+    different question than was actually processed. Writing the enriched body keeps
+    those SQL projections consistent with the run.
+    """
+
+    session.execute(update(Question).where(Question.id == question_id).values(body=body))
+
+
 def record_events(session: Session, question_id: str, rows: list[EventRow]) -> None:
     """Persist per-stage run timing (technical-spec §7) — the latency KPI source.
 
