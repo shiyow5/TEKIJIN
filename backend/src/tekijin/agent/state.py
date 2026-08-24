@@ -94,9 +94,6 @@ class AgentState(TypedDict, total=False):
     question_type: str
     out_of_scope: bool
     intent_confidence: float
-    # Topics the QUESTION itself yielded (topics minus retrieval-mediated ones,
-    # #69/#276): the graph's identifiability signal for the unresolved terminal.
-    topics_from_question: list[str]
 
     # -- C2 sufficiency ----------------------------------------------------
     sufficient: bool

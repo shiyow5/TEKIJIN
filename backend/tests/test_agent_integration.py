@@ -42,7 +42,7 @@ class _FixedIntent:
     and the injected/insufficient C2 path is what drives the ask -> cap flow.
     """
 
-    def analyze(self, question, asker, *, context=None):  # noqa: ARG002
+    def analyze(self, question, asker):  # noqa: ARG002
         from tekijin.agent.protocols import IntentResult
 
         return IntentResult(topics=[TOPIC], products=[], question_type="技術相談", confidence=0.4)
@@ -172,43 +172,6 @@ def test_confident_topic_skips_clarification(seed_counts, session, fake_embedder
     state = agent.invoke(_init("ネットワークの技術相談です"), cfg)
     assert state["sufficient"] is True
     assert agent.get_state(cfg).next == ("send",)  # reached hand-off, no ask interrupt
-
-
-# --------------------------------------------------------------------------- #
-# #69: retrieve-then-classify topic mediation (end-to-end through the graph)
-# --------------------------------------------------------------------------- #
-def test_topic_mediation_surfaces_a_topic_from_retrieved_fragments(
-    seed_counts, session, fake_embedder
-) -> None:
-    # The question carries NO canonical topic keyword, but a retrieved past answer's
-    # question body names one. Because C4 now runs before C1 and C1 classifies with
-    # the fragment text (re-hydrated by the repository), the topic is mediated into
-    # `topics` even though the asker never worded it — the #116 vocabulary bridge.
-    from tekijin.models.tables import Answer, Question
-
-    session.add(Question(id="q_med", asker_id=2, body="CRMで顧客管理の履歴を残す方法", topics=[]))
-    session.flush()  # the answer's FK needs the question row to exist first
-    session.add(
-        Answer(id="a_med", question_id="q_med", responder_id=1, body="商談履歴を蓄積します")
-    )
-    session.flush()
-    retriever = _FakeRetriever(
-        answers=[{"qa_id": "a_med", "score": 0.9, "responder_id": 1}],
-        people=[1, 2],
-    )
-    agent = build_agent(fake_embedder, session, retriever=retriever)
-    cfg = _cfg("mediation")
-
-    # Question has no topic keyword of its own (verify the premise).
-    from tekijin.agent.stubs import KeywordIntentModel
-
-    assert KeywordIntentModel().analyze("履歴をまとめて残したい", None).topics == []
-
-    agent.invoke(_init("履歴をまとめて残したい"), cfg)
-    values = agent.get_state(cfg).values
-    # C4 ran before C1 (the retriever saw the query), and its fragment mediated CRM.
-    assert retriever.calls  # retrieval happened
-    assert "CRM・営業支援" in values["topics"]
 
 
 # --------------------------------------------------------------------------- #
@@ -347,14 +310,13 @@ def test_stream_yields_node_updates(seed_counts, session, fake_embedder) -> None
     nodes = []
     for update in agent.stream(_init(), _cfg("stream"), stream_mode="updates"):
         nodes.extend(update.keys())
-    # The deterministic node sequence up to the send interrupt (#69: retrieve
-    # BEFORE classify, so C3/C4 precede C1/C2).
+    # The deterministic node sequence up to the send interrupt (reset runs first).
     assert nodes[:7] == [
         "reset",
-        "c3_embed",
-        "c4_retrieve",
         "c1_intent",
         "c2_sufficiency",
+        "c3_embed",
+        "c4_retrieve",
         "c5_route",
         "c6_score",
     ]
@@ -562,38 +524,6 @@ def test_unresolved_intent_terminal(seed_counts, session, fake_embedder) -> None
     # terminal, NOT a silent no_candidate.
     final = agent.invoke(Command(resume="よくわからないのですが"), cfg)
     assert not agent.get_state(cfg).next  # terminated
-    assert final["intent_unresolved"] is True
-    assert "特定できませんでした" in final["answer"]
-    assert not final.get("recommendations")
-
-
-def test_unresolved_intent_survives_retrieval_noise(seed_counts, session, fake_embedder) -> None:
-    # #276 review (HIGH): #69 runs retrieval BEFORE C1, so a topic-bearing fragment
-    # is available even for an unidentifiable question. A retrieval-mediated topic
-    # (which never lifts confidence, #275) must NOT defeat the graceful "couldn't
-    # identify" terminal by making `topics` non-empty — the asker would otherwise be
-    # handed off to an expert on a topic they never actually expressed.
-    from tekijin.models.tables import Answer, Question
-
-    session.add(Question(id="q_noise", asker_id=2, body="CRMで顧客管理の履歴を残す", topics=[]))
-    session.flush()
-    session.add(Answer(id="a_noise", question_id="q_noise", responder_id=1, body="商談履歴を蓄積"))
-    session.flush()
-    retriever = _FakeRetriever(
-        answers=[{"qa_id": "a_noise", "score": 0.9, "responder_id": 1}],
-        people=[1],
-    )
-    agent = build_agent(fake_embedder, session, retriever=retriever)
-    cfg = _cfg("noise")
-
-    agent.invoke(_init("これについて教えてください"), cfg)  # no own topic -> ask
-    assert agent.get_state(cfg).next == ("ask",)
-    final = agent.invoke(Command(resume="やっぱりよくわかりません"), cfg)  # still vague -> capped
-    values = agent.get_state(cfg).values
-    # The retriever DID inject a spurious topic (mediation is active)...
-    assert "CRM・営業支援" in values["topics"]
-    # ...but the intent is still unresolved and reaches the graceful terminal,
-    # NOT a person hand-off on the noise topic.
     assert final["intent_unresolved"] is True
     assert "特定できませんでした" in final["answer"]
     assert not final.get("recommendations")
