@@ -14,6 +14,7 @@ only build and test the data path and its interface.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from itertools import zip_longest
 from typing import TYPE_CHECKING, Protocol
 
@@ -26,6 +27,25 @@ if TYPE_CHECKING:  # pragma: no cover - typing only (avoids import cycles)
 # a long context dilutes the signal and slows the LLM call.
 DEFAULT_MAX_FRAGMENTS = 6
 DEFAULT_MAX_CHARS = 200
+
+# Self-answer (#291) wants more of each source than the C1 topic hint — the LLM
+# composes an actual grounded answer from it — so evidence text is clipped longer.
+DEFAULT_EVIDENCE_CHARS = 400
+
+
+@dataclass(frozen=True, slots=True)
+class CitedEvidence:
+    """One retrieved source, id-paired with its text, for a cited self-answer (#291).
+
+    ``source_id`` is the durable id of the past Q&A (``qa_id``) or internal document
+    (``doc_id``) — kept so the composed answer can CITE it and the chat can render a
+    link back to the source. ``kind`` (``"qa"`` / ``"document"``) selects which link
+    the UI builds. ``text`` is the (clipped) evidence the model may draw from.
+    """
+
+    source_id: str
+    kind: str
+    text: str
 
 
 class FragmentSource(Protocol):
@@ -103,6 +123,82 @@ def collect_context_fragments(
             if fragment is not None:
                 interleaved.append(fragment)
     return interleaved[:max_fragments]
+
+
+def collect_cited_evidence(
+    source: FragmentSource,
+    retrieval: RetrievalResult,
+    *,
+    max_fragments: int = DEFAULT_MAX_FRAGMENTS,
+    max_chars: int = DEFAULT_EVIDENCE_CHARS,
+) -> list[CitedEvidence]:
+    """Re-hydrate C4's top hits as id-paired :class:`CitedEvidence` for self-answer.
+
+    Same round-robin interleave and skip rules as :func:`collect_context_fragments`
+    (answer, doc, answer, doc, …; missing/empty rows skipped; empty retrieval →
+    ``[]``), but each item keeps its ``source_id`` and ``kind`` so a composed answer
+    can cite exactly the sources it used and the chat can link back to them.
+    """
+
+    qa_ids = [hit["qa_id"] for hit in retrieval["past_answers"]]
+    doc_ids = [hit["doc_id"] for hit in retrieval["documents"]]
+    if not qa_ids and not doc_ids:
+        return []
+
+    answers = source.answers_by_ids(qa_ids) if qa_ids else {}
+    question_ids = [a.question_id for a in answers.values() if a.question_id]
+    questions = source.questions_by_ids(question_ids) if question_ids else {}
+    documents = source.documents_by_ids(doc_ids) if doc_ids else {}
+
+    answer_items: list[CitedEvidence] = []
+    for qa_id in qa_ids:
+        answer = answers.get(qa_id)
+        if answer is None:
+            continue
+        text = _answer_evidence_text(answer, questions, max_chars)
+        if text:
+            answer_items.append(CitedEvidence(source_id=qa_id, kind="qa", text=text))
+
+    document_items: list[CitedEvidence] = []
+    for doc_id in doc_ids:
+        document = documents.get(doc_id)
+        if document is None:
+            continue
+        text = _document_evidence_text(document, max_chars)
+        if text:
+            document_items.append(CitedEvidence(source_id=doc_id, kind="document", text=text))
+
+    interleaved: list[CitedEvidence] = []
+    for answer_item, document_item in zip_longest(answer_items, document_items):
+        for item in (answer_item, document_item):
+            if item is not None:
+                interleaved.append(item)
+    return interleaved[:max_fragments]
+
+
+def _answer_evidence_text(
+    answer: AnswerDTO, questions: dict[str, QuestionDTO], max_chars: int
+) -> str:
+    """Unlabelled past-Q&A evidence text (question body + answer body), clipped."""
+
+    question = questions.get(answer.question_id)
+    question_body = (question.body or "").strip() if question else ""
+    answer_body = (answer.body or "").strip()
+    text = (
+        f"{question_body} / {answer_body}"
+        if question_body and answer_body
+        else (question_body or answer_body)
+    )
+    return _clip(text, max_chars) if text else ""
+
+
+def _document_evidence_text(document: DocumentDTO, max_chars: int) -> str:
+    """Unlabelled internal-document evidence text (title + body), clipped."""
+
+    title = (document.title or "").strip()
+    body = (document.body or "").strip()
+    text = f"{title}: {body}" if title and body else title or body
+    return _clip(text, max_chars) if text else ""
 
 
 def _answer_fragment(answer: AnswerDTO, questions: dict[str, QuestionDTO], max_chars: int) -> str:

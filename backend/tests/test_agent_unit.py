@@ -624,6 +624,28 @@ def test_answerability_stub_scales_with_evidence_count() -> None:
 # --------------------------------------------------------------------------- #
 # answerability evidence builder + router (#70 part2)
 # --------------------------------------------------------------------------- #
+def test_self_answer_stub_returns_ungrounded_without_evidence() -> None:
+    from tekijin.agent.stubs import TemplateSelfAnswerModel
+
+    result = TemplateSelfAnswerModel().compose("VPNの相談", [])
+    assert result.grounded is False and result.answer == "" and result.cited_source_ids == []
+
+
+def test_self_answer_stub_composes_and_cites_from_evidence() -> None:
+    from tekijin.agent.stubs import TemplateSelfAnswerModel
+    from tekijin.retrieval.fragments import CitedEvidence
+
+    evidence = [
+        CitedEvidence("qa_1", "qa", "VPNは保守時間内に更新します"),
+        CitedEvidence("doc_3", "document", "ネットワーク運用手順"),
+        CitedEvidence("blank", "qa", "   "),  # blank text -> not cited
+    ]
+    result = TemplateSelfAnswerModel().compose("VPNの相談", evidence)
+    assert result.grounded is True
+    assert "VPNは保守時間内に更新します" in result.answer
+    assert result.cited_source_ids == ["qa_1", "doc_3"]  # blank dropped, links preserved
+
+
 def test_answerability_evidence_empty_when_no_recommendations() -> None:
     from tekijin.agent.nodes import answerability_evidence
 

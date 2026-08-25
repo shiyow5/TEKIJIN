@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from tekijin.agent.state import empty_retrieval
 from tekijin.data.dto import AnswerDTO, DocumentDTO, QuestionDTO
-from tekijin.retrieval.fragments import collect_context_fragments
+from tekijin.retrieval.fragments import collect_cited_evidence, collect_context_fragments
 
 
 def _answer(answer_id: str, question_id: str, body: str) -> AnswerDTO:
@@ -195,3 +195,53 @@ def test_interleaves_channels_so_both_are_represented() -> None:
     assert any("質問" in f for f in fragments)
     assert any("文書" in f for f in fragments)
     assert "文書0" in joined
+
+
+# --------------------------------------------------------------------------- #
+# #291: collect_cited_evidence — id-paired evidence for a cited self-answer
+# --------------------------------------------------------------------------- #
+def test_cited_evidence_empty_retrieval() -> None:
+    assert collect_cited_evidence(_FakeSource(), empty_retrieval()) == []
+
+
+def test_cited_evidence_keeps_source_id_and_kind() -> None:
+    source = _FakeSource(
+        answers=[_answer("a1", "q1", "UTMのファーム更新は保守時間内に実施します")],
+        questions=[_question("q1", "UTMのファームウェア更新手順を教えて")],
+        documents=[_document("d1", "セキュリティ運用手順", "ファイアウォールの設定変更フロー")],
+    )
+    retrieval = empty_retrieval()
+    retrieval["past_answers"] = [{"qa_id": "a1", "score": 0.9, "responder_id": 1}]
+    retrieval["documents"] = [{"doc_id": "d1", "score": 0.7}]
+
+    items = collect_cited_evidence(source, retrieval)
+
+    # Round-robin: answer first, then document; each keeps its own id + kind.
+    assert [(e.source_id, e.kind) for e in items] == [("a1", "qa"), ("d1", "document")]
+    qa = items[0]
+    assert "UTMのファームウェア更新手順を教えて" in qa.text  # question body
+    assert "UTMのファーム更新は保守時間内に実施します" in qa.text  # answer body
+    assert "セキュリティ運用手順" in items[1].text and "ファイアウォール" in items[1].text
+
+
+def test_cited_evidence_skips_missing_and_empty() -> None:
+    source = _FakeSource(
+        answers=[_answer("a1", "q1", "本文"), _answer("a2", "q2", "   ")],  # a2 empty body
+        questions=[_question("q1", "質問")],
+    )
+    retrieval = empty_retrieval()
+    retrieval["past_answers"] = [
+        {"qa_id": "a1", "score": 0.9, "responder_id": 1},
+        {"qa_id": "a2", "score": 0.8, "responder_id": 2},  # empty -> skipped
+        {"qa_id": "missing", "score": 0.7, "responder_id": 3},  # absent -> skipped
+    ]
+    items = collect_cited_evidence(source, retrieval)
+    assert [e.source_id for e in items] == ["a1"]
+
+
+def test_cited_evidence_clips_to_max_chars() -> None:
+    source = _FakeSource(documents=[_document("d1", "T", "あ" * 1000)])
+    retrieval = empty_retrieval()
+    retrieval["documents"] = [{"doc_id": "d1", "score": 0.5}]
+    (item,) = collect_cited_evidence(source, retrieval, max_chars=50)
+    assert len(item.text) <= 50 and item.text.endswith("…")

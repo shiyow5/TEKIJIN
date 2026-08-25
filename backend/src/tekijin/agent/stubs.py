@@ -11,9 +11,17 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from tekijin.agent.protocols import AnswerabilityResult, IntentResult, SufficiencyResult
+from tekijin.agent.protocols import (
+    AnswerabilityResult,
+    IntentResult,
+    SelfAnswerResult,
+    SufficiencyResult,
+)
+
+if TYPE_CHECKING:  # pragma: no cover - typing only (keeps retrieval out of the stub path)
+    from tekijin.retrieval.fragments import CitedEvidence
 
 # At most one clarifying round (model-definition C2: "逆質問はまとめて1回").
 MAX_FOLLOWUPS = 1
@@ -324,3 +332,24 @@ class RuleAnswerabilityModel:
             )
         confidence = min(100, 40 + 20 * len(evidence))
         return AnswerabilityResult(confidence=confidence, reason="候補者に関連実績があります。")
+
+
+class TemplateSelfAnswerModel:
+    """Self-answer composer stub (#291): deterministic, network-free scaffolding.
+
+    The real composition is the vLLM model's job; this stub just proves the
+    contract — no evidence means ``grounded=False`` (fall back to a person), and
+    with evidence it echoes the top source and cites every supplied source id so
+    the chat can link back. It never fabricates content beyond the evidence text.
+    """
+
+    def compose(self, question: str, evidence: Sequence[CitedEvidence]) -> SelfAnswerResult:
+        items = [e for e in evidence if e.text and e.text.strip()]
+        if not items:
+            return SelfAnswerResult(answer="", cited_source_ids=[], grounded=False)
+        answer = f"社内の記録によると、{items[0].text}"
+        return SelfAnswerResult(
+            answer=answer,
+            cited_source_ids=[e.source_id for e in items],
+            grounded=True,
+        )
