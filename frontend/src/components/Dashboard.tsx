@@ -7,12 +7,12 @@
  * (自己解決率 / 負荷分散 / 平均解決時間 / 推薦精度) plus load + topic distributions.
  */
 
-import { getDashboard } from "@/lib/api-client";
+import { ApiError, getDashboard } from "@/lib/api-client";
 import type { DashboardResponse } from "@/lib/api-types";
 import { PageBackLink } from "@/components/PageBackLink";
 import { useEffect, useState } from "react";
 
-type Phase = "loading" | "ready" | "error";
+type Phase = "loading" | "ready" | "error" | "forbidden";
 
 interface DashboardState {
   phase: Phase;
@@ -94,8 +94,13 @@ export function Dashboard() {
       .then((data) => {
         if (active) setState({ phase: "ready", data });
       })
-      .catch(() => {
-        if (active) setState({ phase: "error" });
+      .catch((err) => {
+        if (!active) return;
+        // 403 (non-admin session) is permanent — retrying never helps, unlike a
+        // transient failure — so it needs its own message rather than being
+        // folded into the generic "error" phase (#369).
+        const forbidden = err instanceof ApiError && err.status === 403;
+        setState({ phase: forbidden ? "forbidden" : "error" });
       });
     return () => {
       active = false;
@@ -109,6 +114,21 @@ export function Dashboard() {
         <h1 className="text-center font-bold text-2xl text-on-surface">
           ダッシュボードを読み込み中…
         </h1>
+      </section>
+    );
+  }
+
+  if (state.phase === "forbidden") {
+    return (
+      <section className="mx-auto flex w-full max-w-5xl flex-col gap-md py-lg text-center">
+        <PageBackLink href="/" label="ホームへ戻る" />
+        <h1 className="font-bold text-2xl text-on-surface">表示できませんでした</h1>
+        <div
+          role="alert"
+          className="rounded-xl border border-outline-variant bg-surface-container p-md text-on-surface-variant"
+        >
+          このページを見る権限がありません。管理者アカウントでログインしてください。
+        </div>
       </section>
     );
   }

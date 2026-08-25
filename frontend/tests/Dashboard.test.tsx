@@ -7,6 +7,14 @@ const getDashboardMock = vi.fn();
 
 vi.mock("@/lib/api-client", () => ({
   getDashboard: (...args: unknown[]) => getDashboardMock(...args),
+  ApiError: class ApiError extends Error {
+    readonly status: number;
+    constructor(status: number, message: string) {
+      super(message);
+      this.name = "ApiError";
+      this.status = status;
+    }
+  },
 }));
 
 const DATA: DashboardResponse = {
@@ -116,5 +124,18 @@ describe("Dashboard", () => {
     getDashboardMock.mockRejectedValue(new Error("network"));
     render(<Dashboard />);
     expect(await screen.findByRole("alert")).toHaveTextContent(/取得に失敗/);
+  });
+
+  // #369: a non-admin session hitting /dashboard directly (e.g. a stale
+  // bookmark from before #347 hid the entry points) gets a 403 that never
+  // resolves by retrying, so it needs its own message instead of the
+  // generic "time will fix it" error copy.
+  it("shows a permission message, not the generic retry message, on a 403", async () => {
+    const { ApiError } = await import("@/lib/api-client");
+    getDashboardMock.mockRejectedValue(new ApiError(403, "forbidden"));
+    render(<Dashboard />);
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/権限がありません/);
+    expect(alert).not.toHaveTextContent(/時間をおいて/);
   });
 });
