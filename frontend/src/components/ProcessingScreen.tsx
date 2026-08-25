@@ -13,9 +13,12 @@
 
 import { FollowupForm } from "@/components/FollowupForm";
 import { PageBackLink } from "@/components/PageBackLink";
-import { useOptionalSessionStream } from "@/components/SessionStreamProvider";
+import {
+  useOptionalSessionStream,
+  useOptionalSessionStreamRestart,
+} from "@/components/SessionStreamProvider";
 import { type EventStreamState, useEventStream } from "@/hooks/useEventStream";
-import { ApiError, postAnswer } from "@/lib/api-client";
+import { ApiError, postAnswer, requestDocumentFallback } from "@/lib/api-client";
 import { formatConfidence } from "@/lib/format";
 import { routeLabel } from "@/lib/routes";
 import Link from "next/link";
@@ -40,6 +43,7 @@ interface Step {
 }
 
 const FOLLOWUP_ERROR = "回答の送信に失敗しました。もう一度お試しください。";
+const FALLBACK_ERROR = "候補者への取り次ぎを開始できませんでした。もう一度お試しください。";
 
 function joinDomain(topics: string[], products: string[]): string {
   const parts = [...topics, ...products].filter((p) => p.trim() !== "");
@@ -122,6 +126,7 @@ export function ProcessingScreen({
 }: ProcessingScreenProps) {
   const router = useRouter();
   const contextStream = useOptionalSessionStream();
+  const restartStream = useOptionalSessionStreamRestart();
   // Prefer an injected state (test seam), then the shared provider context
   // (production, mounted by the route layout), then a self-owned subscription
   // (kept only for the standalone test seam — disabled when context is present).
@@ -135,6 +140,8 @@ export function ProcessingScreen({
   const [answered, setAnswered] = useState(false);
   const [followupSubmitting, setFollowupSubmitting] = useState(false);
   const [followupError, setFollowupError] = useState<string | null>(null);
+  const [fallbackSubmitting, setFallbackSubmitting] = useState(false);
+  const [fallbackError, setFallbackError] = useState<string | null>(null);
 
   // A newly arrived followup re-opens the reply box.
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset only when a new followup arrives.
@@ -180,9 +187,25 @@ export function ProcessingScreen({
     router.push(`/session/${sessionId}/result`);
   }
 
+  async function handleDocumentFallback() {
+    setFallbackSubmitting(true);
+    setFallbackError(null);
+    try {
+      await requestDocumentFallback({ session_id: sessionId });
+      restartStream?.();
+      router.push(`/session/${sessionId}/result`);
+    } catch {
+      setFallbackError(FALLBACK_ERROR);
+    } finally {
+      setFallbackSubmitting(false);
+    }
+  }
+
   let heading = "最適な回答者を探しています…";
   if (stream.error) {
     heading = "エラーが発生しました";
+  } else if (stream.message?.status === "document") {
+    heading = "関連する社内文書が見つかりました";
   } else if (stream.message) {
     heading = "回答をお届けします";
   } else if (hasResult) {
@@ -202,7 +225,9 @@ export function ProcessingScreen({
           {heading}
         </h1>
         <p className="mt-sm text-on-surface-variant">
-          AIが社内の知識ネットワークを分析し、最も詳しい人物を特定しています。
+          {stream.message?.status === "document"
+            ? "まずは社内文書をご確認ください。解決しない場合は候補者へ質問できます。"
+            : "AIが社内の知識ネットワークを分析し、最も詳しい人物を特定しています。"}
         </p>
       </header>
 
@@ -281,6 +306,23 @@ export function ProcessingScreen({
                 <span aria-hidden="true">📄</span>
                 文書を見る
               </Link>
+            ) : null}
+            {stream.message.status === "document" && stream.message.fallback_responder ? (
+              <button
+                type="button"
+                disabled={fallbackSubmitting}
+                onClick={handleDocumentFallback}
+                className="mt-sm ml-sm inline-flex min-h-[44px] items-center rounded-full border border-primary px-md py-sm font-bold text-primary transition-colors hover:bg-primary-fixed disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {fallbackSubmitting
+                  ? "取り次ぎを準備しています…"
+                  : `${stream.message.fallback_responder.name}さんに聞く`}
+              </button>
+            ) : null}
+            {fallbackError ? (
+              <p role="alert" className="mt-sm text-error text-sm">
+                {fallbackError}
+              </p>
             ) : null}
             {stream.message.citations && stream.message.citations.length > 0 ? (
               <div className="mt-md">

@@ -127,6 +127,12 @@ class ResumeRequest(BaseModel):
         return self.outcome if self.outcome is not None else (self.reply or "")
 
 
+class DocumentFallbackRequest(BaseModel):
+    """Turn a completed document result into a person hand-off (#351)."""
+
+    session_id: str = Field(pattern=_SESSION_ID_PATTERN)
+
+
 class HandoffDraftRequest(BaseModel):
     """Persist the asker's edited hand-off draft for a session paused at ``send``.
 
@@ -587,6 +593,9 @@ class MessageData(BaseModel):
     # For the ``document`` route: the id of the cited document, so the client can
     # open it (GET /documents/{doc_id}). ``None`` for every non-document terminal.
     doc_id: str | None = None
+    # Ranked during the document route but not persisted/shown as a hand-off until
+    # the asker explicitly chooses this person. None means there is no safe CTA.
+    fallback_responder: Recommendation | None = None
     # #291: for the ``self_answered`` terminal, the sources the answer cited — the
     # chat renders a link per entry. Empty for every other terminal.
     citations: list[SourceCitation] = Field(default_factory=list)
