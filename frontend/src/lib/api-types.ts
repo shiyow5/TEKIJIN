@@ -441,11 +441,27 @@ export interface DoneData {
   latency_ms?: number | null;
 }
 
+/**
+ * One source a self-answer (#291) cited, shown in chat as a link (schemas.py
+ * `SourceCitation`). `kind` is "document" (internal doc → GET /documents/{id})
+ * or "qa" (a past Q&A).
+ */
+export interface SourceCitation {
+  source_id: string;
+  /** Closed set from the backend contract (fragments.py): a past Q&A or an internal doc. */
+  kind: "qa" | "document";
+}
+
 export interface MessageData {
   status: string;
   message: string;
   /** For the "document" route: the cited document's id (GET /documents/{doc_id}). */
   doc_id?: string | null;
+  /**
+   * #291/#293: sources the self-answer grounded on, rendered as links in chat.
+   * Empty on non-self-answer terminals. Optional so older payloads parse.
+   */
+  citations?: SourceCitation[];
   /** This run segment's processing time in ms (#177); null on a replay. */
   latency_ms?: number | null;
 }

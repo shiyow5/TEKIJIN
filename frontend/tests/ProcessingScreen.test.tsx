@@ -1,7 +1,7 @@
 import { ProcessingScreen } from "@/components/ProcessingScreen";
 import { SessionStreamProvider } from "@/components/SessionStreamProvider";
-import { ApiError } from "@/lib/api-client";
 import type { EventStreamState, StreamEvent } from "@/hooks/useEventStream";
+import { ApiError } from "@/lib/api-client";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -173,6 +173,35 @@ describe("ProcessingScreen", () => {
       state({ terminal: true, message: { status: "no_candidate", message: "見つかりません" } }),
     );
     expect(screen.queryByRole("link", { name: /文書を見る/ })).not.toBeInTheDocument();
+  });
+
+  it("renders source citations of a self-answer as links/chips (#291/#293)", () => {
+    renderScreen(
+      state({
+        terminal: true,
+        message: {
+          status: "self_answered",
+          message: "既存の社内データから回答します。",
+          citations: [
+            { source_id: "doc_007", kind: "document" },
+            { source_id: "qa_0042", kind: "qa" },
+          ],
+        },
+      }),
+    );
+    // document citation is a link to the document viewer, carrying the session id.
+    const docLink = screen.getByRole("link", { name: /doc_007/ });
+    expect(docLink).toHaveAttribute("href", "/documents/doc_007?from=abc-123");
+    // qa citation is shown as a (non-link) reference until the knowledge viewer exists.
+    expect(screen.getByText(/過去の回答 qa_0042/)).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /qa_0042/ })).not.toBeInTheDocument();
+  });
+
+  it("shows no 出典 block when a terminal message carries no citations", () => {
+    renderScreen(
+      state({ terminal: true, message: { status: "no_candidate", message: "見つかりません" } }),
+    );
+    expect(screen.queryByText("出典")).not.toBeInTheDocument();
   });
 
   it("shows a generic error display without leaking detail", () => {
