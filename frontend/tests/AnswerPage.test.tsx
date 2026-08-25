@@ -3,8 +3,10 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/components/AnswerScreen", () => ({
-  AnswerScreen: ({ sessionId }: { sessionId: string }) => (
-    <div data-testid="answer-screen">{sessionId}</div>
+  AnswerScreen: ({ sessionId, showBackLink }: { sessionId: string; showBackLink?: boolean }) => (
+    <div data-testid="answer-screen" data-show-back-link={showBackLink}>
+      {sessionId}
+    </div>
   ),
 }));
 
@@ -13,7 +15,7 @@ describe("AnswerPage", () => {
     const page = await AnswerPage({ params: Promise.resolve({ session_id: "sess-42" }) });
     render(page);
 
-    expect(screen.getByRole("link", { name: "受信箱へ戻る" })).toHaveAttribute("href", "/inbox");
     expect(screen.getByTestId("answer-screen")).toHaveTextContent("sess-42");
+    expect(screen.getByTestId("answer-screen")).toHaveAttribute("data-show-back-link", "true");
   });
 });
