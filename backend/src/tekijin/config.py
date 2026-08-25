@@ -175,6 +175,16 @@ class Settings(BaseSettings):
     # branch is byte-for-byte dormant while False.
     query_expansion_enabled: bool = False
 
+    # #380: append confusable-category disambiguation few-shot examples to the C1
+    # intent prompt. C1's topic misses were adjacent-category confusions on indirect
+    # questions (supplier price negotiation read as sales, an internal-PC boot fault
+    # read as software dev). ENABLED after the full-graph E2E verification confirmed
+    # the topic gain TRANSLATES (DGX, real Qwen3.6: topic acc@1 0.721->0.868, and
+    # Hit@3 0.712->0.803, RouteAccuracy unchanged 0.833 — routing not harmed). Unlike
+    # the #371/#380 augmentation experiments (query_expansion / union scoring topics,
+    # both measured WORSE), improving C1's OWN precision is the lever that works.
+    c1_fewshot_enabled: bool = True
+
     # LangGraph checkpointer for session persistence / interrupt-resume:
     # "memory" = in-process MemorySaver (safe default, works without a DB);
     # "postgres" = PostgresSaver over ``database_url`` (production). A ``Literal``

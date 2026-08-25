@@ -509,6 +509,31 @@ def test_vllm_intent_prompt_omits_context_block_when_absent() -> None:
     assert "<context>" not in human
 
 
+def test_vllm_intent_fewshot_appends_disambiguation_only_when_on() -> None:
+    # #380: the confusable-category few-shot block is appended to the system prompt
+    # only when fewshot=True; the default prompt is byte-for-byte unchanged.
+    off = next(m for r, m in VllmIntentModel.prompt("q", None) if r == "system")
+    on = next(m for r, m in VllmIntentModel.prompt("q", None, fewshot=True) if r == "system")
+    assert "購買・仕入れ" in on and "CRM・営業支援" in on  # a taught boundary
+    assert "判別しにくい隣接カテゴリ" in on
+    assert on.startswith(off) and len(on) > len(off)  # pure suffix, base unchanged
+    assert "判別しにくい隣接カテゴリ" not in off
+
+
+def test_vllm_intent_model_reads_fewshot_flag_from_settings() -> None:
+    # The model wires the flag from its settings so the factory needs no change.
+    from tekijin.llm.vllm import VllmIntentModel
+
+    assert VllmIntentModel(settings=_settings(c1_fewshot_enabled=True))._fewshot is True
+    assert VllmIntentModel(settings=_settings(c1_fewshot_enabled=False))._fewshot is False
+
+
+def test_c1_fewshot_enabled_by_default() -> None:
+    # #380 enabled after the full-graph E2E verification: topic acc@1 0.721->0.868,
+    # Hit@3 0.712->0.803, RouteAccuracy unchanged (routing not harmed).
+    assert _settings().c1_fewshot_enabled is True
+
+
 def test_vllm_intent_forwards_context_to_the_model() -> None:
     # analyze() threads `context` through to prompt(); the model sees the fence.
     class _Capturing:

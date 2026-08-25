@@ -160,6 +160,11 @@ def main() -> None:
     ap.add_argument("--query-expansion", action="store_true", help="#371 クエリ拡張を ON")
     ap.add_argument("--answerability", action="store_true", help="#70 棄却クリティックを配線")
     ap.add_argument(
+        "--c1-fewshot",
+        action="store_true",
+        help="#380 C1 に隣接カテゴリ判別の few-shot を付与（vLLM のみ有効）",
+    )
+    ap.add_argument(
         "--knowledge-floor",
         type=float,
         default=None,
@@ -170,6 +175,10 @@ def main() -> None:
 
     url = args.db_url.replace("postgresql://", "postgresql+psycopg://", 1)
     os.environ["TEKIJIN_DATABASE_URL"] = url
+    if args.c1_fewshot:
+        # VllmIntentModel reads settings.c1_fewshot_enabled itself; set it via env so
+        # get_settings() (below) picks it up before any model is built.
+        os.environ["TEKIJIN_C1_FEWSHOT_ENABLED"] = "true"
     sys.path.insert(0, SRC)
 
     from tekijin.agent.graph import build_agent
@@ -212,7 +221,8 @@ def main() -> None:
     print(
         f"backend={args.backend} self_answer={args.self_answer} "
         f"query_expansion={args.query_expansion} answerability={args.answerability} "
-        f"knowledge_floor={args.knowledge_floor} rows={len(queries)}"
+        f"knowledge_floor={args.knowledge_floor} c1_fewshot={args.c1_fewshot} "
+        f"rows={len(queries)}"
     )
 
     report = run_eval(queries, ranker)
@@ -227,6 +237,7 @@ def main() -> None:
             "query_expansion": args.query_expansion,
             "answerability": args.answerability,
             "knowledge_floor": args.knowledge_floor,
+            "c1_fewshot": args.c1_fewshot,
             "rows": len(queries),
             "errors": ranker.errors,
         },
