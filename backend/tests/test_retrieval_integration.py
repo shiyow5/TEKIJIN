@@ -147,7 +147,7 @@ def test_embed_corpus_fills_missing_embeddings(seed_counts, session, fake_embedd
 
     counts = embed_corpus(session, fake_embedder)
 
-    assert counts["documents"] == 30
+    assert counts["documents"] == 36  # #296: 型番文書6件追加
     assert counts["answers"] == expected_answers
     assert counts["questions"] >= 1
     assert counts["employee_profiles"] >= 1
@@ -165,7 +165,7 @@ def test_embed_corpus_only_missing_is_idempotent(seed_counts, session, fake_embe
 def test_embed_corpus_reembeds_when_not_only_missing(seed_counts, session, fake_embedder) -> None:
     embed_corpus(session, fake_embedder)
     again = embed_corpus(session, fake_embedder, only_missing=False)
-    assert again["documents"] == 30  # re-embedded despite existing vectors
+    assert again["documents"] == 36  # re-embedded despite existing vectors (#296: 30->36)
 
 
 # --------------------------------------------------------------------------- #
