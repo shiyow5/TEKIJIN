@@ -222,6 +222,30 @@ describe("RecentQuestions", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
+  it("suppresses every dismissal path while the delete is in flight", async () => {
+    useCurrentUserMock.mockReturnValue(asUser("E001"));
+    getRecentQuestionsMock.mockResolvedValue(ITEMS);
+    // Never settles: the component stays in its "deleting" phase for the whole test.
+    deleteQuestionMock.mockReturnValue(new Promise(() => {}));
+    render(<RecentQuestions />);
+
+    await waitFor(() => expect(screen.getByText("UTMの移行時の注意点")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "「UTMの移行時の注意点」を削除" }));
+    fireEvent.click(screen.getByRole("button", { name: "削除" }));
+    await waitFor(() => expect(deleteQuestionMock).toHaveBeenCalledWith("q1"));
+
+    // The request is already sent, so closing the dialog would only hide it.
+    // Escape, the backdrop and 「やめる」 all have to be inert here.
+    const dialog = screen.getByRole("dialog");
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    fireEvent.click(dialog.parentElement as HTMLElement);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "やめる" }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(deleteQuestionMock).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps the question and flags an error when the delete fails", async () => {
     useCurrentUserMock.mockReturnValue(asUser("E001"));
     getRecentQuestionsMock.mockResolvedValue(ITEMS);

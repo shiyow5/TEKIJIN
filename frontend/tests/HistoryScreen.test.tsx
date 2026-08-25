@@ -162,6 +162,25 @@ describe("HistoryScreen", () => {
     expect(resolveQuestionMock).not.toHaveBeenCalled();
   });
 
+  // `ModalDialog` gained backdrop-click dismissal for the delete confirmation
+  // (#286), where cancelling costs nothing. It is opt-in precisely so it does
+  // not spread to dialogs like this one by default.
+  it("does not dismiss the self-resolve popup on a backdrop click", async () => {
+    useCurrentUserMock.mockReturnValue(asUser("E001"));
+    getRecentQuestionsMock.mockResolvedValue(ITEMS);
+    render(<HistoryScreen />);
+
+    await waitFor(() => expect(screen.getByText("社内Wi-Fiの申請方法")).toBeInTheDocument());
+    fireEvent.click(
+      screen.getByRole("button", { name: "「社内Wi-Fiの申請方法」を自分で解決済みにする" }),
+    );
+    const dialog = screen.getByRole("dialog");
+    fireEvent.click(dialog.parentElement as HTMLElement);
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(resolveQuestionMock).not.toHaveBeenCalled();
+  });
+
   it("keeps a pending question and shows a retry when self-resolve fails (#159)", async () => {
     useCurrentUserMock.mockReturnValue(asUser("E001"));
     getRecentQuestionsMock.mockResolvedValue(ITEMS);

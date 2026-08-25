@@ -38,9 +38,13 @@ export function QuestionDeleteButton({
 
   return (
     <>
+      {/* Not disabled while the dialog is open: ModalDialog's overlay and Tab
+          trap already keep this button unreachable, and disabling it here
+          would blur it before ModalDialog's opener-capture effect can run,
+          breaking focus restoration on close. */}
       <button
         type="button"
-        disabled={phase === "confirm" || phase === "deleting"}
+        disabled={phase === "deleting"}
         onClick={() => setPhase("confirm")}
         aria-label={`「${title}」を削除`}
         className="absolute bottom-2 right-2 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-outline-variant bg-surface-container-highest text-on-surface-variant text-xs leading-none hover:bg-error-container hover:text-on-error-container disabled:opacity-50"
