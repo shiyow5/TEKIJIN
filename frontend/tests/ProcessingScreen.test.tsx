@@ -196,9 +196,9 @@ describe("ProcessingScreen", () => {
     // document citation is a link to the document viewer, carrying the session id.
     const docLink = screen.getByRole("link", { name: /doc_007/ });
     expect(docLink).toHaveAttribute("href", "/documents/doc_007?from=abc-123");
-    // qa citation is shown as a (non-link) reference until the knowledge viewer exists.
-    expect(screen.getByText(/過去の回答 qa_0042/)).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: /qa_0042/ })).not.toBeInTheDocument();
+    // qa citation is a link to the knowledge detail viewer (#293 part2, /knowledge/[id]).
+    const qaLink = screen.getByRole("link", { name: /qa_0042/ });
+    expect(qaLink).toHaveAttribute("href", "/knowledge/qa_0042");
   });
 
   it("shows no 出典 block when a terminal message carries no citations", () => {

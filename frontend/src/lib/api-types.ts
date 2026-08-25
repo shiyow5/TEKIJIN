@@ -195,35 +195,37 @@ export interface RecentQuestionsResponse {
 }
 
 /**
- * One accumulated piece of knowledge: a question a person actually answered,
- * company-wide (GET /knowledge, schemas.py `KnowledgeItem`) — unlike
- * `RecentQuestionItem`, this is NOT scoped to the acting user.
+ * One accumulated piece of knowledge: an answered question OR an internal
+ * document (GET /knowledge, schemas.py `KnowledgeItem`) — the same two kinds
+ * a self-answer's citation carries. `source_id` matches a chat citation's
+ * `SourceCitation.source_id` for the same `kind` (`Answer.id` for `"qa"`,
+ * `Document.id` for `"document"`). Unlike `RecentQuestionItem`, this is NOT
+ * scoped to the acting user. The `"document"`-only fields (`question_id`,
+ * `session_id`, responder, topics) are absent/empty for that kind.
  */
 export interface KnowledgeItem {
-  question_id: string;
+  source_id: string;
+  kind: "qa" | "document";
   title: string;
+  summary: string;
   topics: string[];
-  answer_body: string;
   responder_name?: string | null;
   responder_department?: string | null;
-  /** The ANSWER's timestamp (when it was given), not when the question was asked. */
+  /** The item's own timestamp: the ANSWER's for "qa", `updated_at` for "document". */
   resolved_at?: string | null;
+  question_id?: string | null;
   /** Deep-link target for viewing the result (/session/{session_id}); null for seeded history. */
   session_id?: string | null;
 }
 
-/** One responder's answer count, busiest-first (schemas.py `ResponderCount`). */
-export interface ResponderCount {
-  employee_id: number;
-  name: string;
-  answer_count: number;
-}
-
-/** Side-panel aggregate stats on GET /knowledge (schemas.py `KnowledgeSummary`). */
+/**
+ * Side-panel aggregate stats on GET /knowledge (schemas.py `KnowledgeSummary`).
+ * Per-responder aggregates are deliberately absent — that view belongs to
+ * `/dashboard`, not a knowledge browser (PR #340 review).
+ */
 export interface KnowledgeSummary {
   total_items: number;
   self_resolution_rate: number;
-  top_responders: ResponderCount[];
 }
 
 /**

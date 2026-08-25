@@ -29,6 +29,7 @@ import type {
   HandoffSelectResponse,
   InboxItem,
   InboxResponse,
+  KnowledgeItem,
   KnowledgeListResponse,
   LoginRequest,
   LoginResponse,
@@ -352,6 +353,19 @@ export async function getKnowledgeList(
   if (limit !== undefined) params.set("limit", String(limit));
   const query = params.size > 0 ? `?${params.toString()}` : "";
   return getJson<KnowledgeListResponse>(`/knowledge${query}`, requestOptions);
+}
+
+/**
+ * GET /knowledge/{sourceId} — full detail of one past-Q&A knowledge item
+ * (`kind="qa"`), keyed by the same `source_id` a self-answer's citation
+ * carries (`Answer.id`). The `"document"` counterpart already has its own
+ * viewer at `GET /documents/{doc_id}` (#143).
+ */
+export async function getKnowledgeDetail(
+  sourceId: string,
+  options: RequestOptions = {},
+): Promise<KnowledgeItem> {
+  return getJson<KnowledgeItem>(`/knowledge/${encodeURIComponent(sourceId)}`, options);
 }
 
 /**

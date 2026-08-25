@@ -1,16 +1,22 @@
 "use client";
 
 /**
- * ナレッジセンター（蓄積された形式知の一覧・検索画面, #293 / #301）。
+ * ナレッジライブラリー（蓄積された形式知の一覧・検索画面, #293 / #301）。
  *
  * Unlike `HistoryScreen` (the acting user's OWN past questions), this lists
- * recently ANSWERED questions company-wide, newest answer first — the point is
- * "これに近い話、前にも誰かが聞いてたはず": discovering someone else's past
- * answer. Each card shows the answer's own text (clamped to a few lines, not a
- * generated summary) plus the responder and their department (答えの出所は常に
- * 人) so it never reads as an anonymous FAQ. A question with only an accepted
- * hand-off but no formal `answers` row (live chat, no answer TEXT recorded) is
- * excluded — there is nothing to show as its "回答のまとめ".
+ * accumulated knowledge company-wide — both past Q&A (`kind="qa"`) and
+ * internal documents (`kind="document"`), newest first — the point is "これに
+ * 近い話、前にも誰かが聞いてたはず" / "そういう文書がある": discovering
+ * something someone else already produced. Each `source_id`/`kind` matches
+ * exactly what a self-answer's citation (#291) carries for the same entity,
+ * so a chat citation and a knowledge-list card point at the same stable
+ * thing — a `"qa"` card links to `/knowledge/{source_id}` (this app's own
+ * detail viewer, new here), a `"document"` card links to the existing
+ * `/documents/{source_id}` viewer (#143).
+ *
+ * A `"qa"` item needs an actual `answers` row (not merely an accepted
+ * recommendation) — that is the only place answer TEXT lives, so without it
+ * there is nothing to show as its `summary`.
  *
  * The search box forwards straight to GET /knowledge as the `q` query param
  * (server-side filtering). The department/topic/period filters GET /knowledge
@@ -22,10 +28,10 @@
  * `RESULT_LIMIT` at a time via `offset` (by request — pagination matters once
  * a keyword search can match more than one page's worth).
  *
- * The side panels' stats reuse the dashboard's existing self-resolution rate
- * and top-answerers aggregates (via `summary` on the same response) rather
- * than introducing a new aggregation — per the issue's
- * "新規の集計ロジックは極力増やさない".
+ * The side panel's stats reuse the dashboard's existing self-resolution rate
+ * (via `summary` on the same response) rather than introducing a new
+ * aggregation. Per-responder counts are deliberately NOT shown here — that
+ * view belongs to `/dashboard`, not a knowledge browser (PR #340 review).
  */
 
 import { getKnowledgeList } from "@/lib/api-client";
@@ -50,47 +56,45 @@ function formatDate(iso: string | null | undefined): string {
   return iso.slice(0, 10);
 }
 
+/**
+ * Deliberately minimal by request: no kind badge, no responder line — just
+ * the title/summary/topics and a single unified "更新日" (the item's own
+ * timestamp regardless of `kind`).
+ */
 function KnowledgeCard({ item }: { item: KnowledgeItem }) {
-  const body = (
-    <article className="flex h-full min-w-0 flex-col gap-sm overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest p-md transition-shadow hover:shadow-md">
-      <h3 className="break-words font-bold text-base text-on-surface">{item.title}</h3>
-      {item.answer_body ? (
-        <p className="line-clamp-3 break-words text-on-surface-variant text-sm">
-          {item.answer_body}
-        </p>
-      ) : null}
-      {item.topics.length > 0 ? (
-        <div className="flex flex-wrap gap-xs">
-          {item.topics.map((topic) => (
-            <span
-              key={topic}
-              className="max-w-full break-words rounded-full bg-secondary-container px-xs py-[2px] text-on-secondary-container text-xs"
-            >
-              {topic}
-            </span>
-          ))}
-        </div>
-      ) : null}
-      <div className="mt-auto flex flex-wrap items-center gap-x-md gap-y-xs border-outline-variant border-t pt-sm text-on-surface-variant text-xs">
-        <span className="break-words">
-          回答者: {item.responder_name ?? "不明"}
-          {item.responder_department ? `（${item.responder_department}）` : ""}
-        </span>
-        <span>回答日: {formatDate(item.resolved_at)}</span>
-      </div>
-    </article>
-  );
+  const href =
+    item.kind === "qa"
+      ? `/knowledge/${encodeURIComponent(item.source_id)}`
+      : `/documents/${encodeURIComponent(item.source_id)}`;
 
-  return item.session_id ? (
+  return (
     <Link
-      href={`/session/${encodeURIComponent(item.session_id)}`}
-      aria-label={`「${item.title}」の結果を見る`}
+      href={href}
+      aria-label={`「${item.title}」を見る`}
       className="block h-full min-w-0 rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
     >
-      {body}
+      <article className="flex h-full min-w-0 flex-col gap-sm overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest p-md transition-shadow hover:shadow-md">
+        <h3 className="break-words font-bold text-base text-on-surface">{item.title}</h3>
+        {item.summary ? (
+          <p className="line-clamp-3 break-words text-on-surface-variant text-sm">{item.summary}</p>
+        ) : null}
+        {item.topics.length > 0 ? (
+          <div className="flex flex-wrap gap-xs">
+            {item.topics.map((topic) => (
+              <span
+                key={topic}
+                className="max-w-full break-words rounded-full bg-secondary-container px-xs py-[2px] text-on-secondary-container text-xs"
+              >
+                {topic}
+              </span>
+            ))}
+          </div>
+        ) : null}
+        <div className="mt-auto flex flex-wrap items-center gap-x-md gap-y-xs border-outline-variant border-t pt-sm text-on-surface-variant text-xs">
+          <span>更新日: {formatDate(item.resolved_at)}</span>
+        </div>
+      </article>
     </Link>
-  ) : (
-    body
   );
 }
 
@@ -110,34 +114,6 @@ function SummaryPanel({ summary }: { summary: KnowledgeSummary | undefined }) {
           {summary ? `${Math.round(summary.self_resolution_rate * 100)}%` : "—"}
         </p>
       </div>
-    </aside>
-  );
-}
-
-function TopRespondersPanel({ summary }: { summary: KnowledgeSummary | undefined }) {
-  const responders = summary?.top_responders ?? [];
-  if (responders.length === 0) return null;
-  const max = Math.max(...responders.map((r) => r.answer_count));
-
-  return (
-    <aside className="flex w-full flex-col gap-sm rounded-xl border border-outline-variant bg-surface-container-lowest p-md md:w-56">
-      <h2 className="font-bold text-on-surface text-sm">回答者別の件数</h2>
-      <ul className="flex flex-col gap-xs">
-        {responders.map((r) => (
-          <li key={r.employee_id} className="flex flex-col gap-[2px]">
-            <div className="flex items-baseline justify-between gap-sm text-xs">
-              <span className="min-w-0 truncate text-on-surface">{r.name}</span>
-              <span className="shrink-0 text-on-surface-variant">{r.answer_count}</span>
-            </div>
-            <div className="h-1.5 w-full rounded-full bg-surface-container-high">
-              <div
-                className="h-1.5 rounded-full bg-primary"
-                style={{ width: `${(r.answer_count / max) * 100}%` }}
-              />
-            </div>
-          </li>
-        ))}
-      </ul>
     </aside>
   );
 }
@@ -233,7 +209,7 @@ export function KnowledgeScreen() {
           ) : state.items && state.items.length > 0 ? (
             <ul className="grid grid-cols-1 gap-gutter">
               {state.items.map((item) => (
-                <li key={item.question_id} className="min-w-0">
+                <li key={item.source_id} className="min-w-0">
                   <KnowledgeCard item={item} />
                 </li>
               ))}
@@ -267,10 +243,7 @@ export function KnowledgeScreen() {
             </div>
           ) : null}
         </div>
-        <div className="flex w-full shrink-0 flex-col gap-lg md:w-56">
-          <SummaryPanel summary={state.summary} />
-          <TopRespondersPanel summary={state.summary} />
-        </div>
+        <SummaryPanel summary={state.summary} />
       </div>
     </section>
   );

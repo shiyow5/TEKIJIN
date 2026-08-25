@@ -443,36 +443,40 @@ class RecentQuestionsResponse(BaseModel):
 # (#293, #301)
 # --------------------------------------------------------------------------- #
 class KnowledgeItem(BaseModel):
-    """One piece of accumulated knowledge: a question a person actually answered.
+    """One piece of accumulated knowledge: an answered question OR an internal
+    document — the same two kinds a self-answer (#291) cites.
 
-    ``resolved_at`` is the ANSWER's timestamp (when it was given), not when the
-    question was asked.
+    ``source_id`` is exactly a citation's ``SourceCitation.source_id`` for the
+    same ``kind`` (``Answer.id`` for ``"qa"``, ``Document.id`` for
+    ``"document"``), so a chat citation and a knowledge-list item can point at
+    the same stable entity. ``resolved_at`` is the item's own timestamp — the
+    ANSWER's (when it was given, not when the question was asked) for
+    ``"qa"``, the document's ``updated_at`` for ``"document"``. The
+    ``"document"``-only fields (``question_id``, ``session_id``, responder,
+    topics) are ``None``/empty for that kind.
     """
 
-    question_id: str
+    source_id: str
+    kind: Literal["qa", "document"]
     title: str
+    summary: str = ""
     topics: list[str] = Field(default_factory=list)
-    answer_body: str = ""
     responder_name: str | None = None
     responder_department: str | None = None
     resolved_at: str | None = None
+    question_id: str | None = None
     session_id: str | None = None
 
 
-class ResponderCount(BaseModel):
-    """One responder's answer count (``dashboard.top_answerers``, busiest-first)."""
-
-    employee_id: int
-    name: str
-    answer_count: int
-
-
 class KnowledgeSummary(BaseModel):
-    """Side-panel aggregate stats — reuses existing dashboard aggregates."""
+    """Side-panel aggregate stats — reuses existing dashboard aggregates.
+
+    Per-responder aggregates are deliberately NOT included — that view belongs
+    to ``/dashboard``, not a knowledge browser (PR #340 review).
+    """
 
     total_items: int
     self_resolution_rate: float
-    top_responders: list[ResponderCount] = Field(default_factory=list)
 
 
 class KnowledgeListResponse(BaseModel):

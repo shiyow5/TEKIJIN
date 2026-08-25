@@ -10,23 +10,27 @@ vi.mock("@/lib/api-client", () => ({
 
 const ITEMS: KnowledgeItem[] = [
   {
-    question_id: "q1",
+    source_id: "a1",
+    kind: "qa",
     title: "UTMの移行時の注意点",
     topics: ["marketing", "utm"],
-    answer_body: "リダイレクトルールを事前に洗い出してから切り替えると安全です。",
+    summary: "リダイレクトルールを事前に洗い出してから切り替えると安全です。",
     responder_name: "高梨 健太",
     responder_department: "マーケティング部",
     resolved_at: "2026-08-20T10:00:00",
+    question_id: "q1",
     session_id: "sess-q1",
   },
   {
-    question_id: "q2",
-    title: "社内Wi-Fiの申請方法",
+    source_id: "doc1",
+    kind: "document",
+    title: "社内Wi-Fi利用ガイド",
     topics: [],
-    answer_body: "総務部の申請フォームから手続きできます。",
-    responder_name: "田中 太郎",
-    responder_department: "情報システム部",
+    summary: "総務部の申請フォームから手続きできます。",
+    responder_name: null,
+    responder_department: null,
     resolved_at: "2026-08-21T10:00:00",
+    question_id: null,
     session_id: null,
   },
 ];
@@ -34,14 +38,7 @@ const ITEMS: KnowledgeItem[] = [
 const RESPONSE: KnowledgeListResponse = {
   items: ITEMS,
   total_matching: ITEMS.length,
-  summary: {
-    total_items: 42,
-    self_resolution_rate: 0.25,
-    top_responders: [
-      { employee_id: 5, name: "伊藤 健太", answer_count: 12 },
-      { employee_id: 1, name: "田中 太郎", answer_count: 8 },
-    ],
-  },
+  summary: { total_items: 42, self_resolution_rate: 0.25 },
 };
 
 beforeEach(() => {
@@ -54,45 +51,40 @@ afterEach(() => {
 });
 
 describe("KnowledgeScreen", () => {
-  it("lists items with responder/department/topic/date, and the summary panel", async () => {
+  it("lists qa and document items with their own text, and the summary panel", async () => {
     render(<KnowledgeScreen />);
 
     expect(screen.getByRole("heading", { name: "ナレッジライブラリー" })).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText("UTMの移行時の注意点")).toBeInTheDocument());
-    expect(screen.getByText("社内Wi-Fiの申請方法")).toBeInTheDocument();
+    expect(screen.getByText("社内Wi-Fi利用ガイド")).toBeInTheDocument();
     expect(
       screen.getByText("リダイレクトルールを事前に洗い出してから切り替えると安全です。"),
     ).toBeInTheDocument();
-    expect(screen.getByText("回答者: 高梨 健太（マーケティング部）")).toBeInTheDocument();
     expect(screen.getAllByText("utm").length).toBeGreaterThan(0);
-    expect(screen.getByText("回答日: 2026-08-20")).toBeInTheDocument();
-
-    // Side panels reuse the summary from the same response.
+    // Both kinds show the same unified "更新日" label — no kind badge, no responder line.
+    expect(screen.getByText("更新日: 2026-08-20")).toBeInTheDocument();
+    expect(screen.getByText("更新日: 2026-08-21")).toBeInTheDocument();
+    expect(screen.queryByText("Q&A")).not.toBeInTheDocument();
+    expect(screen.queryByText("文書")).not.toBeInTheDocument();
+    expect(screen.queryByText(/回答者:/)).not.toBeInTheDocument();
     expect(screen.getByText("42")).toBeInTheDocument();
     expect(screen.getByText("25%")).toBeInTheDocument();
-    expect(screen.getByText("回答者別の件数")).toBeInTheDocument();
-    expect(screen.getByText("伊藤 健太")).toBeInTheDocument();
-    expect(screen.getByText("12")).toBeInTheDocument();
-  });
-
-  it("hides the top-responders panel when there are none", async () => {
-    getKnowledgeListMock.mockResolvedValue({
-      items: ITEMS,
-      total_matching: ITEMS.length,
-      summary: { total_items: 2, self_resolution_rate: 0, top_responders: [] },
-    });
-    render(<KnowledgeScreen />);
-    await waitFor(() => expect(screen.getByText("UTMの移行時の注意点")).toBeInTheDocument());
+    // The per-responder panel was removed (PR #340 review) — that view is /dashboard's.
     expect(screen.queryByText("回答者別の件数")).not.toBeInTheDocument();
   });
 
-  it("links a card with a session_id to /session/{id}, and leaves one without unlinked", async () => {
+  it("links a qa card to /knowledge/{source_id} and a document card to /documents/{source_id}", async () => {
     render(<KnowledgeScreen />);
 
     await waitFor(() => expect(screen.getByText("UTMの移行時の注意点")).toBeInTheDocument());
-    const link = screen.getByRole("link", { name: /UTMの移行時の注意点/ });
-    expect(link).toHaveAttribute("href", "/session/sess-q1");
-    expect(screen.queryByRole("link", { name: /社内Wi-Fiの申請方法/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /UTMの移行時の注意点/ })).toHaveAttribute(
+      "href",
+      "/knowledge/a1",
+    );
+    expect(screen.getByRole("link", { name: /社内Wi-Fi利用ガイド/ })).toHaveAttribute(
+      "href",
+      "/documents/doc1",
+    );
   });
 
   it("submits the search box as the q param", async () => {
@@ -178,7 +170,7 @@ describe("KnowledgeScreen", () => {
     getKnowledgeListMock.mockResolvedValue({
       items: [],
       total_matching: 0,
-      summary: { total_items: 0, self_resolution_rate: 0, top_responders: [] },
+      summary: { total_items: 0, self_resolution_rate: 0 },
     });
     render(<KnowledgeScreen />);
     await waitFor(() =>

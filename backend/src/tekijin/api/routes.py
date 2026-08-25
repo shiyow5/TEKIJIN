@@ -48,7 +48,7 @@ from tekijin.data.documents import get_document
 from tekijin.data.feedback import record_feedback
 from tekijin.data.history import question_asker_id, recent_questions_for_asker
 from tekijin.data.inbox import pending_handoffs_for_responder
-from tekijin.data.knowledge import list_knowledge
+from tekijin.data.knowledge import get_qa_detail, list_knowledge
 from tekijin.data.messages import (
     create_message,
     messages_for_thread,
@@ -507,16 +507,18 @@ def knowledge(
     limit: int = Query(8, ge=1, le=200),
     principal: Principal = Depends(require_principal),
 ) -> schemas.KnowledgeListResponse:
-    """Company-wide list of recently-answered questions as reusable knowledge.
+    """Company-wide list of accumulated knowledge — answers AND documents.
 
     Open to every authenticated user — unlike ``/dashboard``, this is NOT
     admin-only, since the whole point (#293, #301) is that someone else's past
-    answer is discoverable ("これに近い話、前にも誰かが聞いてたはず"). Each item
-    carries the answer's own text (``answer_body``), not just who answered.
-    ``summary`` reuses the dashboard's self-resolution rate rather than adding
-    new aggregation logic. ``offset``/``limit`` page a search's results (the
-    frontend keeps the unsearched view to one unpaginated page of the latest
-    ``limit`` items).
+    answer (or an existing internal document) is discoverable ("これに近い話、
+    前にも誰かが聞いてたはず"). Each item carries its own text (``summary``),
+    not just who answered — and every item's ``source_id``/``kind`` match a
+    self-answer's citation (#291), so a chat citation and this list point at
+    the same entity. ``summary`` (the response field) reuses the dashboard's
+    self-resolution rate rather than adding new aggregation logic. ``offset``/
+    ``limit`` page a search's results (the frontend keeps the unsearched view
+    to one unpaginated page of the latest ``limit`` items).
     """
 
     with _generic_500("GET /knowledge"):
@@ -536,6 +538,28 @@ def knowledge(
             items=[schemas.KnowledgeItem(**row) for row in rows],
             summary=schemas.KnowledgeSummary(**summary),
         )
+
+
+@router.get("/knowledge/{source_id}", response_model=schemas.KnowledgeItem)
+def knowledge_detail(
+    source_id: str,
+    request: Request,
+    principal: Principal = Depends(require_principal),
+) -> schemas.KnowledgeItem:
+    """Full detail of one past-Q&A knowledge item, keyed by ``Answer.id``.
+
+    The ``"document"`` counterpart already has its own stable detail viewer at
+    ``GET /documents/{doc_id}`` (#143) — this fills the gap #321's chat
+    citation chip was left non-linked for (``kind="qa"`` had nowhere to go).
+    404 when ``source_id`` is unknown.
+    """
+
+    with _generic_500("GET /knowledge/{source_id}"):
+        with _service(request).session_factory() as session:
+            row = get_qa_detail(session, source_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="knowledge item not found")
+        return schemas.KnowledgeItem(**row)
 
 
 @router.delete("/questions/{question_id}", response_model=schemas.DeleteQuestionResponse)

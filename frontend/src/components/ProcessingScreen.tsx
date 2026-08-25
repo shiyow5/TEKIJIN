@@ -297,12 +297,14 @@ export function ProcessingScreen({
                           {citation.source_id}
                         </Link>
                       ) : (
-                        // "qa" 出典は専用ビューアが未実装（ナレッジ詳細 #293 part2 で
-                        // /knowledge/[id] を用意したらリンク化する）。今は非リンクのチップ。
-                        <span className="inline-flex min-h-[44px] items-center gap-xs rounded-full border border-outline-variant bg-surface-container-low px-md py-sm text-sm text-on-surface-variant">
+                        // "qa" 出典はナレッジ詳細（#293 part2, /knowledge/[id]）へリンク。
+                        <Link
+                          href={`/knowledge/${encodeURIComponent(citation.source_id)}`}
+                          className="inline-flex min-h-[44px] items-center gap-xs rounded-full border border-outline-variant bg-surface px-md py-sm text-sm font-bold text-primary transition-colors hover:bg-surface-container"
+                        >
                           <span aria-hidden="true">💬</span>
                           過去の回答 {citation.source_id}
-                        </span>
+                        </Link>
                       )}
                     </li>
                   ))}
