@@ -88,8 +88,13 @@ def main() -> None:
     from tekijin.eval.metrics import QueryResult, evaluate, evaluate_by_difficulty
     from tekijin.eval.pipeline import _pinned_responder
 
+    from tekijin.config import get_settings
+
     session, retriever, scorer = build(url)
     queries = load_eval_queries()
+    # 窓を指定しない config は「設定既定の窓」に戻す（前ループの窓を持ち越さない）。
+    default_lo = get_settings().bm25_adapt_lo
+    default_hi = get_settings().bm25_adapt_hi
 
     def rank(topics, candidates):
         if not topics or not candidates:
@@ -99,11 +104,11 @@ def main() -> None:
 
     report = []
     for label, boosted, lo, hi in CONFIGS:
-        # 適応パラメータを差し替える（_fuse が呼び出し時に読む）。
+        # 適応パラメータを差し替える（_fuse が呼び出し時に読む）。窓を省いた config でも
+        # 前ループの窓が残らないよう、None のときは設定既定に明示的に戻す。
         retriever._bm25_boosted = boosted
-        if lo is not None:
-            retriever._bm25_adapt_lo = lo
-            retriever._bm25_adapt_hi = hi
+        retriever._bm25_adapt_lo = default_lo if lo is None else lo
+        retriever._bm25_adapt_hi = default_hi if hi is None else hi
 
         results = []
         watch = {}
