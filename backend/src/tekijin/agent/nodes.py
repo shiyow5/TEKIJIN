@@ -437,9 +437,13 @@ class AgentNodes:
         result = self._self_answer.compose(state["question"], evidence)
         if not result.grounded:
             return {"self_answer_grounded": False}
+        # The composer already filters cited ids to the supplied evidence, so every
+        # id resolves here; keep only resolvable ids (never mislabel an unknown one).
         kind_by_id = {e.source_id: e.kind for e in evidence}
         citations = [
-            {"source_id": sid, "kind": kind_by_id.get(sid, "qa")} for sid in result.cited_source_ids
+            {"source_id": sid, "kind": kind_by_id[sid]}
+            for sid in result.cited_source_ids
+            if sid in kind_by_id
         ]
         return {
             "self_answer_grounded": True,

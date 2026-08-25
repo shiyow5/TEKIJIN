@@ -597,6 +597,36 @@ def test_self_answer_message_carries_citations(seed_counts, engine, fake_embedde
     assert message["citations"] == [{"source_id": "doc_001", "kind": "document"}]
 
 
+def test_self_answer_on_prior_answer_route_marks_self_resolved(
+    seed_counts, engine, fake_embedder
+) -> None:
+    # #291 review (HIGH): a grounded self-answer on the prior_answer route (which is
+    # NOT stamped at c5 like document) must still count as self-resolved — else the
+    # KPI this feature exists to move undercounts. resolution_kind="self" + resolved_at.
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(
+            people=[1],
+            past_answers=[{"qa_id": "a", "score": 0.05, "responder_id": 1}],
+            answer_confidence=0.9,  # near-duplicate past QA -> prior_answer route
+        ),
+        self_answer_model=_FixedSelfAnswer(grounded=True, answer="過去回答より。", cites=[]),
+    )
+    client.post("/ask", json={"asker_id": 8, "question": GOOD_Q, "session_id": "sapa"})
+    events = _events(client, "sapa")
+    assert next(d for e, d in events if e == "message")["status"] == "self_answered"
+
+    check = get_sessionmaker(engine)()
+    try:
+        q = check.query(Question).filter(Question.session_id == "sapa").first()
+        assert q is not None and q.route == "prior_answer"
+        assert q.resolved_at is not None  # stamped despite not being the document route
+        assert q.resolution_kind == "self"  # counts toward the self-resolution rate
+    finally:
+        check.close()
+
+
 # --------------------------------------------------------------------------- #
 # answerability critic (#70): SSE + persistence gated on the critic's verdict
 # --------------------------------------------------------------------------- #

@@ -73,6 +73,7 @@ from tekijin.data.writes import (
     insert_shown_recommendations,
     latest_primary_recommendation,
     mark_question_resolved,
+    mark_self_resolved,
     persist_question,
     recommendation_outcome,
     record_events,
@@ -1108,6 +1109,14 @@ class AgentService:
                         elif node == "c5_route":
                             route = (data or {}).get("route") or route
                             self._persist_route(question_id, data)
+                        elif node == "self_answered":
+                            # #291: a grounded self-answer resolves the question WITHOUT
+                            # a hand-off — mark it self-resolved regardless of the
+                            # underlying route (document already stamps at c5, but
+                            # prior_answer would otherwise never get resolution credit,
+                            # undercounting exactly the self-resolution KPI this feature
+                            # exists to move). ``mark_self_resolved`` is first-wins.
+                            self._persist_self_answered(question_id)
                         elif node == "c6_score" and route != "document":
                             # Defer persistence to the critic's verdict ONLY when C6
                             # actually produced candidates (a non-empty set routes to
@@ -1233,6 +1242,19 @@ class AgentService:
             # so the question is resolved the moment it is routed there (#97).
             if route == "document":
                 mark_question_resolved(session, question_id, self._now_factory())
+
+    def _persist_self_answered(self, question_id: str | None) -> None:
+        """Record a grounded self-answer (#291) as a self-resolution (no hand-off).
+
+        Sets ``resolution_kind="self"`` + ``resolved_at`` (first-wins), so the
+        question counts toward the self-resolution rate and average resolution time
+        for ANY route it self-answered on — not only ``document``.
+        """
+
+        if question_id is None:  # pragma: no cover - question_id always set via /ask
+            return
+        with session_scope(self._session_factory) as session:
+            mark_self_resolved(session, question_id, self._now_factory())
 
     def _persist_topics(self, question_id: str | None, data: dict[str, Any] | None) -> None:
         if question_id is None:  # pragma: no cover - question_id always set via /ask

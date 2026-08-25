@@ -17,7 +17,7 @@ from langgraph.types import Command
 from tekijin.agent import build_agent
 from tekijin.agent.route import DOCUMENT, PERSON, PRIOR_ANSWER
 from tekijin.agent.state import RetrievalResult
-from tekijin.models.tables import Skill
+from tekijin.models.tables import Answer, Question, Skill
 from tekijin.retrieval.indexing import embed_corpus
 
 NOW = dt.datetime(2026, 9, 15, 12, 0, 0)
@@ -434,6 +434,66 @@ def test_self_answer_unwired_leaves_document_route_unchanged(
     assert state["route"] == DOCUMENT and "doc_001" in state["answer"]
     assert "self_answer" not in agent.get_graph().nodes  # node not added
     assert state.get("self_answer_grounded") is False  # reset default, never set
+
+
+def _seed_qa(session, qa_id: str, responder_id: int, body: str = "過去の回答本文") -> None:
+    session.add(Question(id=f"q_{qa_id}", asker_id=2, body="過去の質問", topics=[TOPIC]))
+    session.flush()
+    session.add(Answer(id=qa_id, question_id=f"q_{qa_id}", responder_id=responder_id, body=body))
+    session.flush()
+
+
+def _prior_answer_retriever(qa_id: str, responder_id: int) -> _FakeRetriever:
+    return _FakeRetriever(
+        answers=[{"qa_id": qa_id, "score": 0.05, "responder_id": responder_id}],
+        answer_confidence=0.9,  # near-duplicate past QA -> prior_answer route
+        people=[responder_id],
+    )
+
+
+def test_self_answer_grounded_on_prior_answer_terminates(
+    seed_counts, session, fake_embedder
+) -> None:
+    # #291 review: the prior_answer route also runs self-answer. A grounded answer
+    # terminates at self_answered (no pinned hand-off), citing the past Q&A.
+    _seed_skill(session, "sk_sapa_ok", 1)
+    _seed_qa(session, "a_sapa", responder_id=1, body="VPNは保守時間内に更新します")
+    composer = _FixedSelfAnswer(
+        grounded=True, answer="過去回答より、保守時間内に更新します。", cites=["a_sapa"]
+    )
+    agent = build_agent(
+        fake_embedder,
+        session,
+        retriever=_prior_answer_retriever("a_sapa", 1),
+        self_answer_model=composer,
+    )
+    cfg = _cfg("sa_pa_ok")
+    state = agent.invoke(_init(), cfg)
+    assert state["route"] == PRIOR_ANSWER
+    assert state["self_answer_grounded"] is True
+    assert state["self_answer_citations"] == [{"source_id": "a_sapa", "kind": "qa"}]
+    assert not _is_paused(agent, cfg)  # terminal, no hand-off interrupt
+
+
+def test_self_answer_ungrounded_falls_back_to_prior_answer_handoff(
+    seed_counts, session, fake_embedder
+) -> None:
+    # Not grounded on the prior_answer route -> fall back to the pinned hand-off.
+    _seed_skill(session, "sk_sapa_ng", 1)
+    _seed_qa(session, "a_sapang", responder_id=1)
+    composer = _FixedSelfAnswer(grounded=False)
+    agent = build_agent(
+        fake_embedder,
+        session,
+        retriever=_prior_answer_retriever("a_sapang", 1),
+        self_answer_model=composer,
+    )
+    cfg = _cfg("sa_pa_ng")
+    state = agent.invoke(_init(), cfg)
+    assert state["route"] == PRIOR_ANSWER
+    assert state["self_answer_grounded"] is False
+    assert _is_paused(agent, cfg)  # fell back to the prior_answer -> send hand-off
+    assert agent.get_state(cfg).next == ("send",)
 
 
 # --------------------------------------------------------------------------- #
