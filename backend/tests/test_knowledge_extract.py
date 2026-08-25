@@ -71,10 +71,12 @@ def test_extractor_returns_none_for_non_case() -> None:
     assert fake.calls[0][1] == ("human", "CRM 導入相談")
 
 
-def test_extractor_returns_none_on_empty_tool_call() -> None:
-    # An empty structured output (the LLM emitted no tool call) is a skip, not a crash.
+def test_extractor_raises_on_empty_tool_call() -> None:
+    # An empty structured output (no tool call) is a hard failure, NOT a benign skip
+    # — it matches the other vLLM adapters and is distinguishable from extractable=false.
     extractor = CaseExtractor(model=_FakeModel(None))
-    assert extractor.extract(_src()) is None
+    with pytest.raises(ValueError, match="structured output was empty"):
+        extractor.extract(_src())
 
 
 def test_extractor_returns_case_when_extractable() -> None:
@@ -109,7 +111,7 @@ def test_extract_and_store_counts_and_topics(seed_counts, session) -> None:
         ExtractionSource("daily_report", "80002", "text2", ("ネットワーク・VPN",)),
     ]
     counts = extract_and_store(session, sources, extractor)
-    assert counts == {"seen": 2, "stored": 2, "skipped": 0}
+    assert counts == {"seen": 2, "stored": 2, "skipped": 0, "errored": 0}
 
     unit = get_knowledge_unit_by_source(session, "daily_report", "80001")
     assert unit is not None
@@ -122,8 +124,39 @@ def test_extract_and_store_counts_and_topics(seed_counts, session) -> None:
 def test_extract_and_store_skips_non_cases(seed_counts, session) -> None:
     extractor = CaseExtractor(model=_FakeModel(CaseExtractionSchema(extractable=False)))
     counts = extract_and_store(session, [_src("80101"), _src("80102")], extractor)
-    assert counts == {"seen": 2, "stored": 0, "skipped": 2}
+    assert counts == {"seen": 2, "stored": 0, "skipped": 2, "errored": 0}
     assert get_knowledge_unit_by_source(session, "daily_report", "80101") is None
+
+
+class _RaisingModel:
+    """A model whose invoke raises, to exercise per-source error isolation."""
+
+    def invoke(self, prompt: list[tuple[str, str]]) -> CaseExtractionSchema:
+        raise RuntimeError("simulated LLM/client failure")
+
+
+def test_extract_and_store_isolates_per_source_errors(seed_counts, session) -> None:
+    # A failing source is counted as errored and skipped; the batch continues and the
+    # good source is still stored (no whole-run rollback). Empty tool call also errors.
+    good = CaseExtractor(
+        model=_FakeModel(CaseExtractionSchema(extractable=True, problem="p", action="a"))
+    )
+    bad = CaseExtractor(model=_RaisingModel())
+    empty = CaseExtractor(model=_FakeModel(None))
+
+    # Mixed batch via a tiny dispatcher extractor.
+    class _Dispatch:
+        def extract(self, source: ExtractionSource):
+            if source.source_id == "80301":
+                return good.extract(source)
+            if source.source_id == "80302":
+                return bad.extract(source)
+            return empty.extract(source)  # 80303 → raises (empty tool call)
+
+    counts = extract_and_store(session, [_src("80301"), _src("80302"), _src("80303")], _Dispatch())
+    assert counts == {"seen": 3, "stored": 1, "skipped": 0, "errored": 2}
+    assert get_knowledge_unit_by_source(session, "daily_report", "80301") is not None
+    assert get_knowledge_unit_by_source(session, "daily_report", "80302") is None
 
 
 def test_extract_and_store_is_idempotent(seed_counts, session) -> None:

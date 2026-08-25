@@ -21,6 +21,7 @@ runnable) so tests drive it with a deterministic fake and never touch a network.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -32,6 +33,8 @@ from tekijin.config import Settings, get_settings
 from tekijin.data.knowledge import upsert_knowledge_unit
 from tekijin.llm.schemas import CaseExtractionSchema
 from tekijin.models.tables import DailyReport
+
+logger = logging.getLogger(__name__)
 
 _SYSTEM_PROMPT = (
     "あなたは営業日報から再利用可能な『ケース知識』を抽出するアナリストです。"
@@ -99,8 +102,8 @@ class CaseExtractor:
     Mirrors the vLLM C1/C2 adapters: an injected ``model`` (bound to
     :class:`CaseExtractionSchema`) is used when provided (tests), otherwise a real
     client is built from settings. :meth:`extract` returns ``None`` for a record the
-    model declines (``extractable=false`` or an empty tool call), so the caller
-    stores nothing.
+    model declines (``extractable=false``), so the caller stores nothing; an empty
+    tool call is raised instead of skipped (see :meth:`extract`).
     """
 
     def __init__(self, *, model: Any | None = None, settings: Settings | None = None) -> None:
@@ -108,22 +111,32 @@ class CaseExtractor:
         self._settings = settings or get_settings()
 
     def _structured(self) -> Any:  # pragma: no cover - builds a network client
-        from tekijin.llm.vllm import _openai_model
+        from tekijin.llm.vllm import build_structured_model
 
-        return _openai_model(self._settings.llm_model, self._settings).with_structured_output(
-            CaseExtractionSchema
-        )
+        return build_structured_model(CaseExtractionSchema, self._settings)
 
     @staticmethod
     def prompt(source: ExtractionSource) -> list[tuple[str, str]]:
         return [("system", _SYSTEM_PROMPT), ("human", source.text)]
 
     def extract(self, source: ExtractionSource) -> CaseExtractionSchema | None:
-        """Return the extracted case, or ``None`` if the record is not a case."""
+        """Return the extracted case, or ``None`` if the record is not a case.
+
+        An EMPTY structured output (``out is None`` — the LLM emitted no tool call)
+        is a hard failure raised as ``ValueError``, matching every other adapter in
+        ``llm/vllm.py``: it is the shape a refusal / prompt-injection tends to
+        produce (#118) and must NOT be conflated with a legitimate "this record is
+        not a case" (``extractable=false`` → ``None``). :func:`extract_and_store`
+        isolates the raise per source so one bad response does not abort a batch.
+        """
 
         model = self._model if self._model is not None else self._structured()
         out: CaseExtractionSchema | None = model.invoke(self.prompt(source))
-        if out is None or not out.extractable:
+        if out is None:
+            raise ValueError(
+                "case extraction: structured output was empty (no tool call from the LLM)"
+            )
+        if not out.extractable:
             return None
         return out
 
@@ -131,32 +144,47 @@ class CaseExtractor:
 def extract_and_store(
     session: Session, sources: Sequence[ExtractionSource], extractor: CaseExtractor
 ) -> dict[str, int]:
-    """Extract each source and upsert the cases; returns ``{seen, stored, skipped}``.
+    """Extract each source and upsert the cases; returns ``{seen, stored, skipped, errored}``.
 
-    ``skipped`` counts records the model declined (not a case). Storage is idempotent
-    on provenance, so re-running over the same sources refreshes in place. The caller
-    owns the transaction; this flushes once at the end.
+    ``skipped`` counts records the model declined (not a case); ``errored`` counts
+    records whose extraction or storage raised — those are ISOLATED per source
+    (logged with the ``source_id`` and skipped) so one bad LLM response or a
+    transient failure does not abort the whole batch and roll back the units already
+    upserted this run. Storage is idempotent on provenance, so re-running over the
+    same sources refreshes in place (and lets an earlier ``errored`` source succeed
+    on a later run). The caller owns the transaction; this flushes once at the end.
     """
 
-    counts = {"seen": 0, "stored": 0, "skipped": 0}
+    counts = {"seen": 0, "stored": 0, "skipped": 0, "errored": 0}
     for source in sources:
         counts["seen"] += 1
-        extraction = extractor.extract(source)
-        if extraction is None:
-            counts["skipped"] += 1
-            continue
-        upsert_knowledge_unit(
-            session,
-            kind="case",
-            problem=extraction.problem,
-            action=extraction.action,
-            result=extraction.result,
-            topics=source.topics,
-            industry=extraction.industry,
-            source_type=source.source_type,
-            source_id=source.source_id,
-            confidence=extraction.confidence,
-        )
-        counts["stored"] += 1
+        try:
+            extraction = extractor.extract(source)
+            if extraction is None:
+                counts["skipped"] += 1
+                continue
+            upsert_knowledge_unit(
+                session,
+                kind="case",
+                problem=extraction.problem,
+                action=extraction.action,
+                result=extraction.result,
+                topics=source.topics,
+                industry=extraction.industry,
+                source_type=source.source_type,
+                source_id=source.source_id,
+                confidence=extraction.confidence,
+            )
+            counts["stored"] += 1
+        except Exception:
+            # Isolate the failure to this source: log which record and continue, so
+            # a single malformed response / timeout does not discard the batch.
+            counts["errored"] += 1
+            logger.warning(
+                "knowledge extraction failed for %s/%s",
+                source.source_type,
+                source.source_id,
+                exc_info=True,
+            )
     session.flush()
     return counts

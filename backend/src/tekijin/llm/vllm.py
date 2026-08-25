@@ -178,6 +178,19 @@ def _openai_model(
     return init_chat_model(f"openai:{name}", **kwargs)
 
 
+def build_structured_model(schema: type, settings: Settings) -> Any:  # pragma: no cover - network
+    """Public factory: a chat model bound to force ``schema`` as structured output.
+
+    The ``Vllm*`` adapters in this module build their own structured runnables from
+    the private :func:`_openai_model`. Cross-module structured-output callers (the
+    #357 knowledge extractor, and slice 3's retrieval composer) go through this
+    public factory instead of reaching into a private symbol, so an internal
+    refactor of :func:`_openai_model` cannot silently break them.
+    """
+
+    return _openai_model(settings.llm_model, settings).with_structured_output(schema)
+
+
 class VllmIntentModel:
     """C1: structured intent extraction over vLLM."""
 
