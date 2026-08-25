@@ -119,6 +119,7 @@ def build_agent(
     bm25_weight: float | None = None,
     prior_answer_reuse_min: int | None = None,
     prior_answer_relevance_floor: float = 0.15,
+    daily_evidence: bool = False,
 ):
     """Compile and return the C1-C8 agent graph.
 
@@ -151,7 +152,8 @@ def build_agent(
         or HybridRetriever(
             embedder, session, top_k=retriever_top_k, rrf_k=rrf_k, bm25_weight=bm25_weight
         ),
-        scorer=scorer or ExpertiseScorer(Repository(session), weights=weights),
+        scorer=scorer
+        or ExpertiseScorer(Repository(session), weights=weights, daily_evidence=daily_evidence),
         answerability_model=answerability_model,
         answerability_threshold=answerability_threshold,
         self_answer_model=self_answer_model,

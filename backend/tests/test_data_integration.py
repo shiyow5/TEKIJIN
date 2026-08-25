@@ -476,6 +476,21 @@ def test_batch_evidence_lookups_match_singular(seed_counts, session) -> None:
     assert repo.project_memberships_for_many([]) == {}
 
 
+def test_daily_reports_for_many(seed_counts, session) -> None:
+    """#355: batch daily reports, only topic-bearing ones, keyed by employee."""
+    repo = Repository(session)
+    ids = [1, 2, 3]
+    daily_many = repo.daily_reports_for_many(ids)
+
+    assert set(daily_many) <= set(ids)
+    for eid, reports in daily_many.items():
+        assert reports  # no empty lists
+        for r in reports:
+            assert r.employee_id == eid
+            assert r.topics  # only reports carrying topics are returned (evidence)
+    assert repo.daily_reports_for_many([]) == {}
+
+
 def test_answers_by_topic(seed_counts, session) -> None:
     repo = Repository(session)
     topic = "ネットワーク・VPN"

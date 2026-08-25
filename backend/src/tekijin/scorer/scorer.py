@@ -19,6 +19,7 @@ from typing import TypedDict
 from tekijin.data.dto import (
     AnswerDTO,
     CertificationDTO,
+    DailyReportDTO,
     ProjectMembershipDTO,
     SkillDTO,
 )
@@ -74,18 +75,28 @@ _REASON_TYPE_ORDER = {
     "skill": 2,
     "answers": 3,
     "project": 4,
-    "recency": 5,
-    "proximity": 6,
-    "load": 7,
+    "daily": 5,  # #355: weakest topic evidence, after project
+    "recency": 6,
+    "proximity": 7,
+    "load": 8,
 }
 
 
 class ExpertiseScorer:
     """Ranks candidate people for a topic from behavioural evidence."""
 
-    def __init__(self, repository: Repository, *, weights: Weights = DEFAULT_WEIGHTS) -> None:
+    def __init__(
+        self,
+        repository: Repository,
+        *,
+        weights: Weights = DEFAULT_WEIGHTS,
+        daily_evidence: bool = False,
+    ) -> None:
         self._repo = repository
         self._weights = weights
+        # #355: include daily reports as topic evidence. Dormant by default so
+        # develop behaviour is byte-identical; gated by ``daily_evidence_enabled``.
+        self._daily_evidence = daily_evidence
 
     def rank(
         self,
@@ -137,6 +148,10 @@ class ExpertiseScorer:
         certs_by_person = self._repo.certifications_for_many(candidates)
         skills_by_person = self._repo.skills_for_many(candidates)
         memberships_by_person = self._repo.project_memberships_for_many(candidates)
+        # #355: daily-report evidence, only when enabled (empty dict = dormant).
+        daily_by_person = (
+            self._repo.daily_reports_for_many(candidates) if self._daily_evidence else {}
+        )
 
         scored: list[tuple[float, int, ScoredCandidate]] = []
         for person_id in candidates:
@@ -153,6 +168,7 @@ class ExpertiseScorer:
                 skills=skills_by_person.get(person_id, []),
                 memberships=memberships_by_person.get(person_id, []),
                 answers=answers_by_person.get(person_id, []),
+                daily_reports=daily_by_person.get(person_id, []),
                 load_count=rec_counts.get(person_id, 0) + ans_counts.get(person_id, 0),
                 asker_branch=asker_branch,
                 now=now,
@@ -178,12 +194,15 @@ class ExpertiseScorer:
         skills: Sequence[SkillDTO],
         memberships: Sequence[ProjectMembershipDTO],
         answers: Sequence[AnswerDTO],
+        daily_reports: Sequence[DailyReportDTO] = (),
         load_count: int,
         asker_branch: str | None,
         now: dt.datetime,
     ) -> tuple[ScoredCandidate, float]:
         # Evidence is pre-fetched in a batch by ``rank`` (no per-candidate query, #58).
-        evidence = collect_topic_evidence(topics, certifications, skills, memberships, answers)
+        evidence = collect_topic_evidence(
+            topics, certifications, skills, memberships, answers, daily_reports
+        )
         weights = self._weights
 
         topic_fit = edge_weight(evidence)
@@ -295,6 +314,16 @@ class ExpertiseScorer:
                 (
                     topic_fit_share(("project",)),
                     {"type": "project", "detail": f"同種の案件を{project_count}件担当"},
+                )
+            )
+
+        # #355: daily-report activity on the topic (dormant unless daily_evidence).
+        daily_count = sum(1 for e in evidence if e.source_type == "daily")
+        if daily_count:
+            entries.append(
+                (
+                    topic_fit_share(("daily",)),
+                    {"type": "daily", "detail": f"日報で関連する活動を{daily_count}件記録"},
                 )
             )
 

@@ -118,6 +118,9 @@ class DailyReport(Base):
     report_date: Mapped[dt.date | None] = mapped_column(Date)
     content: Mapped[str | None] = mapped_column(Text)
     issue: Mapped[str | None] = mapped_column(Text)
+    # #355: precomputed topics (build_fixtures ``match_topics``), so the scorer can
+    # use daily reports as topic evidence without a runtime keyword vocabulary.
+    topics: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
     created_at: Mapped[dt.datetime | None] = mapped_column(DateTime)
 
 

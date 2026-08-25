@@ -107,6 +107,7 @@ def map_daily_report(r: dict[str, Any]) -> t.DailyReport:
         report_date=parse_date(r.get("report_date")),
         content=r.get("content"),
         issue=r.get("issue"),
+        topics=r.get("topics") or [],
         created_at=parse_datetime(r.get("created_at")),
     )
 

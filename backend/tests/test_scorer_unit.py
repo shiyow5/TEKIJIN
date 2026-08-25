@@ -11,7 +11,13 @@ import datetime as dt
 
 import pytest
 
-from tekijin.data.dto import AnswerDTO, CertificationDTO, ProjectMembershipDTO, SkillDTO
+from tekijin.data.dto import (
+    AnswerDTO,
+    CertificationDTO,
+    DailyReportDTO,
+    ProjectMembershipDTO,
+    SkillDTO,
+)
 from tekijin.scorer import features
 from tekijin.scorer.evidence import Evidence, collect_topic_evidence, edge_weight
 from tekijin.scorer.scorer import ExpertiseScorer
@@ -25,10 +31,12 @@ from tekijin.scorer.topics import (
 )
 from tekijin.scorer.weights import (
     BASE_SCORE_CERTIFICATION,
+    BASE_SCORE_DAILY,
     BASE_SCORE_HELPFUL_ANSWER,
     BASE_SCORE_PROJECT_LEAD,
     BASE_SCORE_PROJECT_MEMBER,
     BASE_SCORE_SKILL,
+    DAILY_EVIDENCE_CAP,
 )
 
 NOW = dt.datetime(2026, 8, 21, 12, 0, 0)
@@ -72,6 +80,10 @@ def _answer(helpful: bool | None, reuse: int | None, created: dt.datetime) -> An
         created_at=created,
         has_embedding=False,
     )
+
+
+def _daily(topics: tuple[str, ...], report_date: dt.date | None = None) -> DailyReportDTO:
+    return DailyReportDTO(id=1, employee_id=1, topics=topics, report_date=report_date)
 
 
 # --------------------------------------------------------------------------- #
@@ -198,6 +210,39 @@ def test_collect_topic_evidence_single_and_multi_are_consistent() -> None:
     one = collect_topic_evidence(TOPIC, [], [_skill(TOPIC)], [], [])
     seq = collect_topic_evidence([TOPIC], [], [_skill(TOPIC)], [], [])
     assert [e.source_type for e in one] == [e.source_type for e in seq]
+
+
+# --------------------------------------------------------------------------- #
+# #355: daily reports as evidence
+# --------------------------------------------------------------------------- #
+def test_collect_topic_evidence_daily_default_is_empty() -> None:
+    """No daily arg → no daily evidence (backward-compatible, dormant)."""
+    ev = collect_topic_evidence(TOPIC, [], [], [], [])
+    assert not any(e.source_type == "daily" for e in ev)
+
+
+def test_collect_topic_evidence_includes_on_topic_daily() -> None:
+    ev = collect_topic_evidence(
+        TOPIC, [], [], [], [], daily_reports=[_daily((TOPIC,)), _daily(("経理・決算",))]
+    )
+    daily = [e for e in ev if e.source_type == "daily"]
+    assert len(daily) == 1  # off-topic report excluded
+    assert daily[0].base_score == BASE_SCORE_DAILY
+
+
+def test_collect_topic_evidence_daily_capped() -> None:
+    """A prolific reporter cannot saturate: at most DAILY_EVIDENCE_CAP count."""
+    reports = [_daily((TOPIC,)) for _ in range(DAILY_EVIDENCE_CAP + 4)]
+    ev = collect_topic_evidence(TOPIC, [], [], [], [], daily_reports=reports)
+    assert sum(1 for e in ev if e.source_type == "daily") == DAILY_EVIDENCE_CAP
+
+
+def test_collect_topic_evidence_daily_unions_topics() -> None:
+    """A report matches if ANY of its topics overlaps the queried topic set."""
+    ev = collect_topic_evidence(
+        [TOPIC, "セキュリティ"], [], [], [], [], daily_reports=[_daily(("セキュリティ",))]
+    )
+    assert sum(1 for e in ev if e.source_type == "daily") == 1
 
 
 def test_collect_topic_evidence_project_role_base_scores() -> None:

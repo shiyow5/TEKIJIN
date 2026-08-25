@@ -184,6 +184,7 @@ class AgentService:
         bm25_weight: float | None = None,
         prior_answer_reuse_min: int | None = None,
         prior_answer_relevance_floor: float = 0.15,
+        daily_evidence: bool = False,
         max_concurrent_runs: int = 0,
         now_factory: Any = _default_now,
         clock: Any = time.monotonic,
@@ -215,6 +216,9 @@ class AgentService:
         # build_agent so C5 can revive the route on reuse_count when calibrated.
         self._prior_answer_reuse_min = prior_answer_reuse_min
         self._prior_answer_relevance_floor = prior_answer_relevance_floor
+        # #355: include daily reports as C6 evidence. Passed to build_agent's default
+        # scorer (None = dormant). Ignored when a scorer is injected (tests).
+        self._daily_evidence = daily_evidence
         # Backpressure (#180): max graph runs executing at once before /ask sheds new
         # questions with 503. 0 (default) disables it — set from settings via the
         # factory in production. Guarded by its own lock; independent of the per-
@@ -1067,6 +1071,7 @@ class AgentService:
             bm25_weight=self._bm25_weight,
             prior_answer_reuse_min=self._prior_answer_reuse_min,
             prior_answer_relevance_floor=self._prior_answer_relevance_floor,
+            daily_evidence=self._daily_evidence,
         )
 
     def _run(

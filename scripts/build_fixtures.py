@@ -708,12 +708,18 @@ def main():
                 if t in ISSUE_HINT:
                     issue = ISSUE_HINT[t]
                     break
+        # #355: precompute topics so the C6 scorer can use daily reports as topic
+        # evidence without a runtime keyword vocabulary. Same match_topics as the
+        # eval gold (build_eval_v2 matches on content + issue), so scorer and gold
+        # agree on which reports are on-topic.
+        topics = match_topics(f"{content} {issue or ''}")
         out_daily.append({
             "id": d["id"],
             "employee_id": eid,
             "report_date": d["reported_at"][:10],
             "content": content,
             "issue": issue,
+            "topics": topics,
             "created_at": d["registered_at"],
         })
 

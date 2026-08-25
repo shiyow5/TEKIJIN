@@ -130,6 +130,13 @@ class Settings(BaseSettings):
     prior_answer_reuse_min: int | None = None
     prior_answer_relevance_floor: float = 0.15
 
+    # #355: include daily reports as C6 topic evidence. The eval gold derives from
+    # projects + daily_reports(0.15), but the scorer was blind to daily reports —
+    # so enriching daily activity (#326) could not lift R@3. This closes that
+    # asymmetry. OFF by default (develop behaviour byte-identical); enable only
+    # after DGX confirms a Pareto gain (primary R@3 up, alt not down).
+    daily_evidence_enabled: bool = False
+
     # LangGraph checkpointer for session persistence / interrupt-resume:
     # "memory" = in-process MemorySaver (safe default, works without a DB);
     # "postgres" = PostgresSaver over ``database_url`` (production). A ``Literal``

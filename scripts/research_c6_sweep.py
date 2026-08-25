@@ -200,6 +200,34 @@ def main() -> None:
         )
     set_base(*[BASE_DEFAULT[k] for k in ("lead", "member", "ans", "helpful", "cert", "skill")])
 
+    # #355: daily-report evidence ON/OFF（default config・scale1.0）。gold は日報(0.15)を
+    # 評価に数えるのにスコアラーは日報を見ていなかった非対称の効果を測る。ON で primary が
+    # baseline を上回り alt を下げなければ Pareto 改善＝有効化候補。
+    print("\n== #355 daily-evidence ON/OFF（default config・scale1.0）==")
+    scorer_mod.edge_weight = make_edge_weight(1.0)
+    daily_rows = []
+    for label, de in [("daily OFF(現行)", False), ("daily ON(#355)", True)]:
+        scorer = ExpertiseScorer(repo, weights=D, daily_evidence=de)
+        prim, alt = [], []
+        for q, cands in cache.values():
+            out = scorer.rank(q.gold_topics, cands, None, NOW, top_k=_RANK_DEPTH) if cands else None
+            ranked = [r["person_id"] for r in out["recommendations"]] if out else []
+            rp = _recall_at_3(ranked, q.gold_experts)
+            if rp is not None:
+                prim.append(rp)
+            ra = _recall_at_3(ranked, q.gold_experts_alt)
+            if ra is not None:
+                alt.append(ra)
+        daily_rows.append(
+            {"config": label, "daily_evidence": de,
+             "R@3_primary": round(statistics.mean(prim), 4),
+             "R@3_alt": round(statistics.mean(alt), 4) if alt else None}
+        )
+        print(
+            f"{label:20s} R@3(primary)={statistics.mean(prim):.4f} "
+            f"R@3(alt)={statistics.mean(alt):.4f}"
+        )
+
     report = []
     for label, (scale, W) in CONFIGS.items():
         # edge_weight は scorer.py の名前空間に import 済みなので、そこを差し替える。
@@ -236,6 +264,7 @@ def main() -> None:
     with open(args.out, "w", encoding="utf-8") as f:
         json.dump(
             {"_meta": {"pool_recall": round(statistics.mean(pool_recall), 4), "n": len(queries)},
+             "daily_evidence": daily_rows,
              "rows": report},
             f, ensure_ascii=False, indent=2,
         )

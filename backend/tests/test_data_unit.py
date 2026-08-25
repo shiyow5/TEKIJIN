@@ -147,6 +147,14 @@ def test_sales_daily_reports_use_spr_visit_format() -> None:
     assert not any(d["content"].startswith("【訪問】") for d in other)
 
 
+def test_daily_reports_have_precomputed_topics() -> None:
+    """#355: daily reports carry a precomputed ``topics`` list for scorer evidence."""
+    daily = load_fixture(get_settings().fixtures_dir, "daily_reports")
+    assert all("topics" in d and isinstance(d["topics"], list) for d in daily)
+    # Some (not all) reports are on-topic; sales reports (#326) always are.
+    assert any(d["topics"] for d in daily)
+
+
 def test_sales_daily_reports_carry_topic_keywords() -> None:
     """SPR 日報がトピック語を含み、証拠被覆に寄与する（#326・ADR-0006）。"""
     sales, _ = _sales_and_other_reports()
