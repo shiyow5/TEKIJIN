@@ -62,6 +62,26 @@ class _FixedAnswerability:
         return AnswerabilityResult(confidence=self._confidence, reason="判定理由")
 
 
+class _FixedSelfAnswer:
+    """#291 self-answer composer stand-in with a fixed grounded/ungrounded verdict."""
+
+    def __init__(
+        self, *, grounded: bool, answer: str = "社内記録による回答です。", cites=()
+    ) -> None:
+        self._grounded = grounded
+        self._answer = answer
+        self._cites = list(cites)
+        self.calls: list[tuple[str, list]] = []
+
+    def compose(self, question, evidence):
+        from tekijin.agent.protocols import SelfAnswerResult
+
+        self.calls.append((question, list(evidence)))
+        if not self._grounded:
+            return SelfAnswerResult(answer="", cited_source_ids=[], grounded=False)
+        return SelfAnswerResult(answer=self._answer, cited_source_ids=self._cites, grounded=True)
+
+
 class _FakeRetriever:
     """C4 stand-in returning a fixed retrieval dict (controls the C5 route)."""
 
@@ -337,6 +357,83 @@ def test_answerability_unwired_is_passthrough(seed_counts, session, fake_embedde
     assert "no_expert" not in agent.get_graph().nodes
     # reset() seeds the keys to inert defaults, but no critic ever ran to set them.
     assert state["answerable"] is False
+
+
+# --------------------------------------------------------------------------- #
+# self-answer (#291): answer from data on the document route, or fall back
+# --------------------------------------------------------------------------- #
+def _doc_retriever() -> _FakeRetriever:
+    return _FakeRetriever(
+        documents=[{"doc_id": "doc_001", "score": 0.05}],
+        document_confidence=0.8,  # strong document -> document route
+        people_confidence=0.2,
+        people=[1, 2],
+    )
+
+
+def test_self_answer_grounded_terminates_with_citations(
+    seed_counts, session, fake_embedder
+) -> None:
+    for emp in (1, 2):
+        _seed_skill(session, f"sk_sa_ok_{emp}", emp)
+    composer = _FixedSelfAnswer(grounded=True, answer="保守時間内に更新します。", cites=["doc_001"])
+    agent = build_agent(
+        fake_embedder, session, retriever=_doc_retriever(), self_answer_model=composer
+    )
+    state = agent.invoke(_init(), _cfg("sa_ok"))
+
+    assert state["route"] == DOCUMENT  # C5 still routes on data strength
+    assert state["self_answer_grounded"] is True
+    assert state["answer"] == "保守時間内に更新します。"  # answered from data, not a hand-off
+    assert state["self_answer_citations"] == [{"source_id": "doc_001", "kind": "document"}]
+    assert not _is_paused(agent, _cfg("sa_ok"))  # terminal, no send interrupt
+    assert composer.calls  # the composer was consulted
+
+
+def test_self_answer_ungrounded_falls_back_to_document(seed_counts, session, fake_embedder) -> None:
+    for emp in (1, 2):
+        _seed_skill(session, f"sk_sa_ng_{emp}", emp)
+    composer = _FixedSelfAnswer(grounded=False)
+    agent = build_agent(
+        fake_embedder, session, retriever=_doc_retriever(), self_answer_model=composer
+    )
+    state = agent.invoke(_init(), _cfg("sa_ng"))
+
+    assert state["route"] == DOCUMENT
+    assert state["self_answer_grounded"] is False
+    assert "doc_001" in state["answer"]  # fell back to the document terminal (#279 fallback)
+    assert not _is_paused(agent, _cfg("sa_ng"))
+
+
+def test_self_answer_not_consulted_on_person_route(seed_counts, session, fake_embedder) -> None:
+    # A person-routed question (weak data) must NOT run the self-answer composer —
+    # it goes straight to the hand-off, unchanged.
+    for emp in (1, 2, 3):
+        _seed_skill(session, f"sk_sa_pr_{emp}", emp)
+    composer = _FixedSelfAnswer(grounded=True, cites=["x"])
+    agent = build_agent(
+        fake_embedder,
+        session,
+        retriever=_FakeRetriever(people=[1, 2, 3]),  # person route
+        self_answer_model=composer,
+    )
+    cfg = _cfg("sa_pr")
+    state = agent.invoke(_init(), cfg)
+    assert state["route"] == PERSON
+    assert composer.calls == []  # composer never consulted on the person route
+    assert _is_paused(agent, cfg)  # reached the send hand-off
+
+
+def test_self_answer_unwired_leaves_document_route_unchanged(
+    seed_counts, session, fake_embedder
+) -> None:
+    for emp in (1, 2):
+        _seed_skill(session, f"sk_sa_off_{emp}", emp)
+    agent = build_agent(fake_embedder, session, retriever=_doc_retriever())  # no composer
+    state = agent.invoke(_init(), _cfg("sa_off"))
+    assert state["route"] == DOCUMENT and "doc_001" in state["answer"]
+    assert "self_answer" not in agent.get_graph().nodes  # node not added
+    assert state.get("self_answer_grounded") is False  # reset default, never set
 
 
 # --------------------------------------------------------------------------- #

@@ -52,6 +52,7 @@ from tekijin.agent.protocols import (
     AnswerabilityModel,
     DraftModel,
     IntentModel,
+    SelfAnswerModel,
     SufficiencyModel,
 )
 from tekijin.api import schemas
@@ -176,6 +177,7 @@ class AgentService:
         draft_model: DraftModel,
         answerability_model: AnswerabilityModel | None = None,
         answerability_threshold: int = 40,
+        self_answer_model: SelfAnswerModel | None = None,
         retriever: Any | None = None,
         scorer: Any | None = None,
         bm25_weight: float | None = None,
@@ -195,6 +197,8 @@ class AgentService:
         # rejected set never becomes a phantom pending row (mirrors #281).
         self._answerability = answerability_model
         self._answerability_threshold = answerability_threshold
+        # #291: self-answer composer; None (default) compiles the pre-#291 graph.
+        self._self_answer = self_answer_model
         # Optional C4/C6 overrides — default (None) uses the real HybridRetriever
         # / ExpertiseScorer over the request session; tests inject deterministic
         # fakes so the SSE flow does not depend on retrieval scores.
@@ -1050,6 +1054,7 @@ class AgentService:
             draft_model=self._draft,
             answerability_model=self._answerability,
             answerability_threshold=self._answerability_threshold,
+            self_answer_model=self._self_answer,
             retriever=self._retriever,
             scorer=self._scorer,
             bm25_weight=self._bm25_weight,

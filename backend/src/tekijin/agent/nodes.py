@@ -21,6 +21,7 @@ from tekijin.agent.protocols import (
     IntentModel,
     IntentResult,
     Retriever,
+    SelfAnswerModel,
     SufficiencyModel,
 )
 from tekijin.agent.route import PRIOR_ANSWER, decide_route
@@ -32,6 +33,7 @@ from tekijin.agent.stubs import (
     collect_known_values,
 )
 from tekijin.retrieval.embedding import QUERY, Embedder
+from tekijin.retrieval.fragments import FragmentSource, collect_cited_evidence
 from tekijin.scorer.scorer import ExpertiseScorer
 
 _QUESTION_TYPE_DEFAULT = "製品QA"
@@ -107,6 +109,8 @@ class AgentNodes:
         scorer: ExpertiseScorer,
         answerability_model: AnswerabilityModel | None = None,
         answerability_threshold: int = 40,
+        self_answer_model: SelfAnswerModel | None = None,
+        fragment_source: FragmentSource | None = None,
     ) -> None:
         self._intent = intent_model
         self._sufficiency = sufficiency_model
@@ -119,6 +123,10 @@ class AgentNodes:
         # added (see build_agent), so this is inert unless explicitly wired.
         self._answerability = answerability_model
         self._answerability_threshold = answerability_threshold
+        # #291: optional self-answer composer + the source it re-hydrates evidence
+        # from. Both None (default) -> no self_answer node is added (inert).
+        self._self_answer = self_answer_model
+        self._fragment_source = fragment_source
 
     # -- entry: validate input, reset per-question control fields ---------
     def reset(self, state: AgentState) -> AgentState:
@@ -159,6 +167,11 @@ class AgentNodes:
             "route_confidence": 0.0,
             "prior_answer_note": None,
             "pinned_responder_id": None,
+            # #291: clear the self-answer verdict so a second question on the same
+            # thread_id never inherits a prior grounded answer / citations.
+            "self_answer_grounded": False,
+            "self_answer_text": None,
+            "self_answer_citations": [],
             "recommendations": [],
             # #70: clear the critic's per-question verdict so a second question on
             # the same thread_id never reads a prior run's stale score/reason.
@@ -404,6 +417,42 @@ class AgentNodes:
         return {
             "answer": "恐れ入りますが、こちらは業務の範囲外のご質問のようです。"
             "社内の担当窓口にご確認ください。"
+        }
+
+    # -- self-answer (#291): compose a cited answer from retrieved data ----
+    def self_answer(self, state: AgentState) -> AgentState:
+        """Try to answer directly from the retrieved sources (data-derived routes).
+
+        Runs only when a composer is wired (build_agent adds this node then), on the
+        document / prior_answer routes — where C4 found strong data. Re-hydrates the
+        top hits as id-paired evidence and asks the composer for a grounded, cited
+        answer. ``grounded`` True -> the graph terminates at ``self_answered`` with
+        the answer + source links; False -> fall back to the original route (a human
+        hand-off for the tacit-knowledge case). Never fabricates an answer.
+        """
+
+        assert self._self_answer is not None and self._fragment_source is not None
+        retrieval = state.get("retrieval") or empty_retrieval()
+        evidence = collect_cited_evidence(self._fragment_source, retrieval)
+        result = self._self_answer.compose(state["question"], evidence)
+        if not result.grounded:
+            return {"self_answer_grounded": False}
+        kind_by_id = {e.source_id: e.kind for e in evidence}
+        citations = [
+            {"source_id": sid, "kind": kind_by_id.get(sid, "qa")} for sid in result.cited_source_ids
+        ]
+        return {
+            "self_answer_grounded": True,
+            "self_answer_text": result.answer,
+            "self_answer_citations": citations,
+        }
+
+    def self_answered(self, state: AgentState) -> AgentState:
+        # Terminal for a grounded self-answer: surface the composed text and carry
+        # the citations forward so the SSE message renders a link per source (#291).
+        return {
+            "answer": state.get("self_answer_text") or "",
+            "self_answer_citations": state.get("self_answer_citations") or [],
         }
 
     def document(self, state: AgentState) -> AgentState:

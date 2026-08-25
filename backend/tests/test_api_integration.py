@@ -121,6 +121,7 @@ def _client(
     checkpointer=None,
     answerability_model=None,
     answerability_threshold=40,
+    self_answer_model=None,
 ) -> TestClient:
     service = AgentService(
         session_factory=get_sessionmaker(engine),
@@ -131,11 +132,28 @@ def _client(
         draft_model=TemplateDraftModel(),
         answerability_model=answerability_model,
         answerability_threshold=answerability_threshold,
+        self_answer_model=self_answer_model,
         retriever=retriever,
         scorer=scorer,
         now_factory=lambda: NOW,
     )
     return _app_client(service)
+
+
+class _FixedSelfAnswer:
+    """#291 self-answer composer stand-in for the SSE test."""
+
+    def __init__(self, *, grounded: bool, answer: str = "", cites=()) -> None:
+        self._grounded = grounded
+        self._answer = answer
+        self._cites = list(cites)
+
+    def compose(self, question, evidence):
+        from tekijin.agent.protocols import SelfAnswerResult
+
+        if not self._grounded:
+            return SelfAnswerResult(answer="", cited_source_ids=[], grounded=False)
+        return SelfAnswerResult(answer=self._answer, cited_source_ids=self._cites, grounded=True)
 
 
 class _FixedAnswerability:
@@ -546,6 +564,37 @@ def test_document_route_stamps_resolved_at(seed_counts, engine, fake_embedder) -
         assert check.query(Recommendation).filter(Recommendation.question_id == q.id).count() == 0
     finally:
         check.close()
+
+
+# --------------------------------------------------------------------------- #
+# self-answer (#291): a grounded answer terminates with cited source links
+# --------------------------------------------------------------------------- #
+def test_self_answer_message_carries_citations(seed_counts, engine, fake_embedder) -> None:
+    # A strong document route + a grounded composer -> the run answers directly
+    # (status=self_answered) with the cited sources, and does NOT hand off (no
+    # recommend/draft events).
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(
+            documents=[{"doc_id": "doc_001", "score": 0.05}],
+            document_confidence=0.8,
+            people_confidence=0.2,
+            people=[1, 2],
+        ),
+        scorer=_FakeScorer(_recs(1, 2)),
+        self_answer_model=_FixedSelfAnswer(
+            grounded=True, answer="保守時間内に更新します。", cites=["doc_001"]
+        ),
+    )
+    client.post("/ask", json={"asker_id": 8, "question": GOOD_Q, "session_id": "sa"})
+    events = _events(client, "sa")
+    names = [e for e, _ in events]
+    assert "recommend" not in names and "draft" not in names  # not a hand-off
+    message = next(data for e, data in events if e == "message")
+    assert message["status"] == "self_answered"
+    assert message["message"] == "保守時間内に更新します。"
+    assert message["citations"] == [{"source_id": "doc_001", "kind": "document"}]
 
 
 # --------------------------------------------------------------------------- #

@@ -12,6 +12,7 @@ from tekijin.agent.protocols import (
     AnswerabilityModel,
     DraftModel,
     IntentModel,
+    SelfAnswerModel,
     SufficiencyModel,
 )
 from tekijin.agent.stubs import (
@@ -19,18 +20,20 @@ from tekijin.agent.stubs import (
     RuleAnswerabilityModel,
     RuleSufficiencyModel,
     TemplateDraftModel,
+    TemplateSelfAnswerModel,
 )
 from tekijin.config import Settings, get_settings
 
 
 def make_llm_nodes(
     settings: Settings | None = None,
-) -> tuple[IntentModel, SufficiencyModel, DraftModel, AnswerabilityModel]:
-    """Return ``(intent, sufficiency, draft, answerability)`` for the backend.
+) -> tuple[IntentModel, SufficiencyModel, DraftModel, AnswerabilityModel, SelfAnswerModel]:
+    """Return ``(intent, sufficiency, draft, answerability, self_answer)``.
 
-    The answerability critic (#70) is always constructed here; whether the graph
-    actually calls it is gated separately by ``answerability_enabled`` at the
-    service factory, so the model is cheap to build and inert until wired.
+    The answerability critic (#70) and self-answer composer (#291) are always
+    constructed here; whether the graph calls them is gated separately by
+    ``answerability_enabled`` / ``self_answer_enabled`` at the service factory, so
+    the models are cheap to build and inert until wired.
     """
 
     settings = settings or get_settings()
@@ -39,6 +42,7 @@ def make_llm_nodes(
             VllmAnswerabilityModel,
             VllmDraftModel,
             VllmIntentModel,
+            VllmSelfAnswerModel,
             VllmSufficiencyModel,
         )
 
@@ -47,10 +51,12 @@ def make_llm_nodes(
             VllmSufficiencyModel(settings=settings),
             VllmDraftModel(settings=settings),
             VllmAnswerabilityModel(settings=settings),
+            VllmSelfAnswerModel(settings=settings),
         )
     return (
         KeywordIntentModel(),
         RuleSufficiencyModel(),
         TemplateDraftModel(),
         RuleAnswerabilityModel(),
+        TemplateSelfAnswerModel(),
     )

@@ -115,6 +115,17 @@ class AgentState(TypedDict, total=False):
     prior_answer_note: str | None  # set on the prior_answer (補助) route
     pinned_responder_id: int | None  # prior_answer: hand off to THIS person
 
+    # -- self-answer (#291) ------------------------------------------------
+    # Set by the self_answer node (only when a composer is wired) on the
+    # data-derived routes. ``grounded`` True -> the assistant answered directly
+    # from retrieved sources and the graph terminates at ``self_answered``; False
+    # -> fall back to the original route (document / person hand-off). ``text`` is
+    # the composed answer, ``citations`` the sources it used ({source_id, kind})
+    # so the chat can render links back to each.
+    self_answer_grounded: bool
+    self_answer_text: str | None
+    self_answer_citations: list[dict[str, str]]
+
     # -- C6 scoring --------------------------------------------------------
     recommendations: list[dict[str, Any]]
 

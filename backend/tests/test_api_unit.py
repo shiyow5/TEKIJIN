@@ -13,7 +13,11 @@ import pytest
 from sse_starlette import ServerSentEvent
 
 from tekijin.agent.protocols import IntentResult
-from tekijin.agent.stubs import KeywordIntentModel, RuleAnswerabilityModel
+from tekijin.agent.stubs import (
+    KeywordIntentModel,
+    RuleAnswerabilityModel,
+    TemplateSelfAnswerModel,
+)
 from tekijin.api import events, schemas
 from tekijin.config import Settings
 from tekijin.llm.factory import make_llm_nodes
@@ -182,6 +186,7 @@ def test_node_event_terminals_are_messages() -> None:
             "status": status,
             "message": "終端メッセージ",
             "doc_id": None,
+            "citations": [],  # #291: only the self_answered terminal populates this
             "latency_ms": None,
         }
 
@@ -194,6 +199,29 @@ def test_node_event_document_carries_doc_id() -> None:
         "status": "document",
         "message": "社内文書に該当",
         "doc_id": "doc_001",
+        "citations": [],
+        "latency_ms": None,
+    }
+
+
+def test_node_event_self_answered_carries_citations() -> None:
+    # #291: the self_answered terminal surfaces the composed answer AND its source
+    # citations so the chat renders a link per source.
+    sse = _ev(
+        events.node_event(
+            "self_answered",
+            {
+                "answer": "保守時間内に更新します。",
+                "self_answer_citations": [{"source_id": "doc_001", "kind": "document"}],
+            },
+        )
+    )
+    assert sse.event == "message"
+    assert _data(sse) == {
+        "status": "self_answered",
+        "message": "保守時間内に更新します。",
+        "doc_id": None,
+        "citations": [{"source_id": "doc_001", "kind": "document"}],
         "latency_ms": None,
     }
 
@@ -209,6 +237,7 @@ def test_node_event_internal_nodes_emit_nothing() -> None:
         "prior_answer",
         "reroute",
         "answerability",
+        "self_answer",  # #291: the composer node is internal (self_answered emits)
     ):
         assert events.node_event(node, {"x": 1}) is None
     assert (
@@ -224,6 +253,7 @@ def test_node_event_internal_nodes_emit_nothing() -> None:
                 "unresolved_intent",
                 "no_candidate",
                 "no_expert",
+                "self_answered",
             }
         )
         == events.EVENT_NODES
@@ -383,17 +413,23 @@ def test_postgres_conn_string_strips_driver() -> None:
 # LLM backend factory
 # --------------------------------------------------------------------------- #
 def test_make_llm_nodes_stub() -> None:
-    intent, sufficiency, draft, answerability = make_llm_nodes(_settings(llm_backend="stub"))
+    intent, sufficiency, draft, answerability, self_answer = make_llm_nodes(
+        _settings(llm_backend="stub")
+    )
     assert isinstance(intent, KeywordIntentModel)
     assert isinstance(answerability, RuleAnswerabilityModel)
+    assert isinstance(self_answer, TemplateSelfAnswerModel)
 
 
 def test_make_llm_nodes_vllm_constructs_without_network() -> None:
-    intent, sufficiency, draft, answerability = make_llm_nodes(_settings(llm_backend="vllm"))
+    intent, sufficiency, draft, answerability, self_answer = make_llm_nodes(
+        _settings(llm_backend="vllm")
+    )
     assert isinstance(intent, VllmIntentModel)
     assert isinstance(sufficiency, VllmSufficiencyModel)
     assert isinstance(draft, VllmDraftModel)
     assert isinstance(answerability, VllmAnswerabilityModel)
+    assert isinstance(self_answer, VllmSelfAnswerModel)
 
 
 # --------------------------------------------------------------------------- #

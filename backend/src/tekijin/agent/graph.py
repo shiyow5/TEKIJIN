@@ -24,6 +24,7 @@ from tekijin.agent.protocols import (
     DraftModel,
     IntentModel,
     Retriever,
+    SelfAnswerModel,
     SufficiencyModel,
 )
 from tekijin.agent.route import DOCUMENT, PERSON, PRIOR_ANSWER
@@ -64,6 +65,16 @@ def _after_c6(state: AgentState) -> str:
     return "c7_draft" if state.get("recommendations") else "no_candidate"
 
 
+def _after_self_answer(state: AgentState) -> str:
+    # #291: grounded -> the assistant answered from data; terminate at
+    # ``self_answered``. Not grounded (evidence insufficient) -> fall back to the
+    # route we arrived on: a document stays on its self-resolution terminal (via
+    # C6's #279 person fallback), a prior_answer hands off to the pinned responder.
+    if state.get("self_answer_grounded"):
+        return "self_answered"
+    return "c6_score" if state.get("route") == DOCUMENT else "prior_answer"
+
+
 def _after_answerability(state: AgentState) -> str:
     # #70: the critic node already compared its 0–100 score to the injected
     # threshold and wrote ``answerable``; the router stays pure. Below threshold
@@ -98,6 +109,7 @@ def build_agent(
     draft_model: DraftModel | None = None,
     answerability_model: AnswerabilityModel | None = None,
     answerability_threshold: int = 40,
+    self_answer_model: SelfAnswerModel | None = None,
     retriever: Retriever | None = None,
     scorer: ExpertiseScorer | None = None,
     weights: Weights = DEFAULT_WEIGHTS,
@@ -120,6 +132,11 @@ def build_agent(
             (default) compiles the pre-#70 graph unchanged — no critique node is
             added. When supplied, a critique node runs between C6 and C7 and
             rejects below ``answerability_threshold`` to a ``no_expert`` terminal.
+        self_answer_model: optional #291 self-answer composer. ``None`` (default)
+            leaves the data-derived routes unchanged. When supplied, the document /
+            prior_answer routes first try a cited answer from the retrieved
+            evidence; a grounded answer terminates at ``self_answered``, otherwise
+            the run falls back to the original route (document terminal / hand-off).
         checkpointer: LangGraph checkpointer; default ``MemorySaver``.
     """
 
@@ -135,10 +152,18 @@ def build_agent(
         scorer=scorer or ExpertiseScorer(Repository(session), weights=weights),
         answerability_model=answerability_model,
         answerability_threshold=answerability_threshold,
+        self_answer_model=self_answer_model,
+        # The composer re-hydrates evidence text from ids via the repository's batch
+        # lookups (#69); only needed when self-answer is wired.
+        fragment_source=Repository(session) if self_answer_model is not None else None,
     )
     # #70: the critic is wired only when a model is supplied. Off (the default) the
     # graph is byte-for-byte the pre-#70 flow — C6 -> C7 directly.
     critique_wired = answerability_model is not None
+    # #291: self-answer is wired only when a composer is supplied. Off (default) the
+    # data-derived routes keep their pre-#291 behaviour (document terminal / pinned
+    # hand-off) untouched.
+    self_answer_wired = self_answer_model is not None
 
     graph = StateGraph(AgentState)
     graph.add_node("reset", nodes.reset)
@@ -161,6 +186,9 @@ def build_agent(
     if critique_wired:
         graph.add_node("answerability", nodes.answerability)
         graph.add_node("no_expert", nodes.no_expert)
+    if self_answer_wired:
+        graph.add_node("self_answer", nodes.self_answer)
+        graph.add_node("self_answered", nodes.self_answered)
 
     # START -> reset -> C1. ``reset`` clears per-question control fields on a fresh
     # invoke; ``resume`` bypasses START, so mid-flow interrupts keep their state.
@@ -179,13 +207,33 @@ def build_agent(
     graph.add_edge("ask", "c1_intent")  # re-understand the enriched question
     graph.add_edge("c3_embed", "c4_retrieve")
     graph.add_edge("c4_retrieve", "c5_route")
+    # #291: when self-answer is wired, the DATA-DERIVED routes (document /
+    # prior_answer) try a cited self-answer first; the PERSON route (weak data)
+    # goes straight to the hand-off as before. Off, the mapping is the pre-#291 one.
+    data_route_target = "self_answer" if self_answer_wired else None
     graph.add_conditional_edges(
         "c5_route",
         _after_c5,
         # #279: the document route now also runs C6 to rank a person fallback; the
         # DOCUMENT terminal presents the document AND those candidates.
-        {PERSON: "c6_score", PRIOR_ANSWER: "prior_answer", DOCUMENT: "c6_score"},
+        {
+            PERSON: "c6_score",
+            PRIOR_ANSWER: data_route_target or "prior_answer",
+            DOCUMENT: data_route_target or "c6_score",
+        },
     )
+    if self_answer_wired:
+        graph.add_conditional_edges(
+            "self_answer",
+            _after_self_answer,
+            # grounded -> answer; else fall back to the route we came from.
+            {
+                "self_answered": "self_answered",
+                "c6_score": "c6_score",
+                "prior_answer": "prior_answer",
+            },
+        )
+        graph.add_edge("self_answered", END)
     graph.add_edge("prior_answer", "c6_score")
     # #70: when the critic is wired, the hand-off branch first passes through the
     # answerability node; _after_c6 is unchanged (still returns "c7_draft"), only

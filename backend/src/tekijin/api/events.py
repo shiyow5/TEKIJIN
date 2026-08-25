@@ -34,6 +34,9 @@ _TERMINAL_STATUS: dict[str, str] = {
     # in-house track record was judged insufficient (a graceful terminal, not a
     # hand-off). Only surfaces when the critic is wired (answerability_enabled).
     "no_expert": "no_expert",
+    # #291: the assistant answered directly from retrieved data (past Q&A /
+    # documents) with citations — no hand-off. Only when self_answer_enabled.
+    "self_answered": "self_answered",
 }
 
 # Nodes that produce a visible SSE event (everything else is internal). Kept as a
@@ -105,6 +108,9 @@ def node_event(
                 message=update.get("answer") or "",
                 # Only the document terminal carries a doc id; harmless None elsewhere.
                 doc_id=update.get("document_id"),
+                # #291: the self_answered terminal carries the sources it cited so
+                # the chat renders a link per source; empty elsewhere.
+                citations=update.get("self_answer_citations") or [],
                 latency_ms=latency_ms,
             ),
         )
