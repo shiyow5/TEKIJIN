@@ -276,6 +276,69 @@ def test_hybrid_retriever_matches_term_in_question_only(
     assert "ans_generic" in qa_ids  # recovered via question-body BM25 (fix 1)
 
 
+def test_hybrid_retriever_adaptive_bm25_recovers_model_number(
+    seed_counts, session, fake_embedder
+) -> None:
+    # #114: the same model-number recovery WITHOUT hardcoding bm25_weight=1.0. With
+    # the base weight left at the #68 default (0.2) but adaptivity ON, the weak dense
+    # signal on a bare model number raises BM25 for that channel, so the exact hit
+    # survives — the flat-0.2 default (which the test above pins 1.0 to work around)
+    # would drop it.
+    question = Question(
+        id="q_term_only2", asker_id=1, body="ZQX8888 rare model discussion", topics=["misc"]
+    )
+    answer = Answer(
+        id="ans_generic2",
+        question_id="q_term_only2",
+        responder_id=7,
+        body="follow the standard onboarding procedure",
+    )
+    session.add(question)
+    session.flush()
+    session.add(answer)
+    session.flush()
+    embed_corpus(session, fake_embedder)
+
+    retriever = HybridRetriever(fake_embedder, session, top_k=10)  # base bm25_weight=0.2
+    # Enable adaptivity with a window whose lo=1.0 boosts at ANY cosine (<=1.0). This
+    # ISOLATES the end-to-end plumbing (settings -> _fuse -> weighted RRF) — it does
+    # NOT exercise per-cosine interpolation or which channel's confidence is used
+    # (those are covered by test_adaptive_bm25_weight_* and the wiring test below).
+    retriever._bm25_boosted = 1.0
+    retriever._bm25_adapt_lo, retriever._bm25_adapt_hi = 1.0, 1.001
+    result = retriever.search("ZQX8888")
+
+    assert "ans_generic2" in {p["qa_id"] for p in result["past_answers"]}
+
+
+def test_search_passes_each_channels_own_confidence_to_its_fuse(
+    seed_counts, session, fake_embedder
+) -> None:
+    # #114 review: prove search() wires the RIGHT per-channel dense confidence into
+    # each fusion call — answers<-answer_confidence, docs<-document_confidence,
+    # people<-people_confidence — independent of the cosine scale. A mixed-up channel
+    # would boost/starve the wrong pool; the unconditional-window test above cannot
+    # catch it, so capture the dense_confidence handed to _fuse and compare it to the
+    # confidences the SAME run reports back.
+    retriever = HybridRetriever(fake_embedder, session, top_k=10)
+    seen: list[float] = []
+    original = retriever._fuse
+
+    def _spy(dense_rankings, sparse_ranking, *, dense_confidence):
+        seen.append(dense_confidence)
+        return original(dense_rankings, sparse_ranking, dense_confidence=dense_confidence)
+
+    retriever._fuse = _spy  # type: ignore[method-assign]
+    result = retriever.search("VPN 3拠点の相談")
+
+    # search() fuses in this order: past answers, documents, then people (via
+    # _fused_ids -> _fuse). Each must have received its OWN channel's confidence.
+    assert len(seen) == 3
+    assert seen[0] == result["answer_confidence"]
+    assert seen[1] == result["document_confidence"]
+    assert seen[2] == result["people_confidence"]
+
+
 # --------------------------------------------------------------------------- #
 # fix 2: a term living only in a PROFILE surfaces that person (sparse channel)
 # --------------------------------------------------------------------------- #
