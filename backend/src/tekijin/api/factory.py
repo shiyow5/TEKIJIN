@@ -20,7 +20,7 @@ from tekijin.retrieval.embedding import SentenceTransformerEmbedder
 def build_default_service(settings: Settings | None = None) -> AgentService:
     settings = settings or get_settings()
     session_factory = get_sessionmaker(get_engine(settings.database_url))
-    intent_model, sufficiency_model, draft_model = make_llm_nodes(settings)
+    intent_model, sufficiency_model, draft_model, answerability_model = make_llm_nodes(settings)
     embedder = SentenceTransformerEmbedder(
         settings.embedding_model,
         # All settings-driven from THIS instance (not the cached global), so a
@@ -42,6 +42,11 @@ def build_default_service(settings: Settings | None = None) -> AgentService:
         intent_model=intent_model,
         sufficiency_model=sufficiency_model,
         draft_model=draft_model,
+        # #70: wire the evidence-sufficiency critic ONLY when enabled; otherwise
+        # pass None so the graph compiles the pre-#70 flow (no critique node).
+        # Default OFF until it is verified on the DGX eval (part3).
+        answerability_model=answerability_model if settings.answerability_enabled else None,
+        answerability_threshold=settings.answerability_threshold,
         # From THIS settings instance (not the cached global) so a custom Settings
         # is honored when the graph builds its C4 retriever (#68).
         bm25_weight=settings.bm25_weight,

@@ -13,7 +13,7 @@ import pytest
 from sse_starlette import ServerSentEvent
 
 from tekijin.agent.protocols import IntentResult
-from tekijin.agent.stubs import KeywordIntentModel
+from tekijin.agent.stubs import KeywordIntentModel, RuleAnswerabilityModel
 from tekijin.api import events, schemas
 from tekijin.config import Settings
 from tekijin.llm.factory import make_llm_nodes
@@ -192,7 +192,17 @@ def test_node_event_document_carries_doc_id() -> None:
 
 
 def test_node_event_internal_nodes_emit_nothing() -> None:
-    for node in ("reset", "c2_sufficiency", "c3_embed", "c4_retrieve", "prior_answer", "reroute"):
+    # answerability (#70) is an internal critique node: it never surfaces its own
+    # event (the SSE/persist layer decides whether to release the held recommend).
+    for node in (
+        "reset",
+        "c2_sufficiency",
+        "c3_embed",
+        "c4_retrieve",
+        "prior_answer",
+        "reroute",
+        "answerability",
+    ):
         assert events.node_event(node, {"x": 1}) is None
     assert (
         frozenset(
@@ -206,6 +216,7 @@ def test_node_event_internal_nodes_emit_nothing() -> None:
                 "document",
                 "unresolved_intent",
                 "no_candidate",
+                "no_expert",
             }
         )
         == events.EVENT_NODES
@@ -365,15 +376,17 @@ def test_postgres_conn_string_strips_driver() -> None:
 # LLM backend factory
 # --------------------------------------------------------------------------- #
 def test_make_llm_nodes_stub() -> None:
-    intent, sufficiency, draft = make_llm_nodes(_settings(llm_backend="stub"))
+    intent, sufficiency, draft, answerability = make_llm_nodes(_settings(llm_backend="stub"))
     assert isinstance(intent, KeywordIntentModel)
+    assert isinstance(answerability, RuleAnswerabilityModel)
 
 
 def test_make_llm_nodes_vllm_constructs_without_network() -> None:
-    intent, sufficiency, draft = make_llm_nodes(_settings(llm_backend="vllm"))
+    intent, sufficiency, draft, answerability = make_llm_nodes(_settings(llm_backend="vllm"))
     assert isinstance(intent, VllmIntentModel)
     assert isinstance(sufficiency, VllmSufficiencyModel)
     assert isinstance(draft, VllmDraftModel)
+    assert isinstance(answerability, VllmAnswerabilityModel)
 
 
 # --------------------------------------------------------------------------- #

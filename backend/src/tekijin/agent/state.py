@@ -118,6 +118,16 @@ class AgentState(TypedDict, total=False):
     # -- C6 scoring --------------------------------------------------------
     recommendations: list[dict[str, Any]]
 
+    # -- answerability critic (#70) ---------------------------------------
+    # Evidence-sufficiency verdict on the ranked candidates, run BETWEEN C6 and
+    # C7 (only when a critic is wired). ``answerable`` is the node's own
+    # threshold decision (kept in state so the graph router stays pure); on
+    # False the graph rejects to the ``no_expert`` terminal instead of handing
+    # off a weak match. Absent (all three) when no critic is wired.
+    answerability_confidence: int  # 0–100
+    answerability_reason: str | None
+    answerable: bool
+
     # -- C7 draft ----------------------------------------------------------
     draft: str | None
 

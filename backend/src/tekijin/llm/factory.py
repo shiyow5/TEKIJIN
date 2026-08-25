@@ -8,23 +8,49 @@ OpenAI client — CI/tests stay LLM-free.
 
 from __future__ import annotations
 
-from tekijin.agent.protocols import DraftModel, IntentModel, SufficiencyModel
-from tekijin.agent.stubs import KeywordIntentModel, RuleSufficiencyModel, TemplateDraftModel
+from tekijin.agent.protocols import (
+    AnswerabilityModel,
+    DraftModel,
+    IntentModel,
+    SufficiencyModel,
+)
+from tekijin.agent.stubs import (
+    KeywordIntentModel,
+    RuleAnswerabilityModel,
+    RuleSufficiencyModel,
+    TemplateDraftModel,
+)
 from tekijin.config import Settings, get_settings
 
 
 def make_llm_nodes(
     settings: Settings | None = None,
-) -> tuple[IntentModel, SufficiencyModel, DraftModel]:
-    """Return ``(intent_model, sufficiency_model, draft_model)`` for the backend."""
+) -> tuple[IntentModel, SufficiencyModel, DraftModel, AnswerabilityModel]:
+    """Return ``(intent, sufficiency, draft, answerability)`` for the backend.
+
+    The answerability critic (#70) is always constructed here; whether the graph
+    actually calls it is gated separately by ``answerability_enabled`` at the
+    service factory, so the model is cheap to build and inert until wired.
+    """
 
     settings = settings or get_settings()
     if settings.llm_backend == "vllm":
-        from tekijin.llm.vllm import VllmDraftModel, VllmIntentModel, VllmSufficiencyModel
+        from tekijin.llm.vllm import (
+            VllmAnswerabilityModel,
+            VllmDraftModel,
+            VllmIntentModel,
+            VllmSufficiencyModel,
+        )
 
         return (
             VllmIntentModel(settings=settings),
             VllmSufficiencyModel(settings=settings),
             VllmDraftModel(settings=settings),
+            VllmAnswerabilityModel(settings=settings),
         )
-    return (KeywordIntentModel(), RuleSufficiencyModel(), TemplateDraftModel())
+    return (
+        KeywordIntentModel(),
+        RuleSufficiencyModel(),
+        TemplateDraftModel(),
+        RuleAnswerabilityModel(),
+    )

@@ -48,7 +48,12 @@ from sse_starlette import ServerSentEvent
 
 from tekijin.agent.graph import build_agent
 from tekijin.agent.nodes import draft_context
-from tekijin.agent.protocols import DraftModel, IntentModel, SufficiencyModel
+from tekijin.agent.protocols import (
+    AnswerabilityModel,
+    DraftModel,
+    IntentModel,
+    SufficiencyModel,
+)
 from tekijin.api import schemas
 from tekijin.api.events import (
     TERMINAL_EVENTS,
@@ -169,6 +174,8 @@ class AgentService:
         intent_model: IntentModel,
         sufficiency_model: SufficiencyModel,
         draft_model: DraftModel,
+        answerability_model: AnswerabilityModel | None = None,
+        answerability_threshold: int = 40,
         retriever: Any | None = None,
         scorer: Any | None = None,
         bm25_weight: float | None = None,
@@ -182,6 +189,12 @@ class AgentService:
         self._intent = intent_model
         self._sufficiency = sufficiency_model
         self._draft = draft_model
+        # #70: evidence-sufficiency critic. None (default) compiles the pre-#70
+        # graph (no critique node); when set, the SSE/persist layer defers the
+        # recommend event + rows until the critic accepts (see ``_run``), so a
+        # rejected set never becomes a phantom pending row (mirrors #281).
+        self._answerability = answerability_model
+        self._answerability_threshold = answerability_threshold
         # Optional C4/C6 overrides — default (None) uses the real HybridRetriever
         # / ExpertiseScorer over the request session; tests inject deterministic
         # fakes so the SSE flow does not depend on retrieval scores.
@@ -1035,6 +1048,8 @@ class AgentService:
             intent_model=self._intent,
             sufficiency_model=self._sufficiency,
             draft_model=self._draft,
+            answerability_model=self._answerability,
+            answerability_threshold=self._answerability_threshold,
             retriever=self._retriever,
             scorer=self._scorer,
             bm25_weight=self._bm25_weight,
@@ -1061,6 +1076,13 @@ class AgentService:
         # a `recommend` event (they could never resolve, permanently inflating the
         # pending-handoff KPI and dead-ending responder inboxes — #281 review).
         route: str | None = None
+        # #70: when the answerability critic is wired, hold C6's recommend event
+        # AND its persistence until the critic accepts — a rejected candidate set
+        # must never surface or persist (it could never resolve; same phantom-row
+        # harm as the document route, #281). Inert when no critic is wired.
+        critique_wired = self._answerability is not None
+        pending_recommend: ServerSentEvent | None = None
+        pending_rec_data: dict[str, Any] | None = None
         # Per-stage timing for the latency KPI (#177): each real node's duration is
         # (this node's end) - (previous node's end within this segment). `prev`
         # starts at segment start, so a resume segment does not count the human wait.
@@ -1082,7 +1104,11 @@ class AgentService:
                             route = (data or {}).get("route") or route
                             self._persist_route(question_id, data)
                         elif node == "c6_score" and route != "document":
-                            rec_ids = self._persist_recommendations(question_id, data)
+                            if critique_wired:
+                                # Defer: persist only if the critic accepts (below).
+                                pending_rec_data = data
+                            else:
+                                rec_ids = self._persist_recommendations(question_id, data)
                         if node == "__interrupt__":
                             event = interrupt_event(_interrupt_payload(data))
                         else:
@@ -1104,6 +1130,21 @@ class AgentService:
                             # C6 there is a fallback note, not a hand-off in progress.
                             if node == "c6_score" and route == "document":
                                 event = None
+                            # #70: hold C6's recommend event until the critic decides.
+                            elif node == "c6_score" and critique_wired:
+                                pending_recommend = event
+                                event = None
+                            elif node == "answerability":
+                                # Critic decided: on accept, release the held recommend
+                                # event + persist the rows; on reject, drop both (the
+                                # `no_expert` terminal follows, nothing to surface).
+                                if (data or {}).get("answerable") and pending_rec_data is not None:
+                                    rec_ids = self._persist_recommendations(
+                                        question_id, pending_rec_data
+                                    )
+                                    event = pending_recommend
+                                pending_recommend = None
+                                pending_rec_data = None
                         if event is not None:
                             if event.event in TERMINAL_EVENTS:
                                 terminal = event

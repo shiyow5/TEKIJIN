@@ -112,7 +112,16 @@ def _app_client(service: AgentService) -> TestClient:
     return client
 
 
-def _client(engine, embedder, *, retriever=None, scorer=None, checkpointer=None) -> TestClient:
+def _client(
+    engine,
+    embedder,
+    *,
+    retriever=None,
+    scorer=None,
+    checkpointer=None,
+    answerability_model=None,
+    answerability_threshold=40,
+) -> TestClient:
     service = AgentService(
         session_factory=get_sessionmaker(engine),
         checkpointer=checkpointer or MemorySaver(),
@@ -120,11 +129,25 @@ def _client(engine, embedder, *, retriever=None, scorer=None, checkpointer=None)
         intent_model=KeywordIntentModel(),
         sufficiency_model=RuleSufficiencyModel(),
         draft_model=TemplateDraftModel(),
+        answerability_model=answerability_model,
+        answerability_threshold=answerability_threshold,
         retriever=retriever,
         scorer=scorer,
         now_factory=lambda: NOW,
     )
     return _app_client(service)
+
+
+class _FixedAnswerability:
+    """#70 critic stand-in with a fixed confidence, for the SSE/persist tests."""
+
+    def __init__(self, confidence: int) -> None:
+        self._confidence = confidence
+
+    def assess(self, question, candidate_evidence):
+        from tekijin.agent.protocols import AnswerabilityResult
+
+        return AnswerabilityResult(confidence=self._confidence, reason="判定理由")
 
 
 def _parse_sse(text: str) -> list[tuple[str, dict]]:
@@ -520,6 +543,67 @@ def test_document_route_stamps_resolved_at(seed_counts, engine, fake_embedder) -
         assert q is not None and q.route == "document"
         assert q.resolved_at is not None
         # No phantom recommendation rows for the self-resolving document route.
+        assert check.query(Recommendation).filter(Recommendation.question_id == q.id).count() == 0
+    finally:
+        check.close()
+
+
+# --------------------------------------------------------------------------- #
+# answerability critic (#70): SSE + persistence gated on the critic's verdict
+# --------------------------------------------------------------------------- #
+def test_answerability_accept_surfaces_recommend_and_persists(
+    seed_counts, engine, fake_embedder
+) -> None:
+    # A confident critic behaves exactly like the pre-#70 happy path: recommend
+    # event fires and the shown rows are persisted for the outcome record.
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2, 3], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2, 3)),
+        answerability_model=_FixedAnswerability(confidence=85),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "ans_ok"})
+    names = [e for e, _ in _events(client, "ans_ok")]
+    assert names == ["understood", "route", "recommend", "draft"]  # unchanged flow
+
+    check = get_sessionmaker(engine)()
+    try:
+        q = check.query(Question).filter(Question.session_id == "ans_ok").first()
+        assert q is not None
+        assert check.query(Recommendation).filter(Recommendation.question_id == q.id).count() == 3
+    finally:
+        check.close()
+
+
+def test_answerability_reject_suppresses_recommend_and_persists_nothing(
+    seed_counts, engine, fake_embedder
+) -> None:
+    # A rejecting critic: NO recommend event (the held one is dropped), NO draft,
+    # a `no_expert` terminal message, and — critically — NO Recommendation rows
+    # (a rejected set must never become a phantom pending row / inbox dead-link,
+    # the same integrity guard as the document route, #281).
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2, 3], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2, 3)),
+        answerability_model=_FixedAnswerability(confidence=15),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "ans_ng"})
+    events = _events(client, "ans_ng")
+    names = [e for e, _ in events]
+    assert "recommend" not in names and "draft" not in names
+    assert names[-1] == "message"
+    message = next(data for e, data in events if e == "message")
+    assert message["status"] == "no_expert"
+    assert "社内の実績が見つかりません" in message["message"]
+
+    check = get_sessionmaker(engine)()
+    try:
+        q = check.query(Question).filter(Question.session_id == "ans_ng").first()
+        assert q is not None and q.route == "person"
+        # No phantom recommendation rows for the rejected hand-off.
         assert check.query(Recommendation).filter(Recommendation.question_id == q.id).count() == 0
     finally:
         check.close()

@@ -10,7 +10,7 @@ module turns those into ``sse_starlette`` events per model-definition §4:
     c6_score           -> event: recommend
     c7_draft           -> event: draft
     c8_update          -> event: done
-    off_topic/document/unresolved_intent/no_candidate -> event: message
+    off_topic/document/unresolved_intent/no_candidate/no_expert -> event: message
 
 All other nodes (reset, c2_sufficiency, c3_embed, c4_retrieve, prior_answer,
 send, reroute) are internal and emit nothing.
@@ -30,6 +30,10 @@ _TERMINAL_STATUS: dict[str, str] = {
     "document": "document",
     "unresolved_intent": "unresolved",
     "no_candidate": "no_candidate",
+    # #70: the answerability critic rejected — candidates scored, but their
+    # in-house track record was judged insufficient (a graceful terminal, not a
+    # hand-off). Only surfaces when the critic is wired (answerability_enabled).
+    "no_expert": "no_expert",
 }
 
 # Nodes that produce a visible SSE event (everything else is internal). Kept as a
