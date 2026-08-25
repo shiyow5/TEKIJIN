@@ -81,6 +81,19 @@ def test_embed_knowledge_units_skips_empty_text(seed_counts, session, fake_embed
     assert embed_knowledge_units(session, fake_embedder, batch_size=1) == 0
 
 
+def test_embed_knowledge_units_skips_rejected(seed_counts, session, fake_embedder) -> None:
+    # A human-rejected unit is never embedded (waste avoidance, #354).
+    _upsert(session, "90201", "keep this", "action a")
+    _upsert(session, "90202", "discard this", "action b")
+    rejected = get_knowledge_unit_by_source(session, "daily_report", "90202")
+    set_review_status(session, rejected.id, "rejected")
+    session.flush()
+    embedded = embed_knowledge_units(session, fake_embedder)
+    assert embedded == 1  # only the non-rejected unit
+    assert get_knowledge_unit_by_source(session, "daily_report", "90201").has_embedding is True
+    assert get_knowledge_unit_by_source(session, "daily_report", "90202").has_embedding is False
+
+
 def test_embed_knowledge_units_rejects_bad_batch_size(seed_counts, session, fake_embedder) -> None:
     with pytest.raises(ValueError, match="batch_size must be positive"):
         embed_knowledge_units(session, fake_embedder, batch_size=0)

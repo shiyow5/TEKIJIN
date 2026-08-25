@@ -41,16 +41,18 @@ def embed_knowledge_units(
 
     ``only_missing`` (default) skips units that already carry a vector so re-runs
     only fill gaps; pass ``False`` to re-embed all (e.g. after an extraction refresh
-    changed the text). Units whose case text is empty are skipped. Every review
-    status is embedded — :func:`search_knowledge_units` does the ``approved`` gating
-    at query time, so an approval after indexing needs no re-embed. The caller owns
-    the transaction; this flushes.
+    changed the text). Units whose case text is empty are skipped. ``rejected`` units
+    are NEVER embedded — a human discarded them, so spending encoder/DB writes on
+    them is waste; ``unreviewed`` and ``approved`` are both embedded so that an
+    approval after indexing needs no re-embed (:func:`search_knowledge_units` still
+    gates on ``approved`` at query time). The caller owns the transaction; this
+    flushes.
     """
 
     if batch_size <= 0:
         raise ValueError(f"batch_size must be positive, got {batch_size}")
 
-    stmt = select(KnowledgeUnit)
+    stmt = select(KnowledgeUnit).where(KnowledgeUnit.review_status != "rejected")
     if only_missing:
         stmt = stmt.where(KnowledgeUnit.embedding.is_(None))
     rows = list(session.scalars(stmt))
