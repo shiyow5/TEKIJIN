@@ -658,6 +658,8 @@ def test_apply_schema_upgrades_migrates_old_db(database_url: str) -> None:
                 )
             # employees has no embedding column; it gets password_hash added (#241).
             conn.execute(text("CREATE TABLE employees (id int primary key)"))
+            # #355: pre-existing daily_reports without the new topics column.
+            conn.execute(text("CREATE TABLE daily_reports (id int primary key)"))
             stale = "[" + ",".join(["0.01"] * 1024) + "]"
             conn.execute(text(f"INSERT INTO documents (id, embedding) VALUES (1, '{stale}')"))
 
@@ -686,6 +688,15 @@ def test_apply_schema_upgrades_migrates_old_db(database_url: str) -> None:
                 {"s": schema},
             ).scalar()
             assert has_password_hash == 1
+            # #355: daily_reports.topics added to the pre-existing table.
+            has_daily_topics = conn.execute(
+                text(
+                    "SELECT 1 FROM information_schema.columns WHERE table_schema = :s "
+                    "AND table_name = 'daily_reports' AND column_name = 'topics'"
+                ),
+                {"s": schema},
+            ).scalar()
+            assert has_daily_topics == 1
 
         # Idempotent: a second run is a no-op (still 2048, no error).
         _apply_schema_upgrades(eng)

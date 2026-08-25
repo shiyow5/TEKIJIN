@@ -208,6 +208,11 @@ def _apply_schema_upgrades(engine: Engine) -> None:
         conn.execute(
             text("ALTER TABLE questions ADD COLUMN IF NOT EXISTS consult_method VARCHAR(32)")
         )
+        # #355: precomputed daily-report topics for the C6 scorer. daily_reports is
+        # a pre-existing table, so create_all() never adds this column to a live DB
+        # — reseeding would then insert DailyReport(topics=...) and 500. ADD IF NOT
+        # EXISTS makes an old DGX DB pick it up on the next deploy/reseed.
+        conn.execute(text("ALTER TABLE daily_reports ADD COLUMN IF NOT EXISTS topics TEXT[]"))
         # Widen embedding columns to the current dim when an older DB is narrower.
         # Table/column names are a hard-coded allow-list spliced via format() —
         # never build them from external input (identifiers can't be bound).
