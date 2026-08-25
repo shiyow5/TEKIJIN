@@ -305,6 +305,9 @@ def test_evaluate_source_recall_aggregate() -> None:
     assert sr.precision == pytest.approx((1.0 + 0.5) / 2)
     # 2 of 3 obligated rows produced any citation
     assert sr.grounded_rate == pytest.approx(2 / 3)
+    d = sr.as_dict()
+    assert d["n"] == 3 and d["n_cited"] == 2
+    assert d["recall"] == pytest.approx(0.5) and d["grounded_rate"] == pytest.approx(2 / 3)
 
 
 def test_evaluate_source_recall_empty_without_obligations() -> None:
