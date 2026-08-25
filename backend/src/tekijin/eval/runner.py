@@ -123,7 +123,8 @@ def format_report(report: EvalReport) -> str:
         f"    acc@1={ta.acc_at_1:.3f} acc@3={ta.acc_at_3:.3f} (n={ta.n_topic}) "
         "— 律速がここか下流かを分離する。下の Recall@3 は gold トピックを与えた段B(上限)",
         f"  Top-1 Accuracy : {m.top1_accuracy:.3f} (目標 0.70)",
-        f"  Recall@3       : {m.recall_at_3:.3f} (目標 0.90)",
+        f"  Hit@3          : {m.hit_at_3:.3f} (top3 に有効専門家≥1・プロダクト真指標)",
+        f"  Recall@3       : {m.recall_at_3:.3f} (目標 0.90・分数被覆・補助指標)",
         f"  MRR            : {m.mrr:.3f} (目標 0.75)",
         f"  Route Accuracy : {m.route_accuracy:.3f} (目標 0.80, A/B/C のみ n={m.n_routed})",
         f"  Abstain Rate   : {m.abstain_accuracy:.3f} (無推薦だった割合 n={m.n_abstain}) "
