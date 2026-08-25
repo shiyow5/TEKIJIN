@@ -15,9 +15,10 @@ version 0.2 / 2026-08-25（#292 で方針転換を反映）
 > 唯一ではない。データで答えられるものは自己回答し、取次ぎは蓄積（主軸）を回すための入口に位置づけ直す。
 
 これに伴い **C5 は「自己回答（データ十分）vs 取次ぎ（人）」の判定に再定義**、**回答生成 C7'（self-answer）を追加**、
-**C8 を「形式知の蓄積」に拡張**する。実装は #291 で段階的に（part1 コンポーネント／part2 グラフ配線まで完了、
-**既定OFF** `self_answer_enabled=False`。有効化は part3 の **recall 中心**検証（#297）の後）。回答時は**根拠の
-ソースリンクをチャット内に含める**。
+**C8 を「形式知の蓄積」に拡張**する。実装は #291（part1 コンポーネント／part2 グラフ配線）で完了し、
+**#380 の full-graph E2E 検証を経て既定ON** `self_answer_enabled=True`。データ由来経路（document / prior_answer）では
+グラフが**出典付きの回答を合成して `self_answered` 終端**へ進み、**person 経路は不変で人物取次ぎの recall は 1.000 のまま**。
+回答時は**根拠のソースリンクをチャット内に含める**。
 
 > **用語**: 「**主線**」は経路判定（C5）の既定ルート＝人への取次ぎ（補助＝過去回答提示 / 格下げ＝文書）を指す
 > "どの経路で解くか"の語。「**主軸**」はプロダクト目的＝ナレッジ蓄積（C8）を指す"何のためのアプリか"の語。
@@ -43,7 +44,7 @@ LLM への接続は **LangChain**（`init_chat_model` / `with_structured_output`
 | C5 | 解決経路の判定（**自己回答 vs 取次ぎ**） | 決定的（確信度＋閾値） | **`add_conditional_edges`**（person/prior_answer/document）。データ由来経路(document/prior_answer)は C7' 自己回答へ、person は取次ぎへ | 検索結果 → 経路選択 |
 | C6 | 専門性スコアラー | 決定的（証拠積み上げ） | ノード（決定的） | トピック＋人 → 適合度・根拠・順位 |
 | C7 | 依頼文の下書き生成 | LLM | ノード（LLM） | 質問＋相手＋必須項目 → 依頼文 |
-| C7' | 自己回答生成（#291・**配線済み/既定OFF**） | LLM（構造化出力） | ノード（LLM、`self_answer_enabled` で gate）。データ由来経路(document/prior_answer)で C5 の後に発火し、grounded なら `self_answered` 終端、不足なら元経路へフォールバック | 質問＋検索根拠（過去QA/文書, 出典ID付き） → 出典付き回答 or 「答えられない」 |
+| C7' | 自己回答生成（#291・**配線済み/既定ON（#380）**） | LLM（構造化出力） | ノード（LLM、`self_answer_enabled` で gate・既定 true）。データ由来経路(document/prior_answer)で C5 の後に発火し、grounded なら `self_answered` 終端、不足なら元経路へフォールバック | 質問＋検索根拠（過去QA/文書, 出典ID付き） → 出典付き回答 or 「答えられない」 |
 | C8 | 専門性グラフ更新＋**形式知の蓄積** | 決定的（オンライン更新） | ノード（決定的） | 結果イベント → エッジ重み更新／取次ぎで得た回答を形式知として蓄積 |
 
 LLM を使うのは **C1・C2・C7（＋#291 で C7'）**。推薦の中核（C4・C5・C6・C8）は決定的ノード。
@@ -140,6 +141,8 @@ flowchart TD
 ```
 
 - **ルール**: 逆質問は**まとめて1回**（往復を増やさない）。`sufficient=true` になるまで先へ進めない。
+- **充足判定の fast-path（#377）**: クエリが既に経路確定できる（routable）場合、C2 は LLM 充足判定の呼び出しを**スキップ**する
+  （不要な往復と LLM 呼び出しを省く）。
 
 ### C3. 埋め込み生成（埋め込みモデル）
 
@@ -184,7 +187,8 @@ flowchart TD
     `person` は C6→取次ぎへ進む。
   - 自己回答が**根拠不十分（`grounded=false`）なら元の経路にフォールバック**（document は文書終端＋人物フォールバック、
     prior_answer は pinned 取次ぎ）。＝「データで答えられなければ人へ」を保証。
-  - 経路の閾値は評価セットで決める（recall 中心・#297）。`self_answer_enabled=false` の間は C7' を挟まず旧挙動。
+  - 経路の閾値は評価セットで決める（recall 中心・#297）。既定は `self_answer_enabled=true`（#380）で、
+    データ由来経路では C7' が既定で発火する。C7' を挟まない旧挙動は `self_answer_enabled=false` にした場合の opt-out。
 
 ### C6. 専門性スコアラー（決定的：証拠積み上げ）
 
@@ -224,7 +228,7 @@ flowchart TD
 ### C7'. 自己回答生成（LLM / 構造化出力）＝データ由来の出典付き回答（#291）
 
 - **目的**: 過去QA・社内文書に**答えが既にある**ものを、**その根拠だけ**から出典付きで回答する。人に取り次がない。
-- **配線**: `self_answer_enabled`（既定 false）で gate。データ由来経路（document / prior_answer）で C5 の後に発火。
+- **配線**: `self_answer_enabled`（既定 true・#380）で gate。データ由来経路（document / prior_answer）で C5 の後に発火。
 - **入力**: 質問＋C4 上位ヒットを**出典ID付き**で再構成した根拠（`collect_cited_evidence`。過去QA=`qa`／文書=`document`、
   各 `source_id` 付き）。`<evidence>` タグで囲み、質問ともども `_fence_safe` で無害化（注入対策・#282と同型）。
 - **出力（JSON Schema 準拠を強制）**:
@@ -474,7 +478,7 @@ event: error         data: {"error":"内部エラーが発生しました"}
 | C1 意図理解 | トピック抽出の一致率（recall） | 精度・実用性 |
 | C5 判定 | **「自己回答すべき vs 取り次ぐべき」の振り分け recall**（取りこぼしを見る） | 自律性・工夫 |
 | C7' 自己回答 | **source recall**（回答の根拠となるべき文書/過去QA を検索・引用で落とさない率）＋出典正しさ | 精度・実用性（#291/#297） |
-| C6 スコアラー | **Recall@3**（主指標）／ Top-1精度 / MRR（補助） | 精度・実用性 |
+| C6 スコアラー | **Recall@3**（主指標）＋ **Hit@3**（プロダクト真の指標＝top3 に有効な専門家が1人以上居たか）／ Top-1精度 / MRR（補助） | 精度・実用性 |
 | C8 蓄積 | 利用0→N件での Recall@3 改善曲線／暗黙知の形式知化率 | 自律性・工夫（使うほど適切に） |
 | 全体 | レイテンシ p50/p95、想定外入力の降参率 | 技術完成度 / インタラクション設計 |
 
@@ -489,9 +493,11 @@ event: error         data: {"error":"内部エラーが発生しました"}
 - **C7' source recall** = `evaluate_source_recall()`。`gold_source` を持つ行（自己回答すべき行）について、自己回答の
   `cited_source_ids ∩ gold_source` / `|gold_source|` の平均（`SourceRecall.recall`）。自己回答しなかった行は引用0で recall=0
   ＝取りこぼしとして計上する。補助として precision（引用のうち gold に当たった率＝ハルシネーション検知）と grounded 率。
-- **C6 Recall@3** は従来どおり `evaluate()`（主指標）。レポートは `format_report()` に上記ブロックを追加済み。
-- 自己回答（C7'）は既定 OFF（`self_answer_enabled=False`）なので LLM-free の `PipelineRanker` では source recall は 0。
-  非ゼロにするのは part3 の DGX 検証（`self_answer_enabled` ON・full-graph ranker）から。
+- **C6 Recall@3** は従来どおり `evaluate()`（主指標）。**Hit@3**（`hit_at_k` / `EvalMetrics.hit_at_3`＝top3 に有効な専門家が
+  1人以上居たか、プロダクト真の指標）を Recall@3 と**併記**する。レポートは `format_report()` に上記ブロックを追加済み。
+- 自己回答（C7'）は既定 ON（`self_answer_enabled=True`）。full-graph の ranker `scripts/research_fullgraph_eval.py` が
+  実装され、**DGX 実測（実 Qwen3.6）で source recall ≈ 0.239 / precision ≈ 0.739 / grounded ≈ 0.261**（#380）。
+  LLM-free の `PipelineRanker` は依然 LLM を呼ばないので source recall は 0 のままだが、**唯一のハーネスではなくなった**。
 
 ---
 
@@ -501,8 +507,9 @@ event: error         data: {"error":"内部エラーが発生しました"}
 - 埋め込みモデルの最終選定（DAY3 実測）
 - スコア式の重み `w1..w5`（評価セットで調整）
 - 経路判定・確信度の閾値（評価セットで決定・recall 中心）
-- **自己回答 C7' の有効化**（`self_answer_enabled`）：part3 の recall 中心検証（#296→#297）で
-  「自己回答すべき/取り次ぐべき」の取りこぼしと出典正しさを測ってから ON
+- ~~**自己回答 C7' の有効化**（`self_answer_enabled`）~~：**解決済み。#380 の full-graph E2E 検証を経て既定ON**
+  （`self_answer_enabled=True`）。「自己回答すべき/取り次ぐべき」の取りこぼしと出典正しさは #296→#297 の枠組みで測り、
+  DGX 実測で source recall ≈ 0.239 / precision ≈ 0.739 を確認した
 - **証拠十分性クリティック #70 の有効化**（`answerability_enabled`）：DGX の閾値スイープ後（現状 net+6 だが recall 毀損あり）
 - トピックのタクソノミ語彙（大塚商会の商材体系から種を作る。15_専門性推定とグラフ成長 §1）
 - LangGraph / LangChain の**固定バージョン**（着手時に context7 等で当該版のAPIを確認して pin）

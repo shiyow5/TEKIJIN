@@ -11,7 +11,12 @@ Web Tool
 
 ---
 
-version 0.1 / 2026-08-21 / Aチーム（3名）
+version 0.2 / 2026-08-26 / Aチーム（3名）
+
+> **変更履歴**: v0.2 で #291 の自己回答（self-answer）への方針転換を反映した。データ由来経路
+> （document / prior_answer）は C5 の後に自己回答ノードが発火し `self_answered` 終端で完結する
+> （既定ON `self_answer_enabled=True`・#380 の full-graph E2E 検証後）。person 経路は不変。
+> 評価は 87 行に拡張し、Hit@3・decision recall・source recall を追加した（`docs/benchmarks/eval-metrics.md`）。
 
 ---
 
@@ -45,11 +50,14 @@ version 0.1 / 2026-08-21 / Aチーム（3名）
 │                                                              │
 │   C1 意図理解・トピック抽出   → LLM(with_structured_output)  │
 │   C2 情報充足チェック → 不足なら interrupt() で逆質問        │
+│       （#377: routable なら LLM 充足判定を skip する fast-path）│
 │   C3/C4 埋め込み＋検索         → Retrieval（決定的ノード）    │
 │   C5 経路判定（条件付きエッジ add_conditional_edges）        │
-│       ├ 補助: 過去に"誰が"答えたか（人の証拠として提示）     │
+│       ├ データ由来(document/prior_answer): C7' 自己回答 →    │
+│       │   grounded なら self_answered 終端（出典付き・既定ON）│
 │       ├（格下げ）文書に明確な記載時のみ"場所"を指す         │
 │       └ 主線: 人の推薦 → C6 Scorer（決定的ノード）          │
+│   C7' 自己回答生成（#291）    → LLM（根拠のみ／出典付き）    │
 │   C7 依頼文の下書き生成       → LLM                          │
 │      送信 → 断り検知 → 条件付きエッジで次候補へ再ルーティング │
 │   C8 回答を専門性グラフへ取り込み（索引 + 推定の更新）       │
@@ -212,9 +220,10 @@ from langgraph.checkpoint.postgres import PostgresSaver
 
 g = StateGraph(State)
 g.add_node("c1_understand", c1_understand)     # LLM(構造化)
-g.add_node("c2_sufficiency", c2_sufficiency)   # LLM + interrupt()
+g.add_node("c2_sufficiency", c2_sufficiency)   # LLM + interrupt()（#377: routable なら LLM skip）
 g.add_node("c4_retrieve", c4_retrieve)         # 決定的（Dense+BM25+RRF）
 g.add_node("c5_route", c5_route)               # 決定的
+g.add_node("self_answer", self_answer)         # LLM（#291・根拠のみ／出典付き・既定ON）
 g.add_node("c6_score", c6_score)               # 決定的（説明可能）
 g.add_node("c7_draft", c7_draft)               # LLM
 g.add_node("c8_update", c8_update)             # 決定的（グラフ更新）
@@ -222,11 +231,19 @@ g.add_edge(START, "c1_understand")
 g.add_conditional_edges("c1_understand", lambda s: "end" if s["out_of_scope"] else "c2")
 g.add_conditional_edges("c2_sufficiency", lambda s: "c4" if s["sufficient"] else "c2")
 g.add_conditional_edges("c5_route", route_selector)   # person / prior_answer / document
+# データ由来経路（document/prior_answer）は C5 の後に self_answer が発火。
+# grounded なら self_answered 終端（出典付き）、不足なら元経路（C6 等）へフォールバック。
+g.add_conditional_edges("self_answer",
+    lambda s: "self_answered" if s["grounded"] else s["fallback_route"])
 g.add_edge("c6_score", "c7_draft")
 g.add_edge("c7_draft", "c8_update")
 g.add_edge("c8_update", END)
 graph = g.compile(checkpointer=PostgresSaver(...))
 ```
+
+> **person 経路は不変**（C6→C7→C8）。自己回答は**データ由来経路のみ**に挟まる終端で、
+> 人物取次ぎの recall は 1.000 のまま。自己回答の既定は `self_answer_enabled=True`（#380 の
+> full-graph E2E 検証後）で、OFF にすると C7' を挟まない旧挙動に戻る。
 
 > 「なぜ LangGraph を使うのか」は審査で聞かれうる。
 > **「状態・分岐・ストリーミング(→SSE)・中断再開(→逆質問)・永続化(→メモリ)を"実現できる体験"の
@@ -339,11 +356,13 @@ score(e, q) = w1·topic_fit(e,q)
 
 ### 評価セット
 
+評価セットは `fixtures/synthetic/eval/eval_person.json` = **87 行**（person 49 / data 23［document 16 + prior_answer 7］/ abstain 15）。
+
 | 種類 | 件数 | 作り方 |
 | --- | --- | --- |
-| 質問サンプル | 40件 | **社員ヒアリングで実際の質問を収集**（09_ヒアリング設計_人材サーチ §4）+ 合成で補完 |
-| 正解ラベル（担当者） | 40件 | 職種・部署の粒度。実名は集めない |
-| 正解ラベル（分岐） | 40件 | A / B / C のどれで解決すべきか |
+| 質問サンプル | 87行 | **社員ヒアリングで実際の質問を収集**（09_ヒアリング設計_人材サーチ §4）+ 合成で補完 |
+| 正解ラベル（担当者） | 87行 | 職種・部署の粒度。実名は集めない |
+| 正解ラベル（分岐） | 87行 | 自己回答 / 取次ぎ / 棄却（person 49 / data 23 / abstain 15）のどれで解決すべきか |
 
 ### 指標
 
@@ -351,15 +370,26 @@ score(e, q) = w1·topic_fit(e,q)
 | --- | --- | --- |
 | Top-1 Accuracy | 70% | 1位に正しい人が来る割合 |
 | Recall@3 | 90% | 3名の中に正解がいる割合 |
+| **Hit@3**（プロダクト真の指標） | — | **top3 に有効な専門家が1人以上居たか**。Recall@3 と併記（`hit_at_k` / `EvalMetrics.hit_at_3`） |
 | MRR | 0.75 | 正解の順位の質 |
-| 分岐判定精度 | 80% | A/B/Cの振り分けの正解率 |
+| 分岐判定精度 | 80% | 自己回答 / 取次ぎ / 棄却 の振り分けの正解率 |
+| **decision recall**（C5/C7'） | — | 自己回答 / route / abstain の三系統の決定ごとの取りこぼし率（`evaluate_decisions`） |
+| **source recall**（C7'） | — | 自己回答の引用品質。根拠となるべき文書/過去QA を落とさない率（`evaluate_source_recall`） |
 | 上位1名集中率 | 素朴方式の半分以下 | 100件流して比較 |
 | レイテンシ p50 / p95 | 1.5秒 / 3秒（初回表示） | ステージ別に記録 |
+
+> 指標の定義と実測（Hit@3・decision recall・source recall、oracle と full-graph の別）は
+> `docs/benchmarks/eval-metrics.md` に集約する。
 
 ### 計測の仕込み
 
 `events` テーブルに全ステージの開始・終了時刻を記録する。**DAY3の骨組みの時点で入れる。**
 後から足すと、計測のためにコードを触ることになり、DAY7の凍結後に不整合が出る。
+
+> **full-graph E2E ハーネス** `scripts/research_fullgraph_eval.py` は、実 C1（実 vLLM）を通して
+> `build_agent` を 87 行すべてに走らせ、既存の metrics で測る。これは gold トピックを C6 スコアラーへ
+> 直接渡す oracle 測定（`PipelineRanker` / `python -m tekijin.eval` / `scripts/research_e2e.py --task variants`）
+> とは**別物**で、後者は検索・C1 を経由しない上限（upper bound）に相当する。詳細は `docs/benchmarks/eval-metrics.md`。
 
 ---
 
@@ -374,7 +404,7 @@ score(e, q) = w1·topic_fit(e,q)
 | 案件 | 120件 | 大塚商会の実商材で構成（複合機、PC、ネットワーク、セキュリティ、たのめーる、たよれーる） |
 | 過去QA | 150件 | 補助経路（誰が答えたか）と専門性推定の燃料。**質と多様性が体験と推薦精度を決めるので、ここに時間を使う** |
 | 社内文書 | 30件 | 格下げ経路用。件数を減らす。実装が押したら未使用でも可 |
-| 評価用質問 | 40件 | ヒアリング由来を優先 |
+| 評価用質問 | 87行 | ヒアリング由来を優先（person 49 / data 23 / abstain 15。`fixtures/synthetic/eval/eval_person.json`） |
 
 生成は Claude Code で行い、**人が目視で確認する。** 生成物をそのまま使うと不自然さがデモで露呈する。
 
