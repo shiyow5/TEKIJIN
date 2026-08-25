@@ -1104,8 +1104,12 @@ class AgentService:
                             route = (data or {}).get("route") or route
                             self._persist_route(question_id, data)
                         elif node == "c6_score" and route != "document":
-                            if critique_wired:
-                                # Defer: persist only if the critic accepts (below).
+                            # Defer persistence to the critic's verdict ONLY when C6
+                            # actually produced candidates (a non-empty set routes to
+                            # `answerability`; an empty one routes straight to
+                            # `no_candidate`, bypassing the critic, so it must persist/
+                            # emit exactly like the non-critique path — a no-op insert).
+                            if critique_wired and (data or {}).get("recommendations"):
                                 pending_rec_data = data
                             else:
                                 rec_ids = self._persist_recommendations(question_id, data)
@@ -1130,19 +1134,37 @@ class AgentService:
                             # C6 there is a fallback note, not a hand-off in progress.
                             if node == "c6_score" and route == "document":
                                 event = None
-                            # #70: hold C6's recommend event until the critic decides.
-                            elif node == "c6_score" and critique_wired:
+                            # #70: hold C6's recommend event until the critic decides
+                            # (only when C6 produced candidates — see the persist guard
+                            # above; an empty set bypasses the critic and emits normally).
+                            elif (
+                                node == "c6_score"
+                                and critique_wired
+                                and (data or {}).get("recommendations")
+                            ):
                                 pending_recommend = event
                                 event = None
                             elif node == "answerability":
-                                # Critic decided: on accept, release the held recommend
-                                # event + persist the rows; on reject, drop both (the
+                                # Critic decided: on accept, persist the shown rows +
+                                # release the recommend event; on reject, drop both (the
                                 # `no_expert` terminal follows, nothing to surface).
-                                if (data or {}).get("answerable") and pending_rec_data is not None:
-                                    rec_ids = self._persist_recommendations(
-                                        question_id, pending_rec_data
-                                    )
-                                    event = pending_recommend
+                                if (data or {}).get("answerable"):
+                                    # `pending_*` is None when C6 ran in a PRIOR segment
+                                    # that the client disconnected before the critic ran
+                                    # (reconnect resumes at `answerability`, codex#6). Re-
+                                    # derive the shown recs from the durable state so the
+                                    # accepted hand-off is still persisted + surfaced —
+                                    # otherwise the outcome record is silently lost.
+                                    rec_data = pending_rec_data
+                                    recommend_event = pending_recommend
+                                    if rec_data is None:
+                                        values = graph.get_state(config).values
+                                        rec_data = {
+                                            "recommendations": values.get("recommendations") or []
+                                        }
+                                        recommend_event = node_event("c6_score", rec_data)
+                                    rec_ids = self._persist_recommendations(question_id, rec_data)
+                                    event = recommend_event
                                 pending_recommend = None
                                 pending_rec_data = None
                         if event is not None:

@@ -332,8 +332,11 @@ def test_answerability_unwired_is_passthrough(seed_counts, session, fake_embedde
     cfg = _cfg("ans_off")
     state = agent.invoke(_init(), cfg)
     assert _is_paused(agent, cfg)  # reached send, unchanged
-    assert "answerability_confidence" not in state
-    assert "no_expert" not in agent.get_graph().nodes  # node not even added
+    # The critique/terminal nodes are not even added to the compiled graph.
+    assert "answerability" not in agent.get_graph().nodes
+    assert "no_expert" not in agent.get_graph().nodes
+    # reset() seeds the keys to inert defaults, but no critic ever ran to set them.
+    assert state["answerable"] is False
 
 
 # --------------------------------------------------------------------------- #

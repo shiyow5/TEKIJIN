@@ -160,6 +160,11 @@ class AgentNodes:
             "prior_answer_note": None,
             "pinned_responder_id": None,
             "recommendations": [],
+            # #70: clear the critic's per-question verdict so a second question on
+            # the same thread_id never reads a prior run's stale score/reason.
+            "answerability_confidence": 0,
+            "answerability_reason": None,
+            "answerable": False,
             "draft": None,
             "outcome": None,
             "answer": None,
@@ -424,14 +429,17 @@ class AgentNodes:
     def no_expert(self, state: AgentState) -> AgentState:
         # #70: reached when C6 DID rank candidates but the answerability critic
         # judged the in-house track record insufficient — a "社内に痕跡が無い領域"
-        # (海外法務/知財/製造制御…) where a plausible topic hides a real gap.
-        # Fail gracefully with the critic's reason rather than handing off a weak
-        # match; distinct from ``no_candidate`` (nobody scored at all).
-        reason = state.get("answerability_reason")
-        detail = f"（{reason}）" if reason else ""
+        # (海外法務/知財/製造制御…) where a plausible topic hides a real gap. Fail
+        # gracefully; distinct from ``no_candidate`` (nobody scored at all).
+        #
+        # Deliberately a FIXED message: the critic's ``answerability_reason`` is
+        # kept in state for server-side logging only and is NOT interpolated here.
+        # It is free LLM text derived from the (now suppressed) candidates' names/
+        # departments, so echoing it would re-surface the very people this reject
+        # path exists to withhold — defeating the recommend/persist suppression.
         return {
-            "answer": "ご相談の領域に対応できる社内の実績が見つかりませんでした"
-            f"{detail}。恐れ入りますが、社外の専門窓口へのご相談もご検討ください。"
+            "answer": "ご相談の領域に対応できる社内の実績が見つかりませんでした。"
+            "恐れ入りますが、社外の専門窓口へのご相談もご検討ください。"
         }
 
     def unresolved_intent(self, state: AgentState) -> AgentState:
