@@ -315,36 +315,56 @@ class AgentNodes:
         # keep their rank/score/reasons untouched — only the freed slot(s) are
         # topped up from a fresh rank() call, never a full rescore (#D5/#206).
         existing = state.get("recommendations") or []
+        existing_ids = {r["person_id"] for r in existing}
+
+        top_k = 3
+        remaining = top_k - len(existing)
+        if not topics or remaining <= 0:
+            # Nothing to add: keep whatever survived the decline (possibly fewer
+            # than 3), or [] on a genuinely fresh run with no topics at all.
+            return {"recommendations": existing}
+
         # prior_answer hands off to the pinned past responder — UNTIL they decline,
         # and never if the pin IS the asker (they cannot answer their own question).
-        # In either case drop the pin and fall back to the general candidate pool
+        # In either case drop the pin and rely on the general candidate pool below
         # (never dead-end on a single decline or a self-referential pin).
-        pool: list[int]
-        if (
+        use_pin = (
             state.get("route") == PRIOR_ANSWER
             and pinned is not None
             and pinned not in declined
             and pinned != asker_id
-        ):
-            pool = [pinned]
-        else:
+            and pinned not in existing_ids
+        )
+
+        fresh: list[dict[str, Any]] = []
+        if use_pin:
+            # Guarantee the pinned past responder a slot regardless of how they'd
+            # score against the general pool: they already answered a
+            # near-duplicate question, a signal the scorer's generic evidence
+            # cannot fully capture (#159 "fix G"). The remaining slots below are
+            # then filled from the general pool so the asker still sees up to 3
+            # candidates (#307) instead of dead-ending on this one person.
+            pin_result = self._scorer.rank(topics, [pinned], asker_id, state["now"], top_k=1)
+            fresh = cast("list[dict[str, Any]]", pin_result["recommendations"])
+            remaining -= len(fresh)
+
+        if remaining > 0:
+            filled_ids = existing_ids | {r["person_id"] for r in fresh}
             pool = retrieval.get("candidate_people") or []
-        existing_ids = {r["person_id"] for r in existing}
-        candidates = [p for p in pool if p not in declined and p not in existing_ids]
+            candidates = [p for p in pool if p not in declined and p not in filled_ids]
+            if candidates:
+                # All topics feed the scorer (aggregated topic_fit), not just topics[0].
+                result = self._scorer.rank(
+                    topics, candidates, asker_id, state["now"], top_k=remaining
+                )
+                # The scorer returns typed ScoredCandidate rows; AgentState keeps the
+                # looser list[dict[str, Any]] (also written as plain dicts elsewhere),
+                # so narrow the TypedDict-invariance gap with a cast — identical at
+                # runtime.
+                fresh = fresh + cast("list[dict[str, Any]]", result["recommendations"])
 
-        top_k = 3
-        remaining = top_k - len(existing)
-        if not topics or remaining <= 0 or not candidates:
-            # Nothing to add: keep whatever survived the decline (possibly fewer
-            # than 3), or [] on a genuinely fresh run with no candidates at all.
+        if not fresh:
             return {"recommendations": existing}
-
-        # All topics feed the scorer (aggregated topic_fit), not just topics[0].
-        result = self._scorer.rank(topics, candidates, asker_id, state["now"], top_k=remaining)
-        # The scorer now returns typed ScoredCandidate rows; AgentState keeps the
-        # looser list[dict[str, Any]] (also written as plain dicts elsewhere), so
-        # narrow the TypedDict-invariance gap with a cast — identical at runtime.
-        fresh = cast("list[dict[str, Any]]", result["recommendations"])
         return {"recommendations": existing + fresh}
 
     # -- answerability critic (#70): can the company answer this in-house? -

@@ -735,10 +735,13 @@ def test_node_enforces_followup_cap(seed_counts, session, fake_embedder) -> None
 
 # --------------------------------------------------------------------------- #
 # fix G: prior_answer hands off to the past responder, not a higher scorer
+# #307: prior_answer still backfills up to 3 candidates from the general pool
+# instead of dead-ending on the one pinned person.
 # --------------------------------------------------------------------------- #
 def test_prior_answer_pins_the_responder(seed_counts, session, fake_embedder) -> None:
     # Retrieval lists candidate_people [1, 2, 3] but the strong past answer is by
-    # employee 5; prior_answer must hand off to 5, not to a higher-scoring 1/2/3.
+    # employee 5; prior_answer must hand off to 5 first (not lose them to a
+    # higher-scoring 1/2/3), then fill the remaining 2 slots from 1/2/3.
     for emp in (1, 2, 3):
         _seed_skill(session, f"sk_pin_{emp}", emp)  # strong candidates
     retriever = _FakeRetriever(
@@ -751,7 +754,10 @@ def test_prior_answer_pins_the_responder(seed_counts, session, fake_embedder) ->
     state = agent.invoke(_init(), cfg)
     assert state["route"] == PRIOR_ANSWER
     assert state["pinned_responder_id"] == 5
-    assert [r["person_id"] for r in state["recommendations"]] == [5]  # pinned
+    person_ids = [r["person_id"] for r in state["recommendations"]]
+    assert person_ids[0] == 5  # pinned, guaranteed first
+    assert len(person_ids) == 3  # #307: backfilled from the general pool
+    assert set(person_ids[1:]) <= {1, 2, 3}
 
 
 def test_prior_answer_falls_back_when_pinned_declines(seed_counts, session, fake_embedder) -> None:
@@ -768,9 +774,11 @@ def test_prior_answer_falls_back_when_pinned_declines(seed_counts, session, fake
     cfg = _cfg("pinfb")
     state = agent.invoke(_init(), cfg)
     assert state["route"] == PRIOR_ANSWER
-    assert [r["person_id"] for r in state["recommendations"]] == [1]  # pinned
+    # #307: pinned (1) first, then the general pool backfills the 2nd slot.
+    assert [r["person_id"] for r in state["recommendations"]] == [1, 2]
 
-    # Pinned responder 1 declines -> un-pin, recommend the next candidate (2).
+    # Pinned responder 1 declines -> un-pin; candidate 2 (already recommended)
+    # survives untouched and no further backfill is available (pool exhausted).
     agent.invoke(Command(resume="declined"), cfg)
     rerouted = agent.get_state(cfg).values
     assert 1 in rerouted["declined_ids"]
