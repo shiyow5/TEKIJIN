@@ -144,6 +144,11 @@ class Settings(BaseSettings):
     # graph wiring land in later slices, and the graph does not call it yet. Enable
     # only after the extraction quality + A/B are verified on the eval.
     knowledge_retrieval_enabled: bool = False
+    # #357 slice 4: the cosine-similarity floor a retrieved knowledge unit must clear
+    # to be used in a knowledge answer. Nemotron cosines are compressed (~0.04–0.57),
+    # so this is a moderate default to be CALIBRATED on the eval (slice 4b A/B) before
+    # the knowledge answer is wired live. Inert while knowledge_retrieval_enabled=False.
+    knowledge_answer_min_similarity: float = 0.35
 
     # LangGraph checkpointer for session persistence / interrupt-resume:
     # "memory" = in-process MemorySaver (safe default, works without a DB);
