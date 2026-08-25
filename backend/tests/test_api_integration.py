@@ -3196,12 +3196,48 @@ def test_knowledge_lists_seeded_person_resolved_questions(
     # response cap.
     assert body["summary"]["total_items"] == 150
     assert body["summary"]["self_resolution_rate"] == 0.0  # matches the dashboard's seed baseline
-    assert len(body["items"]) <= 15  # the endpoint's default limit
+    assert len(body["items"]) <= 8  # the endpoint's default limit
     assert len(body["items"]) > 0
     assert body["total_matching"] == 150  # unfiltered: every resolved question matches
     for item in body["items"]:
         assert item["responder_name"]
+        assert item["answer_body"]  # the answer's own text, not just who answered
         assert item["session_id"] is None  # seeded history has no live session
+
+
+def test_knowledge_excludes_a_question_with_no_formal_answer(
+    seed_counts, engine, fake_embedder
+) -> None:
+    """A live-chat-accepted question with no ``answers`` row has no answer TEXT
+    to show as "回答のまとめ", so it must not appear (#293, #301 review) — unlike
+    the earlier "resolved by a person" definition, which also counted an
+    accepted recommendation alone."""
+    factory = get_sessionmaker(engine)
+    with factory() as s:
+        s.add(
+            Question(
+                id="api_kn1",
+                asker_id=10,
+                body="チャットのみでやり取りして解決した質問",
+                topics=[],
+                status="open",
+                created_at=NOW,
+                session_id="sess-kn1",
+            )
+        )
+        s.flush()
+        s.add(
+            Recommendation(
+                question_id="api_kn1", employee_id=1, rank=1, score=0.9, outcome="accepted"
+            )
+        )
+        s.commit()
+
+    client = _client(engine, fake_embedder)
+    resp = client.get("/knowledge", params={"limit": 200})
+    assert resp.status_code == 200
+    ids = {i["question_id"] for i in resp.json()["items"]}
+    assert "api_kn1" not in ids
 
 
 def test_knowledge_available_to_non_admin_user(seed_counts, engine, fake_embedder) -> None:

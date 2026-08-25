@@ -504,16 +504,17 @@ def knowledge(
     since: dt.date | None = None,
     until: dt.date | None = None,
     offset: int = Query(0, ge=0),
-    limit: int = Query(15, ge=1, le=200),
+    limit: int = Query(8, ge=1, le=200),
     principal: Principal = Depends(require_principal),
 ) -> schemas.KnowledgeListResponse:
-    """Company-wide list of resolved-by-a-person questions as reusable knowledge.
+    """Company-wide list of recently-answered questions as reusable knowledge.
 
     Open to every authenticated user — unlike ``/dashboard``, this is NOT
     admin-only, since the whole point (#293, #301) is that someone else's past
-    answer is discoverable ("これに近い話、前にも誰かが聞いてたはず"). ``summary``
-    reuses the dashboard's self-resolution rate rather than adding new
-    aggregation logic. ``offset``/``limit`` page a search's results (the
+    answer is discoverable ("これに近い話、前にも誰かが聞いてたはず"). Each item
+    carries the answer's own text (``answer_body``), not just who answered.
+    ``summary`` reuses the dashboard's self-resolution rate rather than adding
+    new aggregation logic. ``offset``/``limit`` page a search's results (the
     frontend keeps the unsearched view to one unpaginated page of the latest
     ``limit`` items).
     """

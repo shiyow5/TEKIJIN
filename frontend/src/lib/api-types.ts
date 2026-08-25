@@ -203,8 +203,10 @@ export interface KnowledgeItem {
   question_id: string;
   title: string;
   topics: string[];
+  answer_body: string;
   responder_name?: string | null;
   responder_department?: string | null;
+  /** The ANSWER's timestamp (when it was given), not when the question was asked. */
   resolved_at?: string | null;
   /** Deep-link target for viewing the result (/session/{session_id}); null for seeded history. */
   session_id?: string | null;

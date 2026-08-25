@@ -443,11 +443,16 @@ class RecentQuestionsResponse(BaseModel):
 # (#293, #301)
 # --------------------------------------------------------------------------- #
 class KnowledgeItem(BaseModel):
-    """One piece of accumulated knowledge: a question a person actually answered."""
+    """One piece of accumulated knowledge: a question a person actually answered.
+
+    ``resolved_at`` is the ANSWER's timestamp (when it was given), not when the
+    question was asked.
+    """
 
     question_id: str
     title: str
     topics: list[str] = Field(default_factory=list)
+    answer_body: str = ""
     responder_name: str | None = None
     responder_department: str | None = None
     resolved_at: str | None = None

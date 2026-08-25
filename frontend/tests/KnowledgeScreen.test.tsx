@@ -13,6 +13,7 @@ const ITEMS: KnowledgeItem[] = [
     question_id: "q1",
     title: "UTMの移行時の注意点",
     topics: ["marketing", "utm"],
+    answer_body: "リダイレクトルールを事前に洗い出してから切り替えると安全です。",
     responder_name: "高梨 健太",
     responder_department: "マーケティング部",
     resolved_at: "2026-08-20T10:00:00",
@@ -22,6 +23,7 @@ const ITEMS: KnowledgeItem[] = [
     question_id: "q2",
     title: "社内Wi-Fiの申請方法",
     topics: [],
+    answer_body: "総務部の申請フォームから手続きできます。",
     responder_name: "田中 太郎",
     responder_department: "情報システム部",
     resolved_at: "2026-08-21T10:00:00",
@@ -58,9 +60,12 @@ describe("KnowledgeScreen", () => {
     expect(screen.getByRole("heading", { name: "ナレッジライブラリー" })).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText("UTMの移行時の注意点")).toBeInTheDocument());
     expect(screen.getByText("社内Wi-Fiの申請方法")).toBeInTheDocument();
+    expect(
+      screen.getByText("リダイレクトルールを事前に洗い出してから切り替えると安全です。"),
+    ).toBeInTheDocument();
     expect(screen.getByText("回答者: 高梨 健太（マーケティング部）")).toBeInTheDocument();
     expect(screen.getAllByText("utm").length).toBeGreaterThan(0);
-    expect(screen.getByText("解決日: 2026-08-20")).toBeInTheDocument();
+    expect(screen.getByText("回答日: 2026-08-20")).toBeInTheDocument();
 
     // Side panels reuse the summary from the same response.
     expect(screen.getByText("42")).toBeInTheDocument();
@@ -129,7 +134,7 @@ describe("KnowledgeScreen", () => {
     expect(screen.queryByRole("button", { name: "条件をクリア" })).not.toBeInTheDocument();
   });
 
-  it("paginates search results 15 at a time, but not the plain browse view", async () => {
+  it("paginates search results 8 at a time, but not the plain browse view", async () => {
     render(<KnowledgeScreen />);
     await waitFor(() => expect(screen.getByText("UTMの移行時の注意点")).toBeInTheDocument());
     // The unsearched browse view never paginates, even with more than one
@@ -138,7 +143,7 @@ describe("KnowledgeScreen", () => {
 
     getKnowledgeListMock.mockResolvedValue({
       items: ITEMS,
-      total_matching: 22, // > RESULT_LIMIT (15) -> two pages
+      total_matching: 12, // > RESULT_LIMIT (8) -> two pages
       summary: RESPONSE.summary,
     });
     getKnowledgeListMock.mockClear();
@@ -148,7 +153,7 @@ describe("KnowledgeScreen", () => {
     fireEvent.click(screen.getByRole("button", { name: "検索" }));
     await waitFor(() =>
       expect(getKnowledgeListMock).toHaveBeenCalledWith(
-        expect.objectContaining({ q: "質問", offset: 0, limit: 15 }),
+        expect.objectContaining({ q: "質問", offset: 0, limit: 8 }),
       ),
     );
 
@@ -162,7 +167,7 @@ describe("KnowledgeScreen", () => {
     fireEvent.click(nextButton);
     await waitFor(() =>
       expect(getKnowledgeListMock).toHaveBeenCalledWith(
-        expect.objectContaining({ q: "質問", offset: 15, limit: 15 }),
+        expect.objectContaining({ q: "質問", offset: 8, limit: 8 }),
       ),
     );
     expect(screen.getByText("2 / 2")).toBeInTheDocument();

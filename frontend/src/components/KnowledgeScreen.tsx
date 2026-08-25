@@ -4,10 +4,13 @@
  * ナレッジセンター（蓄積された形式知の一覧・検索画面, #293 / #301）。
  *
  * Unlike `HistoryScreen` (the acting user's OWN past questions), this lists
- * every question a PERSON has resolved company-wide — the point is "これに近い
- * 話、前にも誰かが聞いてたはず": discovering someone else's past answer. Each
- * card names the responder and their department (答えの出所は常に人) so it never
- * reads as an anonymous FAQ.
+ * recently ANSWERED questions company-wide, newest answer first — the point is
+ * "これに近い話、前にも誰かが聞いてたはず": discovering someone else's past
+ * answer. Each card shows the answer's own text (clamped to a few lines, not a
+ * generated summary) plus the responder and their department (答えの出所は常に
+ * 人) so it never reads as an anonymous FAQ. A question with only an accepted
+ * hand-off but no formal `answers` row (live chat, no answer TEXT recorded) is
+ * excluded — there is nothing to show as its "回答のまとめ".
  *
  * The search box forwards straight to GET /knowledge as the `q` query param
  * (server-side filtering). The department/topic/period filters GET /knowledge
@@ -30,7 +33,7 @@ import type { KnowledgeItem, KnowledgeSummary } from "@/lib/api-types";
 import Link from "next/link";
 import { type FormEvent, useEffect, useState } from "react";
 
-const RESULT_LIMIT = 15;
+const RESULT_LIMIT = 8;
 
 type Phase = "loading" | "ready" | "error";
 
@@ -51,6 +54,11 @@ function KnowledgeCard({ item }: { item: KnowledgeItem }) {
   const body = (
     <article className="flex h-full min-w-0 flex-col gap-sm overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest p-md transition-shadow hover:shadow-md">
       <h3 className="break-words font-bold text-base text-on-surface">{item.title}</h3>
+      {item.answer_body ? (
+        <p className="line-clamp-3 break-words text-on-surface-variant text-sm">
+          {item.answer_body}
+        </p>
+      ) : null}
       {item.topics.length > 0 ? (
         <div className="flex flex-wrap gap-xs">
           {item.topics.map((topic) => (
@@ -68,7 +76,7 @@ function KnowledgeCard({ item }: { item: KnowledgeItem }) {
           回答者: {item.responder_name ?? "不明"}
           {item.responder_department ? `（${item.responder_department}）` : ""}
         </span>
-        <span>解決日: {formatDate(item.resolved_at)}</span>
+        <span>回答日: {formatDate(item.resolved_at)}</span>
       </div>
     </article>
   );
@@ -223,7 +231,7 @@ export function KnowledgeScreen() {
               ナレッジを取得できませんでした。時間をおいて再度お試しください。
             </p>
           ) : state.items && state.items.length > 0 ? (
-            <ul className="grid grid-cols-1 gap-gutter md:grid-cols-2">
+            <ul className="grid grid-cols-1 gap-gutter">
               {state.items.map((item) => (
                 <li key={item.question_id} className="min-w-0">
                   <KnowledgeCard item={item} />
