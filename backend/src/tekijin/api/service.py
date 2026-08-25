@@ -1124,6 +1124,16 @@ class AgentService:
                             # A clarification reply enriched the question in-graph;
                             # persist it so /inbox and /history match the run (#268).
                             self._persist_question_body(question_id, data)
+                        elif node == "knowledge_answer":
+                            # #357 slice 4c: a grounded knowledge answer terminates
+                            # BEFORE C5, so c5_route never persists a route. Stamp a
+                            # synthetic "knowledge" route so dashboards that segment by
+                            # route account for knowledge-answered questions instead of
+                            # silently omitting them (self-resolution is still credited
+                            # by _persist_self_answered on the shared self_answered node).
+                            if (data or {}).get("self_answer_grounded"):
+                                route = "knowledge"
+                                self._persist_route(question_id, {"route": "knowledge"})
                         elif node == "c5_route":
                             route = (data or {}).get("route") or route
                             self._persist_route(question_id, data)

@@ -32,6 +32,7 @@ from tekijin.agent.stubs import (
     MAX_FOLLOWUPS,
     collect_known_values,
 )
+from tekijin.knowledge.answer import answer_from_knowledge
 from tekijin.retrieval.embedding import QUERY, Embedder
 from tekijin.retrieval.fragments import FragmentSource, collect_cited_evidence
 from tekijin.scorer.scorer import ExpertiseScorer
@@ -473,8 +474,6 @@ class AgentNodes:
         and the run proceeds to normal retrieval/routing (never a degraded answer).
         Reuses the #291 ``self_answer_*`` state + terminal so this is a drop-in.
         """
-
-        from tekijin.knowledge.answer import answer_from_knowledge
 
         assert self._knowledge_session is not None and self._knowledge_floor is not None
         query_vec = state.get("query_vector") or []
