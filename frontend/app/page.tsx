@@ -175,6 +175,14 @@ export default function HomePage() {
             </li>
           ))}
         </ol>
+        {/* Echoes the hero's closing line (#337): today this 3-step flow is
+            always "AI forwards, a person answers" (self_answer_enabled is
+            still off), but it's framed as the current shape, not the only
+            possible one — so it doesn't quietly reintroduce the "answer
+            source is always a person" claim #324 removed. */}
+        <p className="text-on-surface-variant text-xs leading-relaxed">
+          やり取りが積み重なるほど、AIが出典つきで直接答えられる場面も少しずつ増えていきます。
+        </p>
       </section>
     </div>
   );
