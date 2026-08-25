@@ -1,7 +1,7 @@
 import type { CurrentUserContextValue } from "@/components/CurrentUserProvider";
 import { RecentQuestions } from "@/components/RecentQuestions";
 import type { RecentQuestionItem } from "@/lib/api-types";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const useCurrentUserMock = vi.fn<() => CurrentUserContextValue>();
@@ -163,10 +163,63 @@ describe("RecentQuestions", () => {
     render(<RecentQuestions />);
 
     await waitFor(() => expect(screen.getByText("UTMの移行時の注意点")).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: "「UTMの移行時の注意点」を削除" }));
+    const trigger = screen.getByRole("button", { name: "「UTMの移行時の注意点」を削除" });
+    // fireEvent.click does not focus the element the way a real click does, so
+    // focus it explicitly to exercise the dialog's opener-restore behavior.
+    trigger.focus();
+    fireEvent.click(trigger);
     fireEvent.click(screen.getByRole("button", { name: "やめる" }));
     expect(deleteQuestionMock).not.toHaveBeenCalled();
     expect(screen.getByText("UTMの移行時の注意点")).toBeInTheDocument();
+    // Focus returns to the ✕ button that opened the dialog (#286 a11y requirement).
+    expect(trigger).toHaveFocus();
+  });
+
+  // --- #286: modal confirmation (dialog semantics, title, Esc, backdrop) --- //
+  it("shows the target question's title inside a modal dialog", async () => {
+    useCurrentUserMock.mockReturnValue(asUser("E001"));
+    getRecentQuestionsMock.mockResolvedValue(ITEMS);
+    render(<RecentQuestions />);
+
+    await waitFor(() => expect(screen.getByText("UTMの移行時の注意点")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "「UTMの移行時の注意点」を削除" }));
+
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    expect(within(dialog).getByText(/UTMの移行時の注意点/)).toBeInTheDocument();
+  });
+
+  it("cancels the delete on Escape", async () => {
+    useCurrentUserMock.mockReturnValue(asUser("E001"));
+    getRecentQuestionsMock.mockResolvedValue(ITEMS);
+    render(<RecentQuestions />);
+
+    await waitFor(() => expect(screen.getByText("UTMの移行時の注意点")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "「UTMの移行時の注意点」を削除" }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(deleteQuestionMock).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("cancels the delete on a backdrop click, but not on a click inside the dialog", async () => {
+    useCurrentUserMock.mockReturnValue(asUser("E001"));
+    getRecentQuestionsMock.mockResolvedValue(ITEMS);
+    render(<RecentQuestions />);
+
+    await waitFor(() => expect(screen.getByText("UTMの移行時の注意点")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "「UTMの移行時の注意点」を削除" }));
+    const dialog = screen.getByRole("dialog");
+
+    // A click inside the dialog panel must not close it.
+    fireEvent.click(dialog);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+
+    // The backdrop (the dialog's overlay parent) closes it.
+    fireEvent.click(dialog.parentElement as HTMLElement);
+    expect(deleteQuestionMock).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("keeps the question and flags an error when the delete fails", async () => {

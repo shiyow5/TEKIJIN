@@ -29,7 +29,7 @@ from tekijin.auth.tokens import create_access_token
 from tekijin.config import get_settings
 from tekijin.data.dashboard import dashboard_summary
 from tekijin.data.db import get_sessionmaker
-from tekijin.models.tables import Answer, Event, Feedback, Question, Recommendation
+from tekijin.models.tables import Answer, Event, Feedback, Message, Question, Recommendation
 
 NOW = dt.datetime(2026, 9, 15, 12, 0, 0)
 GOOD_Q = "現行のVPN機器で3拠点の拠点間接続について相談したいです"
@@ -2742,32 +2742,49 @@ def _insert_question(engine, qid: str, asker_id: int, *, with_children: bool = F
         s.flush()  # the question must exist before its FK children insert
         if with_children:
             s.add(Answer(id=f"{qid}_a", question_id=qid, responder_id=1, body="回答本文"))
-            s.add(Recommendation(question_id=qid, employee_id=1, rank=1, score=0.9))
+            rec = Recommendation(question_id=qid, employee_id=1, rank=1, score=0.9)
+            s.add(rec)
             s.add(Event(question_id=qid, stage="c1", started_at=NOW, ended_at=NOW, meta=None))
+            s.flush()  # rec.id (autoincrement) must exist before the message FKs it
+            s.add(Message(recommendation_id=rec.id, sender_id=1, body="チャット本文"))
         s.commit()
 
 
-def _counts_for(engine, qid: str) -> tuple[int, int, int, int]:
+def _counts_for(engine, qid: str) -> tuple[int, int, int, int, int]:
     factory = get_sessionmaker(engine)
     with factory() as s:
+        recommendation_ids = [
+            rec_id
+            for (rec_id,) in s.query(Recommendation.id)
+            .filter(Recommendation.question_id == qid)
+            .all()
+        ]
+        message_count = (
+            s.query(Message).filter(Message.recommendation_id.in_(recommendation_ids)).count()
+            if recommendation_ids
+            else 0
+        )
         return (
             s.query(Question).filter(Question.id == qid).count(),
             s.query(Answer).filter(Answer.question_id == qid).count(),
-            s.query(Recommendation).filter(Recommendation.question_id == qid).count(),
+            len(recommendation_ids),
             s.query(Event).filter(Event.question_id == qid).count(),
+            message_count,
         )
 
 
 def test_delete_question_removes_it_and_its_children(seed_counts, engine, fake_embedder) -> None:
     client = _client(engine, fake_embedder)  # admin
     _insert_question(engine, "api_del1", 10, with_children=True)
-    assert _counts_for(engine, "api_del1") == (1, 1, 1, 1)
+    # question, answer, recommendation, event, and its chat message all exist.
+    assert _counts_for(engine, "api_del1") == (1, 1, 1, 1, 1)
 
     resp = client.delete("/questions/api_del1")
     assert resp.status_code == 200
     assert resp.json() == {"question_id": "api_del1", "deleted": True}
-    # question and ALL its FK children are gone.
-    assert _counts_for(engine, "api_del1") == (0, 0, 0, 0)
+    # question and ALL its FK children — including chat messages, one hop out
+    # via the recommendation (#286) — are gone.
+    assert _counts_for(engine, "api_del1") == (0, 0, 0, 0, 0)
 
 
 def test_owner_can_delete_their_own_question(seed_counts, engine, fake_embedder) -> None:
