@@ -162,6 +162,88 @@ def helpful_rate_for_topic(topic):
 SPECIALIZE_RNG_SEED = 4251
 CROSS_DEPT_RATE = 0.75  # 選ばれたメンバーを他部署の担当者へ差し替える確率
 
+# --------------------------------------------------------------------------
+# 営業部日報を SPR 訪問日報フォーマットに寄せる（#326）
+# --------------------------------------------------------------------------
+# ヒアリングで、営業部の日報は SPR（全社が閲覧できる顧客情報システム）に決まったフォーマットで
+# 入力されていると分かった。**営業部の従業員の日報だけ**、訪問日報の構造（訪問日時 / 要件 /
+# 相手担当 / 自社担当 / 所要時間 / 詳細）に沿った短文へ差し替える（他部署は不変）。粒度は 1〜2 文
+# （実態）。実データ・実顧客名は使わず、大塚商会の一般的な商材レンジで合成する。
+#
+# 乱数は日報IDで決まる専用インスタンス（グローバル random を消費しない＝ダウンストリームの
+# 件数を一切ずらさない。pick_members と同じ方針）。
+SALES_DEPT = "営業部"
+SALES_REPORT_RNG_SEED = 7326
+
+SALES_PURPOSES = ["初期訪問", "課題ヒアリング", "提案", "デモ・PoC", "クロージング", "導入フォロー"]
+# 訪問先（守秘のため業種＋規模の一般表現のみ。実顧客名は使わない）。
+SALES_INDUSTRIES = ["製造業", "卸売業", "小売業", "建設業", "運輸・物流業", "医療・介護", "自治体", "サービス業"]
+SALES_SIZES = ["中小企業", "中堅企業", "大手企業"]
+SALES_DURATIONS = [30, 45, 60, 90]
+SALES_COUNTERPARTS = ["情報システム部ご担当", "経営企画ご担当", "総務ご担当", "購買ご担当", "現場ご担当"]
+
+# トピックごとの (顧客課題句, 提案商材句)。いずれも TOPICS のキーワードを含み、match_topics が
+# 拾えるようにする（＝日報が案件と同じトピック証拠を張る）。商材名は大塚商会の公開商材レンジの一般名。
+SALES_TOPIC_SCRIPT = {
+    "CRM・営業支援": ("顧客情報の一元管理と営業活動の可視化", "CRM・営業支援（SFA/CRM）"),
+    "業務効率化コンサル": ("手作業によるコストと業務フローの非効率", "業務効率化コンサル"),
+    "契約管理": ("契約更新漏れが生じている契約管理", "契約書管理システム"),
+    "基幹システム": ("既存システムの老朽化と基幹システムのシステム間連携", "基幹システム刷新"),
+    "ネットワーク・VPN": ("拠点間の接続トラブルが続くネットワーク", "VPN・ネットワーク構築"),
+    "セキュリティ": ("脆弱性対応とセキュリティ運用の負荷", "UTMによるセキュリティ対策"),
+    "クラウド移行": ("オンプレミス資産のクラウド移行", "クラウド移行支援"),
+    "データ基盤・分析": ("部門ごとのデータ分断とデータ分析基盤", "データ基盤構築"),
+}
+# 要件→詳細文テンプレ（{issue}=顧客課題句, {sol}=提案商材句）。粒度 1〜2 文。
+SALES_DETAIL_TEMPLATE = {
+    "初期訪問": "{issue}について現状をヒアリングした。",
+    "課題ヒアリング": "{issue}の課題を整理し、要望を確認した。",
+    "提案": "{issue}に対し、{sol}を提案した。",
+    "デモ・PoC": "{issue}の解決に向け、{sol}のデモを実施した。",
+    "クロージング": "{sol}について契約条件を最終調整し、受注に向けてクロージングした。",
+    "導入フォロー": "{sol}の導入後の稼働状況を確認し、追加要望をヒアリングした。",
+}
+# 要件→課題タグ（daily_reports.issue）。
+SALES_ISSUE_BY_PURPOSE = {
+    "初期訪問": "新規顧客の課題把握",
+    "課題ヒアリング": "顧客課題の深掘り",
+    "提案": "提案内容の精度",
+    "デモ・PoC": "導入効果の実証",
+    "クロージング": "受注確度の見極め",
+    "導入フォロー": "導入後定着の支援",
+}
+
+
+def sales_spr_report(report, emp_name, rep_topics):
+    """営業部の日報1件を SPR 訪問日報フォーマットの短文へ変換する。
+
+    返り値は ``(content, issue)``。乱数は日報IDで決まる専用インスタンス（グローバル random を
+    消費しない）。担当トピックはその社員の**案件由来**の得意領域（``rep_topics``）から選ぶ＝
+    日報が案件と同じトピック証拠を補強し、案件に無いトピックの偽の専門性を作らない
+    （gold の乖離を避ける）。上位トピックほど選ばれやすく重み付ける。
+    """
+    rng = random.Random(SALES_REPORT_RNG_SEED + int(report["id"]))
+    topics = rep_topics or list(SALES_TOPIC_SCRIPT)
+    weights = [len(topics) - i for i in range(len(topics))]
+    topic = rng.choices(topics, weights=weights, k=1)[0]
+    issue_phrase, sol_phrase = SALES_TOPIC_SCRIPT[topic]
+
+    purpose = rng.choice(SALES_PURPOSES)
+    industry = rng.choice(SALES_INDUSTRIES)
+    size = rng.choice(SALES_SIZES)
+    counterpart = rng.choice(SALES_COUNTERPARTS)
+    duration = rng.choice(SALES_DURATIONS)
+    hh = rng.randint(9, 17)
+    mm = rng.choice([0, 15, 30, 45])
+    visit_date = report["reported_at"][:10]
+
+    detail = SALES_DETAIL_TEMPLATE[purpose].format(issue=issue_phrase, sol=sol_phrase)
+    content = (
+        f"【訪問】{visit_date} {hh:02d}:{mm:02d}／{industry}の{size}／要件: {purpose}／"
+        f"先方: {counterpart}／当社: {emp_name}／所要{duration}分。{detail}"
+    )
+    return content, SALES_ISSUE_BY_PURPOSE[purpose]
+
 # 案件に後方から関わる部署。一次データは「顧客接点のある4部署」にしか案件を割り当てていないため、
 # バックオフィスの社員は案件の証拠を一切持てず、トピック→専門家が部署に一意に決まってしまう。
 # 実務では契約書のリーガルチェックに総務、請求まわりに経理、といった形で他部署が入る。
@@ -597,19 +679,40 @@ def main():
         "CRM・営業支援": "営業活動の可視化不足",
         "総務・法務": "契約・規程チェックの負荷",
     }
+    # #326: 営業部の得意領域を**案件由来**（lead1.0/member0.6）で求め、SPR 日報の担当トピックに使う。
+    # グローバル random 非消費（純粋な集計）。
+    sales_ids = {r["id"] for r in out_employees if r["department"] == SALES_DEPT}
+    sales_proj_ev = defaultdict(lambda: defaultdict(float))
+    for m in out_members:
+        eid = m["employee_id"]
+        if eid in sales_ids:
+            w = 1.0 if m["role"] == "lead" else 0.6
+            for t in case_topics[m["project_id"]]:
+                sales_proj_ev[eid][t] += w
+    sales_rep_topics = {}
+    for eid in sales_ids:
+        ranked = sorted(sales_proj_ev[eid].items(), key=lambda x: (-x[1], x[0]))
+        picked = [t for t, w in ranked if t in SALES_TOPIC_SCRIPT and w >= 1.0]
+        sales_rep_topics[eid] = picked or list(SALES_TOPIC_SCRIPT)
+
     out_daily = []
     for d in dailies:
-        topics = match_topics(d["content"])
-        issue = None
-        for t in topics:
-            if t in ISSUE_HINT:
-                issue = ISSUE_HINT[t]
-                break
+        eid = name2id[d["name"]]
+        if eid in sales_ids:
+            # #326: 営業部の日報は SPR 訪問日報フォーマットへ差し替える（他部署は不変）。
+            content, issue = sales_spr_report(d, id2emp[eid]["name"], sales_rep_topics[eid])
+        else:
+            content = d["content"]
+            issue = None
+            for t in match_topics(content):
+                if t in ISSUE_HINT:
+                    issue = ISSUE_HINT[t]
+                    break
         out_daily.append({
             "id": d["id"],
-            "employee_id": name2id[d["name"]],
+            "employee_id": eid,
             "report_date": d["reported_at"][:10],
-            "content": d["content"],
+            "content": content,
             "issue": issue,
             "created_at": d["registered_at"],
         })
