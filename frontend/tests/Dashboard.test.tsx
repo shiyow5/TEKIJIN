@@ -49,6 +49,7 @@ describe("Dashboard", () => {
   it("shows a loading state before data arrives", () => {
     getDashboardMock.mockReturnValue(new Promise(() => {}));
     render(<Dashboard />);
+    expect(screen.getByRole("link", { name: "ホームへ戻る" })).toHaveAttribute("href", "/");
     expect(screen.getByText(/読み込み中/)).toBeInTheDocument();
   });
 

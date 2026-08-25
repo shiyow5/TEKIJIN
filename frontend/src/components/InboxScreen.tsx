@@ -14,6 +14,7 @@
 import { AnswerScreen } from "@/components/AnswerScreen";
 import { ConsultMethodBadge } from "@/components/ConsultMethodBadge";
 import { useCurrentUser } from "@/components/CurrentUserProvider";
+import { PageBackLink } from "@/components/PageBackLink";
 import type { HandoffAction } from "@/hooks/useHandoff";
 import { getInbox } from "@/lib/api-client";
 import type { InboxItem } from "@/lib/api-types";
@@ -152,6 +153,7 @@ export function InboxScreen() {
           showDetail ? "hidden md:flex" : "flex"
         }`}
       >
+        <PageBackLink href="/" label="ホームへ戻る" />
         <header className="flex flex-col gap-xs">
           <h1 className="font-bold text-2xl text-on-surface">受信箱</h1>
           <p className="text-on-surface-variant text-sm">{who}に届いた質問です。</p>

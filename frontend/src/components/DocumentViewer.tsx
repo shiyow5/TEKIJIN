@@ -11,7 +11,7 @@
 
 import { getDocument } from "@/lib/api-client";
 import type { DocumentDetail } from "@/lib/api-types";
-import Link from "next/link";
+import { PageBackLink } from "@/components/PageBackLink";
 import { useEffect, useState } from "react";
 
 type Phase = "loading" | "ready" | "notfound" | "error";
@@ -38,7 +38,7 @@ export function DocumentViewer({
   // Return to the originating session's result when we know it; otherwise the
   // question list is the only safe fallback (#179).
   const backHref = fromSessionId ? `/session/${fromSessionId}/result` : "/questions";
-  const backLabel = fromSessionId ? "← 結果へ戻る" : "← 質問一覧へ戻る";
+  const backLabel = fromSessionId ? "結果へ戻る" : "質問一覧へ戻る";
 
   useEffect(() => {
     let active = true;
@@ -59,9 +59,7 @@ export function DocumentViewer({
 
   return (
     <section className="mx-auto flex w-full max-w-3xl flex-col gap-lg py-lg">
-      <Link href={backHref} className="text-primary text-sm hover:underline">
-        {backLabel}
-      </Link>
+      <PageBackLink href={backHref} label={backLabel} className="-mb-sm" />
 
       {state.phase === "loading" ? (
         <p className="text-on-surface-variant text-sm">読み込み中…</p>

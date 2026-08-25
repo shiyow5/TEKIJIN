@@ -11,5 +11,5 @@ export default async function AnswerPage({
   params: Promise<{ session_id: string }>;
 }) {
   const { session_id } = await params;
-  return <AnswerScreen sessionId={session_id} />;
+  return <AnswerScreen sessionId={session_id} showBackLink />;
 }

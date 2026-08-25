@@ -16,6 +16,7 @@
  */
 
 import { useCurrentUser } from "@/components/CurrentUserProvider";
+import { PageBackLink } from "@/components/PageBackLink";
 import { useChatThread } from "@/hooks/useChatThread";
 import { useChatThreads } from "@/hooks/useChatThreads";
 import type { ChatMessage, ChatThreadSummary } from "@/lib/api-types";
@@ -91,6 +92,7 @@ function ChatThreadList({
     <div
       className={`w-full flex-col gap-sm md:max-w-xs md:shrink-0 md:border-outline-variant md:border-r md:pr-md ${className}`}
     >
+      <PageBackLink href="/" label="ホームへ戻る" />
       <h1 className="font-bold text-lg text-on-surface">チャット</h1>
       {phase === "loading" && threads.length === 0 ? (
         <p className="text-on-surface-variant text-sm">読み込み中…</p>

@@ -9,6 +9,7 @@
 
 import { getDashboard } from "@/lib/api-client";
 import type { DashboardResponse } from "@/lib/api-types";
+import { PageBackLink } from "@/components/PageBackLink";
 import { useEffect, useState } from "react";
 
 type Phase = "loading" | "ready" | "error";
@@ -103,8 +104,11 @@ export function Dashboard() {
 
   if (state.phase === "loading") {
     return (
-      <section className="mx-auto w-full max-w-5xl py-lg text-center">
-        <h1 className="font-bold text-2xl text-on-surface">ダッシュボードを読み込み中…</h1>
+      <section className="mx-auto flex w-full max-w-5xl flex-col py-lg">
+        <PageBackLink href="/" label="ホームへ戻る" className="mb-sm" />
+        <h1 className="text-center font-bold text-2xl text-on-surface">
+          ダッシュボードを読み込み中…
+        </h1>
       </section>
     );
   }
@@ -112,6 +116,7 @@ export function Dashboard() {
   if (state.phase === "error" || !state.data) {
     return (
       <section className="mx-auto flex w-full max-w-5xl flex-col gap-md py-lg text-center">
+        <PageBackLink href="/" label="ホームへ戻る" />
         <h1 className="font-bold text-2xl text-on-surface">表示できませんでした</h1>
         <div
           role="alert"
@@ -137,6 +142,7 @@ export function Dashboard() {
 
   return (
     <section className="mx-auto flex w-full max-w-5xl flex-col gap-lg py-lg">
+      <PageBackLink href="/" label="ホームへ戻る" className="-mb-sm" />
       <header className="flex flex-col gap-xs">
         <h1 className="font-bold text-2xl text-on-surface">ダッシュボード</h1>
         <p className="text-on-surface-variant text-sm">

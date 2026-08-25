@@ -68,9 +68,10 @@ describe("AnswerScreen", () => {
 
   it("renders the question, asker, selection reasons and reuse count", async () => {
     getHandoffMock.mockResolvedValue(HANDOFF);
-    render(<AnswerScreen sessionId="s1" />);
+    render(<AnswerScreen sessionId="s1" showBackLink />);
 
     expect(await screen.findByText("UTM移行時の注意点について")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "受信箱へ戻る" })).toHaveAttribute("href", "/inbox");
     expect(screen.getByText(/藤田 悠斗/)).toBeInTheDocument();
     expect(screen.getByText(/第3営業部/)).toBeInTheDocument();
     // selection reasons (verbatim details from the backend).
@@ -123,6 +124,7 @@ describe("AnswerScreen", () => {
 
     const back = await screen.findByRole("link", { name: "受信箱へ戻る" });
     expect(back).toHaveAttribute("href", "/inbox");
+    expect(screen.getAllByRole("link", { name: "受信箱へ戻る" })).toHaveLength(1);
   });
 
   it("links to the chat thread after accepting when a recommendation_id is present (#224)", async () => {

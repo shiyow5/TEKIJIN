@@ -51,6 +51,7 @@ describe("QuestionScreen", () => {
 
   it("renders the heading, input and submit button", () => {
     render(<QuestionScreen />);
+    expect(screen.getByRole("link", { name: "ホームへ戻る" })).toHaveAttribute("href", "/");
     expect(screen.getByRole("heading", { name: "何を知りたいですか？" })).toBeInTheDocument();
     expect(screen.getByLabelText("質問を入力")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "聞いてみる" })).toBeInTheDocument();

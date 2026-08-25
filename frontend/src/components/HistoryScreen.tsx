@@ -10,6 +10,7 @@
  */
 
 import { useCurrentUser } from "@/components/CurrentUserProvider";
+import { PageBackLink } from "@/components/PageBackLink";
 import { QuestionDeleteButton } from "@/components/QuestionDeleteButton";
 import { QuestionResolveButton } from "@/components/QuestionResolveButton";
 import { getRecentQuestions } from "@/lib/api-client";
@@ -147,6 +148,7 @@ export function HistoryScreen() {
 
   return (
     <section className="mx-auto w-full max-w-3xl px-md py-lg">
+      <PageBackLink href="/" label="ホームへ戻る" className="mb-sm" />
       <h1 className="mb-xs font-bold text-2xl text-on-surface">質問履歴</h1>
       <p className="mb-lg text-on-surface-variant text-sm">
         これまでにあなたが投稿した質問の一覧です。自分で解決できた質問は「自分で解決した」で記録でき、不要になった質問は削除できます。
