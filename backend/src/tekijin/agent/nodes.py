@@ -485,9 +485,7 @@ class AgentNodes:
         )
         if result is None or not result.grounded:
             return {"self_answer_grounded": False}
-        citations = [
-            {"source_id": sid, "kind": "knowledge"} for sid in result.cited_source_ids
-        ]
+        citations = [{"source_id": sid, "kind": "knowledge"} for sid in result.cited_source_ids]
         return {
             "self_answer_grounded": True,
             "self_answer_text": result.answer,
