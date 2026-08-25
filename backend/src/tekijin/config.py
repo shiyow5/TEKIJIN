@@ -206,6 +206,22 @@ class Settings(BaseSettings):
     # dense signal strength is tracked in #114. 0.0 disables BM25 entirely.
     bm25_weight: float = 0.2
 
+    # #114: make the BM25 RRF weight ADAPTIVE to the dense signal strength, to
+    # reconcile the conflicting optima — symptom-worded eval queries want BM25 low
+    # (``bm25_weight``), but product-name / model-number / error-code queries (where
+    # the dense embedding is semantically uninformed and its top cosine is low) want
+    # BM25 high or the exact match falls out of top-k (#68 warned of this).
+    # ``bm25_weight_boosted`` is the weight when the dense channel is UNINFORMED
+    # (its top cosine <= ``bm25_adapt_lo``); it decays linearly back to
+    # ``bm25_weight`` as the dense confidence rises to ``bm25_adapt_hi``. ``None``
+    # (default) keeps the FLAT ``bm25_weight`` everywhere — i.e. adaptivity is OFF
+    # until the boosted value + window are tuned on the DGX eval (the cosines are
+    # compressed, so the lo/hi window is model-specific). Set
+    # ``TEKIJIN_BM25_WEIGHT_BOOSTED`` (e.g. 1.0) to enable.
+    bm25_weight_boosted: float | None = None
+    bm25_adapt_lo: float = 0.15
+    bm25_adapt_hi: float = 0.35
+
     # Directory holding synthetic fixtures used for development/testing.
     fixtures_dir: Path = _DEFAULT_FIXTURES_DIR
 

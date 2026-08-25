@@ -14,6 +14,42 @@ import math
 from collections.abc import Hashable, Sequence
 
 
+def adaptive_bm25_weight(
+    dense_confidence: float,
+    *,
+    base: float,
+    boosted: float | None,
+    lo: float,
+    hi: float,
+) -> float:
+    """BM25 RRF weight scaled by the dense channel's signal strength (#114).
+
+    A fixed low BM25 weight (``base``, the #68 symptom-query optimum) starves the
+    exact-match cases — a bare product name / model number / error code where the
+    dense embedding is semantically uninformed (its top cosine is *low*) yet BM25
+    points straight at the answer. So when the dense channel is weak we raise BM25
+    toward ``boosted``; when dense is confident we keep it at ``base``:
+
+    * ``dense_confidence <= lo``  -> ``boosted`` (dense uninformed; let BM25 lead)
+    * ``dense_confidence >= hi``  -> ``base``    (dense confident; keep BM25 low)
+    * between                     -> linear interpolation
+
+    ``boosted is None`` (or ``boosted <= base``, or a non-increasing ``lo..hi``
+    window) returns ``base`` flat — the pre-#114 fixed-weight behaviour, so the
+    feature is inert until ``boosted`` is set and the window is tuned. ``base``
+    must be non-negative; ``dense_confidence`` is a cosine in ``[0, 1]``.
+    """
+
+    if boosted is None or boosted <= base or hi <= lo:
+        return base
+    if dense_confidence <= lo:
+        return boosted
+    if dense_confidence >= hi:
+        return base
+    frac = (dense_confidence - lo) / (hi - lo)  # 0 at lo, 1 at hi
+    return boosted + (base - boosted) * frac
+
+
 def rrf(
     rankings: Sequence[Sequence[Hashable]],
     k: int = 60,

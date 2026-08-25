@@ -23,7 +23,7 @@ from tekijin.retrieval.embedding import (
     Embedder,
     SentenceTransformerEmbedder,
 )
-from tekijin.retrieval.fusion import rrf
+from tekijin.retrieval.fusion import adaptive_bm25_weight, rrf
 from tekijin.retrieval.retriever import HybridRetriever
 from tekijin.retrieval.sparse import BM25Index, SudachiTokenizer
 
@@ -580,7 +580,7 @@ def test_question_mapped_answer_ids_ranks_by_question_similarity() -> None:
 def test_fuse_accepts_dense_rankings_and_sparse() -> None:
     retriever = _retriever_without_db(top_k=5)
     # "x" is rank 1 in all three lists; agreement lifts it above each list's #0.
-    fused = retriever._fused_ids([["a", "x"], ["b", "x"]], ["c", "x"])
+    fused = retriever._fused_ids([["a", "x"], ["b", "x"]], ["c", "x"], dense_confidence=1.0)
     assert fused[0] == "x"
 
 
@@ -590,10 +590,55 @@ def test_fuse_downweights_the_bm25_channel() -> None:
     # (bm25_weight=1.0) they'd tie and str-order would decide instead.
     weighted = _retriever_without_db(top_k=5)
     weighted._bm25_weight = 0.2
-    fused = weighted._fuse([["dense_hit"]], ["sparse_hit"])
+    fused = weighted._fuse([["dense_hit"]], ["sparse_hit"], dense_confidence=1.0)
     scores = dict(fused)
     assert scores["dense_hit"] > scores["sparse_hit"]
     assert fused[0][0] == "dense_hit"
+
+
+# --------------------------------------------------------------------------- #
+# #114: adaptive BM25 weight (dense-weak queries let BM25 lead)
+# --------------------------------------------------------------------------- #
+def test_adaptive_bm25_weight_flat_when_boosted_none() -> None:
+    # Default (boosted=None) is the pre-#114 flat weight at every confidence.
+    for c in (0.0, 0.15, 0.25, 0.5, 1.0):
+        assert adaptive_bm25_weight(c, base=0.2, boosted=None, lo=0.15, hi=0.35) == 0.2
+
+
+def test_adaptive_bm25_weight_interpolates_monotonically() -> None:
+    kw = {"base": 0.2, "boosted": 1.0, "lo": 0.15, "hi": 0.35}
+    assert adaptive_bm25_weight(0.10, **kw) == 1.0  # dense uninformed -> boosted
+    assert adaptive_bm25_weight(0.15, **kw) == 1.0  # at lo -> boosted
+    assert adaptive_bm25_weight(0.35, **kw) == 0.2  # at hi -> base
+    assert adaptive_bm25_weight(0.50, **kw) == 0.2  # dense confident -> base
+    mid = adaptive_bm25_weight(0.25, **kw)  # halfway -> between base and boosted
+    assert 0.2 < mid < 1.0 and mid == pytest.approx(0.6)
+    # strictly decreasing across the window
+    xs = [adaptive_bm25_weight(c, **kw) for c in (0.15, 0.20, 0.25, 0.30, 0.35)]
+    assert all(a >= b for a, b in zip(xs, xs[1:])) and xs[0] > xs[-1]  # noqa: B905
+
+
+def test_adaptive_bm25_weight_degenerate_window_is_flat() -> None:
+    # hi <= lo (no window) or boosted <= base falls back to base, never inverts.
+    assert adaptive_bm25_weight(0.1, base=0.2, boosted=1.0, lo=0.3, hi=0.3) == 0.2
+    assert adaptive_bm25_weight(0.1, base=0.5, boosted=0.2, lo=0.15, hi=0.35) == 0.5
+
+
+def test_fuse_boosts_bm25_when_dense_channel_is_weak() -> None:
+    # A term/model-number query: dense is uninformed (low confidence) and points
+    # elsewhere; BM25 alone holds the exact hit. With adaptivity ON, the weak-dense
+    # confidence raises BM25 so the sparse-only hit is NOT dominated by the dense #0.
+    r = _retriever_without_db(top_k=5)
+    r._bm25_weight = 0.2
+    r._bm25_boosted = 1.0
+    r._bm25_adapt_lo, r._bm25_adapt_hi = 0.15, 0.35
+    # dense strong (0.5): BM25 stays at base -> the dense hit wins (pre-#114).
+    strong = dict(r._fuse([["dense_hit"]], ["sparse_hit"], dense_confidence=0.5))
+    assert strong["dense_hit"] > strong["sparse_hit"]
+    # dense weak (0.05): BM25 boosted to 1.0 -> the exact sparse hit ties/leads.
+    weak = dict(r._fuse([["dense_hit"]], ["sparse_hit"], dense_confidence=0.05))
+    assert weak["sparse_hit"] >= strong["sparse_hit"]  # BM25 contribution rose
+    assert weak["sparse_hit"] == pytest.approx(weak["dense_hit"])  # equal weight -> tie
 
 
 # --------------------------------------------------------------------------- #

@@ -32,7 +32,7 @@ from tekijin.data.repository import Repository
 from tekijin.retrieval import dense
 from tekijin.retrieval.bm25_cache import cached_bm25_index
 from tekijin.retrieval.embedding import QUERY, Embedder
-from tekijin.retrieval.fusion import rrf
+from tekijin.retrieval.fusion import adaptive_bm25_weight, rrf
 
 if TYPE_CHECKING:  # pragma: no cover - typing only (avoids agent<-retrieval cycle)
     from tekijin.agent.state import DocumentHit, PastAnswer, RetrievalResult
@@ -70,7 +70,8 @@ class HybridRetriever:
             raise ValueError(f"top_k must be positive, got {top_k}")
         if rrf_k <= 0:
             raise ValueError(f"rrf_k must be positive, got {rrf_k}")
-        resolved_weight = get_settings().bm25_weight if bm25_weight is None else bm25_weight
+        settings = get_settings()
+        resolved_weight = settings.bm25_weight if bm25_weight is None else bm25_weight
         if resolved_weight < 0:
             raise ValueError(f"bm25_weight must be non-negative, got {resolved_weight}")
         self._embedder = embedder
@@ -79,21 +80,53 @@ class HybridRetriever:
         self._top_k = top_k
         self._rrf_k = rrf_k
         self._bm25_weight = resolved_weight
+        # #114 adaptive-BM25 params (read from settings; None boosted = flat/OFF).
+        # A boosted value below the base would DOWN-weight BM25 exactly where dense
+        # is weakest — the opposite of the intent — so reject it rather than silently
+        # inverting the curve.
+        self._bm25_boosted = settings.bm25_weight_boosted
+        if self._bm25_boosted is not None and self._bm25_boosted < resolved_weight:
+            raise ValueError(
+                f"bm25_weight_boosted ({self._bm25_boosted}) must be >= bm25_weight "
+                f"({resolved_weight}); it is the weight when dense is WEAK"
+            )
+        self._bm25_adapt_lo = settings.bm25_adapt_lo
+        self._bm25_adapt_hi = settings.bm25_adapt_hi
         # Per-channel retrieval depth before fusion (see CANDIDATE_POOL).
         self._pool = max(top_k * 5, CANDIDATE_POOL)
 
     def _fuse(
-        self, dense_rankings: list[list[Any]], sparse_ranking: list[Any]
+        self,
+        dense_rankings: list[list[Any]],
+        sparse_ranking: list[Any],
+        *,
+        dense_confidence: float,
     ) -> list[tuple[Any, float]]:
         # Dense channels weighted 1.0; the BM25 sparse channel is down-weighted so
         # its noisier ranks (on symptom-worded queries) cannot swamp dense (#68).
+        # #114: when THIS channel's dense signal is weak (low top cosine), raise the
+        # BM25 weight so an exact term/model-number hit is not starved out of top-k.
+        bm25_weight = adaptive_bm25_weight(
+            dense_confidence,
+            base=self._bm25_weight,
+            boosted=self._bm25_boosted,
+            lo=self._bm25_adapt_lo,
+            hi=self._bm25_adapt_hi,
+        )
         # RRF over the full channel pools; truncate to top_k only afterwards.
         rankings = [*dense_rankings, sparse_ranking]
-        weights = [1.0] * len(dense_rankings) + [self._bm25_weight]
+        weights = [1.0] * len(dense_rankings) + [bm25_weight]
         return rrf(rankings, k=self._rrf_k, weights=weights)[: self._top_k]
 
-    def _fused_ids(self, dense_rankings: list[list[Any]], sparse_ranking: list[Any]) -> list[Any]:
-        return [id_ for id_, _ in self._fuse(dense_rankings, sparse_ranking)]
+    def _fused_ids(
+        self, dense_rankings: list[list[Any]], sparse_ranking: list[Any], *, dense_confidence: float
+    ) -> list[Any]:
+        return [
+            id_
+            for id_, _ in self._fuse(
+                dense_rankings, sparse_ranking, dense_confidence=dense_confidence
+            )
+        ]
 
     def _dense_hits(self, query_vec: Sequence[float], target: str) -> list[tuple[Any, float]]:
         """``(id, cosine_similarity)`` for ``target``, best-first."""
@@ -208,7 +241,9 @@ class HybridRetriever:
         sparse_answers = [id_ for id_, _ in answer_index.search(query, self._pool)]
         dense_answers = [id_ for id_, _ in answer_hits]
         question_answers = self._question_mapped_answer_ids(question_hits, answers_by_question)
-        fused_answers = self._fuse([dense_answers, question_answers], sparse_answers)
+        fused_answers = self._fuse(
+            [dense_answers, question_answers], sparse_answers, dense_confidence=answer_confidence
+        )
         past_answers: list[PastAnswer] = [
             {"qa_id": id_, "score": score, "responder_id": responder_of.get(id_)}
             for id_, score in fused_answers
@@ -216,7 +251,9 @@ class HybridRetriever:
 
         # --- documents ----------------------------------------------------- #
         sparse_docs = [id_ for id_, _ in document_index.search(query, self._pool)]
-        fused_docs = self._fuse([[id_ for id_, _ in document_hits]], sparse_docs)
+        fused_docs = self._fuse(
+            [[id_ for id_, _ in document_hits]], sparse_docs, dense_confidence=document_confidence
+        )
         documents_out: list[DocumentHit] = [
             {"doc_id": id_, "score": score} for id_, score in fused_docs
         ]
@@ -224,7 +261,9 @@ class HybridRetriever:
         # --- candidate people ---------------------------------------------- #
         dense_people = [id_ for id_, _ in people_hits]
         sparse_people = [id_ for id_, _ in profile_index.search(query, self._pool)]
-        fused_people = self._fused_ids([dense_people], sparse_people)
+        fused_people = self._fused_ids(
+            [dense_people], sparse_people, dense_confidence=people_confidence
+        )
         candidate_people = self._aggregate_people(past_answers, fused_people)
 
         return {
