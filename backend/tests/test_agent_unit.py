@@ -588,6 +588,72 @@ def test_sufficiency_site_count_needs_a_number() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# C2 speed (#376): skip the sufficiency LLM call when C1 is confident+on-topic
+# --------------------------------------------------------------------------- #
+def _sufficiency_state(**over: Any) -> dict[str, Any]:
+    base: dict[str, Any] = {
+        "question": "VPNの設定手順を教えてください。",
+        "topics": ["ネットワーク・VPN"],
+        "products": [],
+        "situation": None,
+        "intent_confidence": 0.9,
+        "followup_count": 0,
+    }
+    base.update(over)
+    return base
+
+
+def test_c2_skips_sufficiency_llm_when_confident_and_on_topic() -> None:
+    # A confident, on-topic C1 result is already routable (the #113 valve), so C2
+    # must NOT invoke the (LLM) sufficiency model — it decides from C1 alone,
+    # removing one of the three serial generations on the critical path (#376).
+    class _ExplodingSufficiency:
+        def check(self, *_a: Any, **_k: Any):
+            raise AssertionError("sufficiency model must not be called when can_route")
+
+    stub: Any = object()
+    nodes = AgentNodes(
+        intent_model=stub,
+        sufficiency_model=_ExplodingSufficiency(),
+        draft_model=stub,
+        embedder=stub,
+        retriever=stub,
+        scorer=stub,
+    )
+    out = nodes.c2_sufficiency(_sufficiency_state())
+    assert out["sufficient"] is True
+    assert out["missing"] == [] and out["followup_question"] is None
+    assert out["intent_unresolved"] is False
+
+
+def test_c2_calls_sufficiency_llm_when_not_routable() -> None:
+    # Below the confidence threshold: C2 still consults the model (unchanged path).
+    from tekijin.agent.protocols import SufficiencyResult
+
+    seen: list[float] = []
+
+    class _RecordingSufficiency:
+        def check(self, question: Any, intent: Any, followup_count: Any):
+            seen.append(intent.confidence)
+            return SufficiencyResult(
+                sufficient=False, missing=["拠点数"], followup_question="拠点数は？"
+            )
+
+    stub: Any = object()
+    nodes = AgentNodes(
+        intent_model=stub,
+        sufficiency_model=_RecordingSufficiency(),
+        draft_model=stub,
+        embedder=stub,
+        retriever=stub,
+        scorer=stub,
+    )
+    out = nodes.c2_sufficiency(_sufficiency_state(intent_confidence=0.3))
+    assert seen == [0.3]  # the model WAS consulted on the low-confidence path
+    assert out["sufficient"] is False and out["followup_question"] == "拠点数は？"
+
+
+# --------------------------------------------------------------------------- #
 # C7 draft stub
 # --------------------------------------------------------------------------- #
 def test_draft_is_polite_and_names_the_responder() -> None:
