@@ -624,6 +624,25 @@ def test_adaptive_bm25_weight_degenerate_window_is_flat() -> None:
     assert adaptive_bm25_weight(0.1, base=0.5, boosted=0.2, lo=0.15, hi=0.35) == 0.5
 
 
+def test_retriever_rejects_boosted_below_base(monkeypatch) -> None:
+    from tekijin.retrieval import retriever as rmod
+
+    s = Settings(bm25_weight=0.5, bm25_weight_boosted=0.2)  # boosted < base = inverts
+    monkeypatch.setattr(rmod, "get_settings", lambda: s)
+    with pytest.raises(ValueError, match="must be >= bm25_weight"):
+        _retriever_without_db()
+
+
+def test_retriever_rejects_backwards_adapt_window(monkeypatch) -> None:
+    from tekijin.retrieval import retriever as rmod
+
+    # Adaptivity ON but lo >= hi would silently degrade to flat; must fail loudly.
+    s = Settings(bm25_weight_boosted=1.0, bm25_adapt_lo=0.4, bm25_adapt_hi=0.2)
+    monkeypatch.setattr(rmod, "get_settings", lambda: s)
+    with pytest.raises(ValueError, match="bm25_adapt_lo"):
+        _retriever_without_db()
+
+
 def test_fuse_boosts_bm25_when_dense_channel_is_weak() -> None:
     # A term/model-number query: dense is uninformed (low confidence) and points
     # elsewhere; BM25 alone holds the exact hit. With adaptivity ON, the weak-dense

@@ -92,6 +92,16 @@ class HybridRetriever:
             )
         self._bm25_adapt_lo = settings.bm25_adapt_lo
         self._bm25_adapt_hi = settings.bm25_adapt_hi
+        # Fail loudly on a backwards/degenerate window WHEN adaptivity is on, mirroring
+        # the boosted<base guard above. Otherwise ``adaptive_bm25_weight``'s hi<=lo
+        # fallback would silently make an "enabled" feature inert — the exact kind of
+        # misconfiguration the DGX tuning must not miss. (When boosted is None the
+        # window is unused, so lo/hi are left unchecked.)
+        if self._bm25_boosted is not None and self._bm25_adapt_lo >= self._bm25_adapt_hi:
+            raise ValueError(
+                f"bm25_adapt_lo ({self._bm25_adapt_lo}) must be < bm25_adapt_hi "
+                f"({self._bm25_adapt_hi}) when bm25_weight_boosted is set"
+            )
         # Per-channel retrieval depth before fusion (see CANDIDATE_POOL).
         self._pool = max(top_k * 5, CANDIDATE_POOL)
 
