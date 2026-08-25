@@ -34,6 +34,11 @@ export function NotificationBell() {
   // viewport width and header content. Measuring on open and clamping is the
   // only way to keep it on-screen regardless of where the bell lands.
   const [panelLeft, setPanelLeft] = useState<number | null>(null);
+  // Rendered via inline `width` (not a `w-80` Tailwind class) so this always
+  // matches the value the clamp math above used — a `rem`-based class can
+  // render wider than `PANEL_WIDTH_PX` under text-only zoom (larger root font
+  // size), which would silently reintroduce the #316 overflow.
+  const [panelWidth, setPanelWidth] = useState(PANEL_WIDTH_PX);
 
   useEffect(() => {
     if (currentUserId === null) {
@@ -80,20 +85,45 @@ export function NotificationBell() {
       const container = containerRef.current;
       if (!container) return;
       const rect = container.getBoundingClientRect();
-      const panelWidth = Math.min(PANEL_WIDTH_PX, window.innerWidth - VIEWPORT_MARGIN_PX * 2);
+      const computedWidth = Math.min(PANEL_WIDTH_PX, window.innerWidth - VIEWPORT_MARGIN_PX * 2);
       // Default: right-align the panel under the bell (its usual position when
       // the bell sits near the header's right edge); clamp into the viewport
       // when that would run off either side.
-      const maxViewportLeft = window.innerWidth - panelWidth - VIEWPORT_MARGIN_PX;
+      const maxViewportLeft = window.innerWidth - computedWidth - VIEWPORT_MARGIN_PX;
       const viewportLeft = Math.max(
         VIEWPORT_MARGIN_PX,
-        Math.min(rect.right - panelWidth, maxViewportLeft),
+        Math.min(rect.right - computedWidth, maxViewportLeft),
       );
       setPanelLeft(viewportLeft - rect.left);
+      setPanelWidth(computedWidth);
     }
+
+    // Coalesce to at most once per frame — a window resize fires far more
+    // often than the layout actually settles.
+    let rafId: number | null = null;
+    function scheduleReposition() {
+      if (rafId !== null) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
+        reposition();
+      });
+    }
+
     reposition();
-    window.addEventListener("resize", reposition);
-    return () => window.removeEventListener("resize", reposition);
+    window.addEventListener("resize", scheduleReposition);
+    // The header can rewrap (moving the bell) from something other than a
+    // viewport resize — e.g. the web font swapping in and changing sibling
+    // label widths — which never fires `resize`. Watching the <header> itself
+    // catches that: its height changes whenever the wrap count does.
+    const header = containerRef.current?.closest("header") ?? null;
+    const observer = header ? new ResizeObserver(scheduleReposition) : null;
+    observer?.observe(header as Element);
+
+    return () => {
+      window.removeEventListener("resize", scheduleReposition);
+      observer?.disconnect();
+      if (rafId !== null) cancelAnimationFrame(rafId);
+    };
   }, [open]);
 
   function acknowledge(id: number) {
@@ -136,8 +166,11 @@ export function NotificationBell() {
           // viewport (#316) — where the bell lands on screen depends on real
           // header content width, not a fixed breakpoint, so a static
           // left-0/right-0 class can't stay correct at every width.
-          style={panelLeft !== null ? { left: `${panelLeft}px` } : undefined}
-          className="absolute z-10 mt-xs w-80 max-w-[calc(100vw-16px)] rounded-lg border border-outline-variant bg-surface-container-lowest p-xs shadow-md"
+          style={{
+            width: `${panelWidth}px`,
+            ...(panelLeft !== null ? { left: `${panelLeft}px` } : {}),
+          }}
+          className="absolute z-10 mt-xs rounded-lg border border-outline-variant bg-surface-container-lowest p-xs shadow-md"
         >
           {items.length === 0 ? (
             <p className="p-sm text-on-surface-variant text-sm">新しい通知はありません。</p>
