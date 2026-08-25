@@ -133,26 +133,45 @@ class PipelineRanker:
 
         * ``document`` is a terminal route — C6 never runs, so no experts are
           presented (only the document location).
-        * ``prior_answer`` pins the top past responder and scores ONLY them.
+        * ``prior_answer`` pins the top past responder as the first recommendation
+          (never lost to a higher-scoring general candidate), then backfills the
+          remaining slots from the general candidate pool — mirroring
+          ``nodes.c6_score`` (#307), which no longer dead-ends on the single pin.
         * ``c6_score`` returns nothing when there are no topics or no candidates —
           so an empty ``gold_topics`` (unsupported-topic rows) yields no ranking
           rather than an arbitrary load/id tie-break the product would never emit.
         """
 
-        if route == "document":
+        if route == "document" or not query.gold_topics:
             return []
+
         pinned = _pinned_responder(retrieval) if route == "prior_answer" else None
-        candidates = [pinned] if pinned is not None else list(retrieval["candidate_people"])
-        if not query.gold_topics or not candidates:
-            return []
-        ranked = self._scorer.rank(
-            query.gold_topics,
-            candidates,
-            None,  # asker unknown in offline eval — never filter anyone out
-            self._now,
-            top_k=self._top_k,
-        )
-        return [rec["person_id"] for rec in ranked["recommendations"]]
+        ranked_ids: list[int] = []
+        remaining = self._top_k
+        if pinned is not None:
+            pinned_result = self._scorer.rank(
+                query.gold_topics,
+                [pinned],
+                None,  # asker unknown in offline eval — never filter anyone out
+                self._now,
+                top_k=1,
+            )
+            ranked_ids = [rec["person_id"] for rec in pinned_result["recommendations"]]
+            remaining -= len(ranked_ids)
+
+        if remaining > 0:
+            pool = [p for p in retrieval["candidate_people"] if p not in ranked_ids]
+            if pool:
+                result = self._scorer.rank(
+                    query.gold_topics,
+                    pool,
+                    None,
+                    self._now,
+                    top_k=remaining,
+                )
+                ranked_ids += [rec["person_id"] for rec in result["recommendations"]]
+
+        return ranked_ids
 
 
 def build_pipeline_ranker(

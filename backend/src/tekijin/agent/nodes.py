@@ -328,23 +328,27 @@ class AgentNodes:
         # and never if the pin IS the asker (they cannot answer their own question).
         # In either case drop the pin and rely on the general candidate pool below
         # (never dead-end on a single decline or a self-referential pin).
-        use_pin = (
-            state.get("route") == PRIOR_ANSWER
-            and pinned is not None
-            and pinned not in declined
-            and pinned != asker_id
-            and pinned not in existing_ids
+        pin_id: int | None = (
+            pinned
+            if (
+                state.get("route") == PRIOR_ANSWER
+                and pinned is not None
+                and pinned not in declined
+                and pinned != asker_id
+                and pinned not in existing_ids
+            )
+            else None
         )
 
         fresh: list[dict[str, Any]] = []
-        if use_pin:
+        if pin_id is not None:
             # Guarantee the pinned past responder a slot regardless of how they'd
             # score against the general pool: they already answered a
             # near-duplicate question, a signal the scorer's generic evidence
             # cannot fully capture (#159 "fix G"). The remaining slots below are
             # then filled from the general pool so the asker still sees up to 3
             # candidates (#307) instead of dead-ending on this one person.
-            pin_result = self._scorer.rank(topics, [pinned], asker_id, state["now"], top_k=1)
+            pin_result = self._scorer.rank(topics, [pin_id], asker_id, state["now"], top_k=1)
             fresh = cast("list[dict[str, Any]]", pin_result["recommendations"])
             remaining -= len(fresh)
 
