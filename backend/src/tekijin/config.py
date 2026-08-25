@@ -145,10 +145,13 @@ class Settings(BaseSettings):
     # only after the extraction quality + A/B are verified on the eval.
     knowledge_retrieval_enabled: bool = False
     # #357 slice 4: the cosine-similarity floor a retrieved knowledge unit must clear
-    # to be used in a knowledge answer. Nemotron cosines are compressed (~0.04–0.57),
-    # so this is a moderate default to be CALIBRATED on the eval (slice 4b A/B) before
-    # the knowledge answer is wired live. Inert while knowledge_retrieval_enabled=False.
-    knowledge_answer_min_similarity: float = 0.35
+    # to be used in a knowledge answer. CALIBRATED on the eval (slice 4b A/B, DGX,
+    # real Nemotron): CRM-topic queries score 0.224–0.305 against CRM case units,
+    # non-CRM queries 0.015–0.312 (compressed cosines). A floor of 0.20 answers all
+    # 3 CRM eval queries (topic-matched) with only 3/84 non-CRM false-fires; 0.35
+    # (the initial guess) sat ABOVE the CRM range and would never fire. Small CRM
+    # sample (n=3) — directional. Inert while knowledge_retrieval_enabled=False.
+    knowledge_answer_min_similarity: float = 0.20
 
     # LangGraph checkpointer for session persistence / interrupt-resume:
     # "memory" = in-process MemorySaver (safe default, works without a DB);
