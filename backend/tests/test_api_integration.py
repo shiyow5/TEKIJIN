@@ -3176,3 +3176,112 @@ def test_feedback_with_unknown_question_id_records_without_the_link(
     assert resp.status_code == 200
     rows = _feedback_rows(engine)
     assert len(rows) == 1 and rows[0].question_id is None
+
+
+# --------------------------------------------------------------------------- #
+# #293, #301: GET /knowledge — company-wide list of resolved-by-a-person
+# questions (NOT scoped to one asker, and NOT admin-only, unlike /dashboard)
+# --------------------------------------------------------------------------- #
+def test_knowledge_lists_seeded_person_resolved_questions(
+    seed_counts, engine, fake_embedder
+) -> None:
+    client = _client(engine, fake_embedder)
+    resp = client.get("/knowledge")
+    assert resp.status_code == 200
+    body = resp.json()
+
+    # The seed has 150 questions with 150 1:1 seeded answers (test_dashboard_
+    # route_shape_and_seed_values), so every seeded question is "resolved by a
+    # person" and the summary's total is global, independent of the default
+    # response cap.
+    assert body["summary"]["total_items"] == 150
+    assert body["summary"]["self_resolution_rate"] == 0.0  # matches the dashboard's seed baseline
+    assert len(body["items"]) <= 15  # the endpoint's default limit
+    assert len(body["items"]) > 0
+    assert body["total_matching"] == 150  # unfiltered: every resolved question matches
+    for item in body["items"]:
+        assert item["responder_name"]
+        assert item["session_id"] is None  # seeded history has no live session
+
+
+def test_knowledge_available_to_non_admin_user(seed_counts, engine, fake_embedder) -> None:
+    # Unlike /dashboard (admin-only), every authenticated user can browse
+    # knowledge — the whole point is discovering someone ELSE'S past answer.
+    client = _client(engine, fake_embedder)
+    resp = client.get("/knowledge", headers=_user_headers(10))
+    assert resp.status_code == 200
+    assert resp.json()["summary"]["total_items"] == 150
+
+
+def test_knowledge_respects_limit(seed_counts, engine, fake_embedder) -> None:
+    client = _client(engine, fake_embedder)
+    resp = client.get("/knowledge", params={"limit": 1})
+    body = resp.json()
+    assert len(body["items"]) == 1
+    # The summary total stays global — it does not shrink with the page limit.
+    assert body["summary"]["total_items"] == 150
+    assert body["total_matching"] == 150  # unfiltered: still every resolved question
+
+
+def test_knowledge_offset_pages_through_results_without_overlap(
+    seed_counts, engine, fake_embedder
+) -> None:
+    client = _client(engine, fake_embedder)
+    page1 = client.get("/knowledge", params={"limit": 15, "offset": 0}).json()
+    page2 = client.get("/knowledge", params={"limit": 15, "offset": 15}).json()
+
+    assert len(page1["items"]) == 15
+    assert len(page2["items"]) == 15
+    ids1 = {i["question_id"] for i in page1["items"]}
+    ids2 = {i["question_id"] for i in page2["items"]}
+    assert ids1.isdisjoint(ids2)  # no overlap between pages
+    # total_matching is the same on both pages (the count BEFORE paging).
+    assert page1["total_matching"] == page2["total_matching"] == 150
+
+    # The very last page is short (150 is not a multiple of 15... it is: 10*15=150,
+    # so instead check an offset past the end comes back empty).
+    empty = client.get("/knowledge", params={"limit": 15, "offset": 150}).json()
+    assert empty["items"] == []
+    assert empty["total_matching"] == 150
+
+
+def test_knowledge_search_filters_by_keyword(seed_counts, engine, fake_embedder) -> None:
+    client = _client(engine, fake_embedder)
+    baseline = client.get("/knowledge", params={"limit": 200}).json()["items"]
+    target = baseline[0]
+    keyword = target["title"][:8]  # a substring guaranteed to be in at least one title
+
+    resp = client.get("/knowledge", params={"q": keyword, "limit": 200})
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    assert any(i["question_id"] == target["question_id"] for i in items)
+    assert all(keyword in i["title"] for i in items)
+    assert len(items) <= len(baseline)
+
+
+def test_knowledge_filters_by_topic(seed_counts, engine, fake_embedder) -> None:
+    client = _client(engine, fake_embedder)
+    baseline = client.get("/knowledge", params={"limit": 200}).json()["items"]
+    with_topic = next((i for i in baseline if i["topics"]), None)
+    assert with_topic is not None, "seed fixtures are expected to carry topics"
+    topic = with_topic["topics"][0]
+
+    resp = client.get("/knowledge", params={"topic": topic, "limit": 200})
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    assert any(i["question_id"] == with_topic["question_id"] for i in items)
+    assert all(topic in i["topics"] for i in items)
+
+
+def test_knowledge_filters_by_department(seed_counts, engine, fake_embedder) -> None:
+    client = _client(engine, fake_embedder)
+    baseline = client.get("/knowledge", params={"limit": 200}).json()["items"]
+    with_dept = next((i for i in baseline if i["responder_department"]), None)
+    assert with_dept is not None, "seed fixtures are expected to carry a department"
+    dept = with_dept["responder_department"]
+
+    resp = client.get("/knowledge", params={"department": dept, "limit": 200})
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    assert any(i["question_id"] == with_dept["question_id"] for i in items)
+    assert all(i["responder_department"] == dept for i in items)

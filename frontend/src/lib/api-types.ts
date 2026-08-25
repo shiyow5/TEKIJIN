@@ -195,6 +195,47 @@ export interface RecentQuestionsResponse {
 }
 
 /**
+ * One accumulated piece of knowledge: a question a person actually answered,
+ * company-wide (GET /knowledge, schemas.py `KnowledgeItem`) — unlike
+ * `RecentQuestionItem`, this is NOT scoped to the acting user.
+ */
+export interface KnowledgeItem {
+  question_id: string;
+  title: string;
+  topics: string[];
+  responder_name?: string | null;
+  responder_department?: string | null;
+  resolved_at?: string | null;
+  /** Deep-link target for viewing the result (/session/{session_id}); null for seeded history. */
+  session_id?: string | null;
+}
+
+/** One responder's answer count, busiest-first (schemas.py `ResponderCount`). */
+export interface ResponderCount {
+  employee_id: number;
+  name: string;
+  answer_count: number;
+}
+
+/** Side-panel aggregate stats on GET /knowledge (schemas.py `KnowledgeSummary`). */
+export interface KnowledgeSummary {
+  total_items: number;
+  self_resolution_rate: number;
+  top_responders: ResponderCount[];
+}
+
+/**
+ * GET /knowledge payload (schemas.py `KnowledgeListResponse`). `total_matching`
+ * is the count of items matching the current filters BEFORE the offset/limit
+ * page cut — what a search paginates its results with.
+ */
+export interface KnowledgeListResponse {
+  items: KnowledgeItem[];
+  total_matching: number;
+  summary: KnowledgeSummary;
+}
+
+/**
  * One decline event the asker hasn't acknowledged yet (GET /notifications,
  * schemas.py `DeclineNotification`). Paired with the automatic reroute
  * (#206): by the time this is shown, the system has already moved on to

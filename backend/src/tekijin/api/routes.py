@@ -48,6 +48,7 @@ from tekijin.data.documents import get_document
 from tekijin.data.feedback import record_feedback
 from tekijin.data.history import question_asker_id, recent_questions_for_asker
 from tekijin.data.inbox import pending_handoffs_for_responder
+from tekijin.data.knowledge import list_knowledge
 from tekijin.data.messages import (
     create_message,
     messages_for_thread,
@@ -491,6 +492,48 @@ def questions(
             rows = recent_questions_for_asker(session, aid, limit=limit)
         return schemas.RecentQuestionsResponse(
             items=[schemas.RecentQuestionItem(**row) for row in rows]
+        )
+
+
+@router.get("/knowledge", response_model=schemas.KnowledgeListResponse)
+def knowledge(
+    request: Request,
+    q: str | None = Query(default=None, min_length=1),
+    department: str | None = Query(default=None, min_length=1),
+    topic: str | None = Query(default=None, min_length=1),
+    since: dt.date | None = None,
+    until: dt.date | None = None,
+    offset: int = Query(0, ge=0),
+    limit: int = Query(15, ge=1, le=200),
+    principal: Principal = Depends(require_principal),
+) -> schemas.KnowledgeListResponse:
+    """Company-wide list of resolved-by-a-person questions as reusable knowledge.
+
+    Open to every authenticated user — unlike ``/dashboard``, this is NOT
+    admin-only, since the whole point (#293, #301) is that someone else's past
+    answer is discoverable ("これに近い話、前にも誰かが聞いてたはず"). ``summary``
+    reuses the dashboard's self-resolution rate rather than adding new
+    aggregation logic. ``offset``/``limit`` page a search's results (the
+    frontend keeps the unsearched view to one unpaginated page of the latest
+    ``limit`` items).
+    """
+
+    with _generic_500("GET /knowledge"):
+        with _service(request).session_factory() as session:
+            rows, total_matching, summary = list_knowledge(
+                session,
+                q=q,
+                department=department,
+                topic=topic,
+                since=since,
+                until=until,
+                offset=offset,
+                limit=limit,
+            )
+        return schemas.KnowledgeListResponse(
+            total_matching=total_matching,
+            items=[schemas.KnowledgeItem(**row) for row in rows],
+            summary=schemas.KnowledgeSummary(**summary),
         )
 
 

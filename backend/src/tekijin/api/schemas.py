@@ -439,6 +439,51 @@ class RecentQuestionsResponse(BaseModel):
 
 
 # --------------------------------------------------------------------------- #
+# knowledge list (GET /knowledge) — company-wide, not scoped to one asker
+# (#293, #301)
+# --------------------------------------------------------------------------- #
+class KnowledgeItem(BaseModel):
+    """One piece of accumulated knowledge: a question a person actually answered."""
+
+    question_id: str
+    title: str
+    topics: list[str] = Field(default_factory=list)
+    responder_name: str | None = None
+    responder_department: str | None = None
+    resolved_at: str | None = None
+    session_id: str | None = None
+
+
+class ResponderCount(BaseModel):
+    """One responder's answer count (``dashboard.top_answerers``, busiest-first)."""
+
+    employee_id: int
+    name: str
+    answer_count: int
+
+
+class KnowledgeSummary(BaseModel):
+    """Side-panel aggregate stats — reuses existing dashboard aggregates."""
+
+    total_items: int
+    self_resolution_rate: float
+    top_responders: list[ResponderCount] = Field(default_factory=list)
+
+
+class KnowledgeListResponse(BaseModel):
+    """GET /knowledge payload: one page of (filtered) items plus a global summary.
+
+    ``total_matching`` is the count of items matching the current filters
+    BEFORE the ``offset``/``limit`` page cut — what the frontend paginates a
+    search's results with (#293, #301).
+    """
+
+    items: list[KnowledgeItem] = Field(default_factory=list)
+    total_matching: int = 0
+    summary: KnowledgeSummary
+
+
+# --------------------------------------------------------------------------- #
 # decline notifications (GET /notifications, POST /notifications/ack) (#E7)
 # --------------------------------------------------------------------------- #
 class DeclineNotification(BaseModel):

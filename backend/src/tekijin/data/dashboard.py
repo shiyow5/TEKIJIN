@@ -24,6 +24,28 @@ from tekijin.models.tables import Answer, Employee, EvalRun, Event, Question, Re
 _SELF_RESOLVED_ROUTES = ("document",)
 
 
+def top_answerers(session: Session, *, limit: int = 5) -> list[dict[str, Any]]:
+    """Who has answered the most (a proxy for workload distribution), busiest-first.
+
+    Shared by :func:`dashboard_summary` (画面5 負荷分散) and the knowledge list's
+    side panel (#293, #301) so the "回答者別の件数" stat is the exact same
+    aggregate in both places — no new aggregation logic is introduced for the
+    knowledge panel.
+    """
+
+    load_stmt = (
+        select(Answer.responder_id, Employee.name, func.count().label("c"))
+        .join(Employee, Employee.id == Answer.responder_id)
+        .group_by(Answer.responder_id, Employee.name)
+        .order_by(func.count().desc(), Answer.responder_id)
+        .limit(limit)
+    )
+    return [
+        {"employee_id": rid, "name": name, "answer_count": count}
+        for rid, name, count in session.execute(load_stmt)
+    ]
+
+
 def dashboard_summary(
     session: Session,
     *,
@@ -41,17 +63,7 @@ def dashboard_summary(
     recommendation_count = session.scalar(select(func.count()).select_from(Recommendation)) or 0
 
     # Load: who has answered the most (a proxy for workload distribution).
-    load_stmt = (
-        select(Answer.responder_id, Employee.name, func.count().label("c"))
-        .join(Employee, Employee.id == Answer.responder_id)
-        .group_by(Answer.responder_id, Employee.name)
-        .order_by(func.count().desc(), Answer.responder_id)
-        .limit(top_responders)
-    )
-    answers_per_responder = [
-        {"employee_id": rid, "name": name, "answer_count": count}
-        for rid, name, count in session.execute(load_stmt)
-    ]
+    answers_per_responder = top_answerers(session, limit=top_responders)
 
     # Topic distribution over the questions' topic arrays.
     topic_col = func.unnest(Question.topics).label("topic")

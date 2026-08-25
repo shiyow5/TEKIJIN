@@ -29,6 +29,7 @@ import type {
   HandoffSelectResponse,
   InboxItem,
   InboxResponse,
+  KnowledgeListResponse,
   LoginRequest,
   LoginResponse,
   NotificationAckRequest,
@@ -322,6 +323,35 @@ export async function getRecentQuestions(
   const query = `?asker_id=${encodeURIComponent(askerId)}${limitQuery}`;
   const body = await getJson<RecentQuestionsResponse>(`/questions${query}`, requestOptions);
   return body.items;
+}
+
+/**
+ * GET /knowledge — the company-wide list of resolved-by-a-person questions
+ * (#293, #301), with optional search/filter and a side-panel summary. Unlike
+ * {@link getRecentQuestions}, this is NOT scoped to one asker.
+ */
+export async function getKnowledgeList(
+  options: RequestOptions & {
+    q?: string;
+    department?: string;
+    topic?: string;
+    since?: string;
+    until?: string;
+    offset?: number;
+    limit?: number;
+  } = {},
+): Promise<KnowledgeListResponse> {
+  const { q, department, topic, since, until, offset, limit, ...requestOptions } = options;
+  const params = new URLSearchParams();
+  if (q) params.set("q", q);
+  if (department) params.set("department", department);
+  if (topic) params.set("topic", topic);
+  if (since) params.set("since", since);
+  if (until) params.set("until", until);
+  if (offset !== undefined) params.set("offset", String(offset));
+  if (limit !== undefined) params.set("limit", String(limit));
+  const query = params.size > 0 ? `?${params.toString()}` : "";
+  return getJson<KnowledgeListResponse>(`/knowledge${query}`, requestOptions);
 }
 
 /**
