@@ -194,13 +194,10 @@ test.describe("navigation", () => {
     // past one line at a width that would otherwise not wrap (finding from the
     // #316 AI review: `md:right-0` alone still breaks once real content, not
     // just narrow viewports, pushes the bell to the wrapped row's left edge).
-    await page.route(`${API_BASE}/employees`, (route) =>
-      fulfillJson(route, {
-        employees: [
-          { id: "E001", name: "山田 太郎太郎太郎太郎太郎太郎", dept: "カスタマーサポート推進部" },
-        ],
-      }),
-    );
+    // Registered after `mockChrome` so it overrides its default EMPLOYEES.
+    await mockEmployees(page, [
+      { id: "E001", name: "山田 太郎太郎太郎太郎太郎太郎", dept: "カスタマーサポート推進部" },
+    ]);
     await page.setViewportSize({ width: 1024, height: 800 });
     await page.goto("/questions");
 

@@ -181,10 +181,8 @@ export const EMPLOYEES = [
  * page, and the asker's submit is gated on having a current user — so any flow
  * that renders the app chrome needs it stubbed.
  */
-export async function mockEmployees(page: Page): Promise<void> {
-  await page.route(`${API_BASE}/employees`, (route) =>
-    fulfillJson(route, { employees: EMPLOYEES }),
-  );
+export async function mockEmployees(page: Page, employees: unknown[] = EMPLOYEES): Promise<void> {
+  await page.route(`${API_BASE}/employees`, (route) => fulfillJson(route, { employees }));
 }
 
 /** One pending handoff for the inbox (GET /inbox). */

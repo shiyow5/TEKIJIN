@@ -85,7 +85,10 @@ export function NotificationBell() {
       const container = containerRef.current;
       if (!container) return;
       const rect = container.getBoundingClientRect();
-      const computedWidth = Math.min(PANEL_WIDTH_PX, window.innerWidth - VIEWPORT_MARGIN_PX * 2);
+      const computedWidth = Math.max(
+        0,
+        Math.min(PANEL_WIDTH_PX, window.innerWidth - VIEWPORT_MARGIN_PX * 2),
+      );
       // Default: right-align the panel under the bell (its usual position when
       // the bell sits near the header's right edge); clamp into the viewport
       // when that would run off either side.
@@ -115,8 +118,14 @@ export function NotificationBell() {
     // viewport resize — e.g. the web font swapping in and changing sibling
     // label widths — which never fires `resize`. Watching the <header> itself
     // catches that: its height changes whenever the wrap count does.
+    // Guarded: not implemented in the test environment (jsdom) or in older
+    // browsers/webviews, and this repositioning is a nice-to-have on top of
+    // the `resize`-driven reposition, not the only way it happens.
     const header = containerRef.current?.closest("header") ?? null;
-    const observer = header ? new ResizeObserver(scheduleReposition) : null;
+    const observer =
+      header && typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(scheduleReposition)
+        : null;
     observer?.observe(header as Element);
 
     return () => {
