@@ -42,12 +42,18 @@ def _retrieval(
     people_sim: float = 0.0,
     people: Sequence[int] = (),
     past_answers: list[PastAnswer] | None = None,
+    reuse: int = 0,
 ) -> RetrievalResult:
     # C5 routes on the absolute cosine similarities (*_confidence), not RRF scores.
     # ``past_answers`` defaults to one entry whenever answer confidence is set, so
     # the prior_answer gate (needs actual past answers) is satisfied by default.
     if past_answers is None:
-        answer_hit: PastAnswer = {"qa_id": "a", "score": 0.01, "responder_id": 7}
+        answer_hit: PastAnswer = {
+            "qa_id": "a",
+            "score": 0.01,
+            "responder_id": 7,
+            "reuse_count": reuse,
+        }
         past_answers = [answer_hit] if answer else []
     return {
         "past_answers": list(past_answers),
@@ -82,6 +88,45 @@ def test_route_no_prior_answer_without_past_answers() -> None:
     # prior_answer (nobody to hand off to) — falls back to person.
     r = _retrieval(answer=0.95, people=[1], past_answers=[])
     assert decide_route(r).route == PERSON
+
+
+# --------------------------------------------------------------------------- #
+# #327: corpus-count routing for prior_answer (reuse_count, not cosine)
+# --------------------------------------------------------------------------- #
+def test_corpus_count_routing_off_by_default() -> None:
+    # A heavily-reused answer with LOW cosine (Nemotron's real regime) stays on
+    # person when the feature is off (prior_answer_reuse_min=None) — unchanged C5.
+    r = _retrieval(answer=0.30, people=[1], reuse=8)
+    assert decide_route(r).route == PERSON
+
+
+def test_corpus_count_routing_fires_on_reused_answer() -> None:
+    # With the reuse floor on, a low-cosine but heavily-reused top answer routes
+    # prior_answer — the route cosine could never separate (0.30 < PRIOR_ANSWER_SIM).
+    r = _retrieval(answer=0.30, people=[1], reuse=5)
+    decision = decide_route(r, prior_answer_reuse_min=3)
+    assert decision.route == PRIOR_ANSWER
+    assert "再利用" in decision.reason
+
+
+def test_corpus_count_routing_respects_reuse_min() -> None:
+    # Below the reuse floor -> not canonical enough, stays person.
+    r = _retrieval(answer=0.30, people=[1], reuse=2)
+    assert decide_route(r, prior_answer_reuse_min=3).route == PERSON
+
+
+def test_corpus_count_routing_respects_relevance_floor() -> None:
+    # A reused answer that is essentially off-topic (cosine below the noise floor)
+    # does NOT fire — reuse_count discriminates, the floor screens pure noise.
+    r = _retrieval(answer=0.05, people=[1], reuse=9)
+    decision = decide_route(r, prior_answer_reuse_min=3, prior_answer_relevance_floor=0.15)
+    assert decision.route == PERSON
+
+
+def test_corpus_count_routing_needs_past_answers() -> None:
+    # No past answers to hand off to -> never fires even with high reuse configured.
+    r = _retrieval(answer=0.0, people=[1], past_answers=[])
+    assert decide_route(r, prior_answer_reuse_min=3).route == PERSON
 
 
 def test_route_document_when_person_signal_weak() -> None:

@@ -90,6 +90,7 @@ describe("ChatScreen", () => {
     useCurrentUserMock.mockReturnValue(asUser("E010"));
     getChatThreadsMock.mockResolvedValue([]);
     render(<ChatScreen />);
+    expect(screen.getByRole("link", { name: "ホームへ戻る" })).toHaveAttribute("href", "/");
 
     await waitFor(() =>
       expect(screen.getByText("承諾済みの依頼がまだありません。")).toBeInTheDocument(),
@@ -106,8 +107,13 @@ describe("ChatScreen", () => {
     await waitFor(() =>
       expect(getChatThreadMock).toHaveBeenCalledWith(42, "E010", expect.anything()),
     );
+    // `findByText`, not `getByText`: the waitFor above only proves the fetch was
+    // issued. Its result still has to land and re-render the conversation pane,
+    // which until then shows 「読み込み中…」 — a synchronous getByText loses that
+    // race intermittently under load (seen at ~25% of full-suite runs once #336
+    // added a link to the list pane and shifted the timing).
+    expect(await screen.findByText("よろしくお願いします")).toBeInTheDocument();
     expect(screen.getAllByText("高梨 健太").length).toBeGreaterThan(0);
-    expect(screen.getByText("よろしくお願いします")).toBeInTheDocument();
     expect(screen.getByText("承知しました")).toBeInTheDocument(); // the bubble (list shows name + time only)
   });
 

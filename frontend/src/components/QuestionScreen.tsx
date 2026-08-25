@@ -10,6 +10,7 @@
  */
 
 import { useCurrentUser } from "@/components/CurrentUserProvider";
+import { PageBackLink } from "@/components/PageBackLink";
 import { RecentQuestions } from "@/components/RecentQuestions";
 import { ApiError, postAsk } from "@/lib/api-client";
 import { createSessionId } from "@/lib/session";
@@ -87,6 +88,9 @@ export function QuestionScreen({ onSubmitted }: QuestionScreenProps) {
 
   return (
     <div className="flex w-full flex-col items-center">
+      <div className="w-full max-w-4xl">
+        <PageBackLink href="/" label="ホームへ戻る" />
+      </div>
       <section className="mt-lg mb-margin flex w-full max-w-3xl flex-col items-center text-center">
         <h1 className="mb-margin font-bold text-3xl text-on-surface tracking-tight">
           何を知りたいですか？

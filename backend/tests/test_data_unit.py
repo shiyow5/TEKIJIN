@@ -58,7 +58,7 @@ EXPECTED_COUNTS = {
     "daily_reports": 3070,
     "questions": 150,
     "answers": 150,
-    "documents": 30,
+    "documents": 36,  # #296: 型番/製品文書6件を追加（30 -> 36）
 }
 
 

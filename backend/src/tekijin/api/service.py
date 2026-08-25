@@ -182,6 +182,8 @@ class AgentService:
         retriever: Any | None = None,
         scorer: Any | None = None,
         bm25_weight: float | None = None,
+        prior_answer_reuse_min: int | None = None,
+        prior_answer_relevance_floor: float = 0.15,
         max_concurrent_runs: int = 0,
         now_factory: Any = _default_now,
         clock: Any = time.monotonic,
@@ -209,6 +211,10 @@ class AgentService:
         # custom Settings is honored rather than the cached global (#68). None →
         # the default HybridRetriever reads settings itself.
         self._bm25_weight = bm25_weight
+        # #327: corpus-count routing for prior_answer (None = OFF). Passed to
+        # build_agent so C5 can revive the route on reuse_count when calibrated.
+        self._prior_answer_reuse_min = prior_answer_reuse_min
+        self._prior_answer_relevance_floor = prior_answer_relevance_floor
         # Backpressure (#180): max graph runs executing at once before /ask sheds new
         # questions with 503. 0 (default) disables it — set from settings via the
         # factory in production. Guarded by its own lock; independent of the per-
@@ -1059,6 +1065,8 @@ class AgentService:
             retriever=self._retriever,
             scorer=self._scorer,
             bm25_weight=self._bm25_weight,
+            prior_answer_reuse_min=self._prior_answer_reuse_min,
+            prior_answer_relevance_floor=self._prior_answer_relevance_floor,
         )
 
     def _run(

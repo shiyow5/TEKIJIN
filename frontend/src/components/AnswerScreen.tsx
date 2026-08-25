@@ -15,6 +15,7 @@
  */
 
 import { ConsultMethodBadge } from "@/components/ConsultMethodBadge";
+import { PageBackLink } from "@/components/PageBackLink";
 import type { HandoffAction } from "@/hooks/useHandoff";
 import { useHandoff } from "@/hooks/useHandoff";
 import type { HandoffResponse, Reason } from "@/lib/api-types";
@@ -24,6 +25,9 @@ import { useEffect } from "react";
 
 export interface AnswerScreenProps {
   sessionId: string;
+  /** Show the route-level return link for a standalone deep link. The inbox's
+   * embedded detail pane has its own responsive list navigation. */
+  showBackLink?: boolean;
   /** Fired once the responder's outcome lands, so an embedding page (the inbox's
    * merged list+detail view) can refresh its list without a full navigation. */
   onDone?: (action: HandoffAction) => void;
@@ -112,7 +116,7 @@ const DONE_BODY: Record<HandoffAction, string> = {
   refer: "別の候補者を自動でお探しします。ご対応ありがとうございました。",
 };
 
-export function AnswerScreen({ sessionId, onDone }: AnswerScreenProps) {
+export function AnswerScreen({ sessionId, showBackLink = false, onDone }: AnswerScreenProps) {
   const { phase, handoff, action, errorKind, submitError, submit } = useHandoff(sessionId);
 
   // onDone fires once per completed outcome (keyed on phase/action); an
@@ -125,6 +129,7 @@ export function AnswerScreen({ sessionId, onDone }: AnswerScreenProps) {
   if (phase === "loading") {
     return (
       <Centered>
+        {showBackLink ? <PageBackLink href="/inbox" label="受信箱へ戻る" /> : null}
         <h1 className="font-bold text-2xl text-on-surface">質問を読み込み中…</h1>
         <p className="text-on-surface-variant">届いた質問の内容を取得しています。</p>
       </Centered>
@@ -183,6 +188,7 @@ export function AnswerScreen({ sessionId, onDone }: AnswerScreenProps) {
 
   return (
     <section className="mx-auto flex w-full max-w-2xl flex-col gap-md py-lg">
+      {showBackLink ? <PageBackLink href="/inbox" label="受信箱へ戻る" /> : null}
       <header className="flex items-baseline justify-between gap-sm">
         <h1 className="font-bold text-2xl text-on-surface">あなたに届いた質問</h1>
         {hf.responder ? (

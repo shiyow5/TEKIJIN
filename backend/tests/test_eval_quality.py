@@ -164,7 +164,8 @@ def test_enough_independent_samples(person):
 
 def test_difficulty_layers_present(person):
     dist = Counter(q["difficulty"] for q in person)
-    assert dist == {"L1": 10, "L2": 36, "L3": 20, "L4": 15}, dist
+    # #296: L3 に型番/製品名クエリ6件を追加（20→26・route=document）。
+    assert dist == {"L1": 10, "L2": 36, "L3": 26, "L4": 15}, dist
 
 
 def test_l4_expects_abstain(person):
@@ -211,6 +212,26 @@ def test_gold_source_present_only_on_data_routes(person):
             assert gs, f"id={q['id']} ({q['gold_route']}) に gold_source が無い"
         else:
             assert gs == [], f"id={q['id']} ({q['gold_route']}) に不要な gold_source: {gs}"
+
+
+def test_product_docs_do_not_pollute_unrelated_gold_source(person):
+    """#296: 製品文書(型番付き doc_031〜)は「その型番クエリの gold_source」以外に混入しない。
+
+    トピック接頭辞ルール（title.startswith(topic)）は、製品カテゴリ名がトピック名を接頭辞に
+    含むと無関係クエリの gold を汚す（例「セキュリティゲートウェイ」.startswith("セキュリティ")）。
+    製品文書は gold_source_override で当該型番行にだけ単独で付くべきで、他行に現れてはいけない。
+    """
+    docs = _load(SYN / "documents" / "documents.json")
+    product_ids = {d["id"] for d in docs if d.get("product_model")}
+    assert product_ids, "製品文書(product_model 付き)が無い。型番eval の前提が崩れている"
+    for q in person:
+        gs = set(q.get("gold_source", []))
+        overlap = gs & product_ids
+        if overlap:
+            # 製品文書を含むなら単独の gold_source（＝その型番クエリ本体）でなければならない。
+            assert gs == overlap and len(gs) == 1, (
+                f"id={q['id']} の gold_source に製品文書が混入/混合している: {sorted(gs)}"
+            )
 
 
 def test_gold_source_ids_resolve_in_corpus(person):

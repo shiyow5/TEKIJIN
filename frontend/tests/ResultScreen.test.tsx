@@ -73,6 +73,10 @@ const THREE_CANDIDATES: Recommendation[] = [
 describe("ResultScreen — pending", () => {
   it("shows a preparing placeholder when no data has arrived", () => {
     renderResult(state({}));
+    expect(screen.getByRole("link", { name: "質問一覧へ戻る" })).toHaveAttribute(
+      "href",
+      "/questions",
+    );
     expect(screen.getByText("結果を準備中…")).toBeInTheDocument();
   });
 });
@@ -353,8 +357,16 @@ describe("ResultScreen — main line (person)", () => {
       }),
     );
     // The regenerated draft (for the newly selected candidate) replaces the editor's text.
-    expect(await screen.findByLabelText<HTMLTextAreaElement>("聞き方の下書き")).toHaveValue(
-      "鈴木さん向けに調整した下書き",
+    // `waitFor`, not `findBy`: the textarea is in the DOM from the first render,
+    // so `findByLabelText` resolves immediately and `toHaveValue` then runs
+    // *before* the awaited `selectHandoffCandidate` promise has re-rendered it.
+    // The preceding `waitFor` only proves the call was made, not that its result
+    // landed. On a loaded CI box that lost the race and read the previous
+    // candidate's draft — the intermittent failure seen on #258/#298/#320.
+    await waitFor(() =>
+      expect(screen.getByLabelText<HTMLTextAreaElement>("聞き方の下書き")).toHaveValue(
+        "鈴木さん向けに調整した下書き",
+      ),
     );
 
     // The send confirmation now names the selected candidate, not the original top pick.
@@ -386,8 +398,16 @@ describe("ResultScreen — main line (person)", () => {
         person_id: "E002",
       }),
     );
-    expect(await screen.findByLabelText<HTMLTextAreaElement>("聞き方の下書き")).toHaveValue(
-      "鈴木さん向けに調整した下書き",
+    // `waitFor`, not `findBy`: the textarea is in the DOM from the first render,
+    // so `findByLabelText` resolves immediately and `toHaveValue` then runs
+    // *before* the awaited `selectHandoffCandidate` promise has re-rendered it.
+    // The preceding `waitFor` only proves the call was made, not that its result
+    // landed. On a loaded CI box that lost the race and read the previous
+    // candidate's draft — the intermittent failure seen on #258/#298/#320.
+    await waitFor(() =>
+      expect(screen.getByLabelText<HTMLTextAreaElement>("聞き方の下書き")).toHaveValue(
+        "鈴木さん向けに調整した下書き",
+      ),
     );
 
     // A late `draft` SSE event for the (still top-pick) 高梨 now arrives. Before the
