@@ -15,7 +15,7 @@ metric. Routes are checked against the closed label set.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -44,6 +44,10 @@ class EvalQuery:
     # Independent second gold set (from ``answers``); empty when absent. Used for
     # the anti-circularity check, not the primary metrics.
     gold_experts_alt: list[int]
+    # #296: source ids a SELF-ANSWER (#291) should be able to cite (raw doc_id /
+    # answer qa_id). Non-empty only on the data-derived routes (document /
+    # prior_answer); empty for person/none. Feeds the #297 source-recall metric.
+    gold_source: list[str] = field(default_factory=list)
 
 
 def default_eval_queries_path() -> Path:
@@ -92,6 +96,8 @@ def _parse_query(row: object, source: Path) -> EvalQuery:
         gold_experts_alt=[
             _as_int(e, "gold_experts_alt[]") for e in _as_list(row.get("gold_experts_alt", []))
         ],
+        # Optional (older rows / person/none routes may omit or empty it).
+        gold_source=[_as_str(s, "gold_source[]") for s in _as_list(row.get("gold_source", []))],
     )
 
 

@@ -784,8 +784,33 @@ DECOY_SENTENCES = [
 def main():
     employees = load("people/employees.json")
     documents = load("documents/documents.json")
+    answers = load("answers/answers.json")
     projects = load("projects/projects.json")
     emp_ids = {e["id"] for e in employees}
+
+    # #296: the raw source ids a SELF-ANSWER (#291) should be able to cite, keyed by
+    # topic. Documents carry their topic in the title prefix (build_fixtures §8:
+    # ``f"{topic}{kind}（…）"``); past answers carry an explicit ``topic``. Used to
+    # fill ``gold_source`` per eval row so the recall-centric eval (#297) can measure
+    # source recall (did the self-answer cite a topic-relevant source?).
+    doc_ids_by_topic: dict[str, list[str]] = defaultdict(list)
+    for d in documents:
+        for t in TOPICS:
+            if d["title"].startswith(t):
+                doc_ids_by_topic[t].append(d["id"])
+    ans_ids_by_topic: dict[str, list[str]] = defaultdict(list)
+    for a in answers:
+        if a.get("topic"):
+            ans_ids_by_topic[a["topic"]].append(a["id"])
+
+    def gold_source_for(route: str, topics: list[str]) -> list[str]:
+        # Only the data-derived routes have a self-answer source; person/none route
+        # to a human or abstain, so they carry no gold source (empty).
+        if route == "document":
+            return sorted({i for t in topics for i in doc_ids_by_topic.get(t, [])})
+        if route == "prior_answer":
+            return sorted({i for t in topics for i in ans_ids_by_topic.get(t, [])})
+        return []
 
     corpus = topic_corpus_profile()
     ev, proj_topics = build_gold_evidence()
@@ -838,6 +863,8 @@ def main():
                 "gold_experts": experts,
                 "gold_experts_alt": alt_experts(topics),
                 "gold_route": route,
+                # #296: sources a self-answer should cite (data-derived routes only).
+                "gold_source": gold_source_for(route, topics),
                 "expect_abstain": route == "none",
                 "constraint": constraint,
                 "source_topic": source_topic,
