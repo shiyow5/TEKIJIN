@@ -35,9 +35,10 @@ export function DocumentViewer({
   fromSessionId?: string;
 }) {
   const [state, setState] = useState<ViewerState>({ phase: "loading" });
-  // Return to the originating session's result when we know it; otherwise the
-  // question list is the only safe fallback (#179).
-  const backHref = fromSessionId ? `/session/${fromSessionId}/result` : "/questions";
+  // Document links originate on the session processing screen. Returning to
+  // `/result` loses that screen and shows only the replayed terminal message,
+  // so take the reader back to the actual origin route (#342).
+  const backHref = fromSessionId ? `/session/${fromSessionId}` : "/questions";
   const backLabel = fromSessionId ? "結果へ戻る" : "質問一覧へ戻る";
 
   useEffect(() => {

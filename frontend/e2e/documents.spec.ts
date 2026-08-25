@@ -1,5 +1,12 @@
 import { expect, test } from "@playwright/test";
-import { API_BASE, fulfillJson, mockAuth, mockEmployees } from "./support/mocks";
+import {
+  API_BASE,
+  fulfillJson,
+  fulfillSse,
+  mockAuth,
+  mockEmployees,
+  sseBody,
+} from "./support/mocks";
 
 /**
  * Document viewer (#143): the `/documents/[id]` route that the document-route
@@ -28,6 +35,34 @@ test.describe("document viewer", () => {
     await expect(page.getByText("出典: 社内Wiki/IT")).toBeVisible();
     // A way back to asking.
     await expect(page.getByRole("link", { name: /戻る/ })).toBeVisible();
+  });
+
+  test("returns to the session screen that opened the document (#342)", async ({ page }) => {
+    await mockEmployees(page);
+    await mockAuth(page);
+    await page.route(`${API_BASE}/documents/doc_001`, (route) => fulfillJson(route, DOC));
+    await page.route(`${API_BASE}/events/**`, (route) =>
+      fulfillSse(
+        route,
+        sseBody([
+          {
+            event: "message",
+            data: {
+              status: "document",
+              message: "社内文書に該当がありそうです。",
+              doc_id: "doc_001",
+            },
+          },
+        ]),
+      ),
+    );
+
+    await page.goto("/documents/doc_001?from=session-vpn");
+    await page.getByRole("link", { name: "結果へ戻る" }).click();
+
+    await page.waitForURL(/\/session\/session-vpn$/);
+    await expect(page.getByText("社内文書に該当がありそうです。")).toBeVisible();
+    await expect(page.getByRole("link", { name: "文書を見る" })).toBeVisible();
   });
 
   test("shows a not-found state for an unknown document", async ({ page }) => {
