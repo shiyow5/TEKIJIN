@@ -834,6 +834,11 @@ def main():
     # source recall (did the self-answer cite a topic-relevant source?).
     doc_ids_by_topic: dict[str, list[str]] = defaultdict(list)
     for d in documents:
+        # #296: 製品文書(型番付き)はトピック接頭辞プールに入れない。gold_source_override で
+        # 特定クエリにだけ紐づく想定であり、かつカテゴリ名がトピック名を接頭辞に含むと
+        # （例「セキュリティゲートウェイ」.startswith("セキュリティ")）無関係クエリの gold を汚す。
+        if d.get("product_model"):
+            continue
         for t in TOPICS:
             if d["title"].startswith(t):
                 doc_ids_by_topic[t].append(d["id"])
@@ -1032,6 +1037,8 @@ def main():
     # ---- eval_retrieval.json（層1）: L1〜L3 に対応する根拠チャンク ----
     doc_by_topic = defaultdict(list)
     for d in documents:
+        if d.get("product_model"):  # #296: 製品文書は接頭辞プールから除外（上と同じ理由）
+            continue
         for t in TOPICS:
             if d["title"].startswith(t):
                 doc_by_topic[t].append(f"doc:{d['id']}")

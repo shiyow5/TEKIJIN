@@ -562,8 +562,7 @@
     "gold_source": [
       "doc_007",
       "doc_015",
-      "doc_023",
-      "doc_032"
+      "doc_023"
     ],
     "expect_abstain": false,
     "constraint": {

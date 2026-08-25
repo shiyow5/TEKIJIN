@@ -214,6 +214,26 @@ def test_gold_source_present_only_on_data_routes(person):
             assert gs == [], f"id={q['id']} ({q['gold_route']}) に不要な gold_source: {gs}"
 
 
+def test_product_docs_do_not_pollute_unrelated_gold_source(person):
+    """#296: 製品文書(型番付き doc_031〜)は「その型番クエリの gold_source」以外に混入しない。
+
+    トピック接頭辞ルール（title.startswith(topic)）は、製品カテゴリ名がトピック名を接頭辞に
+    含むと無関係クエリの gold を汚す（例「セキュリティゲートウェイ」.startswith("セキュリティ")）。
+    製品文書は gold_source_override で当該型番行にだけ単独で付くべきで、他行に現れてはいけない。
+    """
+    docs = _load(SYN / "documents" / "documents.json")
+    product_ids = {d["id"] for d in docs if d.get("product_model")}
+    assert product_ids, "製品文書(product_model 付き)が無い。型番eval の前提が崩れている"
+    for q in person:
+        gs = set(q.get("gold_source", []))
+        overlap = gs & product_ids
+        if overlap:
+            # 製品文書を含むなら単独の gold_source（＝その型番クエリ本体）でなければならない。
+            assert gs == overlap and len(gs) == 1, (
+                f"id={q['id']} の gold_source に製品文書が混入/混合している: {sorted(gs)}"
+            )
+
+
 def test_gold_source_ids_resolve_in_corpus(person):
     """#296: gold_source の各IDが実在する文書/過去回答であること（出典リンク先の担保）。"""
     doc_ids = {d["id"] for d in _load(SYN / "documents" / "documents.json")}
