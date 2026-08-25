@@ -16,15 +16,24 @@ import { useCurrentUser } from "@/components/CurrentUserProvider";
 import { ackNotifications, getNotifications } from "@/lib/api-client";
 import type { DeclineNotification } from "@/lib/api-types";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 const POLL_INTERVAL_MS = 15_000;
+const PANEL_WIDTH_PX = 320;
+const VIEWPORT_MARGIN_PX = 8;
 
 export function NotificationBell() {
   const { currentUserId } = useCurrentUser();
   const [items, setItems] = useState<DeclineNotification[]>([]);
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  // Panel left offset (relative to `containerRef`), clamped to the viewport.
+  // The bell's on-screen position depends on where the header happens to wrap
+  // (driven by real content width, not a fixed breakpoint — #316), so a static
+  // `left-0`/`right-0` class can put the panel off either edge depending on
+  // viewport width and header content. Measuring on open and clamping is the
+  // only way to keep it on-screen regardless of where the bell lands.
+  const [panelLeft, setPanelLeft] = useState<number | null>(null);
 
   useEffect(() => {
     if (currentUserId === null) {
@@ -64,6 +73,29 @@ export function NotificationBell() {
     return () => document.removeEventListener("mousedown", onOutside);
   }, [open]);
 
+  // Runs before paint so the panel never flashes at an unclamped position.
+  useLayoutEffect(() => {
+    if (!open) return;
+    function reposition() {
+      const container = containerRef.current;
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+      const panelWidth = Math.min(PANEL_WIDTH_PX, window.innerWidth - VIEWPORT_MARGIN_PX * 2);
+      // Default: right-align the panel under the bell (its usual position when
+      // the bell sits near the header's right edge); clamp into the viewport
+      // when that would run off either side.
+      const maxViewportLeft = window.innerWidth - panelWidth - VIEWPORT_MARGIN_PX;
+      const viewportLeft = Math.max(
+        VIEWPORT_MARGIN_PX,
+        Math.min(rect.right - panelWidth, maxViewportLeft),
+      );
+      setPanelLeft(viewportLeft - rect.left);
+    }
+    reposition();
+    window.addEventListener("resize", reposition);
+    return () => window.removeEventListener("resize", reposition);
+  }, [open]);
+
   function acknowledge(id: number) {
     setItems((prev) => prev.filter((item) => item.id !== id));
     if (currentUserId !== null) {
@@ -100,12 +132,12 @@ export function NotificationBell() {
         <div
           role="menu"
           aria-label="通知一覧"
-          // Anchored from the left below `md`: the header row wraps there
-          // (#288) and the bell becomes the leftmost item, so a right-0 panel
-          // would open mostly off the left edge of the viewport (#316). Above
-          // `md` the bell sits near the header's right edge, where right-0 is
-          // correct.
-          className="absolute left-0 z-10 mt-xs w-80 max-w-[90vw] rounded-lg border border-outline-variant bg-surface-container-lowest p-xs shadow-md md:right-0 md:left-auto"
+          // `left` is computed in the layout effect above and clamped to the
+          // viewport (#316) — where the bell lands on screen depends on real
+          // header content width, not a fixed breakpoint, so a static
+          // left-0/right-0 class can't stay correct at every width.
+          style={panelLeft !== null ? { left: `${panelLeft}px` } : undefined}
+          className="absolute z-10 mt-xs w-80 max-w-[calc(100vw-16px)] rounded-lg border border-outline-variant bg-surface-container-lowest p-xs shadow-md"
         >
           {items.length === 0 ? (
             <p className="p-sm text-on-surface-variant text-sm">新しい通知はありません。</p>
