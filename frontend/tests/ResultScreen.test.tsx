@@ -645,7 +645,7 @@ describe("ResultScreen — main line (person)", () => {
   });
 });
 
-describe("ResultScreen — auxiliary (prior_answer)", () => {
+describe("ResultScreen — single-candidate auxiliary route (prior_answer, #310)", () => {
   const auxState = state({
     route: { route: "prior_answer", reason: "2023/10/12に同様の質問に回答", confidence: 0.8 },
     recommend: {
@@ -660,39 +660,29 @@ describe("ResultScreen — auxiliary (prior_answer)", () => {
         },
       ],
     },
+    draft: { draft: "高梨さんへ。ご相談させてください。" },
   });
 
-  it("shows the person as evidence, with the past-answer record and both actions", () => {
+  it("goes straight to the main line (candidate card + draft), no intermediate screen", () => {
     renderResult(auxState);
-    expect(screen.getByText("この質問には、高梨さんが詳しそうです")).toBeInTheDocument();
-    expect(screen.getByText(/2023\/10\/12に同様の質問に回答/)).toBeInTheDocument();
-    // The record is the verbatim `answers` evidence — not a fabricated reuse count.
-    expect(screen.getByText("類似の質問に過去30件回答（うち有用と評価20件）")).toBeInTheDocument();
-    expect(screen.queryByText(/役立ちました/)).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "解決した" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "この方に追加で聞く" })).toBeInTheDocument();
-  });
-
-  it("drops to the main line when 追加で聞く is pressed", () => {
-    renderResult(auxState);
-    fireEvent.click(screen.getByRole("button", { name: "この方に追加で聞く" }));
     expect(screen.getByText("この質問は、人に聞くのが確実です")).toBeInTheDocument();
+    expect(screen.getByText(/2023\/10\/12に同様の質問に回答/)).toBeInTheDocument();
+    // The past-answer evidence is still visible — via the candidate's own reasons.
+    expect(screen.getByText(/類似の質問に過去30件回答（うち有用と評価20件）/)).toBeInTheDocument();
+    expect(screen.getByDisplayValue("高梨さんへ。ご相談させてください。")).toBeInTheDocument();
+    expect(screen.queryByText(/詳しそうです/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "この方に追加で聞く" })).not.toBeInTheDocument();
   });
 
-  it("shows a completion state when 解決した is pressed", () => {
-    renderResult(auxState);
-    fireEvent.click(screen.getByRole("button", { name: "解決した" }));
-    expect(screen.getByText("解決しました")).toBeInTheDocument();
-  });
-
-  it("falls back to placeholders and disables 追加で聞く when there is no main line", () => {
-    renderResult(state({ route: { route: "prior_answer", reason: "", confidence: 0.8 } }));
-    expect(screen.getByText("この質問には、詳しい方さんが詳しそうです")).toBeInTheDocument();
-    expect(screen.getByText(/同様の質問に過去に回答しています/)).toBeInTheDocument();
-    expect(screen.getByText("過去の回答実績を確認しています。")).toBeInTheDocument();
-    expect(screen.queryByText(/役立ちました/)).not.toBeInTheDocument();
-    // No candidates or draft to drop to → the ask-more action is disabled (no dead-end).
-    expect(screen.getByRole("button", { name: "この方に追加で聞く" })).toBeDisabled();
+  it("falls back to the reconnect placeholder when only a draft exists (no PriorAnswerView dead-end)", () => {
+    renderResult(
+      state({
+        route: { route: "prior_answer", reason: "", confidence: 0.8 },
+        draft: { draft: "本文" },
+      }),
+    );
+    expect(screen.getByText("この質問は、人に聞くのが確実です")).toBeInTheDocument();
+    expect(screen.getByText(/宛先候補を再取得しています/)).toBeInTheDocument();
   });
 });
 

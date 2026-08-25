@@ -85,7 +85,8 @@ export const PERSON_ROUTE_FRAMES: SseFrame[] = [
   { event: "draft", data: { draft: PERSON_ROUTE_DRAFT } },
 ];
 
-/** Non-terminal prior_answer stream → ResultScreen shows the PriorAnswerView. */
+/** Non-terminal prior_answer stream (single candidate) → reaches the same
+ * PersonRouteView result as the main line, with no intermediate screen (#310). */
 export const PRIOR_ANSWER_FRAMES: SseFrame[] = [
   {
     event: "understood",

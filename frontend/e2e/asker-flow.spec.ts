@@ -129,7 +129,7 @@ test.describe("asker flow", () => {
     await expect.poll(() => answerBody?.reply).toBe("現行はVPN機器で3拠点です");
   });
 
-  test("prior_answer 経路 → 詳しい人の提示 → 解決", async ({ page }) => {
+  test("prior_answer 経路（単一候補）→ 中間画面を挟まず下書きに到達 (#310)", async ({ page }) => {
     await mockEmployees(page);
     await mockAuth(page);
     await mockRecentQuestions(page);
@@ -149,10 +149,14 @@ test.describe("asker flow", () => {
     await page.getByRole("button", { name: "結果を見る" }).click();
     await page.waitForURL(/\/session\/[^/]+\/result$/);
 
-    // The prior-answer view presents the expert as evidence, not the answer.
-    await expect(page.getByRole("heading", { name: /詳しそうです/ })).toBeVisible();
-    await page.getByRole("button", { name: "解決した" }).click();
-    await expect(page.getByRole("heading", { name: "解決しました" })).toBeVisible();
+    // Same main-line screen as the multi-candidate case — no intermediate
+    // "evidence only" screen, no extra click to reach the draft.
+    await expect(
+      page.getByRole("heading", { name: "この質問は、人に聞くのが確実です" }),
+    ).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "聞き方の下書き" })).toHaveValue(
+      PERSON_ROUTE_DRAFT,
+    );
   });
 
   test("「最近のあなたの質問」パネルが履歴を表示する", async ({ page }) => {
