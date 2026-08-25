@@ -109,7 +109,9 @@ class SelfAnswerResult:
     are the ids of the evidence actually used (a subset of what was supplied) so the
     chat can render links back to each source. ``grounded`` is ``False`` when the
     evidence is insufficient to answer — the graph then falls back to routing to a
-    person (the tacit-knowledge path), never emits an ungrounded answer.
+    person (the tacit-knowledge path), never emits an ungrounded answer. A
+    ``grounded`` result ALWAYS carries at least one real citation: a grounded answer
+    with no surviving citation is treated as fabricated and downgraded to routing.
     """
 
     answer: str = ""

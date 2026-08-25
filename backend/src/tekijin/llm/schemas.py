@@ -73,10 +73,16 @@ class SelfAnswerSchema(BaseModel):
     )
 
     @model_validator(mode="after")
-    def _grounded_answer_is_nonempty(self) -> SelfAnswerSchema:
-        # A grounded answer must carry text — otherwise the graph would emit an empty
-        # "answer" instead of falling back to routing. (The reverse — grounded=false
-        # with stray text — is harmless: the graph ignores it and routes.)
-        if self.grounded and not self.answer.strip():
-            raise ValueError("answer is required when grounded is true")
+    def _grounded_requires_answer_and_citation(self) -> SelfAnswerSchema:
+        # A grounded answer must carry BOTH text and at least one citation — else the
+        # graph would emit an empty/uncited "answer" instead of falling back to
+        # routing. A grounded answer with zero citations is the strongest signal the
+        # model fabricated it (the composer verifies the ids are real; here we at
+        # least require it to claim one). (The reverse — grounded=false with stray
+        # text — is harmless: the graph ignores it and routes.)
+        if self.grounded:
+            if not self.answer.strip():
+                raise ValueError("answer is required when grounded is true")
+            if not self.cited_source_ids:
+                raise ValueError("cited_source_ids is required when grounded is true")
         return self

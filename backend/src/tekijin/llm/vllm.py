@@ -464,4 +464,11 @@ class VllmSelfAnswerModel:
             if sid in supplied and sid not in seen:
                 seen.add(sid)
                 cited.append(sid)
+        if not cited:
+            # Every cited id was invented (none matched the supplied evidence): the
+            # strongest signal the answer was fabricated, not composed from the
+            # evidence. Do NOT surface it — fall back to routing, and the chat keeps
+            # its guarantee that every self-answer carries a real source link (#291
+            # review). "grounded" therefore requires >=1 surviving real citation.
+            return SelfAnswerResult(answer="", cited_source_ids=[], grounded=False)
         return SelfAnswerResult(answer=out.answer, cited_source_ids=cited, grounded=True)

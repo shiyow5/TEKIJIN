@@ -1055,6 +1055,26 @@ def test_vllm_self_answer_returns_composed_answer_and_filters_citations() -> Non
     assert result.cited_source_ids == ["qa_1"]  # ghost dropped, dup removed
 
 
+def test_vllm_self_answer_downgrades_when_all_citations_hallucinated() -> None:
+    # grounded=true but EVERY cited id was invented -> after filtering, no real
+    # citation survives, so it is treated as fabricated and downgraded to routing
+    # (never surfaces an uncited "grounded" answer) — #291 review HIGH.
+    out = SelfAnswerSchema(
+        grounded=True, answer="根拠にない断定的な回答", cited_source_ids=["ghost_1", "ghost_2"]
+    )
+    result = VllmSelfAnswerModel(model=_FakeStructured(out)).compose("VPNの相談", _evidence())
+    assert result.grounded is False and result.answer == "" and result.cited_source_ids == []
+
+
+def test_self_answer_schema_requires_citation_when_grounded() -> None:
+    from pydantic import ValidationError
+
+    # A grounded answer must claim at least one source (defense in depth; the
+    # composer additionally verifies the ids are real).
+    with pytest.raises(ValidationError):
+        SelfAnswerSchema(grounded=True, answer="回答", cited_source_ids=[])
+
+
 def test_vllm_self_answer_ungrounded_passes_through() -> None:
     out = SelfAnswerSchema(grounded=False, answer="", cited_source_ids=[])
     result = VllmSelfAnswerModel(model=_FakeStructured(out)).compose("暗黙知の相談", _evidence())
