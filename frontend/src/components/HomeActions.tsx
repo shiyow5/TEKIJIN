@@ -115,9 +115,13 @@ const ACTIONS: Action[] = [
 export function HomeActions() {
   const { principal } = useAuth();
   const actions = ACTIONS.filter((action) => !action.adminOnly || principal?.is_admin);
+  // Admin sees all 3 cards (3-col grid); a regular user only sees 2 (#347), so a
+  // fixed 3-col grid would leave the third column's width as dead space on the
+  // right instead of the remaining cards filling the row (#368).
+  const gridColsClass = actions.length >= 3 ? "sm:grid-cols-3" : "sm:grid-cols-2";
 
   return (
-    <ul className="grid grid-cols-1 gap-md sm:grid-cols-3">
+    <ul className={`grid grid-cols-1 gap-md ${gridColsClass}`}>
       {actions.map((action) => (
         <li key={action.href}>
           <Link
