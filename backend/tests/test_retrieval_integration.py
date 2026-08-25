@@ -201,7 +201,7 @@ def test_hybrid_retriever_end_to_end(seed_counts, session, fake_embedder) -> Non
     past = result["past_answers"]
     assert past, "expected at least one fused past answer"
     top = past[0]
-    assert set(top) == {"qa_id", "score", "responder_id"}
+    assert set(top) == {"qa_id", "score", "responder_id", "reuse_count"}  # #327
     assert top["score"] > 0
     assert isinstance(top["responder_id"], int)
     # Unique body -> the exact-match answer is the unambiguous rank-0 hit.

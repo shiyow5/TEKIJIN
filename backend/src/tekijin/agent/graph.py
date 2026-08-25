@@ -117,6 +117,8 @@ def build_agent(
     retriever_top_k: int = 10,
     rrf_k: int = 60,
     bm25_weight: float | None = None,
+    prior_answer_reuse_min: int | None = None,
+    prior_answer_relevance_floor: float = 0.15,
 ):
     """Compile and return the C1-C8 agent graph.
 
@@ -156,6 +158,8 @@ def build_agent(
         # The composer re-hydrates evidence text from ids via the repository's batch
         # lookups (#69); only needed when self-answer is wired.
         fragment_source=Repository(session) if self_answer_model is not None else None,
+        prior_answer_reuse_min=prior_answer_reuse_min,
+        prior_answer_relevance_floor=prior_answer_relevance_floor,
     )
     # #70: the critic is wired only when a model is supplied. Off (the default) the
     # graph is byte-for-byte the pre-#70 flow — C6 -> C7 directly.

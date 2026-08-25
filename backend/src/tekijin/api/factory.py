@@ -56,6 +56,10 @@ def build_default_service(settings: Settings | None = None) -> AgentService:
         # From THIS settings instance (not the cached global) so a custom Settings
         # is honored when the graph builds its C4 retriever (#68).
         bm25_weight=settings.bm25_weight,
+        # #327: corpus-count routing for prior_answer from THIS settings instance
+        # (None = OFF keeps prior_answer dormant, C5 unchanged).
+        prior_answer_reuse_min=settings.prior_answer_reuse_min,
+        prior_answer_relevance_floor=settings.prior_answer_relevance_floor,
         # Backpressure admission limit (#180) from THIS settings instance.
         max_concurrent_runs=settings.max_concurrent_runs,
     )

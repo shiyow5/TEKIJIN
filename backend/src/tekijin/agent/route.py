@@ -85,12 +85,23 @@ def decide_route(
     prior_answer_sim: float = PRIOR_ANSWER_SIM,
     document_sim: float = DOCUMENT_SIM,
     person_weak_sim: float = PERSON_WEAK_SIM,
+    prior_answer_reuse_min: int | None = None,
+    prior_answer_relevance_floor: float = 0.0,
 ) -> RouteDecision:
     """Pick ``person`` / ``prior_answer`` / ``document`` from channel confidences.
 
     Deterministic: depends only on the three absolute similarities and whether
     candidate people exist — never on iteration order. The default landing spot
     is always ``person``.
+
+    ``prior_answer_reuse_min`` (default ``None`` = OFF) turns on **corpus-count
+    routing** for prior_answer (#119/#327): since Nemotron's answer cosine cannot
+    separate the route (``PRIOR_ANSWER_SIM`` is above the observed max), route on
+    whether the top retrieved past answer is a REUSED/canonical answer instead —
+    ``reuse_count`` is the very signal ``route_for`` used to define the gold. When
+    set, a top past answer with ``reuse_count >= prior_answer_reuse_min`` and
+    ``answer_confidence >= prior_answer_relevance_floor`` (a low noise floor, not a
+    discriminator) fires prior_answer before the dormant cosine gate below.
     """
 
     answer_conf = float(retrieval.get("answer_confidence", 0.0))
@@ -98,6 +109,21 @@ def decide_route(
     people_conf = float(retrieval.get("people_confidence", 0.0))
     candidate_people = retrieval.get("candidate_people") or []
     past_answers = retrieval.get("past_answers") or []
+
+    # #119/#327: corpus-count routing for prior_answer (OFF unless a reuse floor is
+    # supplied). Fires on a reused/canonical top answer rather than on cosine, which
+    # cannot separate this route under Nemotron. The relevance floor only screens
+    # out clearly-unrelated top hits (the retriever already returns query-matched
+    # answers); reuse_count does the discrimination.
+    if prior_answer_reuse_min is not None and past_answers:
+        top_answer = max(past_answers, key=lambda p: p.get("score", 0.0))
+        reuse = int(top_answer.get("reuse_count", 0) or 0)
+        if reuse >= prior_answer_reuse_min and answer_conf >= prior_answer_relevance_floor:
+            return RouteDecision(
+                PRIOR_ANSWER,
+                f"よく再利用される過去回答が該当（再利用 {reuse} 回）。回答者を提示します。",
+                answer_conf,
+            )
 
     # prior_answer needs BOTH a near-duplicate past QA AND actual past answers to
     # hand off to. answer_confidence already only counts questions that have
