@@ -831,7 +831,7 @@ def test_format_report_contains_all_metrics_and_breakdowns() -> None:
         lambda q: RankResult(list(q.gold_experts), "person", predicted_topics=list(q.gold_topics)),
     )
     text = format_report(report)
-    for label in ("Top-1 Accuracy", "Recall@3", "MRR", "Route Accuracy"):
+    for label in ("Top-1 Accuracy", "Hit@3", "Recall@3", "MRR", "Route Accuracy"):
         assert label in text
     assert "層別" in text and "L1" in text and "L2" in text  # per-layer breakdown
     assert "第2正解" in text  # anti-circularity (alt) line
