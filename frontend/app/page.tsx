@@ -3,9 +3,13 @@ import type { ReactNode } from "react";
 
 /**
  * Landing hub (#124). A real home, not a placeholder: a hero that states the
- * product's promise ("回答の出所は、常に人"), a primary call-to-action, role-oriented
- * action cards, and a three-step "how it works" strip. Every link points at an
- * existing route (#121). Server component — no client state.
+ * product's promise, a primary call-to-action, role-oriented action cards, and
+ * a three-step "how it works" strip. Every link points at an existing route
+ * (#121). Server component — no client state.
+ *
+ * The hero copy follows the #292 product direction: implicit knowledge is
+ * accumulated and converted into explicit knowledge over time, so the answer
+ * source is no longer framed as "always a person" (#324).
  */
 
 function IconChat() {
@@ -106,20 +110,18 @@ const ACTIONS: Action[] = [
 const STEPS: { n: string; title: string; body: string }[] = [
   { n: "1", title: "質問を書く", body: "カテゴリ選択は不要。ふだんの言葉でそのまま。" },
   { n: "2", title: "AIが取り次ぐ", body: "社内の実績から、答えられそうな人を推薦。" },
-  { n: "3", title: "人が答える", body: "回答の出所は常に人。AIは代わりに答えません。" },
+  { n: "3", title: "人が答える", body: "AIが選んだ相手が、あなたに直接回答します。" },
 ];
 
 export default function HomePage() {
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-lg py-lg">
       <section className="flex flex-col items-center gap-md rounded-xl border border-outline-variant bg-surface-container-low px-margin py-lg text-center">
-        <span className="rounded-full bg-secondary-container px-sm py-xs font-bold text-on-secondary-container text-xs">
-          回答の出所は、常に人。
-        </span>
         <h1 className="font-bold text-4xl text-on-surface tracking-tight">TEKIJIN</h1>
         <p className="max-w-2xl text-on-surface-variant leading-relaxed">
           社内の「訊きづらさ」を溶かす、質問と回答のマッチング支援ツール。
-          AIが最適な相手を見つけて取り次ぎ、回答はその人自身が返します。
+          答えがあれば出典つきでAIがその場に返し、なければ答えられる人に取り次ぎます。
+          やり取りが積み重なるほど、会社の知識として少しずつ蓄積されていきます。
         </p>
         <Link
           href="/questions"
