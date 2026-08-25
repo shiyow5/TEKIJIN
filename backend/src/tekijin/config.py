@@ -114,10 +114,13 @@ class Settings(BaseSettings):
 
     # Self-answer (#291): when the retrieved past Q&A / documents already hold the
     # answer, reply DIRECTLY with a cited answer instead of handing off to a person
-    # (the product pivot — "the answer is not always a person"). OFF by default until
-    # the composer is wired into the graph + verified on the recall-centric eval; this
-    # is the component-only slice (the graph does not call it yet).
-    self_answer_enabled: bool = False
+    # (the product pivot — "the answer is not always a person"). ENABLED after the
+    # full-graph E2E verification (#380, DGX, real Qwen3.6 + Nemotron): firing ONLY
+    # on the data-derived routes AFTER C5, it leaves person routing untouched
+    # (person recall 1.000 -> 1.000) while citing a grounded answer on the data
+    # rows (source recall 0.239, precision 0.739, grounded 0.261 — conservative,
+    # low-hallucination). Safe by construction: it never intercepts a person query.
+    self_answer_enabled: bool = True
 
     # #327: corpus-count routing for prior_answer. Nemotron's answer cosine cannot
     # separate this route (PRIOR_ANSWER_SIM sits above the observed max — see

@@ -49,9 +49,10 @@ def build_default_service(settings: Settings | None = None) -> AgentService:
         # Default OFF until it is verified on the DGX eval (part3).
         answerability_model=answerability_model if settings.answerability_enabled else None,
         answerability_threshold=settings.answerability_threshold,
-        # #291: wire the self-answer composer ONLY when enabled; else None keeps the
-        # pre-#291 data-derived routes (document terminal / hand-off). Default OFF
-        # until verified on the recall-centric eval (part3).
+        # #291: wire the self-answer composer when enabled; else None keeps the
+        # pre-#291 data-derived routes (document terminal / hand-off). ENABLED by
+        # default after the #380 full-graph E2E verification (fires only on the
+        # data-derived routes after C5 — person routing recall stays 1.000).
         self_answer_model=self_answer_model if settings.self_answer_enabled else None,
         # From THIS settings instance (not the cached global) so a custom Settings
         # is honored when the graph builds its C4 retriever (#68).
@@ -62,9 +63,10 @@ def build_default_service(settings: Settings | None = None) -> AgentService:
         prior_answer_relevance_floor=settings.prior_answer_relevance_floor,
         # #355: daily reports as C6 evidence (False = dormant, develop unchanged).
         daily_evidence=settings.daily_evidence_enabled,
-        # #371: fold C1 topics into the C4 retrieval query so multi-facet questions
-        # surface each facet's experts (DGX: R@3 0.79->0.83). False = dormant, develop
-        # unchanged; enable after the DGX re-verification confirms the +0.04.
+        # #371: fold C1 topics into the C4 retrieval query. DORMANT (False) and must
+        # stay OFF: the #380 full-graph E2E run showed folding real C1 topics
+        # (acc@1=0.750) into the query BREAKS routing (person recall 1.000->0.776);
+        # the retrieval-harness "+0.04" was an oracle-topic artifact. See config.py.
         query_expansion_enabled=settings.query_expansion_enabled,
         # #357 slice 4c: wire the knowledge-answer step ONLY when enabled; else None
         # keeps the pre-#357 graph (no knowledge_answer node). Default OFF until the
