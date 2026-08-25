@@ -19,6 +19,7 @@
 import { useAuth } from "@/components/AuthProvider";
 import { useCurrentUser } from "@/components/CurrentUserProvider";
 import { NotificationBell } from "@/components/NotificationBell";
+import type { EmployeeSummary } from "@/lib/api-types";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
@@ -103,6 +104,70 @@ function NavLinks({
   );
 }
 
+// The admin-only demo switcher (badge + label + select + retry button),
+// factored out so it can be rendered inline in the header row at every
+// breakpoint while logout moves into the hamburger menu on narrow screens
+// (#288) — the row itself needs `flex-wrap` (already on its parent) to absorb
+// this cluster gracefully instead of overflowing.
+function UserSwitcher({
+  loading,
+  error,
+  reload,
+  ready,
+  currentUserId,
+  employees,
+  onChange,
+  className,
+}: {
+  loading: boolean;
+  error: boolean;
+  reload: () => void;
+  ready: boolean;
+  currentUserId: string | null;
+  employees: EmployeeSummary[];
+  onChange: (id: string) => void;
+  className: string;
+}) {
+  return (
+    <label
+      className={className}
+      aria-busy={loading}
+      title="管理者のデモ機能。動作確認のため、任意の利用者になりかわって表示します。"
+    >
+      <span className="rounded bg-surface-container-high px-xs py-[1px] text-on-surface-variant">
+        デモ用
+      </span>
+      <span>利用者を切替</span>
+      <select
+        aria-label="利用者を切替（管理者デモ機能）"
+        className="rounded-md border border-outline bg-surface-container-lowest px-sm py-xs text-sm disabled:text-on-surface-variant"
+        value={currentUserId ?? ""}
+        disabled={!ready}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        {ready ? (
+          employees.map((employee) => (
+            <option key={employee.id} value={employee.id}>
+              {employee.dept ? `${employee.name}（${employee.dept}）` : employee.name}
+            </option>
+          ))
+        ) : (
+          <option value="">{loading ? "読み込み中…" : "利用できません"}</option>
+        )}
+      </select>
+      {error ? (
+        <button
+          type="button"
+          onClick={reload}
+          className="rounded-md border border-outline px-sm py-xs text-primary text-xs transition-colors hover:bg-surface-container-low"
+        >
+          利用者一覧の取得に失敗しました。再試行
+        </button>
+      ) : null}
+    </label>
+  );
+}
+
 export function AppHeader() {
   const { employees, currentUserId, setCurrentUserId, loading, error, reload, canSwitch } =
     useCurrentUser();
@@ -175,56 +240,33 @@ export function AppHeader() {
             poll for, so the bell stays out of the tree entirely. */}
           {principal ? <NotificationBell /> : null}
           {canSwitch ? (
-            <label
-              className="flex items-center gap-xs text-on-surface-variant text-xs"
-              aria-busy={loading}
-              title="管理者のデモ機能。動作確認のため、任意の利用者になりかわって表示します。"
-            >
-              <span className="rounded bg-surface-container-high px-xs py-[1px] text-on-surface-variant">
-                デモ用
-              </span>
-              <span>利用者を切替</span>
-              <select
-                aria-label="利用者を切替（管理者デモ機能）"
-                className="rounded-md border border-outline bg-surface-container-lowest px-sm py-xs text-sm disabled:text-on-surface-variant"
-                value={ready ? currentUserId : ""}
-                disabled={!ready}
-                onChange={(e) => {
-                  setCurrentUserId(e.target.value);
-                  router.push("/");
-                }}
-              >
-                {ready ? (
-                  employees.map((employee) => (
-                    <option key={employee.id} value={employee.id}>
-                      {employee.dept ? `${employee.name}（${employee.dept}）` : employee.name}
-                    </option>
-                  ))
-                ) : (
-                  <option value="">{loading ? "読み込み中…" : "利用できません"}</option>
-                )}
-              </select>
-              {error ? (
-                <button
-                  type="button"
-                  onClick={reload}
-                  className="rounded-md border border-outline px-sm py-xs text-primary text-xs transition-colors hover:bg-surface-container-low"
-                >
-                  利用者一覧の取得に失敗しました。再試行
-                </button>
-              ) : null}
-            </label>
+            <UserSwitcher
+              loading={loading}
+              error={error}
+              reload={reload}
+              ready={ready}
+              currentUserId={currentUserId}
+              employees={employees}
+              onChange={(id) => {
+                setCurrentUserId(id);
+                router.push("/");
+              }}
+              className="flex flex-wrap items-center gap-xs text-on-surface-variant text-xs"
+            />
           ) : (
             <span className="text-on-surface-variant text-sm">
               {principal?.name ?? ""}
               {principal?.is_admin ? "（管理者）" : ""}
             </span>
           )}
+          {/* Logout stays reachable inline on desktop; on narrow screens it
+            moves into the hamburger menu so the row stays bell + switcher +
+            menu toggle (#288). */}
           {principal ? (
             <button
               type="button"
               onClick={handleLogout}
-              className="rounded-md border border-outline px-sm py-xs text-on-surface-variant text-sm transition-colors hover:bg-surface-container-low"
+              className="hidden rounded-md border border-outline px-sm py-xs text-on-surface-variant text-sm transition-colors hover:bg-surface-container-low md:block"
             >
               ログアウト
             </button>
@@ -256,6 +298,17 @@ export function AppHeader() {
             onNavigate={() => setMenuOpen(false)}
             className="flex flex-col gap-xs"
           />
+          {principal ? (
+            <div className="mt-sm border-outline-variant border-t pt-sm">
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="rounded-md border border-outline px-sm py-xs text-on-surface-variant text-sm transition-colors hover:bg-surface-container-low"
+              >
+                ログアウト
+              </button>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </header>
