@@ -29,7 +29,7 @@ VALID_KINDS: tuple[str, ...] = ("case", "procedure", "decision")
 
 # Review lifecycle. A unit is ``unreviewed`` at extraction and only an
 # ``approved`` unit is trusted by retrieval / self-answer; ``rejected`` marks a
-# mis-extraction. The human-review导线 is #354.
+# mis-extraction. The human-review導線 is #354.
 VALID_REVIEW_STATUSES: tuple[str, ...] = ("unreviewed", "approved", "rejected")
 
 
@@ -127,7 +127,9 @@ def list_knowledge_units(
     """Every knowledge unit, ordered by id; optionally filtered by review status.
 
     ``review_status=None`` returns all (the review/management view, #354);
-    ``'unreviewed'`` is the extraction queue awaiting a human.
+    ``'unreviewed'`` is the extraction queue awaiting a human. Unbounded by
+    design at this slice (skeleton, no caller); the #354 management endpoint that
+    wires this must add ``limit``/``offset`` pagination before exposing it.
     """
 
     stmt = select(KnowledgeUnit).order_by(KnowledgeUnit.id)

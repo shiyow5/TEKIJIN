@@ -414,7 +414,7 @@ class KnowledgeUnit(Base):
     hallucinated unit has no home. ``(source_type, source_id)`` is UNIQUE, making
     re-extraction an idempotent upsert (one source record → at most one unit for
     the PoC). ``review_status`` gates a unit into the retrieval/self-answer path:
-    only ``approved`` units are trusted (the human-review导线 is #354). ``topics``
+    only ``approved`` units are trusted (the human-review導線 is #354). ``topics``
     reuses the same 22-word vocabulary as the eval gold, so knowledge retrieval and
     the existing scorer speak one language. ``embedding`` indexes the *unit* (the
     structure), not the raw text — filled by a later ingestion slice, hence NULL
