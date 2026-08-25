@@ -1072,8 +1072,20 @@ def test_self_answer_schema_requires_answer_when_grounded() -> None:
     assert SelfAnswerSchema(grounded=False).grounded is False
 
 
-def test_self_answer_settings_default_dormant() -> None:
-    assert _settings().self_answer_enabled is False
+def test_self_answer_settings_enabled_by_default() -> None:
+    # #291 enabled after the #380 full-graph E2E verification: self-answer fires
+    # only on the data-derived routes (after C5), leaving person routing at recall
+    # 1.000 while citing grounded answers on the data rows. Safe by construction.
+    assert _settings().self_answer_enabled is True
+
+
+def test_build_default_service_wires_self_answer_per_flag() -> None:
+    # Enabling the flag must actually wire the composer into the service (else the
+    # graph never self-answers); disabling keeps the pre-#291 data routes.
+    from tekijin.api.factory import build_default_service
+
+    assert build_default_service(_settings(self_answer_enabled=True))._self_answer is not None
+    assert build_default_service(_settings(self_answer_enabled=False))._self_answer is None
 
 
 def _evidence() -> list[CitedEvidence]:

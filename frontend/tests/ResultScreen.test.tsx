@@ -156,6 +156,32 @@ describe("ResultScreen — terminal-only replay (hard reload)", () => {
       screen.getByRole("heading", { level: 1, name: "回答をお届けします" }),
     ).toBeInTheDocument();
   });
+
+  it("renders the self-answer citations on reload replay (#291/#382)", () => {
+    // A grounded self-answer replayed after a hard reload must keep its sourcing
+    // links, not just the answer text — otherwise the auto-composed answer loses
+    // its verifiability. Regression for the #382 review MEDIUM (citations were only
+    // rendered on the live ProcessingScreen).
+    renderResult(
+      state({
+        terminal: true,
+        message: {
+          status: "self_answered",
+          message: "社内の記録によると、VPNは保守時間内に更新します。",
+          citations: [
+            { source_id: "doc_003", kind: "document" },
+            { source_id: "ans_0042", kind: "qa" },
+          ],
+        },
+      }),
+    );
+    expect(screen.getByText("出典")).toBeInTheDocument();
+    // document 出典は文書ビューアへのリンク。
+    const docLink = screen.getByRole("link", { name: /doc_003/ });
+    expect(docLink).toHaveAttribute("href", expect.stringContaining("/documents/doc_003"));
+    // qa 出典は非リンクのチップ（ビューア未実装）。
+    expect(screen.getByText(/過去の回答 ans_0042/)).toBeInTheDocument();
+  });
 });
 
 describe("ResultScreen — stream error", () => {
