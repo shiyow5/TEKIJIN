@@ -2,7 +2,7 @@ import type { CurrentUserContextValue } from "@/components/CurrentUserProvider";
 import { InboxScreen } from "@/components/InboxScreen";
 import type { HandoffResponse, InboxItem } from "@/lib/api-types";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const useCurrentUserMock = vi.fn<() => CurrentUserContextValue>();
 vi.mock("@/components/CurrentUserProvider", () => ({
@@ -94,17 +94,18 @@ beforeEach(() => {
   advanceSessionMock.mockResolvedValue(undefined);
   // Since #246 the inbox renders the detail pane (AnswerScreen) for the
   // auto-selected first item, so `getHandoff` fires even in tests that only
-  // assert on the list and return as soon as it appears. Those tests can hand
-  // control back before the effect runs, and `afterEach`'s restoreAllMocks
-  // then strips the implementation — leaving `getHandoff(...)` returning
-  // undefined and `.then` throwing. A default keeps a late call harmless;
-  // tests that care still override it. (#303)
+  // assert on the list. A default keeps such a call harmless whenever it
+  // lands; tests that care still override it. (#303)
   getHandoffMock.mockResolvedValue(handoffFor(ITEM));
 });
 
-afterEach(() => {
-  vi.restoreAllMocks();
-});
+// No `afterEach(vi.restoreAllMocks)` here on purpose. There is no `vi.spyOn` in
+// this file, so it would have nothing to restore — but it *does* strip the mock
+// implementations, and since #246 the inbox renders the detail pane, whose
+// `getHandoff` effect can still land after a test that only asserted on the
+// list has handed control back. A stripped mock returns undefined there and
+// `getHandoff(...).then` throws. `beforeEach` resets every mock explicitly, so
+// isolation between tests does not depend on restoring. (#303)
 
 describe("InboxScreen", () => {
   it("shows loading until the current user resolves", () => {
