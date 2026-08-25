@@ -15,7 +15,15 @@ from typing import Any
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
-from tekijin.models.tables import Answer, Employee, EvalRun, Event, Question, Recommendation
+from tekijin.models.tables import (
+    Answer,
+    Employee,
+    EvalRun,
+    Event,
+    Message,
+    Question,
+    Recommendation,
+)
 
 # One recorded run stage: (stage name, started_at, ended_at, meta).
 EventRow = tuple[str, dt.datetime, dt.datetime, dict[str, Any] | None]
@@ -62,11 +70,14 @@ def persist_question(
 
 
 def delete_question(session: Session, question_id: str) -> None:
-    """Delete a question and everything that references it, children first (#207).
+    """Delete a question and everything that references it, children first (#207, #286).
 
     ``answers`` / ``recommendations`` / ``events`` all FK ``questions.id`` with no
     ``ON DELETE CASCADE``, so a bare question delete would raise ``IntegrityError``
-    mid-flush. Delete the children first, then the question.
+    mid-flush. ``messages`` is one FK hop further out — it keys off
+    ``recommendation_id``, not ``question_id`` (see :class:`Message`) — so its rows
+    are found via this question's recommendation ids before those recommendations
+    are deleted. Delete grandchildren, then children, then the question.
 
     Scoped to one question by id. The caller confirms the question exists (via
     ``question_asker_id``) and authorizes the actor (only the asker or an admin)
@@ -74,6 +85,13 @@ def delete_question(session: Session, question_id: str) -> None:
     deletes nothing (idempotent).
     """
 
+    recommendation_ids = (
+        session.execute(select(Recommendation.id).where(Recommendation.question_id == question_id))
+        .scalars()
+        .all()
+    )
+    if recommendation_ids:
+        session.execute(delete(Message).where(Message.recommendation_id.in_(recommendation_ids)))
     session.execute(delete(Answer).where(Answer.question_id == question_id))
     session.execute(delete(Recommendation).where(Recommendation.question_id == question_id))
     session.execute(delete(Event).where(Event.question_id == question_id))
