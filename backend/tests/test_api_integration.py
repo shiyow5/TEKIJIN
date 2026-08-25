@@ -112,7 +112,16 @@ def _app_client(service: AgentService) -> TestClient:
     return client
 
 
-def _client(engine, embedder, *, retriever=None, scorer=None, checkpointer=None) -> TestClient:
+def _client(
+    engine,
+    embedder,
+    *,
+    retriever=None,
+    scorer=None,
+    checkpointer=None,
+    answerability_model=None,
+    answerability_threshold=40,
+) -> TestClient:
     service = AgentService(
         session_factory=get_sessionmaker(engine),
         checkpointer=checkpointer or MemorySaver(),
@@ -120,11 +129,25 @@ def _client(engine, embedder, *, retriever=None, scorer=None, checkpointer=None)
         intent_model=KeywordIntentModel(),
         sufficiency_model=RuleSufficiencyModel(),
         draft_model=TemplateDraftModel(),
+        answerability_model=answerability_model,
+        answerability_threshold=answerability_threshold,
         retriever=retriever,
         scorer=scorer,
         now_factory=lambda: NOW,
     )
     return _app_client(service)
+
+
+class _FixedAnswerability:
+    """#70 critic stand-in with a fixed confidence, for the SSE/persist tests."""
+
+    def __init__(self, confidence: int) -> None:
+        self._confidence = confidence
+
+    def assess(self, question, candidate_evidence):
+        from tekijin.agent.protocols import AnswerabilityResult
+
+        return AnswerabilityResult(confidence=self._confidence, reason="判定理由")
 
 
 def _parse_sse(text: str) -> list[tuple[str, dict]]:
@@ -520,6 +543,67 @@ def test_document_route_stamps_resolved_at(seed_counts, engine, fake_embedder) -
         assert q is not None and q.route == "document"
         assert q.resolved_at is not None
         # No phantom recommendation rows for the self-resolving document route.
+        assert check.query(Recommendation).filter(Recommendation.question_id == q.id).count() == 0
+    finally:
+        check.close()
+
+
+# --------------------------------------------------------------------------- #
+# answerability critic (#70): SSE + persistence gated on the critic's verdict
+# --------------------------------------------------------------------------- #
+def test_answerability_accept_surfaces_recommend_and_persists(
+    seed_counts, engine, fake_embedder
+) -> None:
+    # A confident critic behaves exactly like the pre-#70 happy path: recommend
+    # event fires and the shown rows are persisted for the outcome record.
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2, 3], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2, 3)),
+        answerability_model=_FixedAnswerability(confidence=85),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "ans_ok"})
+    names = [e for e, _ in _events(client, "ans_ok")]
+    assert names == ["understood", "route", "recommend", "draft"]  # unchanged flow
+
+    check = get_sessionmaker(engine)()
+    try:
+        q = check.query(Question).filter(Question.session_id == "ans_ok").first()
+        assert q is not None
+        assert check.query(Recommendation).filter(Recommendation.question_id == q.id).count() == 3
+    finally:
+        check.close()
+
+
+def test_answerability_reject_suppresses_recommend_and_persists_nothing(
+    seed_counts, engine, fake_embedder
+) -> None:
+    # A rejecting critic: NO recommend event (the held one is dropped), NO draft,
+    # a `no_expert` terminal message, and — critically — NO Recommendation rows
+    # (a rejected set must never become a phantom pending row / inbox dead-link,
+    # the same integrity guard as the document route, #281).
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2, 3], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2, 3)),
+        answerability_model=_FixedAnswerability(confidence=15),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "ans_ng"})
+    events = _events(client, "ans_ng")
+    names = [e for e, _ in events]
+    assert "recommend" not in names and "draft" not in names
+    assert names[-1] == "message"
+    message = next(data for e, data in events if e == "message")
+    assert message["status"] == "no_expert"
+    assert "社内の実績が見つかりません" in message["message"]
+
+    check = get_sessionmaker(engine)()
+    try:
+        q = check.query(Question).filter(Question.session_id == "ans_ng").first()
+        assert q is not None and q.route == "person"
+        # No phantom recommendation rows for the rejected hand-off.
         assert check.query(Recommendation).filter(Recommendation.question_id == q.id).count() == 0
     finally:
         check.close()
@@ -1926,7 +2010,16 @@ def test_postgres_checkpointer_persists(
 # --------------------------------------------------------------------------- #
 # service-level helper for durability / concurrency tests (no TestClient/SSE)
 # --------------------------------------------------------------------------- #
-def _svc(engine, embedder, *, retriever=None, scorer=None, now_factory=None) -> AgentService:
+def _svc(
+    engine,
+    embedder,
+    *,
+    retriever=None,
+    scorer=None,
+    now_factory=None,
+    answerability_model=None,
+    answerability_threshold=40,
+) -> AgentService:
     return AgentService(
         session_factory=get_sessionmaker(engine),
         checkpointer=MemorySaver(),
@@ -1934,6 +2027,8 @@ def _svc(engine, embedder, *, retriever=None, scorer=None, now_factory=None) -> 
         intent_model=KeywordIntentModel(),
         sufficiency_model=RuleSufficiencyModel(),
         draft_model=TemplateDraftModel(),
+        answerability_model=answerability_model,
+        answerability_threshold=answerability_threshold,
         retriever=retriever,
         scorer=scorer,
         now_factory=now_factory or (lambda: NOW),
@@ -2246,6 +2341,57 @@ def test_disconnect_after_recommend_then_continue_and_outcome(
     recs = _recs_for(engine, _latest_question(engine).id)
     assert [r.rank for r in recs] == [1, 2]  # NOT double-inserted on continuation
     assert recs[0].outcome == "accepted"  # recorded via durable DB fallback
+
+
+class _FlakyAnswerability:
+    """#70 critic that fails once (transient vLLM error) then accepts — to exercise
+    the reconnect-after-error path where C6 already committed but the critic had
+    not run in the failed segment."""
+
+    def __init__(self, confidence: int) -> None:
+        self._confidence = confidence
+        self.calls = 0
+
+    def assess(self, question, candidate_evidence):
+        self.calls += 1
+        if self.calls == 1:
+            raise RuntimeError("transient critic error")
+        from tekijin.agent.protocols import AnswerabilityResult
+
+        return AnswerabilityResult(confidence=self._confidence, reason="ok")
+
+
+def test_answerability_reconnect_after_critic_error_persists(
+    seed_counts, engine, fake_embedder
+) -> None:
+    # CRITICAL guard (#70 review): the critic raises AFTER C6 has checkpointed
+    # (next=answerability) but before it accepted, so the run parks at the
+    # `answerability` node with the deferred recs NOT yet persisted. On reconnect,
+    # a NEW _run segment resumes at `answerability` with empty pending_* locals —
+    # the fix re-derives the shown recs from durable state so the accepted hand-off
+    # is still persisted + surfaced (else the outcome record is silently lost).
+    critic = _FlakyAnswerability(confidence=85)
+    svc = _svc(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2]),
+        scorer=_FakeScorer(_recs(1, 2)),
+        answerability_model=critic,
+    )
+    svc.start_question("recon", 10, GOOD_Q)
+    first = [ev.event for ev in svc.stream_events("recon")]
+    assert "error" in first  # critic raised -> parked at answerability, no persist yet
+    q = _latest_question(engine)
+    assert _recs_for(engine, q.id) == []  # nothing persisted on the failed segment
+
+    # Reconnect: resumes at answerability; the critic now accepts.
+    second = [ev.event for ev in svc.stream_events("recon")]
+    assert "recommend" in second and "draft" in second  # released on the resumed segment
+    recs = _recs_for(engine, q.id)
+    assert [r.rank for r in recs] == [1, 2]  # persisted despite the mid-run error
+
+    svc.submit_resume("recon", outcome="accepted")
+    assert _recs_for(engine, q.id)[0].outcome == "accepted"  # outcome recorded, not lost
 
 
 # --------------------------------------------------------------------------- #

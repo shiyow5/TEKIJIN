@@ -19,7 +19,13 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
 from tekijin.agent.nodes import AgentNodes
-from tekijin.agent.protocols import DraftModel, IntentModel, Retriever, SufficiencyModel
+from tekijin.agent.protocols import (
+    AnswerabilityModel,
+    DraftModel,
+    IntentModel,
+    Retriever,
+    SufficiencyModel,
+)
 from tekijin.agent.route import DOCUMENT, PERSON, PRIOR_ANSWER
 from tekijin.agent.state import AgentState
 from tekijin.agent.stubs import KeywordIntentModel, RuleSufficiencyModel, TemplateDraftModel
@@ -58,6 +64,13 @@ def _after_c6(state: AgentState) -> str:
     return "c7_draft" if state.get("recommendations") else "no_candidate"
 
 
+def _after_answerability(state: AgentState) -> str:
+    # #70: the critic node already compared its 0–100 score to the injected
+    # threshold and wrote ``answerable``; the router stays pure. Below threshold
+    # -> graceful ``no_expert`` terminal instead of handing off a weak match.
+    return "c7_draft" if state.get("answerable") else "no_expert"
+
+
 def _after_send(state: AgentState) -> str:
     # The outcome is external input (Command(resume=...)); validate it. Only the
     # known values proceed — anything else (None, a typo, a payload) loops back to
@@ -83,6 +96,8 @@ def build_agent(
     intent_model: IntentModel | None = None,
     sufficiency_model: SufficiencyModel | None = None,
     draft_model: DraftModel | None = None,
+    answerability_model: AnswerabilityModel | None = None,
+    answerability_threshold: int = 40,
     retriever: Retriever | None = None,
     scorer: ExpertiseScorer | None = None,
     weights: Weights = DEFAULT_WEIGHTS,
@@ -101,6 +116,10 @@ def build_agent(
         retriever: C4 component with ``.search(query) -> dict``; default
             ``HybridRetriever``.
         scorer: C6 scorer; default ``ExpertiseScorer`` over ``session``.
+        answerability_model: optional #70 evidence-sufficiency critic. ``None``
+            (default) compiles the pre-#70 graph unchanged — no critique node is
+            added. When supplied, a critique node runs between C6 and C7 and
+            rejects below ``answerability_threshold`` to a ``no_expert`` terminal.
         checkpointer: LangGraph checkpointer; default ``MemorySaver``.
     """
 
@@ -114,7 +133,12 @@ def build_agent(
             embedder, session, top_k=retriever_top_k, rrf_k=rrf_k, bm25_weight=bm25_weight
         ),
         scorer=scorer or ExpertiseScorer(Repository(session), weights=weights),
+        answerability_model=answerability_model,
+        answerability_threshold=answerability_threshold,
     )
+    # #70: the critic is wired only when a model is supplied. Off (the default) the
+    # graph is byte-for-byte the pre-#70 flow — C6 -> C7 directly.
+    critique_wired = answerability_model is not None
 
     graph = StateGraph(AgentState)
     graph.add_node("reset", nodes.reset)
@@ -134,6 +158,9 @@ def build_agent(
     graph.add_node("document", nodes.document)
     graph.add_node("no_candidate", nodes.no_candidate)
     graph.add_node("unresolved_intent", nodes.unresolved_intent)
+    if critique_wired:
+        graph.add_node("answerability", nodes.answerability)
+        graph.add_node("no_expert", nodes.no_expert)
 
     # START -> reset -> C1. ``reset`` clears per-question control fields on a fresh
     # invoke; ``resume`` bypasses START, so mid-flow interrupts keep their state.
@@ -160,11 +187,22 @@ def build_agent(
         {PERSON: "c6_score", PRIOR_ANSWER: "prior_answer", DOCUMENT: "c6_score"},
     )
     graph.add_edge("prior_answer", "c6_score")
+    # #70: when the critic is wired, the hand-off branch first passes through the
+    # answerability node; _after_c6 is unchanged (still returns "c7_draft"), only
+    # its target is redirected. The document/no_candidate terminals are untouched.
+    handoff_target = "answerability" if critique_wired else "c7_draft"
     graph.add_conditional_edges(
         "c6_score",
         _after_c6,
-        {"c7_draft": "c7_draft", "no_candidate": "no_candidate", "document": "document"},
+        {"c7_draft": handoff_target, "no_candidate": "no_candidate", "document": "document"},
     )
+    if critique_wired:
+        graph.add_conditional_edges(
+            "answerability",
+            _after_answerability,
+            {"c7_draft": "c7_draft", "no_expert": "no_expert"},
+        )
+        graph.add_edge("no_expert", END)
     graph.add_edge("c7_draft", "send")
     graph.add_conditional_edges(
         "send",

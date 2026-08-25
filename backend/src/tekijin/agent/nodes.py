@@ -16,6 +16,7 @@ from typing import Any, cast
 from langgraph.types import interrupt
 
 from tekijin.agent.protocols import (
+    AnswerabilityModel,
     DraftModel,
     IntentModel,
     IntentResult,
@@ -42,6 +43,34 @@ def _top_by_score(items: Sequence[Mapping[str, Any]]) -> Mapping[str, Any] | Non
     if not items:
         return None
     return max(items, key=lambda item: float(item.get("score", 0.0)))
+
+
+def answerability_evidence(recommendations: Sequence[Mapping[str, Any]]) -> list[str]:
+    """One track-record summary line per ranked candidate, for the #70 critic.
+
+    The evidence-sufficiency critic judges "can the company answer this in-house"
+    from the *shown* candidates' track record — so we hand it exactly what C6
+    produced: each candidate's name/dept plus its scored ``reasons`` details
+    (self-reported skills, certifications, past answers…). Candidates with no
+    reasons still contribute a line (name/dept), because the critic's job is to
+    weigh how strong that record is — an empty ``recommendations`` yields ``[]``,
+    which the critic reads as "nobody in-house" and rejects.
+    """
+
+    lines: list[str] = []
+    for rec in recommendations:
+        name = str(rec.get("name") or "").strip()
+        dept = str(rec.get("dept") or "").strip()
+        who = f"{name}（{dept}）" if dept else name
+        details = [
+            str(r.get("detail") or "").strip()
+            for r in (rec.get("reasons") or [])
+            if str(r.get("detail") or "").strip()
+        ]
+        line = f"{who}: {'; '.join(details)}" if details else who
+        if line.strip():
+            lines.append(line)
+    return lines
 
 
 def draft_context(state: Mapping[str, Any]) -> tuple[list[str], dict[str, str]]:
@@ -76,6 +105,8 @@ class AgentNodes:
         embedder: Embedder,
         retriever: Retriever,
         scorer: ExpertiseScorer,
+        answerability_model: AnswerabilityModel | None = None,
+        answerability_threshold: int = 40,
     ) -> None:
         self._intent = intent_model
         self._sufficiency = sufficiency_model
@@ -83,6 +114,11 @@ class AgentNodes:
         self._embedder = embedder
         self._retriever = retriever
         self._scorer = scorer
+        # #70: optional evidence-sufficiency critic between C6 and C7. ``None``
+        # (default) keeps the graph exactly as before — no critique node is even
+        # added (see build_agent), so this is inert unless explicitly wired.
+        self._answerability = answerability_model
+        self._answerability_threshold = answerability_threshold
 
     # -- entry: validate input, reset per-question control fields ---------
     def reset(self, state: AgentState) -> AgentState:
@@ -124,6 +160,11 @@ class AgentNodes:
             "prior_answer_note": None,
             "pinned_responder_id": None,
             "recommendations": [],
+            # #70: clear the critic's per-question verdict so a second question on
+            # the same thread_id never reads a prior run's stale score/reason.
+            "answerability_confidence": 0,
+            "answerability_reason": None,
+            "answerable": False,
             "draft": None,
             "outcome": None,
             "answer": None,
@@ -293,6 +334,28 @@ class AgentNodes:
         fresh = cast("list[dict[str, Any]]", result["recommendations"])
         return {"recommendations": existing + fresh}
 
+    # -- answerability critic (#70): can the company answer this in-house? -
+    def answerability(self, state: AgentState) -> AgentState:
+        """Rate the shown candidates' evidence 0–100 and decide accept/reject.
+
+        Runs only when a critic is wired (build_agent adds this node then). A
+        plausible topic does not imply an in-house expert (海外法務/知財/製造制御…),
+        which the topic classifier cannot catch — so we score the *evidence* and
+        reject BELOW the injected threshold to the ``no_expert`` terminal instead
+        of handing off a weak match. The threshold decision is made here (not in
+        the pure router) so the router only reads a boolean.
+        """
+
+        assert self._answerability is not None  # only reached when wired
+        recs = state.get("recommendations") or []
+        evidence = answerability_evidence(recs)
+        result = self._answerability.assess(state["question"], evidence)
+        return {
+            "answerability_confidence": result.confidence,
+            "answerability_reason": result.reason,
+            "answerable": result.confidence >= self._answerability_threshold,
+        }
+
     # -- C7: draft the request (LLM stub) ---------------------------------
     def c7_draft(self, state: AgentState) -> AgentState:
         top = (state.get("recommendations") or [])[0]
@@ -361,6 +424,22 @@ class AgentNodes:
     def no_candidate(self, state: AgentState) -> AgentState:
         return {
             "answer": "現時点で適任者が見つかりませんでした。条件を変えて、もう一度お試しください。"
+        }
+
+    def no_expert(self, state: AgentState) -> AgentState:
+        # #70: reached when C6 DID rank candidates but the answerability critic
+        # judged the in-house track record insufficient — a "社内に痕跡が無い領域"
+        # (海外法務/知財/製造制御…) where a plausible topic hides a real gap. Fail
+        # gracefully; distinct from ``no_candidate`` (nobody scored at all).
+        #
+        # Deliberately a FIXED message: the critic's ``answerability_reason`` is
+        # kept in state for server-side logging only and is NOT interpolated here.
+        # It is free LLM text derived from the (now suppressed) candidates' names/
+        # departments, so echoing it would re-surface the very people this reject
+        # path exists to withhold — defeating the recommend/persist suppression.
+        return {
+            "answer": "ご相談の領域に対応できる社内の実績が見つかりませんでした。"
+            "恐れ入りますが、社外の専門窓口へのご相談もご検討ください。"
         }
 
     def unresolved_intent(self, state: AgentState) -> AgentState:

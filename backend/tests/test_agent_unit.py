@@ -619,3 +619,44 @@ def test_answerability_stub_scales_with_evidence_count() -> None:
     assert 0 < one.confidence < three.confidence <= 100
     # Blank lines do not count as evidence.
     assert model.assess("q", ["  ", ""]).confidence == 0
+
+
+# --------------------------------------------------------------------------- #
+# answerability evidence builder + router (#70 part2)
+# --------------------------------------------------------------------------- #
+def test_answerability_evidence_empty_when_no_recommendations() -> None:
+    from tekijin.agent.nodes import answerability_evidence
+
+    assert answerability_evidence([]) == []
+
+
+def test_answerability_evidence_one_line_per_candidate_with_reasons() -> None:
+    from tekijin.agent.nodes import answerability_evidence
+
+    recs = [
+        {
+            "person_id": 1,
+            "name": "山田",
+            "dept": "技術部",
+            "reasons": [
+                {"type": "skill", "detail": "VPN構築の実績"},
+                {"type": "cert", "detail": "ネットワーク資格"},
+            ],
+        },
+        {"person_id": 2, "name": "佐藤", "dept": None, "reasons": []},
+    ]
+    lines = answerability_evidence(recs)
+    assert len(lines) == 2
+    # name/dept + the reason details are all present for the critic to weigh.
+    assert "山田（技術部）" in lines[0]
+    assert "VPN構築の実績" in lines[0] and "ネットワーク資格" in lines[0]
+    # A candidate with no reasons still contributes a line (name only, no dept).
+    assert lines[1] == "佐藤"
+
+
+def test_after_answerability_routes_on_the_boolean() -> None:
+    # The node writes ``answerable``; the router only reads it (stays pure).
+    assert graph_mod._after_answerability(cast("AgentState", {"answerable": True})) == "c7_draft"
+    assert graph_mod._after_answerability(cast("AgentState", {"answerable": False})) == "no_expert"
+    # Missing key (critic never ran) is treated as reject, never a silent hand-off.
+    assert graph_mod._after_answerability(cast("AgentState", {})) == "no_expert"

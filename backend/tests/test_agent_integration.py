@@ -48,6 +48,20 @@ class _FixedIntent:
         return IntentResult(topics=[TOPIC], products=[], question_type="技術相談", confidence=0.4)
 
 
+class _FixedAnswerability:
+    """#70 evidence-sufficiency critic stand-in returning a fixed confidence."""
+
+    def __init__(self, confidence: int) -> None:
+        self._confidence = confidence
+        self.calls: list[tuple[str, list[str]]] = []
+
+    def assess(self, question, candidate_evidence):
+        from tekijin.agent.protocols import AnswerabilityResult
+
+        self.calls.append((question, list(candidate_evidence)))
+        return AnswerabilityResult(confidence=self._confidence, reason="判定理由")
+
+
 class _FakeRetriever:
     """C4 stand-in returning a fixed retrieval dict (controls the C5 route)."""
 
@@ -232,6 +246,97 @@ def test_document_route_offers_a_person_fallback(seed_counts, session, fake_embe
     assert state["recommendations"][0]["name"] in state["answer"]  # named as a backstop
     assert "doc_0007" in state["answer"]  # document is still the main line
     assert not _is_paused(agent, cfg)  # terminal — no send interrupt
+
+
+# --------------------------------------------------------------------------- #
+# answerability critic (#70): reject weak in-house evidence, accept strong
+# --------------------------------------------------------------------------- #
+def test_answerability_accepts_and_proceeds_to_handoff(seed_counts, session, fake_embedder) -> None:
+    for emp in (1, 2, 3):
+        _seed_skill(session, f"sk_ans_ok_{emp}", emp)
+    critic = _FixedAnswerability(confidence=85)  # strong in-house track record
+    agent = build_agent(
+        fake_embedder,
+        session,
+        retriever=_FakeRetriever(people=[1, 2, 3]),
+        answerability_model=critic,
+        answerability_threshold=40,
+    )
+    cfg = _cfg("ans_ok")
+    state = agent.invoke(_init(), cfg)
+    assert state["route"] == PERSON
+    assert state["answerability_confidence"] == 85 and state["answerable"] is True
+    assert state["recommendations"]  # candidates survive the critic
+    assert _is_paused(agent, cfg)  # reached the send hand-off, as before
+    # The critic saw the ranked candidates' evidence, not an empty list.
+    assert critic.calls and critic.calls[0][1]
+
+    final = agent.invoke(Command(resume="accepted"), cfg)
+    assert "取り次ぎました" in final["answer"]
+
+
+def test_answerability_rejects_to_no_expert_terminal(seed_counts, session, fake_embedder) -> None:
+    # C6 DID rank candidates, but the critic judges the in-house evidence
+    # insufficient (海外法務/知財… "痕跡が無い領域") -> graceful no_expert terminal,
+    # NOT a hand-off to a weak match.
+    for emp in (1, 2, 3):
+        _seed_skill(session, f"sk_ans_ng_{emp}", emp)
+    critic = _FixedAnswerability(confidence=15)  # below threshold
+    agent = build_agent(
+        fake_embedder,
+        session,
+        retriever=_FakeRetriever(people=[1, 2, 3]),
+        answerability_model=critic,
+        answerability_threshold=40,
+    )
+    cfg = _cfg("ans_ng")
+    state = agent.invoke(_init(), cfg)
+    assert state["route"] == PERSON
+    assert state["answerability_confidence"] == 15 and state["answerable"] is False
+    assert not _is_paused(agent, cfg)  # terminal — no send interrupt, no hand-off
+    assert "社内の実績が見つかりません" in state["answer"]
+    assert state.get("draft") is None  # never drafted a hand-off
+
+
+def test_answerability_bypassed_on_document_route(seed_counts, session, fake_embedder) -> None:
+    # The document route is self-resolution, not a hand-off — the critic must not
+    # sit on that path (a low score must not turn a document answer into no_expert).
+    for emp in (1, 2):
+        _seed_skill(session, f"sk_ans_doc_{emp}", emp)
+    critic = _FixedAnswerability(confidence=5)  # would reject if it were consulted
+    retriever = _FakeRetriever(
+        documents=[{"doc_id": "doc_0007", "score": 0.05}],
+        document_confidence=0.8,
+        people_confidence=0.2,
+        people=[1, 2],
+    )
+    agent = build_agent(
+        fake_embedder,
+        session,
+        retriever=retriever,
+        answerability_model=critic,
+        answerability_threshold=40,
+    )
+    state = agent.invoke(_init(), _cfg("ans_doc"))
+    assert state["route"] == DOCUMENT
+    assert "doc_0007" in state["answer"]  # document terminal, unaffected by the critic
+    assert critic.calls == []  # the critic was never consulted on the document route
+
+
+def test_answerability_unwired_is_passthrough(seed_counts, session, fake_embedder) -> None:
+    # Default (no critic): the graph is the pre-#70 flow — no critique node, no
+    # answerability keys in state, straight to the send hand-off.
+    for emp in (1, 2):
+        _seed_skill(session, f"sk_ans_off_{emp}", emp)
+    agent = build_agent(fake_embedder, session, retriever=_FakeRetriever(people=[1, 2]))
+    cfg = _cfg("ans_off")
+    state = agent.invoke(_init(), cfg)
+    assert _is_paused(agent, cfg)  # reached send, unchanged
+    # The critique/terminal nodes are not even added to the compiled graph.
+    assert "answerability" not in agent.get_graph().nodes
+    assert "no_expert" not in agent.get_graph().nodes
+    # reset() seeds the keys to inert defaults, but no critic ever ran to set them.
+    assert state["answerable"] is False
 
 
 # --------------------------------------------------------------------------- #
