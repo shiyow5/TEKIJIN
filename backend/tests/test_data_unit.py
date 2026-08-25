@@ -160,9 +160,24 @@ def test_sales_daily_reports_carry_topic_keywords() -> None:
     sales, _ = _sales_and_other_reports()
     # build_fixtures の TOPICS 語彙（SALES_TOPIC_SCRIPT の課題句/商材句が含む）。
     keys = (
-        "CRM", "顧客情報", "営業活動", "業務効率化", "手作業", "業務フロー",
-        "契約", "基幹システム", "システム間連携", "老朽化", "ネットワーク", "VPN",
-        "接続トラブル", "セキュリティ", "UTM", "脆弱性", "クラウド", "データ基盤",
+        "CRM",
+        "顧客情報",
+        "営業活動",
+        "業務効率化",
+        "手作業",
+        "業務フロー",
+        "契約",
+        "基幹システム",
+        "システム間連携",
+        "老朽化",
+        "ネットワーク",
+        "VPN",
+        "接続トラブル",
+        "セキュリティ",
+        "UTM",
+        "脆弱性",
+        "クラウド",
+        "データ基盤",
     )
     assert all(any(k in d["content"] for k in keys) for d in sales)
 
