@@ -280,6 +280,33 @@ export function ProcessingScreen({
                 文書を見る
               </Link>
             ) : null}
+            {stream.message.citations && stream.message.citations.length > 0 ? (
+              <div className="mt-md">
+                <p className="text-xs font-bold text-on-surface-variant">出典</p>
+                <ul className="mt-xs flex flex-wrap gap-xs">
+                  {stream.message.citations.map((citation) => (
+                    <li key={`${citation.kind}:${citation.source_id}`}>
+                      {citation.kind === "document" ? (
+                        <Link
+                          href={`/documents/${encodeURIComponent(citation.source_id)}?from=${encodeURIComponent(sessionId)}`}
+                          className="inline-flex min-h-[44px] items-center gap-xs rounded-full border border-outline-variant bg-surface px-md py-sm text-sm font-bold text-primary transition-colors hover:bg-surface-container"
+                        >
+                          <span aria-hidden="true">📄</span>
+                          {citation.source_id}
+                        </Link>
+                      ) : (
+                        // "qa" 出典は専用ビューアが未実装（ナレッジ詳細 #293 part2 で
+                        // /knowledge/[id] を用意したらリンク化する）。今は非リンクのチップ。
+                        <span className="inline-flex min-h-[44px] items-center gap-xs rounded-full border border-outline-variant bg-surface-container-low px-md py-sm text-sm text-on-surface-variant">
+                          <span aria-hidden="true">💬</span>
+                          過去の回答 {citation.source_id}
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
           </div>
         ) : null}
 
