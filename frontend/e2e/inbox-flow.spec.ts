@@ -55,3 +55,41 @@ test("inbox shows an empty state when nothing is pending", async ({ page }) => {
 
   await expect(page.getByText("いまは届いている質問はありません。")).toBeVisible();
 });
+
+/**
+ * #332 put a "ホームへ戻る" link in the inbox's list pane. On a phone the list
+ * and the detail are the same column — the list is `hidden md:flex` while the
+ * detail is open — so that link is still in the DOM behind the detail. The
+ * detail carries its own "← 受信箱へ戻る". Assert the user is never offered two
+ * back affordances at once, and that each width offers exactly the right one.
+ */
+test("the inbox never shows two back affordances at the same time (#332)", async ({ page }) => {
+  await mockEmployees(page);
+  await mockAuth(page);
+  await mockInbox(page);
+  await page.route(`${API_BASE}/handoff/**`, (route) =>
+    fulfillJson(route, { ...HANDOFF, session_id: INBOX_ITEM.session_id }),
+  );
+
+  const home = page.getByRole("link", { name: "ホームへ戻る" });
+  const toList = page.getByRole("button", { name: "← 受信箱へ戻る" });
+
+  // Phone: the list is what you see first, so only the route-level link shows.
+  await page.setViewportSize({ width: 375, height: 800 });
+  await page.goto("/inbox");
+  await expect(home).toBeVisible();
+  await expect(toList).toBeHidden();
+
+  // Opening the detail swaps the column: the list (and its link) goes away and
+  // the detail's own control takes over. `toBeHidden` — not `toHaveCount(0)` —
+  // because `hidden md:flex` keeps the list mounted.
+  await page.getByRole("button", { name: /藤田 悠斗 さんからの質問/ }).click();
+  await expect(toList).toBeVisible();
+  await expect(home).toBeHidden();
+
+  // Desktop shows both panes at once, so only the route-level link applies;
+  // the detail's control is `md:hidden`.
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await expect(home).toBeVisible();
+  await expect(toList).toBeHidden();
+});
