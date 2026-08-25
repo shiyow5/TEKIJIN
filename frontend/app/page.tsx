@@ -9,7 +9,11 @@ import type { ReactNode } from "react";
  *
  * The hero copy follows the #292 product direction: implicit knowledge is
  * accumulated and converted into explicit knowledge over time, so the answer
- * source is no longer framed as "always a person" (#324).
+ * source is no longer framed as "always a person" (#324). It stays consistent
+ * with the STEPS strip below by describing self-answer as a growing future
+ * capability, not a live one — `self_answer_enabled` still defaults to off
+ * (#291 part3), so the concrete flow today is still "AI forwards, a person
+ * answers."
  */
 
 function IconChat() {
@@ -120,8 +124,8 @@ export default function HomePage() {
         <h1 className="font-bold text-4xl text-on-surface tracking-tight">TEKIJIN</h1>
         <p className="max-w-2xl text-on-surface-variant leading-relaxed">
           社内の「訊きづらさ」を溶かす、質問と回答のマッチング支援ツール。
-          答えがあれば出典つきでAIがその場に返し、なければ答えられる人に取り次ぎます。
-          やり取りが積み重なるほど、会社の知識として少しずつ蓄積されていきます。
+          AIが最適な相手を見つけて取り次ぎ、やり取りは会社の知識として少しずつ蓄積されていきます。
+          貯まるほど、AIが自ら出典つきで答えられる場面も増えていきます。
         </p>
         <Link
           href="/questions"
