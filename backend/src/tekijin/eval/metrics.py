@@ -22,6 +22,42 @@ RECALL_K = 3
 # Gold route for a query that should be declined (abstain / no expert exists).
 ABSTAIN_ROUTE = "none"
 
+# The three product decisions of the tacit→explicit model (#291 / #292): answer
+# from data (自己回答), route to a person (取次ぎ), or decline (棄却). Both the gold
+# route label and the predicted route/terminal collapse into one of these so the
+# recall-centric §7 metric measures the *decision*, not the internal route name.
+SELF_ANSWER_DECISION = "self_answer"
+ROUTE_DECISION = "route"
+ABSTAIN_DECISION = "abstain"
+# Iteration order fixes the report layout; keep self_answer → route → abstain.
+DECISION_CLASSES = (SELF_ANSWER_DECISION, ROUTE_DECISION, ABSTAIN_DECISION)
+
+# Map a route label OR a graph terminal status to its product decision. The gold
+# side only ever carries the four VALID_ROUTES; the predicted side may also carry
+# the graph terminals ``self_answered`` (grounded self-answer, #291) and
+# ``no_expert`` (declined after finding nobody, #70) — both fold in here so a
+# full-graph run scores without a second mapping. Anything unrecognised → ``None``
+# (counts as a miss, never silently as a hit).
+_ROUTE_TO_DECISION = {
+    "document": SELF_ANSWER_DECISION,
+    "prior_answer": SELF_ANSWER_DECISION,
+    "self_answered": SELF_ANSWER_DECISION,
+    "person": ROUTE_DECISION,
+    "none": ABSTAIN_DECISION,
+    "no_expert": ABSTAIN_DECISION,
+}
+
+
+def decision_class(route: str) -> str | None:
+    """Collapse a route/terminal label into its product decision (or ``None``).
+
+    ``None`` means the label maps to no known decision — the caller treats that
+    as a miss on the predicted side and skips it on the gold side, so an unknown
+    string never inflates recall.
+    """
+
+    return _ROUTE_TO_DECISION.get(route)
+
 
 @dataclass(frozen=True)
 class QueryResult:
@@ -47,6 +83,15 @@ class QueryResult:
     gold_experts_alt: list[int] = field(default_factory=list)
     predicted_topics: list[str] = field(default_factory=list)
     gold_topics: list[str] = field(default_factory=list)
+    # #297 source-recall inputs. ``cited_source_ids`` is what a SELF-ANSWER (#291)
+    # actually cited (raw doc_id / answer qa_id); empty when the system did not
+    # self-answer — that empty case is a real miss the recall metric must see, not
+    # a row to skip. ``gold_source`` (#296) is the set of acceptable citation
+    # sources; non-empty only on the data-derived gold routes (document /
+    # prior_answer). A LLM-free pipeline ranker leaves ``cited_source_ids`` empty,
+    # so source recall reads 0 there — the full-graph DGX run is what populates it.
+    cited_source_ids: list[str] = field(default_factory=list)
+    gold_source: list[str] = field(default_factory=list)
 
 
 def _first_hit_rank(ranked: Sequence[int], gold: Iterable[int]) -> int | None:
@@ -91,6 +136,36 @@ def route_hit(result: QueryResult) -> bool:
     """True if the predicted route matches the gold route."""
 
     return result.predicted_route == result.gold_route
+
+
+def source_recall(result: QueryResult) -> float | None:
+    """Fraction of the gold sources the self-answer cited (``None`` when no gold).
+
+    ``None`` marks a row that has no citation obligation (person/none routes with
+    empty ``gold_source``) so the aggregate can exclude it from the denominator.
+    A row that SHOULD cite but produced nothing scores 0.0 (not ``None``) — the
+    取りこぼし is the point of a recall metric, so it stays in the average.
+    """
+
+    gold = set(result.gold_source)
+    if not gold:
+        return None
+    return len(set(result.cited_source_ids) & gold) / len(gold)
+
+
+def source_precision(result: QueryResult) -> float | None:
+    """Fraction of cited sources that were gold (``None`` when nothing was cited).
+
+    The hallucination signal: a self-answer citing a source outside ``gold_source``
+    loses precision here. ``None`` when the row cited nothing — there is no
+    precision to score on an empty citation list, so it is excluded rather than
+    counted as a perfect or a zero.
+    """
+
+    cited = set(result.cited_source_ids)
+    if not cited:
+        return None
+    return len(cited & set(result.gold_source)) / len(cited)
 
 
 def topic_hit_at_k(result: QueryResult, k: int) -> bool:
@@ -219,6 +294,113 @@ def evaluate_by_difficulty(results: Sequence[QueryResult]) -> dict[str, EvalMetr
 
     layers = sorted({r.difficulty for r in results if r.difficulty})
     return {layer: evaluate([r for r in results if r.difficulty == layer]) for layer in layers}
+
+
+@dataclass(frozen=True)
+class ClassRecall:
+    """Recall for one decision class: how many of its gold rows we caught."""
+
+    support: int  # gold rows in this class (the denominator)
+    hits: int  # rows whose predicted decision also equalled this class
+    recall: float  # hits / support (0.0 when support is 0)
+
+    def as_dict(self) -> dict[str, float | int]:
+        return {"support": self.support, "hits": self.hits, "recall": self.recall}
+
+
+@dataclass(frozen=True)
+class DecisionRecall:
+    """C5 (振り分け) recall over the three product decisions (#291 / #297).
+
+    Recall-centric per the mentor's guidance: for each decision (self_answer /
+    route / abstain) we report what fraction of the rows that SHOULD land there
+    actually did. ``macro_recall`` averages the per-class recalls over the classes
+    that appear in gold (a class with no gold rows is not a free 1.0 or 0.0).
+    ``n`` is the rows with a recognised gold decision (all four VALID_ROUTES map,
+    so it equals the scored total).
+    """
+
+    n: int
+    per_class: dict[str, ClassRecall]
+    macro_recall: float
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "n": self.n,
+            "macro_recall": self.macro_recall,
+            "per_class": {name: cr.as_dict() for name, cr in self.per_class.items()},
+        }
+
+
+def evaluate_decisions(results: Sequence[QueryResult]) -> DecisionRecall:
+    """Per-decision recall of the C5 self-answer / route / abstain split.
+
+    Gold rows whose route maps to no decision are skipped (never happens for the
+    closed VALID_ROUTES, but keeps the metric total-agnostic). A predicted route
+    that maps to ``None`` counts as a miss. Classes absent from gold are omitted
+    from ``per_class`` and from the macro average — averaging in a 0/0 would
+    invent a score for a decision the eval set never asked for.
+    """
+
+    per_class: dict[str, ClassRecall] = {}
+    n = 0
+    for decision in DECISION_CLASSES:
+        gold_rows = [r for r in results if decision_class(r.gold_route) == decision]
+        if not gold_rows:
+            continue
+        hits = sum(1 for r in gold_rows if decision_class(r.predicted_route) == decision)
+        per_class[decision] = ClassRecall(
+            support=len(gold_rows), hits=hits, recall=hits / len(gold_rows)
+        )
+        n += len(gold_rows)
+    macro = _mean([cr.recall for cr in per_class.values()])
+    return DecisionRecall(n=n, per_class=per_class, macro_recall=macro)
+
+
+@dataclass(frozen=True)
+class SourceRecall:
+    """C7' citation quality over the rows that owe a citation (#296 / #297).
+
+    Scored over rows with a non-empty ``gold_source`` (the data-derived routes a
+    self-answer must ground). ``recall`` (the primary, recall-centric number) is
+    the mean per-row fraction of gold sources cited — a row that failed to
+    self-answer cites nothing and scores 0, so 取りこぼし shows up. ``grounded_rate``
+    is the fraction of those rows that cited anything at all (did we self-answer),
+    and ``precision`` (hallucination signal) averages, over the rows that DID
+    cite, the fraction of citations that were gold. ``n`` is the obligation count;
+    ``n_cited`` the precision denominator.
+    """
+
+    n: int
+    n_cited: int
+    recall: float
+    precision: float
+    grounded_rate: float
+
+    def as_dict(self) -> dict[str, float | int]:
+        return {
+            "n": self.n,
+            "n_cited": self.n_cited,
+            "recall": self.recall,
+            "precision": self.precision,
+            "grounded_rate": self.grounded_rate,
+        }
+
+
+def evaluate_source_recall(results: Sequence[QueryResult]) -> SourceRecall:
+    """Aggregate C7' source recall / precision over citation-obligated rows."""
+
+    recalls = [source_recall(r) for r in results]
+    obligated = [r for r, sr in zip(results, recalls, strict=True) if sr is not None]
+    precisions = [source_precision(r) for r in obligated]
+    cited_precisions = [p for p in precisions if p is not None]
+    return SourceRecall(
+        n=len(obligated),
+        n_cited=len(cited_precisions),
+        recall=_mean([sr for sr in recalls if sr is not None]),
+        precision=_mean(cited_precisions),
+        grounded_rate=_mean([1.0 if r.cited_source_ids else 0.0 for r in obligated]),
+    )
 
 
 def evaluate_alt(results: Sequence[QueryResult]) -> EvalMetrics:
