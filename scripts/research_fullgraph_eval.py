@@ -60,7 +60,14 @@ def _build_models(backend: str, settings, *, self_answer: bool, answerability: b
 
     if backend == "stub":
         # 決定的 stub。self_answer/answerability ノードは vLLM 実測が前提なので
-        # stub では配線しない（compose/critic の LLM が要る）。
+        # stub では配線しない（compose/critic の LLM が要る）。CLI で立てても無視
+        # されるので、黙って握り潰さず警告する（起動ログの True と実態の乖離防止）。
+        if self_answer or answerability:
+            print(
+                "  !! --backend stub では self_answer/answerability ノードは配線されません"
+                "（vLLM 実測が前提）。フラグは無視されます。",
+                file=sys.stderr,
+            )
         return None, None, None, None, None
 
     from tekijin.llm.vllm import (
@@ -105,6 +112,7 @@ class GraphRanker:
     def __init__(self, graph, *, critique_wired: bool) -> None:
         self._graph = graph
         self._critique_wired = critique_wired
+        self.errors = 0  # rows whose invoke crashed (counted for the output audit)
 
     def __call__(self, query):
         from tekijin.eval.runner import RankResult
@@ -123,6 +131,7 @@ class GraphRanker:
             values = self._graph.get_state(config).values or {}
             next_nodes = tuple(self._graph.get_state(config).next)
         except Exception as exc:  # noqa: BLE001 — 1行の失敗で全体を止めない
+            self.errors += 1
             print(f"  !! id={query.id} invoke失敗: {exc}", file=sys.stderr)
             return RankResult(ranked_experts=[], route="none", predicted_topics=[])
 
@@ -208,6 +217,8 @@ def main() -> None:
 
     report = run_eval(queries, ranker)
     print(format_report(report))
+    if ranker.errors:
+        print(f"  ※ invoke 失敗行: {ranker.errors}/{len(queries)}（miss/abstain として計上）")
 
     out = {
         "config": {
@@ -217,6 +228,7 @@ def main() -> None:
             "answerability": args.answerability,
             "knowledge_floor": args.knowledge_floor,
             "rows": len(queries),
+            "errors": ranker.errors,
         },
         "metrics": report.metrics.as_dict(),
         "by_difficulty": {k: v.as_dict() for k, v in report.by_difficulty.items()},
