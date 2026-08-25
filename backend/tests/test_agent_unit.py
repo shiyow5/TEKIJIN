@@ -603,27 +603,44 @@ def _sufficiency_state(**over: Any) -> dict[str, Any]:
     return base
 
 
-def test_c2_skips_sufficiency_llm_when_confident_and_on_topic() -> None:
-    # A confident, on-topic C1 result is already routable (the #113 valve), so C2
-    # must NOT invoke the (LLM) sufficiency model — it decides from C1 alone,
-    # removing one of the three serial generations on the critical path (#376).
-    class _ExplodingSufficiency:
-        def check(self, *_a: Any, **_k: Any):
-            raise AssertionError("sufficiency model must not be called when can_route")
+class _ExplodingSufficiency:
+    def check(self, *_a: Any, **_k: Any):
+        raise AssertionError("sufficiency model must not be called when can_route")
 
+
+def _c2_nodes(sufficiency: Any) -> AgentNodes:
     stub: Any = object()
-    nodes = AgentNodes(
+    return AgentNodes(
         intent_model=stub,
-        sufficiency_model=_ExplodingSufficiency(),
+        sufficiency_model=sufficiency,
         draft_model=stub,
         embedder=stub,
         retriever=stub,
         scorer=stub,
     )
-    out = nodes.c2_sufficiency(_sufficiency_state())
+
+
+def test_c2_skips_sufficiency_llm_when_confident_and_on_topic() -> None:
+    # A confident, on-topic C1 result is already routable (the #113 valve), so C2
+    # must NOT invoke the (LLM) sufficiency model — it decides from C1 alone,
+    # removing one of the three serial generations on the critical path (#376).
+    # question_type "製品QA" (the default) carries no required slots -> missing [].
+    out = _c2_nodes(_ExplodingSufficiency()).c2_sufficiency(_sufficiency_state())
     assert out["sufficient"] is True
     assert out["missing"] == [] and out["followup_question"] is None
     assert out["intent_unresolved"] is False
+
+
+def test_c2_fast_path_still_surfaces_missing_slots_for_the_draft() -> None:
+    # #376 regression guard: skipping the LLM must NOT drop the estimate slots the
+    # hand-off draft flags. A confident 技術相談 with no product / no site count still
+    # yields missing=[現行製品, 対象拠点数] (computed deterministically, no LLM call),
+    # so C7's 「補足いただきたい点」hint is preserved exactly as before #376.
+    state = _sufficiency_state(question_type="技術相談", products=[])
+    out = _c2_nodes(_ExplodingSufficiency()).c2_sufficiency(state)
+    assert out["sufficient"] is True
+    assert out["missing"] == ["現行製品", "対象拠点数"]
+    assert out["followup_question"] is None
 
 
 def test_c2_calls_sufficiency_llm_when_not_routable() -> None:
@@ -639,16 +656,9 @@ def test_c2_calls_sufficiency_llm_when_not_routable() -> None:
                 sufficient=False, missing=["拠点数"], followup_question="拠点数は？"
             )
 
-    stub: Any = object()
-    nodes = AgentNodes(
-        intent_model=stub,
-        sufficiency_model=_RecordingSufficiency(),
-        draft_model=stub,
-        embedder=stub,
-        retriever=stub,
-        scorer=stub,
+    out = _c2_nodes(_RecordingSufficiency()).c2_sufficiency(
+        _sufficiency_state(intent_confidence=0.3)
     )
-    out = nodes.c2_sufficiency(_sufficiency_state(intent_confidence=0.3))
     assert seen == [0.3]  # the model WAS consulted on the low-confidence path
     assert out["sufficient"] is False and out["followup_question"] == "拠点数は？"
 

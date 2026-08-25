@@ -31,6 +31,7 @@ from tekijin.agent.stubs import (
     INTENT_CONFIDENCE_THRESHOLD,
     MAX_FOLLOWUPS,
     collect_known_values,
+    missing_required_slots,
 )
 from tekijin.knowledge.answer import answer_from_knowledge
 from tekijin.retrieval.embedding import QUERY, Embedder
@@ -256,14 +257,16 @@ class AgentNodes:
         # Speed (#376): ``can_route`` is decidable from C1's output ALONE, and it
         # forces ``sufficient=True`` anyway — so on the common confident path SKIP the
         # C2 sufficiency LLM call entirely, removing one of the three serial
-        # generations on the critical path. ``missing``/``followup_question`` are
-        # unused when sufficient (the graph goes straight to C3; C7 recomputes missing
-        # via ``draft_context``), and ``intent_unresolved`` is False whenever topics
-        # exist — so returning them empty here changes no downstream output.
+        # generations on the critical path. We still compute ``missing`` DETERMINISTICALLY
+        # (LLM-free, same slot logic the rule model uses) so C7's hand-off draft keeps
+        # its 「補足いただきたい点」hint — matching the pre-#376 behaviour, where the
+        # model's ``missing`` flowed through even though ``sufficient`` was already
+        # forced True by ``can_route``. ``followup_question`` is unused when sufficient
+        # (graph goes to C3), and ``intent_unresolved`` is False whenever topics exist.
         if can_route:
             return {
                 "sufficient": True,
-                "missing": [],
+                "missing": missing_required_slots(state["question"], intent),
                 "followup_question": None,
                 "intent_unresolved": False,
             }
