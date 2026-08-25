@@ -17,6 +17,7 @@
 
 import { useOptionalSessionId, useOptionalSessionStream } from "@/components/SessionStreamProvider";
 import { PageBackLink } from "@/components/PageBackLink";
+import { SourceCitations } from "@/components/SourceCitations";
 import { PersonRouteView } from "@/components/result/PersonRouteView";
 import type { EventStreamState } from "@/hooks/useEventStream";
 import type { ReactNode } from "react";
@@ -75,9 +76,11 @@ function terminalHeading(status: string): string {
 function ResultTerminal({
   done,
   message,
+  sessionId,
 }: {
   done?: EventStreamState["done"];
   message?: EventStreamState["message"];
+  sessionId?: string;
 }) {
   const heading = message ? terminalHeading(message.status) : "依頼は送信済みです";
   const body =
@@ -90,6 +93,12 @@ function ResultTerminal({
     <section className="mx-auto flex w-full max-w-2xl flex-col gap-md py-lg text-center">
       <h1 className="font-bold text-2xl text-on-surface">{heading}</h1>
       <p className="whitespace-pre-wrap text-on-surface-variant">{body}</p>
+      {/* #291: a self-answered / document terminal carries the sources it cited;
+          render them on reload replay too, not only on the live ProcessingScreen
+          (#382 review) — otherwise a hard-reloaded auto-answer loses verifiability. */}
+      <div className="mx-auto w-full max-w-md text-left">
+        <SourceCitations citations={message?.citations} sessionId={sessionId} />
+      </div>
       <div className="flex justify-center">
         <a
           href="/questions"
@@ -153,7 +162,11 @@ export function ResultScreen({ streamState, sessionId }: ResultScreenProps) {
   if (stream.terminal && (stream.done || stream.message)) {
     return (
       <ResultFrame>
-        <ResultTerminal done={stream.done} message={stream.message} />
+        <ResultTerminal
+          done={stream.done}
+          message={stream.message}
+          sessionId={effectiveSessionId ?? undefined}
+        />
       </ResultFrame>
     );
   }
