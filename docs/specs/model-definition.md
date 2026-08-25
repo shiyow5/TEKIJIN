@@ -481,6 +481,18 @@ event: error         data: {"error":"内部エラーが発生しました"}
 評価データは #296（`gold_source` 付き・自己回答/取次ぎのラベル・L4 ラベル矛盾の是正・型番クエリ集合）、
 評価実装は #297。評価セットは社員ヒアリングの実質問（09_ヒアリング設計_人材サーチ §4）を核とする。
 
+**実装（#297・`backend/src/tekijin/eval/metrics.py`）**:
+
+- **C5 振り分け recall** = `evaluate_decisions()`。route/終端を三系統の決定（`self_answer`/`route`/`abstain`）に畳み込み
+  （`decision_class()`：document・prior_answer・`self_answered` → 自己回答、person → 取次ぎ、none・`no_expert` → 棄却）、
+  各決定ごとに「そこへ行くべき行のうち実際に行けた率」を出す（`DecisionRecall.per_class[*].recall` と `macro_recall`）。
+- **C7' source recall** = `evaluate_source_recall()`。`gold_source` を持つ行（自己回答すべき行）について、自己回答の
+  `cited_source_ids ∩ gold_source` / `|gold_source|` の平均（`SourceRecall.recall`）。自己回答しなかった行は引用0で recall=0
+  ＝取りこぼしとして計上する。補助として precision（引用のうち gold に当たった率＝ハルシネーション検知）と grounded 率。
+- **C6 Recall@3** は従来どおり `evaluate()`（主指標）。レポートは `format_report()` に上記ブロックを追加済み。
+- 自己回答（C7'）は既定 OFF（`self_answer_enabled=False`）なので LLM-free の `PipelineRanker` では source recall は 0。
+  非ゼロにするのは part3 の DGX 検証（`self_answer_enabled` ON・full-graph ranker）から。
+
 ---
 
 ## 7. まだ決めていない事項（仕様確定時に埋める）

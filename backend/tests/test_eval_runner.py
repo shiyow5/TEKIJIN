@@ -19,12 +19,17 @@ import pytest
 from tekijin.eval.dataset import VALID_ROUTES, EvalQuery, load_eval_queries
 from tekijin.eval.metrics import (
     QueryResult,
+    decision_class,
     evaluate,
     evaluate_alt,
     evaluate_by_difficulty,
+    evaluate_decisions,
+    evaluate_source_recall,
     evaluate_topics,
     recall_at_k,
     reciprocal_rank,
+    source_precision,
+    source_recall,
     top1_hit,
     topic_hit_at_k,
 )
@@ -44,6 +49,8 @@ def _qr(
     gold_alt=None,
     predicted_topics=None,
     gold_topics=None,
+    cited_source_ids=None,
+    gold_source=None,
 ) -> QueryResult:
     return QueryResult(
         ranked_experts=ranked,
@@ -54,6 +61,8 @@ def _qr(
         gold_experts_alt=gold_alt or [],
         predicted_topics=predicted_topics or [],
         gold_topics=gold_topics or [],
+        cited_source_ids=cited_source_ids or [],
+        gold_source=gold_source or [],
     )
 
 
@@ -208,6 +217,103 @@ def test_evaluate_alt_uses_alternate_gold_only_where_present() -> None:
     alt = evaluate_alt(results)
     assert alt.n_ranked == 2  # only the two rows with alt labels
     assert alt.top1_accuracy == pytest.approx(0.5)
+
+
+# --------------------------------------------------------------------------- #
+# #297 recall-centric metrics: C5 decision recall + C7' source recall
+# --------------------------------------------------------------------------- #
+def test_decision_class_maps_routes_and_terminals() -> None:
+    # data-derived routes + the grounded self-answer terminal -> self_answer
+    assert decision_class("document") == "self_answer"
+    assert decision_class("prior_answer") == "self_answer"
+    assert decision_class("self_answered") == "self_answer"
+    # person -> route (取次ぎ)
+    assert decision_class("person") == "route"
+    # abstain route + the no-expert terminal -> abstain
+    assert decision_class("none") == "abstain"
+    assert decision_class("no_expert") == "abstain"
+    # unknown label -> None (never a silent hit)
+    assert decision_class("banana") is None
+
+
+def test_source_recall_per_row() -> None:
+    # cited 1 of 2 gold -> 0.5
+    r = _qr([], [], gold_source=["doc_1", "doc_2"], cited_source_ids=["doc_1", "doc_9"])
+    assert source_recall(r) == pytest.approx(0.5)
+    # should self-answer but cited nothing -> 0.0 (the miss stays in the average)
+    assert source_recall(_qr([], [], gold_source=["doc_1"], cited_source_ids=[])) == 0.0
+    # no citation obligation -> None (excluded from the denominator)
+    assert source_recall(_qr([], [], gold_source=[], cited_source_ids=[])) is None
+
+
+def test_source_precision_per_row() -> None:
+    # cited 2, one gold -> 0.5 (hallucination signal)
+    r = _qr([], [], gold_source=["doc_1"], cited_source_ids=["doc_1", "doc_9"])
+    assert source_precision(r) == pytest.approx(0.5)
+    # cited nothing -> None (no precision to score)
+    assert source_precision(_qr([], [], gold_source=["doc_1"], cited_source_ids=[])) is None
+    # every citation gold -> 1.0
+    assert source_precision(_qr([], [], gold_source=["a", "b"], cited_source_ids=["a"])) == 1.0
+
+
+def test_evaluate_decisions_per_class_recall() -> None:
+    results = [
+        # self_answer gold: one hit (document→document), one miss (prior_answer→person)
+        _qr([], [], predicted_route="document", gold_route="document"),
+        _qr([], [], predicted_route="person", gold_route="prior_answer"),
+        # route gold: one hit, one miss (person→document)
+        _qr([1], [1], predicted_route="person", gold_route="person"),
+        _qr([], [], predicted_route="document", gold_route="person"),
+        # abstain gold: one hit via the no_expert terminal
+        _qr([], [], predicted_route="no_expert", gold_route="none"),
+    ]
+    dr = evaluate_decisions(results)
+    assert dr.n == 5
+    assert dr.per_class["self_answer"].recall == pytest.approx(0.5)  # 1/2
+    assert dr.per_class["route"].recall == pytest.approx(0.5)  # 1/2
+    assert dr.per_class["abstain"].recall == pytest.approx(1.0)  # 1/1
+    # macro averages the three present classes
+    assert dr.macro_recall == pytest.approx((0.5 + 0.5 + 1.0) / 3)
+    d = dr.as_dict()
+    assert d["per_class"]["self_answer"] == {"support": 2, "hits": 1, "recall": 0.5}
+
+
+def test_evaluate_decisions_omits_absent_classes() -> None:
+    # only route-gold rows present: self_answer/abstain must NOT appear as 0/0
+    dr = evaluate_decisions([_qr([1], [1], predicted_route="person", gold_route="person")])
+    assert set(dr.per_class) == {"route"}
+    assert dr.macro_recall == pytest.approx(1.0)
+
+
+def test_evaluate_source_recall_aggregate() -> None:
+    results = [
+        # obligated + fully cited
+        _qr([], [], gold_route="document", gold_source=["a", "b"], cited_source_ids=["a", "b"]),
+        # obligated + half cited, one hallucinated citation
+        _qr([], [], gold_route="prior_answer", gold_source=["c", "d"], cited_source_ids=["c", "z"]),
+        # obligated but did NOT self-answer (routed to a person): recall 0, not cited
+        _qr([1], [1], gold_route="document", gold_source=["e"], cited_source_ids=[]),
+        # not obligated (person route, no gold_source): excluded entirely
+        _qr([1], [1], gold_route="person", gold_source=[], cited_source_ids=[]),
+    ]
+    sr = evaluate_source_recall(results)
+    assert sr.n == 3  # three citation-obligated rows
+    assert sr.n_cited == 2  # two of them cited something
+    # recall: (1.0 + 0.5 + 0.0) / 3
+    assert sr.recall == pytest.approx((1.0 + 0.5 + 0.0) / 3)
+    # precision over cited rows only: (1.0 + 0.5) / 2
+    assert sr.precision == pytest.approx((1.0 + 0.5) / 2)
+    # 2 of 3 obligated rows produced any citation
+    assert sr.grounded_rate == pytest.approx(2 / 3)
+    d = sr.as_dict()
+    assert d["n"] == 3 and d["n_cited"] == 2
+    assert d["recall"] == pytest.approx(0.5) and d["grounded_rate"] == pytest.approx(2 / 3)
+
+
+def test_evaluate_source_recall_empty_without_obligations() -> None:
+    sr = evaluate_source_recall([_qr([1], [1], gold_route="person")])
+    assert sr.n == 0 and sr.n_cited == 0
+    assert sr.recall == 0.0 and sr.precision == 0.0 and sr.grounded_rate == 0.0
 
 
 # --------------------------------------------------------------------------- #
@@ -649,6 +755,51 @@ def test_run_eval_carries_topics_and_scores_stage_a() -> None:
     assert report.topic_accuracy.acc_at_3 == pytest.approx(1.0)
 
 
+def test_run_eval_carries_source_recall_and_decisions() -> None:
+    queries = [
+        _q(id=1, gold_route="document", gold_source=["doc_1", "doc_2"]),
+        _q(id=2, gold_route="person", gold_source=[], gold_experts=[7]),
+    ]
+
+    def ranker(query: EvalQuery) -> RankResult:
+        if query.id == 1:
+            # self-answers, citing one of the two gold sources
+            return RankResult([], "self_answered", cited_source_ids=["doc_1"])
+        return RankResult([7], "person")
+
+    report = run_eval(queries, ranker)
+    # per-query records keep the citation inputs for drill-down
+    assert report.results[0].cited_source_ids == ["doc_1"]
+    assert report.results[0].gold_source == ["doc_1", "doc_2"]
+    # C7' source recall over the single obligated row: 1 of 2 gold cited
+    assert report.source_recall.n == 1
+    assert report.source_recall.recall == pytest.approx(0.5)
+    assert report.source_recall.grounded_rate == pytest.approx(1.0)
+    # C5 decision recall: self_answered→self_answer hit, person→route hit
+    assert report.decision_recall.per_class["self_answer"].recall == pytest.approx(1.0)
+    assert report.decision_recall.per_class["route"].recall == pytest.approx(1.0)
+
+
+def test_format_report_contains_recall_centric_blocks() -> None:
+    queries = [
+        _q(id=1, gold_route="document", gold_source=["doc_1"]),
+        _q(id=2, gold_route="person", gold_experts=[2]),
+    ]
+    report = run_eval(
+        queries,
+        lambda q: RankResult(
+            list(q.gold_experts),
+            "self_answered" if q.id == 1 else "person",
+            cited_source_ids=["doc_1"] if q.id == 1 else [],
+        ),
+    )
+    text = format_report(report)
+    assert "C5 振り分け recall" in text
+    assert "自己回答" in text and "取次ぎ" in text
+    assert "C7' 出典 recall" in text
+    assert "precision" in text and "grounded率" in text
+
+
 def test_format_report_contains_all_metrics_and_breakdowns() -> None:
     queries = [
         _q(id=1, difficulty="L1", gold_experts=[1], gold_experts_alt=[1]),
@@ -728,3 +879,17 @@ def test_run_eval_real_pipeline_over_seed(seed_counts, session, fake_embedder) -
     assert m.recall_at_3 >= 0.50
     assert m.mrr >= 0.55
     assert m.route_accuracy >= 0.65
+
+    # #297 recall-centric metrics are produced over the real seed. The LLM-free
+    # pipeline ranker never self-answers, so C7' source recall is 0 over the 17
+    # citation-obligated rows (document 10 + prior_answer 7) — this asserts the
+    # obligation denominator is wired, not that the (absent) self-answer works.
+    sr = report.source_recall
+    assert sr.n == 17  # document 10 + prior_answer 7 carry gold_source
+    assert sr.recall == 0.0 and sr.n_cited == 0 and sr.grounded_rate == 0.0
+    # C5 decision recall covers all three product decisions on this set.
+    dr = report.decision_recall
+    assert set(dr.per_class) == {"self_answer", "route", "abstain"}
+    assert dr.n == m.n  # every VALID_ROUTES row maps to a decision
+    for cr in dr.per_class.values():
+        assert 0.0 <= cr.recall <= 1.0
