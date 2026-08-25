@@ -42,6 +42,15 @@ BASE_SCORE_ANSWER = 0.7
 BASE_SCORE_CERTIFICATION = 0.6
 BASE_SCORE_PROJECT_MEMBER = 0.5
 BASE_SCORE_SKILL = 0.3
+# Daily-report evidence (#355): the weakest per-item signal, matching the eval
+# gold's daily weight (``build_eval_v2.build_gold_evidence`` adds 0.15 per
+# on-topic daily report). A single report is faint; volume is what counts. To
+# keep a prolific reporter from saturating ``topic_fit`` on shallow activity, at
+# most ``DAILY_EVIDENCE_CAP`` on-topic reports contribute per (person, topic set)
+# — 5 × 0.15 = 0.75, comparable to one project membership. Dormant unless the
+# scorer is built with ``daily_evidence=True`` (``daily_evidence_enabled``).
+BASE_SCORE_DAILY = 0.15
+DAILY_EVIDENCE_CAP = 5
 
 # Half-life of experience relevance: a 6-month-old project/answer counts half as
 # much toward ``recency`` (technical-spec §5: 半減期6か月の時間減衰).

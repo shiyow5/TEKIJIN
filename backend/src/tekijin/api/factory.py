@@ -60,6 +60,8 @@ def build_default_service(settings: Settings | None = None) -> AgentService:
         # (None = OFF keeps prior_answer dormant, C5 unchanged).
         prior_answer_reuse_min=settings.prior_answer_reuse_min,
         prior_answer_relevance_floor=settings.prior_answer_relevance_floor,
+        # #355: daily reports as C6 evidence (False = dormant, develop unchanged).
+        daily_evidence=settings.daily_evidence_enabled,
         # Backpressure admission limit (#180) from THIS settings instance.
         max_concurrent_runs=settings.max_concurrent_runs,
     )

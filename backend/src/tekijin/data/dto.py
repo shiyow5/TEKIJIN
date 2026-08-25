@@ -17,6 +17,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from tekijin.models.tables import (
         Answer,
         Certification,
+        DailyReport,
         Document,
         Employee,
         EmployeeProfile,
@@ -104,6 +105,30 @@ class SkillDTO:
             topic=row.topic,
             level=row.level,
             source=row.source,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class DailyReportDTO:
+    """A daily report as topic evidence (#355).
+
+    ``topics`` is precomputed at seed time (``build_fixtures`` ``match_topics``),
+    mirroring the eval gold's daily-topic derivation, so the scorer needs no
+    keyword vocabulary at runtime — it just checks topic-set overlap.
+    """
+
+    id: int
+    employee_id: int
+    topics: tuple[str, ...]
+    report_date: dt.date | None
+
+    @classmethod
+    def from_row(cls, row: DailyReport) -> DailyReportDTO:
+        return cls(
+            id=row.id,
+            employee_id=row.employee_id,
+            topics=tuple(row.topics or ()),
+            report_date=row.report_date,
         )
 
 
