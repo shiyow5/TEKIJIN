@@ -3,10 +3,10 @@
 /**
  * Shared modal-dialog chrome: overlay, `role="dialog"` + `aria-modal`, Tab-trap,
  * Escape-to-cancel, and opener focus restore. Extracted from
- * `result/ConsultMethodDialog.tsx` and `QuestionResolveButton`'s confirm popup,
- * which had independently reimplemented the same a11y-sensitive logic and had
- * already drifted (their Tab-trap selectors disagreed on whether to skip
- * disabled buttons).
+ * `result/ConsultMethodDialog.tsx` when `QuestionResolveButton`'s confirmation
+ * became a popup too (#289) and would otherwise have carried a second copy of
+ * the same a11y-sensitive logic. Anything that needs a modal should render this
+ * rather than reimplement it — #286 (delete confirmation) is next.
  *
  * Callers must NOT disable the element that opened the dialog in the same
  * render that mounts it: per the HTML spec, a browser blurs a focused control
