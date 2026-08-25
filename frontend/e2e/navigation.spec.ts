@@ -170,9 +170,7 @@ test.describe("navigation", () => {
       page,
     }) => {
       await mockChrome(page);
-      await page.route(`${API_BASE}/notifications*`, (route) =>
-        fulfillJson(route, { items: [] }),
-      );
+      await page.route(`${API_BASE}/notifications*`, (route) => fulfillJson(route, { items: [] }));
       await page.setViewportSize({ width, height: 800 });
       await page.goto("/questions");
 
