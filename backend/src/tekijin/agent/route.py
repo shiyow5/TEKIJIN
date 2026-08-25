@@ -86,7 +86,7 @@ def decide_route(
     document_sim: float = DOCUMENT_SIM,
     person_weak_sim: float = PERSON_WEAK_SIM,
     prior_answer_reuse_min: int | None = None,
-    prior_answer_relevance_floor: float = 0.0,
+    prior_answer_relevance_floor: float = 0.15,
 ) -> RouteDecision:
     """Pick ``person`` / ``prior_answer`` / ``document`` from channel confidences.
 
