@@ -221,10 +221,23 @@ class Settings(BaseSettings):
     # ``bm25_weight_boosted`` is the weight when the dense channel is UNINFORMED
     # (its top cosine <= ``bm25_adapt_lo``); it decays linearly back to
     # ``bm25_weight`` as the dense confidence rises to ``bm25_adapt_hi``. ``None``
-    # (default) keeps the FLAT ``bm25_weight`` everywhere — i.e. adaptivity is OFF
-    # until the boosted value + window are tuned on the DGX eval (the cosines are
-    # compressed, so the lo/hi window is model-specific). Set
-    # ``TEKIJIN_BM25_WEIGHT_BOOSTED`` (e.g. 1.0) to enable.
+    # (default) keeps the FLAT ``bm25_weight`` everywhere — i.e. adaptivity is OFF.
+    #
+    # DGX tuning (2026-08-25, real Nemotron embeddings, scripts/research_bm25_sweep.py):
+    # swept boosted ∈ {0.5,1.0,1.5} × window {0.15-0.35,0.10-0.25,0.20-0.45} on the
+    # current eval. **boosted=0.5 / window 0.15-0.35 is the sweet spot** — layer-2
+    # R@3 0.679→0.694 (+0.015), with-gold-topics 0.723→0.739, L2 0.708→0.736, no
+    # L1/L3 regression, route accuracy unchanged (0.818). boosted=1.5 and a wider
+    # window (0.20-0.45) regress; 0.10-0.25 is a no-op. So the DEFAULT window
+    # (0.15-0.35) is already correct; the recommended boosted is 0.5.
+    #
+    # Still OFF by default: the gain is small and the PRIMARY target — product-name
+    # / model-number queries — is not yet in the eval (that query set is #296's
+    # remaining work), and the #70 misrejections (#37/#49) did NOT improve under any
+    # config, so BM25 boosting alone is not their fix. Enable (set
+    # ``TEKIJIN_BM25_WEIGHT_BOOSTED=0.5``) once the 型番/product-name eval confirms
+    # the intended retrieval gain there. Re-run scripts/research_bm25_sweep.py to
+    # re-tune when the corpus or embedding model changes.
     bm25_weight_boosted: float | None = None
     bm25_adapt_lo: float = 0.15
     bm25_adapt_hi: float = 0.35
