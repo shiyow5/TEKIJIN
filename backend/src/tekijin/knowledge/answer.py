@@ -28,9 +28,11 @@ from tekijin.agent.protocols import SelfAnswerResult
 from tekijin.data.dto import KnowledgeUnitDTO
 from tekijin.data.knowledge import search_knowledge_units
 
-# Citation id scheme for a knowledge unit: ``ku_{id}``. Distinct from a document
-# (``doc_…``) or past-answer (``ans_…``) citation so the UI / #354 management view
-# can resolve it back to the unit (and, through the unit, its source provenance).
+# Citation id scheme for a knowledge unit: ``ku_{id}``. The existing #291 self-answer
+# citations are the raw source id (a past-answer ``qa_id`` or a document id, no
+# prefix — see retrieval/fragments.CitedEvidence), so the ``ku_`` prefix keeps a
+# knowledge citation distinct from those raw ids and lets the UI / #354 management
+# view resolve it back to the unit (and, through the unit, its source provenance).
 KNOWLEDGE_CITATION_PREFIX = "ku_"
 
 
@@ -41,11 +43,18 @@ def knowledge_citation_id(unit: KnowledgeUnitDTO) -> str:
 def _format_case(unit: KnowledgeUnitDTO) -> str:
     """Render one case unit as a compact 問題→打ち手→結果 block (present fields only)."""
 
+    # Guard every optional field: problem/action are ``str | None`` on the DTO/column.
+    # The extraction pipeline's validator guarantees them for a ``case`` unit, but a
+    # manual write (#354) or a future procedure/decision kind could pass None — and a
+    # bare f-string would leak the literal "None" into a user-facing answer. Consistent
+    # with knowledge/index.unit_text, which is likewise defensive.
     lines = []
     if unit.industry:
         lines.append(f"【{unit.industry}】")
-    lines.append(f"課題: {unit.problem}")
-    lines.append(f"打ち手: {unit.action}")
+    if unit.problem:
+        lines.append(f"課題: {unit.problem}")
+    if unit.action:
+        lines.append(f"打ち手: {unit.action}")
     if unit.result:
         lines.append(f"結果: {unit.result}")
     return "\n".join(lines)
@@ -90,6 +99,10 @@ def answer_from_knowledge(
     approved knowledge answers this" so the caller routes normally; this never
     returns an ungrounded answer. Pure (no config/flag read) — the ``knowledge_
     retrieval_enabled`` gate lives at the call site.
+
+    NOTE for the slice-4c wiring: ``min_similarity`` defaults to ``0.0`` (no floor)
+    to keep this pure; the live caller MUST pass ``settings.knowledge_answer_min_
+    similarity`` explicitly, or every retrieved unit would qualify.
     """
 
     hits = search_knowledge_units(session, query_vec, top_k=top_k, review_status="approved")

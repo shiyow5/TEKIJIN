@@ -72,6 +72,16 @@ def test_compose_omits_absent_optional_fields() -> None:
     assert knowledge_citation_id(_unit(9)) == "ku_9"
 
 
+def test_compose_never_leaks_literal_none() -> None:
+    # problem/action are str|None; a None must never render as the literal "None"
+    # in a user-facing answer (defensive guard for manual writes / future kinds).
+    res = compose_knowledge_answer(
+        [_unit(3, problem=None, action=None, result=None, industry=None)]
+    )
+    assert "None" not in res.answer
+    assert res.grounded is True and res.cited_source_ids == ["ku_3"]
+
+
 # --------------------------------------------------------------------------- #
 # answer_from_knowledge (retrieve → compose, DB)
 # --------------------------------------------------------------------------- #
