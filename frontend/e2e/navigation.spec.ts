@@ -159,6 +159,38 @@ test.describe("navigation", () => {
     await expect(page.getByRole("button", { name: /メニューを(開く|閉じる)/ })).toBeHidden();
   });
 
+  test("the notification panel stays inside the viewport at phone width (#316)", async ({
+    page,
+  }) => {
+    await mockChrome(page);
+    // Below `md` the header row wraps (#288) and the bell becomes the leftmost
+    // item, no longer near the right edge — the regression was the panel still
+    // opening right-anchored and landing mostly off the left edge of the screen.
+    await page.setViewportSize({ width: 390, height: 780 });
+    await page.goto("/questions");
+
+    await page.getByRole("button", { name: "通知" }).click();
+    const panel = page.getByRole("menu", { name: "通知一覧" });
+    await expect(panel).toBeVisible();
+
+    const box = await panel.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box?.x).toBeGreaterThanOrEqual(0);
+    expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(390);
+  });
+
+  test("the notification panel stays right-anchored at desktop width (#316)", async ({ page }) => {
+    await mockChrome(page);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.goto("/questions");
+
+    await page.getByRole("button", { name: "通知" }).click();
+    const panel = page.getByRole("menu", { name: "通知一覧" });
+    const box = await panel.boundingBox();
+    expect(box).not.toBeNull();
+    expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(1280);
+  });
+
   test("switching the current user returns to the hub (#210)", async ({ page }) => {
     await mockChrome(page);
     // The inbox is the screen the bug was reported on: it re-fetches for the new

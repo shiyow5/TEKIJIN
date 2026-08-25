@@ -100,7 +100,12 @@ export function NotificationBell() {
         <div
           role="menu"
           aria-label="通知一覧"
-          className="absolute right-0 z-10 mt-xs w-80 max-w-[90vw] rounded-lg border border-outline-variant bg-surface-container-lowest p-xs shadow-md"
+          // Anchored from the left below `md`: the header row wraps there
+          // (#288) and the bell becomes the leftmost item, so a right-0 panel
+          // would open mostly off the left edge of the viewport (#316). Above
+          // `md` the bell sits near the header's right edge, where right-0 is
+          // correct.
+          className="absolute left-0 z-10 mt-xs w-80 max-w-[90vw] rounded-lg border border-outline-variant bg-surface-container-lowest p-xs shadow-md md:right-0 md:left-auto"
         >
           {items.length === 0 ? (
             <p className="p-sm text-on-surface-variant text-sm">新しい通知はありません。</p>
