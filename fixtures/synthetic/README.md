@@ -70,6 +70,15 @@ python3 scripts/build_fixtures.py     # fixtures/source/ を入力に、ここ�
 - **project_members**: `project_id, employee_id, role`（`lead` = 案件主担当、`member` = 同部署から0〜2名）。
 - **employee_chat_history**: `id, sender_employee_id, receiver_employee_id(null), channel, message, sent_at`
 - **daily_reports**: `id, employee_id, report_date, content, issue, created_at`（`issue` は content から簡易導出、無ければ `null`）。
+  - **営業部の日報だけ SPR 訪問日報フォーマット（#326）**。ヒアリングで、営業部の日報は SPR（全社が閲覧できる
+    顧客情報システム）に決まった様式で入力されると分かったため、営業部の従業員の日報を訪問日報の構造
+    （`【訪問】訪問日 時刻／業種・規模／要件: 初期訪問|課題ヒアリング|提案|デモ・PoC|クロージング|導入フォロー／
+    先方: ご担当／当社: 営業担当／所要○分。詳細（1〜2文）`）に差し替えている。**他部署の日報は不変**。
+    詳細の担当トピックは、その社員の**案件由来の得意領域**（lead1.0/member0.6）から選び、日報が案件と同じ
+    トピック証拠を補強する（案件に無い偽の専門性を作らない）。実データ・実顧客名は使わず、大塚商会の一般的な
+    商材レンジ（CRM・営業支援 / 業務効率化コンサル / 契約書管理 / 基幹システム / ネットワーク・VPN 等）で合成。
+    乱数は日報IDで決まる専用インスタンス（グローバル `random` 非消費＝他データの件数を一切ずらさない）。
+    ガードは `backend/tests/test_data_unit.py::test_sales_daily_reports_use_spr_visit_format` ほか。
 - **questions**: `id, asker_id, body, topics[], status(="answered"), created_at`
 - **answers**: `id, question_id, responder_id, body, created_at, reuse_count(0〜8), was_helpful(≈7割 true), topic`
   - **全40名が最低1回は `responder_id` に登場**する（少数者の埋没を防ぐため、未カバー社員は
