@@ -76,26 +76,29 @@ _INTENT_SYSTEM = (
     "一覧の表記から選び、抜粋に引きずられて一覧に無い語を作らないでください。"
 )
 
-# #380: optional few-shot disambiguation for C1 (c1_fewshot_enabled). The full-graph
-# eval showed C1's top-3 topic misses are almost all confusions between ADJACENT
-# business categories on indirect/euphemistic questions (e.g. supplier price
-# negotiation read as sales, an internal-PC boot fault read as software dev). These
-# examples teach the CATEGORY BOUNDARIES (not the eval's questions — generic domain
-# distinctions any classifier should know) so the model stops collapsing onto the
-# more salient neighbour. Appended to the system prompt only when the flag is on.
+# #380: optional few-shot disambiguation for C1 (c1_fewshot_enabled). These teach the
+# DEFINITIONAL distinctions between the semantically-nearest topic pairs in the fixed
+# vocabulary — framed from the taxonomy (who is the actor, what artefact), NOT from any
+# eval question's wording — so the model stops collapsing a topic onto its more salient
+# neighbour. Appended to the system prompt only when the flag is on. (Rewritten after a
+# review flagged that scenario-shaped examples echoed the eval; the honest validation is
+# the held-out set + the disjoint-authored measurement, not the mined eval alone.)
 _INTENT_FEWSHOT = (
-    "\n\n判別しにくい隣接カテゴリの区別（婉曲な言い回しでも取り違えないこと）:\n"
-    "- 仕入先・取引先との『値段交渉／発注条件の標準化』は【購買・仕入れ】。"
-    "顧客向けの営業活動【CRM・営業支援】と混同しない。\n"
-    "- 取引先との『契約書・覚書の期限管理／書面の一元管理』は【契約管理】。"
-    "これも営業【CRM・営業支援】ではない。\n"
-    "- 顧客からの『一次受け窓口・問い合わせ対応の運用や外部委託』は"
-    "【問い合わせ・ヘルプデスク運用】。社内向けのIT支援【社内IT・ヘルプデスク】とは別。\n"
-    "- 『自社の公式アカウントでの投稿・発信の運用』は【SNS運用】。"
-    "広告出稿は【Webマーケティング・広告】、報道・対外広報は【広報・PR】と区別する。\n"
-    "- 『部門別の予算実績（予実）／月次の費用把握・締め』は【経理・決算】。\n"
-    "- 『社内貸与PC・キッティング済み端末の起動不良やハード障害』は"
-    "【社内IT・ヘルプデスク】。自社製品の実装【システム開発・API】ではない。\n"
+    "\n\n意味が近く取り違えやすいトピックは、次の定義で区別してください:\n"
+    "- 【購買・仕入れ】は自社が『買う／調達する』側の業務（仕入先の選定・発注・"
+    "コスト削減・仕入条件）。【CRM・営業支援】は自社が『売る』側（顧客管理・商談・"
+    "営業活動）。取引の向きで決める。\n"
+    "- 【契約管理】は契約書・覚書そのものの管理（締結・期限・更新・保管）。"
+    "営業の一環に見えても、対象が『契約文書』なら【CRM・営業支援】ではない。\n"
+    "- 【問い合わせ・ヘルプデスク運用】は社外・顧客からの問い合わせ対応の運用。"
+    "【社内IT・ヘルプデスク】は自社従業員向けのIT支援（PC・アカウント・社内端末）。"
+    "対応相手が社外か社内かで分ける。\n"
+    "- 【SNS運用】は自社アカウントの投稿・運用。【Webマーケティング・広告】は"
+    "広告出稿・集客施策。【広報・PR】は報道・対外的な広報。手段で区別する。\n"
+    "- 【社内IT・ヘルプデスク】は社内端末・PCの保守やトラブル対応。"
+    "【システム開発・API】は自社が提供するソフトウェアの実装。運用保守か開発かで分ける。\n"
+    "- 【経理・決算】は会計・予算実績・費用・決算の管理。業務改善一般"
+    "【業務効率化コンサル】とは別。\n"
     "複数の領域にまたがる相談は、該当するトピックを全て挙げること。"
 )
 _SUFFICIENCY_SYSTEM = (

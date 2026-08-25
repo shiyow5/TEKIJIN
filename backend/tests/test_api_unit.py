@@ -515,9 +515,9 @@ def test_vllm_intent_fewshot_appends_disambiguation_only_when_on() -> None:
     off = next(m for r, m in VllmIntentModel.prompt("q", None) if r == "system")
     on = next(m for r, m in VllmIntentModel.prompt("q", None, fewshot=True) if r == "system")
     assert "購買・仕入れ" in on and "CRM・営業支援" in on  # a taught boundary
-    assert "判別しにくい隣接カテゴリ" in on
+    assert "意味が近く取り違えやすいトピック" in on
     assert on.startswith(off) and len(on) > len(off)  # pure suffix, base unchanged
-    assert "判別しにくい隣接カテゴリ" not in off
+    assert "意味が近く取り違えやすいトピック" not in off
 
 
 def test_vllm_intent_model_reads_fewshot_flag_from_settings() -> None:
@@ -529,8 +529,10 @@ def test_vllm_intent_model_reads_fewshot_flag_from_settings() -> None:
 
 
 def test_c1_fewshot_enabled_by_default() -> None:
-    # #380 enabled after the full-graph E2E verification: topic acc@1 0.721->0.868,
-    # Hit@3 0.712->0.803, RouteAccuracy unchanged (routing not harmed).
+    # #380 enabled after held-out validation (disjoint from the eval + the examples):
+    # C1 topic acc@1 ~0.70->0.833 / acc@3 0.833->0.917, stable across 3 vLLM runs, no
+    # regression on easy questions, routing untouched. See config.py for the honest
+    # write-up (the eval's own number was leak-inflated; held-out is the evidence).
     assert _settings().c1_fewshot_enabled is True
 
 

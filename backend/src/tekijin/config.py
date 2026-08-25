@@ -175,14 +175,20 @@ class Settings(BaseSettings):
     # branch is byte-for-byte dormant while False.
     query_expansion_enabled: bool = False
 
-    # #380: append confusable-category disambiguation few-shot examples to the C1
-    # intent prompt. C1's topic misses were adjacent-category confusions on indirect
-    # questions (supplier price negotiation read as sales, an internal-PC boot fault
-    # read as software dev). ENABLED after the full-graph E2E verification confirmed
-    # the topic gain TRANSLATES (DGX, real Qwen3.6: topic acc@1 0.721->0.868, and
-    # Hit@3 0.712->0.803, RouteAccuracy unchanged 0.833 — routing not harmed). Unlike
-    # the #371/#380 augmentation experiments (query_expansion / union scoring topics,
-    # both measured WORSE), improving C1's OWN precision is the lever that works.
+    # #380: append confusable-category disambiguation to the C1 intent prompt. C1's
+    # topic misses were adjacent-category confusions on INDIRECT questions (buy-side
+    # procurement read as sell-side sales, an internal-PC fault read as product dev).
+    # The block teaches the DEFINITIONAL boundary (actor/artefact), not any eval
+    # question's wording. VALIDATION (honest, after a review caught that scenario-
+    # shaped examples had leaked the eval): on a HELD-OUT set of fresh indirect
+    # questions disjoint from both the eval and the examples, C1 topic acc@1 ~0.70->
+    # 0.833 and acc@3 0.833->0.917, STABLE across 3 vLLM runs (ON beat OFF every run;
+    # ON's output was deterministic while OFF wobbled) — real generalization, not
+    # memorization. No regression on easy/direct questions (held-out direct 1.0->1.0),
+    # and routing is untouched (SCORING/prompt only — RouteAccuracy 0.833 unchanged).
+    # The eval's own Hit@3 delta is small and within LLM run-variance (±~0.09 acc@1
+    # run-to-run) because that set's base already sits near the topic ceiling; the
+    # held-out generalization is the evidence, NOT the leak-inflated eval number.
     c1_fewshot_enabled: bool = True
 
     # LangGraph checkpointer for session persistence / interrupt-resume:
