@@ -20,7 +20,9 @@ from tekijin.retrieval.embedding import SentenceTransformerEmbedder
 def build_default_service(settings: Settings | None = None) -> AgentService:
     settings = settings or get_settings()
     session_factory = get_sessionmaker(get_engine(settings.database_url))
-    intent_model, sufficiency_model, draft_model, answerability_model = make_llm_nodes(settings)
+    intent_model, sufficiency_model, draft_model, answerability_model, self_answer_model = (
+        make_llm_nodes(settings)
+    )
     embedder = SentenceTransformerEmbedder(
         settings.embedding_model,
         # All settings-driven from THIS instance (not the cached global), so a
@@ -47,6 +49,10 @@ def build_default_service(settings: Settings | None = None) -> AgentService:
         # Default OFF until it is verified on the DGX eval (part3).
         answerability_model=answerability_model if settings.answerability_enabled else None,
         answerability_threshold=settings.answerability_threshold,
+        # #291: wire the self-answer composer ONLY when enabled; else None keeps the
+        # pre-#291 data-derived routes (document terminal / hand-off). Default OFF
+        # until verified on the recall-centric eval (part3).
+        self_answer_model=self_answer_model if settings.self_answer_enabled else None,
         # From THIS settings instance (not the cached global) so a custom Settings
         # is honored when the graph builds its C4 retriever (#68).
         bm25_weight=settings.bm25_weight,

@@ -574,12 +574,22 @@ class DoneData(BaseModel):
     latency_ms: int | None = None
 
 
+class SourceCitation(BaseModel):
+    """One source a self-answer (#291) drew from, so the chat can link to it."""
+
+    source_id: str
+    kind: str  # "qa" (past Q&A) | "document" (internal doc)
+
+
 class MessageData(BaseModel):
     status: str
     message: str
     # For the ``document`` route: the id of the cited document, so the client can
     # open it (GET /documents/{doc_id}). ``None`` for every non-document terminal.
     doc_id: str | None = None
+    # #291: for the ``self_answered`` terminal, the sources the answer cited — the
+    # chat renders a link per entry. Empty for every other terminal.
+    citations: list[SourceCitation] = Field(default_factory=list)
     # This run segment's processing time in ms (#177); None on a replay.
     latency_ms: int | None = None
 
