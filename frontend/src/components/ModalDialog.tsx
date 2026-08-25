@@ -6,7 +6,12 @@
  * `result/ConsultMethodDialog.tsx` when `QuestionResolveButton`'s confirmation
  * became a popup too (#289) and would otherwise have carried a second copy of
  * the same a11y-sensitive logic. Anything that needs a modal should render this
- * rather than reimplement it — #286 (delete confirmation) is next.
+ * rather than reimplement it — #286 (delete confirmation) is the third caller.
+ *
+ * Backdrop-click dismissal is opt-in via `dismissOnBackdrop`, because it is not
+ * universally safe: it is right for a confirmation whose cancel path is free
+ * (#286), and wrong wherever a stray click would discard work. Escape and the
+ * dialog's own cancel control are always available regardless.
  *
  * Callers must NOT disable the element that opened the dialog in the same
  * render that mounts it: per the HTML spec, a browser blurs a focused control
@@ -22,10 +27,18 @@ export interface ModalDialogProps {
   titleId: string;
   onCancel: () => void;
   initialFocusRef: RefObject<HTMLElement | null>;
+  /** Close when the overlay outside the dialog panel is clicked. Default off. */
+  dismissOnBackdrop?: boolean;
   children: ReactNode;
 }
 
-export function ModalDialog({ titleId, onCancel, initialFocusRef, children }: ModalDialogProps) {
+export function ModalDialog({
+  titleId,
+  onCancel,
+  initialFocusRef,
+  dismissOnBackdrop = false,
+  children,
+}: ModalDialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -59,7 +72,21 @@ export function ModalDialog({ titleId, onCancel, initialFocusRef, children }: Mo
   }, [onCancel]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-on-surface/40 p-md">
+    /* biome-ignore lint/a11y/useKeyWithClickEvents: mouse-only dismissal; the
+    keyboard path is the document-level Escape listener registered above, not
+    a key event on this element. */
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-on-surface/40 p-md"
+      onClick={
+        dismissOnBackdrop
+          ? (e) => {
+              // Only a click on the overlay itself. Clicks inside the panel
+              // bubble up to here with a different target, and must not close.
+              if (e.target === e.currentTarget) onCancel();
+            }
+          : undefined
+      }
+    >
       {/* biome-ignore lint/a11y/useSemanticElements: role="dialog" + aria-modal
       matches this component's own onCancel/Escape handling; the native
       <dialog> element's imperative showModal()/close() API isn't needed here. */}

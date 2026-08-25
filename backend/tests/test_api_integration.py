@@ -2747,10 +2747,21 @@ def _insert_question(engine, qid: str, asker_id: int, *, with_children: bool = F
             s.add(Event(question_id=qid, stage="c1", started_at=NOW, ended_at=NOW, meta=None))
             s.flush()  # rec.id (autoincrement) must exist before the message FKs it
             s.add(Message(recommendation_id=rec.id, sender_id=1, body="チャット本文"))
+            # A learning signal keyed to this question. Every correction the asker
+            # makes (draft edits, person exclusions, re-runs) writes one of these.
+            s.add(
+                Feedback(
+                    question_id=qid,
+                    stage="c7",
+                    kind="draft_edited",
+                    payload={"generated": "旧", "sent": "新"},
+                    actor_id=asker_id,
+                )
+            )
         s.commit()
 
 
-def _counts_for(engine, qid: str) -> tuple[int, int, int, int, int]:
+def _counts_for(engine, qid: str) -> tuple[int, int, int, int, int, int]:
     factory = get_sessionmaker(engine)
     with factory() as s:
         recommendation_ids = [
@@ -2770,6 +2781,7 @@ def _counts_for(engine, qid: str) -> tuple[int, int, int, int, int]:
             len(recommendation_ids),
             s.query(Event).filter(Event.question_id == qid).count(),
             message_count,
+            s.query(Feedback).filter(Feedback.question_id == qid).count(),
         )
 
 
@@ -2777,14 +2789,14 @@ def test_delete_question_removes_it_and_its_children(seed_counts, engine, fake_e
     client = _client(engine, fake_embedder)  # admin
     _insert_question(engine, "api_del1", 10, with_children=True)
     # question, answer, recommendation, event, and its chat message all exist.
-    assert _counts_for(engine, "api_del1") == (1, 1, 1, 1, 1)
+    assert _counts_for(engine, "api_del1") == (1, 1, 1, 1, 1, 1)
 
     resp = client.delete("/questions/api_del1")
     assert resp.status_code == 200
     assert resp.json() == {"question_id": "api_del1", "deleted": True}
     # question and ALL its FK children — including chat messages, one hop out
-    # via the recommendation (#286) — are gone.
-    assert _counts_for(engine, "api_del1") == (0, 0, 0, 0, 0)
+    # via the recommendation, and the feedback rows (#286) — are gone.
+    assert _counts_for(engine, "api_del1") == (0, 0, 0, 0, 0, 0)
 
 
 def test_owner_can_delete_their_own_question(seed_counts, engine, fake_embedder) -> None:
