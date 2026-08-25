@@ -185,6 +185,7 @@ class AgentService:
         prior_answer_reuse_min: int | None = None,
         prior_answer_relevance_floor: float = 0.15,
         daily_evidence: bool = False,
+        knowledge_answer_min_similarity: float | None = None,
         max_concurrent_runs: int = 0,
         now_factory: Any = _default_now,
         clock: Any = time.monotonic,
@@ -203,6 +204,9 @@ class AgentService:
         self._answerability_threshold = answerability_threshold
         # #291: self-answer composer; None (default) compiles the pre-#291 graph.
         self._self_answer = self_answer_model
+        # #357 slice 4c: knowledge-answer similarity floor; None (default) compiles
+        # the pre-#357 graph (no knowledge_answer node). Passed to build_agent.
+        self._knowledge_answer_min_similarity = knowledge_answer_min_similarity
         # Optional C4/C6 overrides — default (None) uses the real HybridRetriever
         # / ExpertiseScorer over the request session; tests inject deterministic
         # fakes so the SSE flow does not depend on retrieval scores.
@@ -1072,6 +1076,7 @@ class AgentService:
             prior_answer_reuse_min=self._prior_answer_reuse_min,
             prior_answer_relevance_floor=self._prior_answer_relevance_floor,
             daily_evidence=self._daily_evidence,
+            knowledge_answer_min_similarity=self._knowledge_answer_min_similarity,
         )
 
     def _run(
@@ -1119,6 +1124,16 @@ class AgentService:
                             # A clarification reply enriched the question in-graph;
                             # persist it so /inbox and /history match the run (#268).
                             self._persist_question_body(question_id, data)
+                        elif node == "knowledge_answer":
+                            # #357 slice 4c: a grounded knowledge answer terminates
+                            # BEFORE C5, so c5_route never persists a route. Stamp a
+                            # synthetic "knowledge" route so dashboards that segment by
+                            # route account for knowledge-answered questions instead of
+                            # silently omitting them (self-resolution is still credited
+                            # by _persist_self_answered on the shared self_answered node).
+                            if (data or {}).get("self_answer_grounded"):
+                                route = "knowledge"
+                                self._persist_route(question_id, {"route": "knowledge"})
                         elif node == "c5_route":
                             route = (data or {}).get("route") or route
                             self._persist_route(question_id, data)

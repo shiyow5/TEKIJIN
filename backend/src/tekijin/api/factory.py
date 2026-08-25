@@ -62,6 +62,14 @@ def build_default_service(settings: Settings | None = None) -> AgentService:
         prior_answer_relevance_floor=settings.prior_answer_relevance_floor,
         # #355: daily reports as C6 evidence (False = dormant, develop unchanged).
         daily_evidence=settings.daily_evidence_enabled,
+        # #357 slice 4c: wire the knowledge-answer step ONLY when enabled; else None
+        # keeps the pre-#357 graph (no knowledge_answer node). Default OFF until the
+        # knowledge corpus is populated + verified (slice 4b calibrated the floor).
+        knowledge_answer_min_similarity=(
+            settings.knowledge_answer_min_similarity
+            if settings.knowledge_retrieval_enabled
+            else None
+        ),
         # Backpressure admission limit (#180) from THIS settings instance.
         max_concurrent_runs=settings.max_concurrent_runs,
     )

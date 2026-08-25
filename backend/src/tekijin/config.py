@@ -143,6 +143,11 @@ class Settings(BaseSettings):
     # this is the schema/CRUD skeleton slice; extraction, vector retrieval, and the
     # graph wiring land in later slices, and the graph does not call it yet. Enable
     # only after the extraction quality + A/B are verified on the eval.
+    # #357: answer directly from structured knowledge units. Slice 4c wired the
+    # ``knowledge_answer`` node into the graph (before C5), so flipping this to True
+    # DOES make /ask try a knowledge answer live. OFF by default until the knowledge
+    # corpus is populated (extract + embed + human-approve) AND the frontend renders
+    # the ``knowledge`` citation kind (see #357 slice-4d gate). Off = pre-#357 graph.
     knowledge_retrieval_enabled: bool = False
     # #357 slice 4: the cosine-similarity floor a retrieved knowledge unit must clear
     # to be used in a knowledge answer. CALIBRATED on the eval (slice 4b A/B, DGX,

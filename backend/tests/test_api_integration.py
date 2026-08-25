@@ -122,6 +122,7 @@ def _client(
     answerability_model=None,
     answerability_threshold=40,
     self_answer_model=None,
+    knowledge_answer_min_similarity=None,
 ) -> TestClient:
     service = AgentService(
         session_factory=get_sessionmaker(engine),
@@ -133,6 +134,7 @@ def _client(
         answerability_model=answerability_model,
         answerability_threshold=answerability_threshold,
         self_answer_model=self_answer_model,
+        knowledge_answer_min_similarity=knowledge_answer_min_similarity,
         retriever=retriever,
         scorer=scorer,
         now_factory=lambda: NOW,
@@ -595,6 +597,60 @@ def test_self_answer_message_carries_citations(seed_counts, engine, fake_embedde
     assert message["status"] == "self_answered"
     assert message["message"] == "保守時間内に更新します。"
     assert message["citations"] == [{"source_id": "doc_001", "kind": "document"}]
+
+
+def test_knowledge_answer_persists_route_and_self_resolution(
+    seed_counts, engine, fake_embedder
+) -> None:
+    # #357 slice 4c: a grounded knowledge answer terminates before C5, so the run
+    # must still (a) emit a self_answered message and (b) persist a synthetic
+    # "knowledge" route + mark the question self-resolved (dashboards segment by route).
+    from tekijin.data.knowledge import (
+        get_knowledge_unit_by_source,
+        set_review_status,
+        upsert_knowledge_unit,
+    )
+    from tekijin.knowledge.index import embed_knowledge_units
+
+    setup = get_sessionmaker(engine)()
+    try:
+        upsert_knowledge_unit(
+            setup,
+            kind="case",
+            problem=GOOD_Q,
+            action="SFA/CRM を提案",
+            result="受注",
+            topics=["CRM・営業支援"],
+            source_type="daily_report",
+            source_id="kb_api_1",
+            confidence=0.9,
+        )
+        setup.flush()
+        dto = get_knowledge_unit_by_source(setup, "daily_report", "kb_api_1")
+        set_review_status(setup, dto.id, "approved")
+        setup.flush()
+        embed_knowledge_units(setup, fake_embedder)
+        setup.commit()
+    finally:
+        setup.close()
+
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2]),
+        knowledge_answer_min_similarity=0.1,
+    )
+    client.post("/ask", json={"asker_id": 8, "question": GOOD_Q, "session_id": "skb"})
+    events = _events(client, "skb")
+    assert next(d for e, d in events if e == "message")["status"] == "self_answered"
+
+    check = get_sessionmaker(engine)()
+    try:
+        q = check.query(Question).filter(Question.session_id == "skb").first()
+        assert q is not None and q.route == "knowledge"  # synthetic route persisted
+        assert q.resolved_at is not None and q.resolution_kind == "self"
+    finally:
+        check.close()
 
 
 def test_self_answer_on_prior_answer_route_marks_self_resolved(
