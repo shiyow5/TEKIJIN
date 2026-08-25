@@ -110,6 +110,8 @@ class PipelineRanker:
         now: dt.datetime,
         top_k: int = _RANK_DEPTH,
         answer_topics: Mapping[str, list[str]] | None = None,
+        prior_answer_reuse_min: int | None = None,
+        prior_answer_relevance_floor: float = 0.15,
     ) -> None:
         self._retriever = retriever
         self._scorer = scorer
@@ -118,10 +120,17 @@ class PipelineRanker:
         # Empty by default so a fake-retriever unit test constructs without a DB;
         # then no answer maps to a topic and predicted_topics is simply empty.
         self._answer_topics = answer_topics or {}
+        # #327: corpus-count prior_answer routing (None = OFF, matches production).
+        self._prior_answer_reuse_min = prior_answer_reuse_min
+        self._prior_answer_relevance_floor = prior_answer_relevance_floor
 
     def __call__(self, query: EvalQuery) -> RankResult:
         retrieval = self._retriever.search(query.query)
-        route = decide_route(retrieval).route
+        route = decide_route(
+            retrieval,
+            prior_answer_reuse_min=self._prior_answer_reuse_min,
+            prior_answer_relevance_floor=self._prior_answer_relevance_floor,
+        ).route
         return RankResult(
             ranked_experts=self._rank_experts(query, retrieval, route),
             route=route,
@@ -183,7 +192,10 @@ def build_pipeline_ranker(
 ) -> PipelineRanker:
     """Construct a :class:`PipelineRanker` bound to a DB session + embedder."""
 
+    from tekijin.config import get_settings
+
     repo = Repository(session)
+    settings = get_settings()
     return PipelineRanker(
         # Widen the retrieval pool to match the rank depth, so a deeper top_k
         # actually surfaces more candidates (the retriever caps at its own top_k).
@@ -192,4 +204,8 @@ def build_pipeline_ranker(
         now=now,
         top_k=top_k,
         answer_topics=build_answer_topics(repo),
+        # #327: honor corpus-count prior_answer routing from settings (None = OFF),
+        # so a TEKIJIN_PRIOR_ANSWER_REUSE_MIN=N env turns it on for the DGX eval.
+        prior_answer_reuse_min=settings.prior_answer_reuse_min,
+        prior_answer_relevance_floor=settings.prior_answer_relevance_floor,
     )

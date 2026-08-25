@@ -119,6 +119,17 @@ class Settings(BaseSettings):
     # is the component-only slice (the graph does not call it yet).
     self_answer_enabled: bool = False
 
+    # #327: corpus-count routing for prior_answer. Nemotron's answer cosine cannot
+    # separate this route (PRIOR_ANSWER_SIM sits above the observed max — see
+    # route.py / #119), so route on whether the top retrieved past answer is a
+    # REUSED/canonical answer instead. ``None`` (default) = OFF: prior_answer stays
+    # dormant and C5 behaves exactly as before. When set (e.g. 3), a top past
+    # answer with ``reuse_count >=`` this value AND answer cosine >=
+    # ``prior_answer_relevance_floor`` (a low noise floor, not a discriminator)
+    # routes prior_answer. Calibrate the two on the DGX eval before enabling.
+    prior_answer_reuse_min: int | None = None
+    prior_answer_relevance_floor: float = 0.15
+
     # LangGraph checkpointer for session persistence / interrupt-resume:
     # "memory" = in-process MemorySaver (safe default, works without a DB);
     # "postgres" = PostgresSaver over ``database_url`` (production). A ``Literal``

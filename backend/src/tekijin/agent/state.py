@@ -27,6 +27,9 @@ class PastAnswer(TypedDict):
     qa_id: str
     score: float
     responder_id: int | None  # None if the answer's responder is unknown
+    # #327: how often this answer was reused — the corpus-count signal C5 uses to
+    # route prior_answer (cosine cannot separate it under Nemotron). 0 when unknown.
+    reuse_count: int
 
 
 class DocumentHit(TypedDict):

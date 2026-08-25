@@ -210,6 +210,8 @@ class HybridRetriever:
         documents = self._repo.list_documents()
         profiles = self._repo.list_profiles()
         responder_of = {a.id: a.responder_id for a in answers}
+        # #327: reuse_count per answer — the corpus-count signal C5 routes prior_answer on.
+        reuse_of = {a.id: int(a.reuse_count or 0) for a in answers}
         question_body_by_id = {q.id: q.body for q in questions}
         answers_by_question: dict[str, list[str]] = {}
         for a in answers:
@@ -255,7 +257,12 @@ class HybridRetriever:
             [dense_answers, question_answers], sparse_answers, dense_confidence=answer_confidence
         )
         past_answers: list[PastAnswer] = [
-            {"qa_id": id_, "score": score, "responder_id": responder_of.get(id_)}
+            {
+                "qa_id": id_,
+                "score": score,
+                "responder_id": responder_of.get(id_),
+                "reuse_count": reuse_of.get(id_, 0),
+            }
             for id_, score in fused_answers
         ]
 

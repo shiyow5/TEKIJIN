@@ -111,6 +111,8 @@ class AgentNodes:
         answerability_threshold: int = 40,
         self_answer_model: SelfAnswerModel | None = None,
         fragment_source: FragmentSource | None = None,
+        prior_answer_reuse_min: int | None = None,
+        prior_answer_relevance_floor: float = 0.15,
     ) -> None:
         self._intent = intent_model
         self._sufficiency = sufficiency_model
@@ -127,6 +129,9 @@ class AgentNodes:
         # from. Both None (default) -> no self_answer node is added (inert).
         self._self_answer = self_answer_model
         self._fragment_source = fragment_source
+        # #327: corpus-count routing for prior_answer (None = OFF, dormant route).
+        self._prior_answer_reuse_min = prior_answer_reuse_min
+        self._prior_answer_relevance_floor = prior_answer_relevance_floor
 
     # -- entry: validate input, reset per-question control fields ---------
     def reset(self, state: AgentState) -> AgentState:
@@ -281,7 +286,11 @@ class AgentNodes:
 
     # -- C5: route decision (deterministic) -------------------------------
     def c5_route(self, state: AgentState) -> AgentState:
-        decision = decide_route(state.get("retrieval") or empty_retrieval())
+        decision = decide_route(
+            state.get("retrieval") or empty_retrieval(),
+            prior_answer_reuse_min=self._prior_answer_reuse_min,
+            prior_answer_relevance_floor=self._prior_answer_relevance_floor,
+        )
         return {
             "route": decision.route,
             "route_reason": decision.reason,
