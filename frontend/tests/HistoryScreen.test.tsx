@@ -106,7 +106,7 @@ describe("HistoryScreen", () => {
     expect(screen.getByText("UTMの移行時の注意点")).toBeInTheDocument();
   });
 
-  it("marks a pending question self-resolved after confirmation (#159)", async () => {
+  it("marks a pending question self-resolved after confirmation via the popup (#289)", async () => {
     useCurrentUserMock.mockReturnValue(asUser("E001"));
     getRecentQuestionsMock.mockResolvedValue(ITEMS);
     render(<HistoryScreen />);
@@ -117,12 +117,49 @@ describe("HistoryScreen", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "「社内Wi-Fiの申請方法」を自分で解決済みにする" }),
     );
+    // The confirmation is a popup dialog, not an inline row swap.
+    const dialog = screen.getByRole("dialog", { name: "自分で解決しましたか？" });
+    expect(dialog).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "解決済みにする" }));
 
     await waitFor(() => expect(resolveQuestionMock).toHaveBeenCalledWith("q2"));
-    // The row updates in place to the self-resolved state (no re-fetch).
-    await waitFor(() => expect(screen.getByText("自分で解決")).toBeInTheDocument());
+    // The dialog closes and the row updates in place to the self-resolved state (no re-fetch).
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(screen.getByText("自分で解決")).toBeInTheDocument();
     expect(screen.getByText("社内Wi-Fiの申請方法")).toBeInTheDocument();
+  });
+
+  it("closes the self-resolve popup without resolving when cancelled (#289)", async () => {
+    useCurrentUserMock.mockReturnValue(asUser("E001"));
+    getRecentQuestionsMock.mockResolvedValue(ITEMS);
+    render(<HistoryScreen />);
+
+    await waitFor(() => expect(screen.getByText("社内Wi-Fiの申請方法")).toBeInTheDocument());
+    fireEvent.click(
+      screen.getByRole("button", { name: "「社内Wi-Fiの申請方法」を自分で解決済みにする" }),
+    );
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "やめる" }));
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(resolveQuestionMock).not.toHaveBeenCalled();
+    expect(screen.getByText("取り次ぎ先を調整中")).toBeInTheDocument();
+  });
+
+  it("closes the self-resolve popup on Escape without resolving (#289)", async () => {
+    useCurrentUserMock.mockReturnValue(asUser("E001"));
+    getRecentQuestionsMock.mockResolvedValue(ITEMS);
+    render(<HistoryScreen />);
+
+    await waitFor(() => expect(screen.getByText("社内Wi-Fiの申請方法")).toBeInTheDocument());
+    fireEvent.click(
+      screen.getByRole("button", { name: "「社内Wi-Fiの申請方法」を自分で解決済みにする" }),
+    );
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(resolveQuestionMock).not.toHaveBeenCalled();
   });
 
   it("keeps a pending question and shows a retry when self-resolve fails (#159)", async () => {
