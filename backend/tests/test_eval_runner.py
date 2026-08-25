@@ -26,6 +26,7 @@ from tekijin.eval.metrics import (
     evaluate_decisions,
     evaluate_source_recall,
     evaluate_topics,
+    hit_at_k,
     recall_at_k,
     reciprocal_rank,
     source_precision,
@@ -102,6 +103,21 @@ def test_recall_at_k_rejects_nonpositive_k() -> None:
         recall_at_k(_qr([1], [1]), 0)
 
 
+def test_hit_at_k_credits_at_least_one_gold_in_topk() -> None:
+    # Product-true routing metric (#371 follow-up): success == the user got ≥1
+    # genuinely useful expert in the shown top-k, regardless of how many of the
+    # 2–4 gold were caught. Diverges from fractional recall exactly on multi-gold.
+    assert hit_at_k(_qr([1, 2, 9, 4], [1, 2, 3]), 3) is True  # 2 of gold in top3
+    assert hit_at_k(_qr([9, 8, 7, 1], [1, 2]), 3) is False  # gold only at rank 4
+    assert hit_at_k(_qr([9, 1], [1, 2, 3, 4]), 3) is True  # 1-of-4 gold == product success
+    assert hit_at_k(_qr([], [3]), 3) is False  # empty ranking never hits
+
+
+def test_hit_at_k_rejects_nonpositive_k() -> None:
+    with pytest.raises(ValueError):
+        hit_at_k(_qr([1], [1]), 0)
+
+
 def test_reciprocal_rank() -> None:
     assert reciprocal_rank(_qr([9, 3, 1], [3])) == pytest.approx(1 / 2)  # first hit at index 1
     assert reciprocal_rank(_qr([3, 9], [3])) == pytest.approx(1.0)
@@ -165,6 +181,10 @@ def test_evaluate_excludes_goldless_and_nonabc_routes() -> None:
     assert m.n_abstain == 1  # the "none"-route query
     assert m.top1_accuracy == pytest.approx(0.5)
     assert m.recall_at_3 == pytest.approx(0.5)
+    # Both ranked rows have ≥1 gold in top3 -> Hit@3 == 1.0, diverging from the
+    # fractional Recall@3 of 0.5: the product succeeded on both (a useful expert
+    # was shown), which fractional recall under-credits on multi-gold rows.
+    assert m.hit_at_3 == pytest.approx(1.0)
     assert m.mrr == pytest.approx((1.0 + 0.5) / 2)
     assert m.route_accuracy == pytest.approx(0.5)  # 1 of 2 A/B/C routes match
     # the abstain query produced no experts -> declined correctly.
@@ -178,6 +198,7 @@ def test_evaluate_excludes_goldless_and_nonabc_routes() -> None:
         "n_abstain",
         "top1_accuracy",
         "recall_at_3",
+        "hit_at_3",
         "mrr",
         "route_accuracy",
         "abstain_accuracy",
