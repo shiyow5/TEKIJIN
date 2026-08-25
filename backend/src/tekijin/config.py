@@ -112,6 +112,13 @@ class Settings(BaseSettings):
     answerability_enabled: bool = False
     answerability_threshold: int = 40
 
+    # Self-answer (#291): when the retrieved past Q&A / documents already hold the
+    # answer, reply DIRECTLY with a cited answer instead of handing off to a person
+    # (the product pivot — "the answer is not always a person"). OFF by default until
+    # the composer is wired into the graph + verified on the recall-centric eval; this
+    # is the component-only slice (the graph does not call it yet).
+    self_answer_enabled: bool = False
+
     # LangGraph checkpointer for session persistence / interrupt-resume:
     # "memory" = in-process MemorySaver (safe default, works without a DB);
     # "postgres" = PostgresSaver over ``database_url`` (production). A ``Literal``

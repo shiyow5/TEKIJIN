@@ -13,9 +13,12 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from tekijin.agent.state import RetrievalResult
+
+if TYPE_CHECKING:  # pragma: no cover - typing only (keeps the heavy retrieval import out)
+    from tekijin.retrieval.fragments import CitedEvidence
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,6 +97,39 @@ class AnswerabilityModel(Protocol):
     """
 
     def assess(self, question: str, candidate_evidence: Sequence[str]) -> AnswerabilityResult: ...
+
+
+@dataclass(frozen=True, slots=True)
+class SelfAnswerResult:
+    """Self-answer output (#291): a grounded answer composed from retrieved data.
+
+    The product pivot (#291) drops "the answer is always a person":
+    when the past Q&A / internal documents already hold the answer, the assistant
+    replies DIRECTLY, citing its sources, and does not hand off. ``cited_source_ids``
+    are the ids of the evidence actually used (a subset of what was supplied) so the
+    chat can render links back to each source. ``grounded`` is ``False`` when the
+    evidence is insufficient to answer — the graph then falls back to routing to a
+    person (the tacit-knowledge path), never emits an ungrounded answer. A
+    ``grounded`` result ALWAYS carries at least one real citation: a grounded answer
+    with no surviving citation is treated as fabricated and downgraded to routing.
+    """
+
+    answer: str = ""
+    cited_source_ids: list[str] = field(default_factory=list)
+    grounded: bool = False
+
+
+class SelfAnswerModel(Protocol):
+    """Self-answer composer (#291): retrieved evidence -> a cited, grounded answer.
+
+    Given the question and the top retrieved sources (past Q&A / documents, each
+    id-paired), compose an answer that draws ONLY from that evidence and cite the
+    sources used. If the evidence does not actually answer the question, return
+    ``grounded=False`` rather than inventing one — the decision to fall back to a
+    human hand-off is the graph's, but the model must not hallucinate to avoid it.
+    """
+
+    def compose(self, question: str, evidence: Sequence[CitedEvidence]) -> SelfAnswerResult: ...
 
 
 class DraftModel(Protocol):

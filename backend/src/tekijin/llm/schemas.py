@@ -53,3 +53,36 @@ class AnswerabilitySchema(BaseModel):
         default=0, ge=0, le=100, description="社内の実績でこの相談に答えられる確度(0-100)"
     )
     reason: str | None = Field(default=None, description="判断の根拠を一言で（任意）")
+
+
+class SelfAnswerSchema(BaseModel):
+    """Self-answer structured output (#291): a grounded, cited answer or a pass.
+
+    The model must answer ONLY from the supplied evidence and list the source ids it
+    used. When the evidence does not answer the question it sets ``grounded=false``
+    (and leaves ``answer`` empty) so the graph falls back to a human hand-off rather
+    than surfacing an ungrounded answer.
+    """
+
+    grounded: bool = Field(
+        default=False, description="提供された根拠だけで質問に回答できるなら true"
+    )
+    answer: str = Field(default="", description="根拠のみに基づく回答本文（grounded=false なら空）")
+    cited_source_ids: list[str] = Field(
+        default_factory=list, description="回答に実際に用いた根拠の source_id（提供分の部分集合）"
+    )
+
+    @model_validator(mode="after")
+    def _grounded_requires_answer_and_citation(self) -> SelfAnswerSchema:
+        # A grounded answer must carry BOTH text and at least one citation — else the
+        # graph would emit an empty/uncited "answer" instead of falling back to
+        # routing. A grounded answer with zero citations is the strongest signal the
+        # model fabricated it (the composer verifies the ids are real; here we at
+        # least require it to claim one). (The reverse — grounded=false with stray
+        # text — is harmless: the graph ignores it and routes.)
+        if self.grounded:
+            if not self.answer.strip():
+                raise ValueError("answer is required when grounded is true")
+            if not self.cited_source_ids:
+                raise ValueError("cited_source_ids is required when grounded is true")
+        return self
