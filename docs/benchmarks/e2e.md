@@ -3,7 +3,12 @@
 > **この文書は2つの測定を含む。** §0 が**現行 develop の数値**、§1 以降は
 > e5-large 時代に #103 を見つけたときの記録（当時の構成のまま残してある）。
 
-## 0. 現行構成での実測（2026-08-23 再測定 / #132）
+> 📏 **§0 は pipeline / oracle-topic 測定（gold トピックを C6 に直接渡す `PipelineRanker` 系）で、かつ
+> `self_answer` OFF の条件**での数値。**これは「現行の完全な end-to-end」ではない。**
+> 実 C1 を通して `build_agent` を 87 行に走らせる **full-graph E2E の真の数値（`self_answer` ON）は
+> `scripts/research_fullgraph_eval.py`** が出す。2つの測定の別と指標定義は **[eval-metrics.md](eval-metrics.md)** を参照。
+
+## 0. 現行構成での pipeline / oracle-topic 実測（2026-08-23 再測定 / #132・`self_answer` OFF）
 
 > **#84 / #158 で評価セットを変えたので測り直した。**
 > **#158 では制約つきを5件→15件に増やし（該当10件の gold がその拠点の人に絞られた）、
@@ -52,6 +57,10 @@
 **6.67件相当が正解**で、L1 は到達可能分の **0.667 / 0.700 = 95%** を取っている。
 
 ### 0.3 経路
+
+> 📏 この経路表は **`self_answer` 有効化より前**に測ったもの（`self_answer` OFF）。自己回答が既定ON に
+> なった後（#380）は、データ由来経路が `self_answered` 終端へ進むため終端分布が変わる。真の end-to-end は
+> `scripts/research_fullgraph_eval.py` / [eval-metrics.md](eval-metrics.md) を参照。**下の数値は変更していない。**
 
 ```
 予測経路の分布: {'person': 77, 'document': 4}   ← 81件

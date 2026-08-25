@@ -4,6 +4,9 @@
 
 詳細な読み解きは `analysis/20_モデル実測結果.md`（非gitの検討資料）にある。ここには**数字と再現方法**を置く。
 
+> 📊 **指標の定義と読み方** → [eval-metrics.md](eval-metrics.md)、**現行の実測値スコアカード** → [eval-scores.md](eval-scores.md)。
+> フルグラフ E2E（実 C1・self_answer ON）の実力値と、算法レバーの負の結果（[ADR-0008](../adr/0008-system2-hit3-ceiling-and-augmentation-negatives.md)）はそちら。
+
 > ✅ **#132 で現行 develop（Nemotron + 較正済み閾値 + #115 の RRF 重み）を実 DB で再測定した。**
 > 層2 Recall@3 は **0.140 → 0.692**（#158 後の採点対象66件基準）、経路精度は **0.125 → 0.803**（53/66）。
 > #103（全件 `prior_answer` で候補が1名に固定）は #120 で解消済み。→ **[e2e.md](e2e.md) §0**
@@ -26,6 +29,12 @@
 > **続き**: モデルを固定したまま**アーキテクチャ側**で精度を上げる実験は
 > [ablation.md](ablation.md)（#65）にある。層2 Recall@3 は分割検証で **+0.136**（中央値）伸びた。
 > 旧 C4 の Dense+BM25 等重み RRF が **-0.134**（production 整合ハーネス・#68 / #158 で再測）と測れている点も、そちらを参照。
+
+> 📏 **上の「現行 develop」の数値（層2 R@3 0.692・経路 0.803 など）は、gold トピックを C6 に直接渡す
+> oracle-topic 測定（`PipelineRanker`）で、かつ `self_answer` OFF の条件**。
+> 実 C1 を通して `build_agent` を 87 行に走らせる **full-graph E2E の数値（`self_answer` ON）は
+> `scripts/research_fullgraph_eval.py`** が出す。2つの測定の別と指標定義（Hit@3・decision/source recall）は
+> **[eval-metrics.md](eval-metrics.md)** に集約した。
 
 > ✅ **#192 で埋め込み5本を採点66件基準に測り直した**（下の「埋め込み」節・`bench_emb.json` も更新済み）。
 > Nemotron は1位を維持したが、次点との差が縮小し次点が ruri に入れ替わった（[ADR-0002](../adr/0002-embedding-model-nemotron.md) 追補）。
