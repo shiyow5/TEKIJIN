@@ -62,6 +62,10 @@ def build_default_service(settings: Settings | None = None) -> AgentService:
         prior_answer_relevance_floor=settings.prior_answer_relevance_floor,
         # #355: daily reports as C6 evidence (False = dormant, develop unchanged).
         daily_evidence=settings.daily_evidence_enabled,
+        # #371: fold C1 topics into the C4 retrieval query so multi-facet questions
+        # surface each facet's experts (DGX: R@3 0.79->0.83). False = dormant, develop
+        # unchanged; enable after the DGX re-verification confirms the +0.04.
+        query_expansion_enabled=settings.query_expansion_enabled,
         # #357 slice 4c: wire the knowledge-answer step ONLY when enabled; else None
         # keeps the pre-#357 graph (no knowledge_answer node). Default OFF until the
         # knowledge corpus is populated + verified (slice 4b calibrated the floor).

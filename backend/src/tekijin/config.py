@@ -158,6 +158,16 @@ class Settings(BaseSettings):
     # sample (n=3) — directional. Inert while knowledge_retrieval_enabled=False.
     knowledge_answer_min_similarity: float = 0.20
 
+    # #371: fold the C1-extracted topics into the C4 retrieval query. A multi-facet
+    # question (e.g. 経理×データ基盤) collapses onto the facet with the thicker corpus
+    # under a single dense query, dropping the other department's experts out of the
+    # top_k candidate pool — the measured cause of ~2/3 of R@3 misses (34 gold
+    # out-of-pool vs 16 ranked-low over 62 rows). Folding topics into the query
+    # surfaces each facet (DGX, decisive harness: R@3 0.7903 -> 0.8306, pool-recall
+    # 0.837 -> 0.952). OFF by default (byte-for-byte the pre-#371 c4_retrieve); enable
+    # after the DGX re-verification on the live graph confirms the +0.04.
+    query_expansion_enabled: bool = False
+
     # LangGraph checkpointer for session persistence / interrupt-resume:
     # "memory" = in-process MemorySaver (safe default, works without a DB);
     # "postgres" = PostgresSaver over ``database_url`` (production). A ``Literal``
