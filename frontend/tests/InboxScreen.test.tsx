@@ -111,6 +111,7 @@ describe("InboxScreen", () => {
   it("shows loading until the current user resolves", () => {
     useCurrentUserMock.mockReturnValue(asUser(null));
     render(<InboxScreen />);
+    expect(screen.getByRole("link", { name: "ホームへ戻る" })).toHaveAttribute("href", "/");
     expect(screen.getByText("読み込み中…")).toBeInTheDocument();
     expect(getInboxMock).not.toHaveBeenCalled();
   });

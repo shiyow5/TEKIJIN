@@ -68,6 +68,18 @@ test.describe("navigation", () => {
     await expect(page.getByRole("heading", { name: "何を知りたいですか？" })).toBeVisible();
   });
 
+  test("major screens provide an explicit way back to the home hub (#332)", async ({ page }) => {
+    await mockChrome(page);
+
+    for (const path of ["/questions", "/history", "/inbox", "/dashboard"]) {
+      await page.goto(path);
+      const back = page.getByRole("link", { name: "ホームへ戻る" });
+      await expect(back).toBeVisible();
+      await back.click();
+      await page.waitForURL(/\/$/);
+    }
+  });
+
   test("an unknown route shows the not-found page with a way home", async ({ page }) => {
     await mockChrome(page);
     await page.goto("/no-such-page");
@@ -127,6 +139,7 @@ test.describe("navigation", () => {
     // The desktop nav is display:none below `md`, so its links are not reachable.
     const nav = page.getByRole("navigation", { name: "メインナビゲーション" });
     await expect(nav).toBeHidden();
+    await expect(page.getByRole("link", { name: "ホームへ戻る" })).toBeVisible();
 
     const toggle = page.getByRole("button", { name: "メニューを開く" });
     await expect(toggle).toBeVisible();

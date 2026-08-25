@@ -90,6 +90,7 @@ describe("ChatScreen", () => {
     useCurrentUserMock.mockReturnValue(asUser("E010"));
     getChatThreadsMock.mockResolvedValue([]);
     render(<ChatScreen />);
+    expect(screen.getByRole("link", { name: "ホームへ戻る" })).toHaveAttribute("href", "/");
 
     await waitFor(() =>
       expect(screen.getByText("承諾済みの依頼がまだありません。")).toBeInTheDocument(),

@@ -43,6 +43,10 @@ describe("ProcessingScreen", () => {
 
   it("shows an in-progress step while no events have arrived yet", () => {
     renderScreen(state({}));
+    expect(screen.getByRole("link", { name: "質問一覧へ戻る" })).toHaveAttribute(
+      "href",
+      "/questions",
+    );
     expect(screen.getByText("最適な回答者を探しています…")).toBeInTheDocument();
     expect(screen.getByTestId("active-step")).toBeInTheDocument();
   });

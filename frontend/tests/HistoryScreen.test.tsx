@@ -68,6 +68,7 @@ describe("HistoryScreen", () => {
   it("shows loading until the current user resolves", () => {
     useCurrentUserMock.mockReturnValue(asUser(null));
     render(<HistoryScreen />);
+    expect(screen.getByRole("link", { name: "ホームへ戻る" })).toHaveAttribute("href", "/");
     expect(screen.getByText("読み込み中…")).toBeInTheDocument();
     expect(getRecentQuestionsMock).not.toHaveBeenCalled();
   });

@@ -1,4 +1,5 @@
 import { AnswerScreen } from "@/components/AnswerScreen";
+import { PageBackLink } from "@/components/PageBackLink";
 
 /**
  * Answer route (product-spec 画面4 / the "asked" side). Thin server wrapper: it
@@ -11,5 +12,10 @@ export default async function AnswerPage({
   params: Promise<{ session_id: string }>;
 }) {
   const { session_id } = await params;
-  return <AnswerScreen sessionId={session_id} />;
+  return (
+    <div className="mx-auto flex w-full max-w-2xl flex-col py-lg">
+      <PageBackLink href="/inbox" label="受信箱へ戻る" />
+      <AnswerScreen sessionId={session_id} />
+    </div>
+  );
 }

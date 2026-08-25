@@ -16,8 +16,10 @@
  */
 
 import { useOptionalSessionId, useOptionalSessionStream } from "@/components/SessionStreamProvider";
+import { PageBackLink } from "@/components/PageBackLink";
 import { PersonRouteView } from "@/components/result/PersonRouteView";
 import type { EventStreamState } from "@/hooks/useEventStream";
+import type { ReactNode } from "react";
 
 export interface ResultScreenProps {
   /** Test seam: provide a fixed stream state instead of reading context. */
@@ -27,6 +29,15 @@ export interface ResultScreenProps {
 }
 
 const EMPTY_STREAM: EventStreamState = { events: [], terminal: false };
+
+function ResultFrame({ children }: { children: ReactNode }) {
+  return (
+    <div className="mx-auto flex w-full max-w-5xl flex-col py-lg">
+      <PageBackLink href="/questions" label="質問一覧へ戻る" />
+      {children}
+    </div>
+  );
+}
 
 function ResultPending() {
   return (
@@ -130,36 +141,54 @@ export function ResultScreen({ streamState, sessionId }: ResultScreenProps) {
 
   // A failed stream can no longer advance: surface it before any data gating.
   if (stream.error) {
-    return <ResultError />;
+    return (
+      <ResultFrame>
+        <ResultError />
+      </ResultFrame>
+    );
   }
   // A terminal outcome wins over any retained route/recommend: a run that ended
   // (sent / no_candidate / off_topic), or a completed session replayed after a
   // hard reload, must show its outcome rather than a stale route or 準備中.
   if (stream.terminal && (stream.done || stream.message)) {
-    return <ResultTerminal done={stream.done} message={stream.message} />;
+    return (
+      <ResultFrame>
+        <ResultTerminal done={stream.done} message={stream.message} />
+      </ResultFrame>
+    );
   }
 
   const hasMainLineData = recommendations.length > 0 || draft !== "";
   const hasAnyData = hasMainLineData || Boolean(stream.route);
   if (!hasAnyData) {
-    return <ResultPending />;
+    return (
+      <ResultFrame>
+        <ResultPending />
+      </ResultFrame>
+    );
   }
 
   if (hasMainLineData) {
     return (
-      // Keyed by the top candidate so a decline->reroute (new recommend/draft for
-      // a different person) remounts the whole view: it clears a stale "sent"
-      // confirmation and the previous selection/edit, making the reroute
-      // reachable. A same-recipient late draft keeps the key (edits preserved).
-      <PersonRouteView
-        key={recommendations[0]?.person_id ?? "no-candidate"}
-        recommendations={recommendations}
-        reason={stream.route?.reason}
-        draft={draft}
-        sessionId={effectiveSessionId}
-      />
+      <ResultFrame>
+        {/* Keyed by the top candidate so a decline->reroute (new recommend/draft for
+            a different person) remounts the whole view: it clears a stale "sent"
+            confirmation and the previous selection/edit, making the reroute
+            reachable. A same-recipient late draft keeps the key (edits preserved). */}
+        <PersonRouteView
+          key={recommendations[0]?.person_id ?? "no-candidate"}
+          recommendations={recommendations}
+          reason={stream.route?.reason}
+          draft={draft}
+          sessionId={effectiveSessionId}
+        />
+      </ResultFrame>
     );
   }
 
-  return <ResultPending />;
+  return (
+    <ResultFrame>
+      <ResultPending />
+    </ResultFrame>
+  );
 }

@@ -12,6 +12,7 @@
  */
 
 import { FollowupForm } from "@/components/FollowupForm";
+import { PageBackLink } from "@/components/PageBackLink";
 import { useOptionalSessionStream } from "@/components/SessionStreamProvider";
 import { type EventStreamState, useEventStream } from "@/hooks/useEventStream";
 import { ApiError, postAnswer } from "@/lib/api-client";
@@ -190,6 +191,7 @@ export function ProcessingScreen({
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-lg py-lg">
+      <PageBackLink href="/questions" label="質問一覧へ戻る" className="-mb-sm" />
       <header className="text-center">
         <h1 className="flex items-center justify-center gap-sm font-bold text-2xl text-primary">
           {showActiveStep ? (
