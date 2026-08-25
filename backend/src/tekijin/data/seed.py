@@ -39,6 +39,7 @@ from tekijin.data.mappers import build_all
 # input, request data, or any external source, since the names are spliced into
 # raw SQL (identifiers cannot be passed as bind parameters).
 _TRUNCATE_ORDER: tuple[str, ...] = (
+    "knowledge_units",
     "evidence",
     "person_topic_edges",
     "events",

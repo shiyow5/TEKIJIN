@@ -397,6 +397,66 @@ class Evidence(Base):
     ts: Mapped[dt.datetime | None] = mapped_column(DateTime)
 
 
+# --------------------------------------------------------------------------- #
+# D. Knowledge layer (#357 — tacit → explicit)
+# --------------------------------------------------------------------------- #
+class KnowledgeUnit(Base):
+    """A structured unit of formalised knowledge extracted from raw data (#357).
+
+    The product pivot ([[tekijin-product-direction]]) is to turn tacit knowledge
+    into *explicit, reusable* units rather than searching raw text. The PoC unit is
+    the **case** (``kind='case'``): ``problem`` (状況・課題) → ``action`` (打ち手) →
+    ``result`` (結果). ``procedure`` / ``decision`` are reserved in the check but not
+    yet produced.
+
+    Every unit keeps its ``(source_type, source_id)`` provenance back to the raw
+    record it was extracted from — a unit is never stored without it, so a
+    hallucinated unit has no home. ``(source_type, source_id)`` is UNIQUE, making
+    re-extraction an idempotent upsert (one source record → at most one unit for
+    the PoC). ``review_status`` gates a unit into the retrieval/self-answer path:
+    only ``approved`` units are trusted (the human-review導線 is #354). ``topics``
+    reuses the same 22-word vocabulary as the eval gold, so knowledge retrieval and
+    the existing scorer speak one language. ``embedding`` indexes the *unit* (the
+    structure), not the raw text — filled by a later ingestion slice, hence NULL
+    at insert.
+    """
+
+    __tablename__ = "knowledge_units"
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN ('case', 'procedure', 'decision')", name="ck_knowledge_units_kind"
+        ),
+        CheckConstraint(
+            "review_status IN ('unreviewed', 'approved', 'rejected')",
+            name="ck_knowledge_units_review_status",
+        ),
+        # Provenance is unique so re-extraction upserts rather than duplicates.
+        Index(
+            "uq_knowledge_units_source",
+            "source_type",
+            "source_id",
+            unique=True,
+        ),
+        # ``knowledge_units_by_topics`` filters with ``topics && :topics``; GIN
+        # accelerates the array-overlap the same way it does for ``questions``.
+        Index("ix_knowledge_units_topics", "topics", postgresql_using="gin"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    kind: Mapped[str] = mapped_column(String(16))
+    problem: Mapped[str | None] = mapped_column(Text)
+    action: Mapped[str | None] = mapped_column(Text)
+    result: Mapped[str | None] = mapped_column(Text)
+    topics: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
+    industry: Mapped[str | None] = mapped_column(String(255))
+    source_type: Mapped[str] = mapped_column(String(32))
+    source_id: Mapped[str] = mapped_column(String(64))
+    confidence: Mapped[float | None] = mapped_column(Float)
+    review_status: Mapped[str] = mapped_column(String(16), server_default="unreviewed")
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM))
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now())
+
+
 __all__ = [
     "EMBEDDING_DIM",
     "Employee",
@@ -417,4 +477,5 @@ __all__ = [
     "Document",
     "PersonTopicEdge",
     "Evidence",
+    "KnowledgeUnit",
 ]

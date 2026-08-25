@@ -137,6 +137,14 @@ class Settings(BaseSettings):
     # after DGX confirms a Pareto gain (primary R@3 up, alt not down).
     daily_evidence_enabled: bool = False
 
+    # #357: knowledge framework. When the knowledge layer is wired into retrieval,
+    # answer a question from structured knowledge units (problem → action → result,
+    # with provenance) instead of, or before, pointing at a person. OFF by default —
+    # this is the schema/CRUD skeleton slice; extraction, vector retrieval, and the
+    # graph wiring land in later slices, and the graph does not call it yet. Enable
+    # only after the extraction quality + A/B are verified on the eval.
+    knowledge_retrieval_enabled: bool = False
+
     # LangGraph checkpointer for session persistence / interrupt-resume:
     # "memory" = in-process MemorySaver (safe default, works without a DB);
     # "postgres" = PostgresSaver over ``database_url`` (production). A ``Literal``

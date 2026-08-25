@@ -160,9 +160,24 @@ def test_sales_daily_reports_carry_topic_keywords() -> None:
     sales, _ = _sales_and_other_reports()
     # build_fixtures の TOPICS 語彙（SALES_TOPIC_SCRIPT の課題句/商材句が含む）。
     keys = (
-        "CRM", "顧客情報", "営業活動", "業務効率化", "手作業", "業務フロー",
-        "契約", "基幹システム", "システム間連携", "老朽化", "ネットワーク", "VPN",
-        "接続トラブル", "セキュリティ", "UTM", "脆弱性", "クラウド", "データ基盤",
+        "CRM",
+        "顧客情報",
+        "営業活動",
+        "業務効率化",
+        "手作業",
+        "業務フロー",
+        "契約",
+        "基幹システム",
+        "システム間連携",
+        "老朽化",
+        "ネットワーク",
+        "VPN",
+        "接続トラブル",
+        "セキュリティ",
+        "UTM",
+        "脆弱性",
+        "クラウド",
+        "データ基盤",
     )
     assert all(any(k in d["content"] for k in keys) for d in sales)
 
@@ -269,6 +284,67 @@ def test_answer_certification_skill_document_dtos() -> None:
         t.Document(id="d1", title="t", body="b", source="s", embedding=[0.0] * 3)
     )
     assert doc.has_embedding is True
+
+
+def test_knowledge_unit_dto_from_row() -> None:
+    from tekijin.data.dto import KnowledgeUnitDTO
+
+    row = t.KnowledgeUnit(
+        id=3,
+        kind="case",
+        problem="CRM 導入が進まない",
+        action="SFA/CRM を提案",
+        result="受注",
+        topics=["CRM・営業支援"],
+        industry="製造業",
+        source_type="daily_report",
+        source_id="1234",
+        confidence=0.8,
+        review_status="approved",
+        embedding=None,
+    )
+    dto = KnowledgeUnitDTO.from_row(row)
+    assert dto.id == 3 and dto.kind == "case"
+    assert dto.topics == ("CRM・営業支援",)
+    assert dto.source_type == "daily_report" and dto.source_id == "1234"
+    assert dto.review_status == "approved" and dto.has_embedding is False
+    # topics=None -> empty tuple (mirrors the other DTOs)
+    bare = KnowledgeUnitDTO.from_row(
+        t.KnowledgeUnit(
+            id=4,
+            kind="case",
+            source_type="answer",
+            source_id="a_1",
+            review_status="unreviewed",
+            topics=None,
+            embedding=[0.0] * 3,
+        )
+    )
+    assert bare.topics == () and bare.has_embedding is True
+
+
+def test_knowledge_write_validation_is_database_free() -> None:
+    """Boundary validation raises before any SQL, so it needs no DB (#357)."""
+    from tekijin.data import knowledge as kb
+
+    # A bad kind / missing provenance is a clean ValueError, not a CheckViolation.
+    with pytest.raises(ValueError, match="unknown knowledge-unit kind"):
+        kb.upsert_knowledge_unit(
+            session=None, kind="bogus", problem="p", action="a", source_type="x", source_id="1"
+        )
+    with pytest.raises(ValueError, match="provenance"):
+        kb.upsert_knowledge_unit(
+            session=None, kind="case", problem="p", action="a", source_type="", source_id="1"
+        )
+    with pytest.raises(ValueError, match="unknown review status"):
+        kb.set_review_status(None, 1, "bogus")
+    # The read helpers validate review_status before touching the session too.
+    with pytest.raises(ValueError, match="unknown review status"):
+        kb.list_knowledge_units(None, review_status="bogus")
+    with pytest.raises(ValueError, match="unknown review status"):
+        kb.knowledge_units_by_topics(None, ["CRM・営業支援"], review_status="bogus")
+    assert set(kb.VALID_KINDS) == {"case", "procedure", "decision"}
+    assert set(kb.VALID_REVIEW_STATUSES) == {"unreviewed", "approved", "rejected"}
 
 
 def test_project_with_members_dto() -> None:
