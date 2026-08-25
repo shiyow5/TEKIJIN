@@ -55,6 +55,45 @@ class AnswerabilitySchema(BaseModel):
     reason: str | None = Field(default=None, description="判断の根拠を一言で（任意）")
 
 
+class CaseExtractionSchema(BaseModel):
+    """Knowledge-unit extraction structured output (#357 slice 2, case type).
+
+    The model reads ONE raw record (a sales daily report for the PoC) and, if it
+    holds a reusable *case*, distils it into ``問題(状況) → 打ち手 → 結果``. Not every
+    record is a case — a status note with no problem/action is not — so
+    ``extractable`` lets the model pass (the caller then stores nothing, keeping a
+    non-case out of the knowledge base). ``topics`` are NOT emitted here: they come
+    from the source record's precomputed tags so the knowledge vocabulary can never
+    drift from the eval gold's. The model must ground every field in the supplied
+    text and never invent a ``result`` that is not stated (leave it null).
+    """
+
+    extractable: bool = Field(
+        default=False, description="この記録が再利用可能なケース(課題→打ち手→結果)を含むなら true"
+    )
+    problem: str = Field(default="", description="顧客の状況・課題（記録に書かれた範囲で）")
+    action: str = Field(default="", description="打ち手・提案した商材やソリューション")
+    result: str | None = Field(
+        default=None, description="結果（受注・継続商談など）。記録に無ければ null"
+    )
+    industry: str | None = Field(
+        default=None, description="顧客の業種（記録に明示があれば）。無ければ null"
+    )
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0, description="抽出の確信度")
+
+    @model_validator(mode="after")
+    def _extractable_requires_problem_and_action(self) -> CaseExtractionSchema:
+        # A case is meaningless without BOTH a problem and an action — if the model
+        # claims extractable it must supply both, else the caller would store an
+        # empty unit. (extractable=false with stray text is harmless: skipped.)
+        if self.extractable:
+            if not self.problem.strip():
+                raise ValueError("problem is required when extractable is true")
+            if not self.action.strip():
+                raise ValueError("action is required when extractable is true")
+        return self
+
+
 class SelfAnswerSchema(BaseModel):
     """Self-answer structured output (#291): a grounded, cited answer or a pass.
 
