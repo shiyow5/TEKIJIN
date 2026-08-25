@@ -448,7 +448,8 @@ export interface DoneData {
  */
 export interface SourceCitation {
   source_id: string;
-  kind: string;
+  /** Closed set from the backend contract (fragments.py): a past Q&A or an internal doc. */
+  kind: "qa" | "document";
 }
 
 export interface MessageData {
