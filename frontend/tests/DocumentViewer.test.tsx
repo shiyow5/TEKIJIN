@@ -49,7 +49,7 @@ describe("DocumentViewer", () => {
   it("links back to the originating session screen when fromSessionId is given (#342)", async () => {
     getDocumentMock.mockResolvedValue(DOC);
     render(<DocumentViewer docId="doc_001" fromSessionId="sess-9" />);
-    const back = await screen.findByRole("link", { name: "結果へ戻る" });
+    const back = await screen.findByRole("link", { name: "回答へ戻る" });
     expect(back).toHaveAttribute("href", "/session/sess-9");
   });
 

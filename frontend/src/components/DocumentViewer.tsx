@@ -38,8 +38,15 @@ export function DocumentViewer({
   // Document links originate on the session processing screen. Returning to
   // `/result` loses that screen and shows only the replayed terminal message,
   // so take the reader back to the actual origin route (#342).
+  //
+  // The label says 回答, not 結果: `/session/{id}/result` is a *different*
+  // screen, and the origin screen offers its own 「結果を見る」 button pointing
+  // there. Calling this one 「結果へ戻る」 would put two 結果 labels on adjacent
+  // screens leading to two different places. The origin is headed
+  // 「回答をお届けします」 whenever this link is shown — a document link only
+  // exists on a terminal `message` — so 回答 is what the reader left (#126).
   const backHref = fromSessionId ? `/session/${fromSessionId}` : "/questions";
-  const backLabel = fromSessionId ? "結果へ戻る" : "質問一覧へ戻る";
+  const backLabel = fromSessionId ? "回答へ戻る" : "質問一覧へ戻る";
 
   useEffect(() => {
     let active = true;

@@ -58,7 +58,7 @@ test.describe("document viewer", () => {
     );
 
     await page.goto("/documents/doc_001?from=session-vpn");
-    await page.getByRole("link", { name: "結果へ戻る" }).click();
+    await page.getByRole("link", { name: "回答へ戻る" }).click();
 
     await page.waitForURL(/\/session\/session-vpn$/);
     await expect(page.getByText("社内文書に該当がありそうです。")).toBeVisible();
