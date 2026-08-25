@@ -113,6 +113,8 @@ class AgentNodes:
         fragment_source: FragmentSource | None = None,
         prior_answer_reuse_min: int | None = None,
         prior_answer_relevance_floor: float = 0.15,
+        knowledge_session: Any | None = None,
+        knowledge_answer_min_similarity: float | None = None,
     ) -> None:
         self._intent = intent_model
         self._sufficiency = sufficiency_model
@@ -129,6 +131,12 @@ class AgentNodes:
         # from. Both None (default) -> no self_answer node is added (inert).
         self._self_answer = self_answer_model
         self._fragment_source = fragment_source
+        # #357 slice 4c: optional knowledge-answer step. ``knowledge_answer_min_
+        # similarity`` None (default) -> no knowledge_answer node is added (inert);
+        # a float wires the node, which answers a query directly from approved
+        # knowledge units before routing (bypassing the C5 separation problem, #327).
+        self._knowledge_session = knowledge_session
+        self._knowledge_floor = knowledge_answer_min_similarity
         # #327: corpus-count routing for prior_answer (None = OFF, dormant route).
         self._prior_answer_reuse_min = prior_answer_reuse_min
         self._prior_answer_relevance_floor = prior_answer_relevance_floor
@@ -453,6 +461,39 @@ class AgentNodes:
         }
 
     # -- self-answer (#291): compose a cited answer from retrieved data ----
+    def knowledge_answer(self, state: AgentState) -> AgentState:
+        """Try to answer directly from structured knowledge units (#357 slice 4c).
+
+        Runs (when wired) right after C3 embeds the query, BEFORE routing — so it
+        applies to every route, sidestepping the C5 person/document separation the
+        #327 measurement proved unfixable (ADR-0007). Searches approved knowledge
+        units by the query embedding and, if one clears the similarity floor,
+        composes a grounded answer deterministically (no LLM, no hallucination) and
+        terminates at ``self_answered``. No relevant knowledge -> ``grounded=False``
+        and the run proceeds to normal retrieval/routing (never a degraded answer).
+        Reuses the #291 ``self_answer_*`` state + terminal so this is a drop-in.
+        """
+
+        from tekijin.knowledge.answer import answer_from_knowledge
+
+        assert self._knowledge_session is not None and self._knowledge_floor is not None
+        query_vec = state.get("query_vector") or []
+        if not query_vec:
+            return {"self_answer_grounded": False}
+        result = answer_from_knowledge(
+            self._knowledge_session, query_vec, min_similarity=self._knowledge_floor
+        )
+        if result is None or not result.grounded:
+            return {"self_answer_grounded": False}
+        citations = [
+            {"source_id": sid, "kind": "knowledge"} for sid in result.cited_source_ids
+        ]
+        return {
+            "self_answer_grounded": True,
+            "self_answer_text": result.answer,
+            "self_answer_citations": citations,
+        }
+
     def self_answer(self, state: AgentState) -> AgentState:
         """Try to answer directly from the retrieved sources (data-derived routes).
 

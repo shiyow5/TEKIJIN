@@ -185,6 +185,7 @@ class AgentService:
         prior_answer_reuse_min: int | None = None,
         prior_answer_relevance_floor: float = 0.15,
         daily_evidence: bool = False,
+        knowledge_answer_min_similarity: float | None = None,
         max_concurrent_runs: int = 0,
         now_factory: Any = _default_now,
         clock: Any = time.monotonic,
@@ -203,6 +204,9 @@ class AgentService:
         self._answerability_threshold = answerability_threshold
         # #291: self-answer composer; None (default) compiles the pre-#291 graph.
         self._self_answer = self_answer_model
+        # #357 slice 4c: knowledge-answer similarity floor; None (default) compiles
+        # the pre-#357 graph (no knowledge_answer node). Passed to build_agent.
+        self._knowledge_answer_min_similarity = knowledge_answer_min_similarity
         # Optional C4/C6 overrides — default (None) uses the real HybridRetriever
         # / ExpertiseScorer over the request session; tests inject deterministic
         # fakes so the SSE flow does not depend on retrieval scores.
@@ -1072,6 +1076,7 @@ class AgentService:
             prior_answer_reuse_min=self._prior_answer_reuse_min,
             prior_answer_relevance_floor=self._prior_answer_relevance_floor,
             daily_evidence=self._daily_evidence,
+            knowledge_answer_min_similarity=self._knowledge_answer_min_similarity,
         )
 
     def _run(
