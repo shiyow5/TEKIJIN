@@ -19,6 +19,12 @@
       37
     ],
     "gold_route": "document",
+    "gold_source": [
+      "doc_005",
+      "doc_013",
+      "doc_021",
+      "doc_029"
+    ],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
@@ -45,6 +51,11 @@
       15
     ],
     "gold_route": "document",
+    "gold_source": [
+      "doc_008",
+      "doc_016",
+      "doc_024"
+    ],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
@@ -71,6 +82,20 @@
       4
     ],
     "gold_route": "prior_answer",
+    "gold_source": [
+      "ans_0017",
+      "ans_0018",
+      "ans_0042",
+      "ans_0043",
+      "ans_0067",
+      "ans_0068",
+      "ans_0092",
+      "ans_0093",
+      "ans_0117",
+      "ans_0118",
+      "ans_0142",
+      "ans_0143"
+    ],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
@@ -97,6 +122,20 @@
       1
     ],
     "gold_route": "prior_answer",
+    "gold_source": [
+      "ans_0011",
+      "ans_0012",
+      "ans_0036",
+      "ans_0037",
+      "ans_0061",
+      "ans_0062",
+      "ans_0086",
+      "ans_0087",
+      "ans_0111",
+      "ans_0112",
+      "ans_0136",
+      "ans_0137"
+    ],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
@@ -123,6 +162,12 @@
       3
     ],
     "gold_route": "document",
+    "gold_source": [
+      "doc_006",
+      "doc_014",
+      "doc_022",
+      "doc_030"
+    ],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
@@ -150,6 +195,12 @@
       8
     ],
     "gold_route": "document",
+    "gold_source": [
+      "doc_004",
+      "doc_012",
+      "doc_020",
+      "doc_028"
+    ],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
@@ -177,6 +228,7 @@
       20
     ],
     "gold_route": "person",
+    "gold_source": [],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
@@ -204,6 +256,12 @@
       28
     ],
     "gold_route": "document",
+    "gold_source": [
+      "doc_003",
+      "doc_011",
+      "doc_019",
+      "doc_027"
+    ],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
@@ -230,6 +288,7 @@
       14
     ],
     "gold_route": "person",
+    "gold_source": [],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
@@ -257,6 +316,20 @@
       18
     ],
     "gold_route": "prior_answer",
+    "gold_source": [
+      "ans_0019",
+      "ans_0020",
+      "ans_0044",
+      "ans_0045",
+      "ans_0069",
+      "ans_0070",
+      "ans_0094",
+      "ans_0095",
+      "ans_0119",
+      "ans_0120",
+      "ans_0144",
+      "ans_0145"
+    ],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
@@ -280,6 +353,12 @@
       6
     ],
     "gold_route": "document",
+    "gold_source": [
+      "doc_001",
+      "doc_009",
+      "doc_017",
+      "doc_025"
+    ],
     "expect_abstain": false,
     "constraint": {
       "branch": "福岡"
@@ -302,6 +381,7 @@
     ],
     "gold_experts_alt": [],
     "gold_route": "person",
+    "gold_source": [],
     "expect_abstain": false,
     "constraint": {
       "branch": "本社"
@@ -324,6 +404,7 @@
     ],
     "gold_experts_alt": [],
     "gold_route": "person",
+    "gold_source": [],
     "expect_abstain": false,
     "constraint": {
       "branch": "本社"
@@ -350,6 +431,20 @@
       16
     ],
     "gold_route": "prior_answer",
+    "gold_source": [
+      "ans_0008",
+      "ans_0009",
+      "ans_0033",
+      "ans_0034",
+      "ans_0058",
+      "ans_0059",
+      "ans_0083",
+      "ans_0084",
+      "ans_0108",
+      "ans_0109",
+      "ans_0133",
+      "ans_0134"
+    ],
     "expect_abstain": false,
     "constraint": {
       "branch": "大阪"
@@ -372,6 +467,7 @@
     ],
     "gold_experts_alt": [],
     "gold_route": "person",
+    "gold_source": [],
     "expect_abstain": false,
     "constraint": {
       "branch": "本社"
@@ -397,6 +493,7 @@
       25
     ],
     "gold_route": "person",
+    "gold_source": [],
     "expect_abstain": false,
     "constraint": {
       "branch": "本社"
@@ -423,6 +520,20 @@
       1
     ],
     "gold_route": "prior_answer",
+    "gold_source": [
+      "ans_0013",
+      "ans_0014",
+      "ans_0038",
+      "ans_0039",
+      "ans_0063",
+      "ans_0064",
+      "ans_0088",
+      "ans_0089",
+      "ans_0113",
+      "ans_0114",
+      "ans_0138",
+      "ans_0139"
+    ],
     "expect_abstain": false,
     "constraint": {
       "branch": "本社"
@@ -448,6 +559,11 @@
       25
     ],
     "gold_route": "document",
+    "gold_source": [
+      "doc_007",
+      "doc_015",
+      "doc_023"
+    ],
     "expect_abstain": false,
     "constraint": {
       "branch": "福岡"
@@ -474,6 +590,7 @@
       16
     ],
     "gold_route": "person",
+    "gold_source": [],
     "expect_abstain": false,
     "constraint": {
       "branch": "大阪"
@@ -499,6 +616,7 @@
       21
     ],
     "gold_route": "person",
+    "gold_source": [],
     "expect_abstain": false,
     "constraint": {
       "branch": "本社"
@@ -525,6 +643,20 @@
       4
     ],
     "gold_route": "prior_answer",
+    "gold_source": [
+      "ans_0015",
+      "ans_0016",
+      "ans_0040",
+      "ans_0041",
+      "ans_0065",
+      "ans_0066",
+      "ans_0090",
+      "ans_0091",
+      "ans_0115",
+      "ans_0116",
+      "ans_0140",
+      "ans_0141"
+    ],
     "expect_abstain": false,
     "constraint": {
       "branch": "大阪"
@@ -552,6 +684,12 @@
       30
     ],
     "gold_route": "document",
+    "gold_source": [
+      "doc_002",
+      "doc_010",
+      "doc_018",
+      "doc_026"
+    ],
     "expect_abstain": false,
     "constraint": {
       "branch": "大阪"
@@ -579,6 +717,12 @@
       37
     ],
     "gold_route": "document",
+    "gold_source": [
+      "doc_005",
+      "doc_013",
+      "doc_021",
+      "doc_029"
+    ],
     "expect_abstain": false,
     "constraint": {
       "branch": "東京"
@@ -605,6 +749,11 @@
       15
     ],
     "gold_route": "document",
+    "gold_source": [
+      "doc_008",
+      "doc_016",
+      "doc_024"
+    ],
     "expect_abstain": false,
     "constraint": {
       "branch": "大阪"
@@ -631,6 +780,20 @@
       4
     ],
     "gold_route": "prior_answer",
+    "gold_source": [
+      "ans_0017",
+      "ans_0018",
+      "ans_0042",
+      "ans_0043",
+      "ans_0067",
+      "ans_0068",
+      "ans_0092",
+      "ans_0093",
+      "ans_0117",
+      "ans_0118",
+      "ans_0142",
+      "ans_0143"
+    ],
     "expect_abstain": false,
     "constraint": {
       "branch": "大阪"
@@ -656,6 +819,7 @@
       16
     ],
     "gold_route": "person",
+    "gold_source": [],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": "ECサイト構築",
@@ -675,6 +839,7 @@
     ],
     "gold_experts_alt": [],
     "gold_route": "person",
+    "gold_source": [],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": "モバイルアプリ開発",
@@ -698,6 +863,7 @@
       25
     ],
     "gold_route": "person",
+    "gold_source": [],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": "クラウド移行支援",
@@ -718,6 +884,7 @@
     ],
     "gold_experts_alt": [],
     "gold_route": "person",
+    "gold_source": [],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": "基幹システム導入",
@@ -743,6 +910,7 @@
       1
     ],
     "gold_route": "person",
+    "gold_source": [],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": "契約管理システム導入",
@@ -767,6 +935,7 @@
       15
     ],
     "gold_route": "person",
+    "gold_source": [],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": "保守運用サポート",
@@ -787,6 +956,7 @@
     ],
     "gold_experts_alt": [],
     "gold_route": "person",
+    "gold_source": [],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": "見積書作成・顧客提示",
@@ -807,6 +977,7 @@
     ],
     "gold_experts_alt": [],
     "gold_route": "person",
+    "gold_source": [],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": "クレーム・エスカレーション対応",
@@ -827,6 +998,7 @@
     ],
     "gold_experts_alt": [],
     "gold_route": "person",
+    "gold_source": [],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": "出張旅費精算方法",
@@ -847,6 +1019,7 @@
     ],
     "gold_experts_alt": [],
     "gold_route": "person",
+    "gold_source": [],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": "展示会出展企画",
@@ -867,6 +1040,7 @@
     ],
     "gold_experts_alt": [],
     "gold_route": "person",
+    "gold_source": [],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": "パフォーマンスチューニング",
@@ -892,6 +1066,7 @@
       18
     ],
     "gold_route": "person",
+    "gold_source": [],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": "ヘルプデスク運用代行",
@@ -915,6 +1090,7 @@
       4
     ],
     "gold_route": "person",
+    "gold_source": [],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": "Webマーケティング支援",
@@ -939,6 +1115,7 @@
       18
     ],
     "gold_route": "person",
+    "gold_source": [],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": "問い合わせ対応システム導入",
@@ -964,6 +1141,7 @@
       16
     ],
     "gold_route": "person",
+    "gold_source": [],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": "データ基盤構築",
@@ -989,6 +1167,7 @@
       4
     ],
     "gold_route": "person",
+    "gold_source": [],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": "SNS運用代行",
@@ -1016,6 +1195,7 @@
       30
     ],
     "gold_route": "person",
+    "gold_source": [],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": "オフィス備品の発注・管理",
@@ -1043,6 +1223,7 @@
       20
     ],
     "gold_route": "person",
+    "gold_source": [],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": "プレスリリース原稿作成",
@@ -1070,6 +1251,7 @@
       8
     ],
     "gold_route": "person",
+    "gold_source": [],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": "中途採用書類選考",
@@ -1097,6 +1279,7 @@
       28
     ],
     "gold_route": "person",
+    "gold_source": [],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": "予算管理表の更新",
@@ -1124,6 +1307,7 @@
       37
     ],
     "gold_route": "person",
+    "gold_source": [],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": "仕入れ先との価格交渉",
@@ -1150,6 +1334,7 @@
       25
     ],
     "gold_route": "person",
+    "gold_source": [],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
@@ -1178,6 +1363,7 @@
       13
     ],
     "gold_route": "person",
+    "gold_source": [],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
@@ -1204,6 +1390,7 @@
       25
     ],
     "gold_route": "person",
+    "gold_source": [],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
@@ -1232,6 +1419,7 @@
       15
     ],
     "gold_route": "person",
+    "gold_source": [],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
@@ -1258,6 +1446,7 @@
       33
     ],
     "gold_route": "person",
+    "gold_source": [],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
@@ -1286,6 +1475,7 @@
       38
     ],
     "gold_route": "person",
+    "gold_source": [],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
@@ -1314,6 +1504,7 @@
       12
     ],
     "gold_route": "person",
+    "gold_source": [],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
@@ -1342,6 +1533,7 @@
       7
     ],
     "gold_route": "person",
+    "gold_source": [],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
@@ -1370,6 +1562,7 @@
       15
     ],
     "gold_route": "person",
+    "gold_source": [],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
@@ -1391,6 +1584,7 @@
     ],
     "gold_experts_alt": [],
     "gold_route": "person",
+    "gold_source": [],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
@@ -1419,6 +1613,7 @@
       15
     ],
     "gold_route": "person",
+    "gold_source": [],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
@@ -1447,6 +1642,7 @@
       38
     ],
     "gold_route": "person",
+    "gold_source": [],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
@@ -1473,6 +1669,7 @@
       7
     ],
     "gold_route": "person",
+    "gold_source": [],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
@@ -1501,6 +1698,7 @@
       12
     ],
     "gold_route": "person",
+    "gold_source": [],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
@@ -1529,6 +1727,7 @@
       15
     ],
     "gold_route": "person",
+    "gold_source": [],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
@@ -1555,6 +1754,7 @@
       29
     ],
     "gold_route": "person",
+    "gold_source": [],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
@@ -1583,6 +1783,7 @@
       7
     ],
     "gold_route": "person",
+    "gold_source": [],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
@@ -1609,6 +1810,7 @@
       34
     ],
     "gold_route": "person",
+    "gold_source": [],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
@@ -1637,6 +1839,7 @@
       2
     ],
     "gold_route": "person",
+    "gold_source": [],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
@@ -1663,6 +1866,7 @@
       21
     ],
     "gold_route": "person",
+    "gold_source": [],
     "expect_abstain": false,
     "constraint": null,
     "source_topic": null,
@@ -1678,6 +1882,7 @@
     "gold_experts": [],
     "gold_experts_alt": [],
     "gold_route": "none",
+    "gold_source": [],
     "expect_abstain": true,
     "constraint": null,
     "source_topic": null,
@@ -1693,6 +1898,7 @@
     "gold_experts": [],
     "gold_experts_alt": [],
     "gold_route": "none",
+    "gold_source": [],
     "expect_abstain": true,
     "constraint": null,
     "source_topic": null,
@@ -1708,6 +1914,7 @@
     "gold_experts": [],
     "gold_experts_alt": [],
     "gold_route": "none",
+    "gold_source": [],
     "expect_abstain": true,
     "constraint": null,
     "source_topic": null,
@@ -1723,6 +1930,7 @@
     "gold_experts": [],
     "gold_experts_alt": [],
     "gold_route": "none",
+    "gold_source": [],
     "expect_abstain": true,
     "constraint": null,
     "source_topic": null,
@@ -1738,6 +1946,7 @@
     "gold_experts": [],
     "gold_experts_alt": [],
     "gold_route": "none",
+    "gold_source": [],
     "expect_abstain": true,
     "constraint": null,
     "source_topic": null,
@@ -1753,6 +1962,7 @@
     "gold_experts": [],
     "gold_experts_alt": [],
     "gold_route": "none",
+    "gold_source": [],
     "expect_abstain": true,
     "constraint": null,
     "source_topic": null,
@@ -1768,6 +1978,7 @@
     "gold_experts": [],
     "gold_experts_alt": [],
     "gold_route": "none",
+    "gold_source": [],
     "expect_abstain": true,
     "constraint": null,
     "source_topic": null,
@@ -1783,6 +1994,7 @@
     "gold_experts": [],
     "gold_experts_alt": [],
     "gold_route": "none",
+    "gold_source": [],
     "expect_abstain": true,
     "constraint": null,
     "source_topic": null,
@@ -1798,6 +2010,7 @@
     "gold_experts": [],
     "gold_experts_alt": [],
     "gold_route": "none",
+    "gold_source": [],
     "expect_abstain": true,
     "constraint": null,
     "source_topic": null,
@@ -1813,6 +2026,7 @@
     "gold_experts": [],
     "gold_experts_alt": [],
     "gold_route": "none",
+    "gold_source": [],
     "expect_abstain": true,
     "constraint": null,
     "source_topic": null,
@@ -1828,6 +2042,7 @@
     "gold_experts": [],
     "gold_experts_alt": [],
     "gold_route": "none",
+    "gold_source": [],
     "expect_abstain": true,
     "constraint": null,
     "source_topic": null,
@@ -1843,6 +2058,7 @@
     "gold_experts": [],
     "gold_experts_alt": [],
     "gold_route": "none",
+    "gold_source": [],
     "expect_abstain": true,
     "constraint": null,
     "source_topic": null,
@@ -1858,6 +2074,7 @@
     "gold_experts": [],
     "gold_experts_alt": [],
     "gold_route": "none",
+    "gold_source": [],
     "expect_abstain": true,
     "constraint": null,
     "source_topic": null,
@@ -1873,6 +2090,7 @@
     "gold_experts": [],
     "gold_experts_alt": [],
     "gold_route": "none",
+    "gold_source": [],
     "expect_abstain": true,
     "constraint": null,
     "source_topic": null,
@@ -1888,6 +2106,7 @@
     "gold_experts": [],
     "gold_experts_alt": [],
     "gold_route": "none",
+    "gold_source": [],
     "expect_abstain": true,
     "constraint": null,
     "source_topic": null,

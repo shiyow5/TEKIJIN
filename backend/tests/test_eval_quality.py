@@ -199,6 +199,29 @@ def test_queries_are_distinct(person):
     assert len(set(queries)) == len(queries)
 
 
+def test_gold_source_present_only_on_data_routes(person):
+    """#296: gold_source は自己回答できるデータ由来経路(document/prior_answer)にのみ付く。
+
+    person(取次ぎ)・none(棄却)は自己回答の出典を持たない。自己回答経路は必ず出典を持つ
+    （空だと source recall(#297) の分母が壊れる）。
+    """
+    for q in person:
+        gs = q.get("gold_source", [])
+        if q["gold_route"] in ("document", "prior_answer"):
+            assert gs, f"id={q['id']} ({q['gold_route']}) に gold_source が無い"
+        else:
+            assert gs == [], f"id={q['id']} ({q['gold_route']}) に不要な gold_source: {gs}"
+
+
+def test_gold_source_ids_resolve_in_corpus(person):
+    """#296: gold_source の各IDが実在する文書/過去回答であること（出典リンク先の担保）。"""
+    doc_ids = {d["id"] for d in _load(SYN / "documents" / "documents.json")}
+    ans_ids = {a["id"] for a in _load(SYN / "answers" / "answers.json")}
+    known = doc_ids | ans_ids
+    unknown = sorted({s for q in person for s in q.get("gold_source", []) if s not in known})
+    assert not unknown, f"未知の gold_source id: {unknown}"
+
+
 def test_label_source_recorded(person):
     """どの正解が自動でどれが著述かを、後から説明できること。"""
     allowed = {"auto:project_daily", "authored", "human:pr46"}
