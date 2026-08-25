@@ -43,8 +43,6 @@ describe("HomePage (hub)", () => {
     render(<HomePage />);
     // The 3-step strip itself still describes today's live flow ("a person
     // answers") — this note keeps it from reading as the only possible one.
-    expect(
-      screen.getByText(/AIが出典つきで直接答えられる場面も少しずつ増えていきます/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/この3ステップは今のかたちです/)).toBeInTheDocument();
   });
 });
