@@ -92,6 +92,14 @@ beforeEach(() => {
   advanceSessionMock.mockReset();
   postAnswerMock.mockResolvedValue({ session_id: "sess-42", status: "resumed" });
   advanceSessionMock.mockResolvedValue(undefined);
+  // Since #246 the inbox renders the detail pane (AnswerScreen) for the
+  // auto-selected first item, so `getHandoff` fires even in tests that only
+  // assert on the list and return as soon as it appears. Those tests can hand
+  // control back before the effect runs, and `afterEach`'s restoreAllMocks
+  // then strips the implementation — leaving `getHandoff(...)` returning
+  // undefined and `.then` throwing. A default keeps a late call harmless;
+  // tests that care still override it. (#303)
+  getHandoffMock.mockResolvedValue(handoffFor(ITEM));
 });
 
 afterEach(() => {
