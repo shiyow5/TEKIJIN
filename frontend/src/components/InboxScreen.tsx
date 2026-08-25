@@ -50,7 +50,7 @@ function InboxListItem({
         aria-current={active ? "true" : undefined}
         className={
           active
-            ? "flex w-full flex-col gap-sm rounded-xl border border-primary bg-secondary-container p-md text-left text-on-secondary-container shadow-sm"
+            ? "flex w-full flex-col gap-sm rounded-xl border border-primary bg-surface-container-high p-md text-left shadow-sm"
             : "flex w-full flex-col gap-sm rounded-xl border border-outline-variant bg-surface-container-lowest p-md text-left shadow-sm transition-colors hover:bg-surface-container-low"
         }
       >
