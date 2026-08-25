@@ -344,20 +344,22 @@ def test_pipeline_ranker_pins_responder_on_prior_answer_route() -> None:
                 "people_confidence": 0.2,
             }
 
-    seen: dict[str, object] = {}
+    calls: list[list[int]] = []
 
     class _FakeScorer:
         def rank(self, topics, candidate_ids, asker_id, now, *, top_k=3):  # noqa: ARG002
-            seen["candidate_ids"] = list(candidate_ids)
+            calls.append(list(candidate_ids))
             return {"recommendations": [{"person_id": pid} for pid in candidate_ids]}
 
     ranker = PipelineRanker(retriever=_FakeRetriever(), scorer=_FakeScorer(), now=NOW)
     result = ranker(_q(gold_route="prior_answer"))
 
     assert result.route == "prior_answer"
-    # Only the pinned past responder is scored, not the whole candidate pool.
-    assert seen["candidate_ids"] == [3]
-    assert result.ranked_experts == [3]
+    # #307: the pinned past responder is scored alone first (guaranteed a slot),
+    # then the remaining candidate pool (minus the pin) backfills the rest —
+    # mirroring nodes.c6_score so the eval reflects what the product shows.
+    assert calls == [[3], [1, 2, 4]]
+    assert result.ranked_experts == [3, 1, 2, 4]
 
 
 class _StaticRetriever:
