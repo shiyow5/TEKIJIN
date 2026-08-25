@@ -31,6 +31,7 @@ from tekijin.agent.stubs import (
     INTENT_CONFIDENCE_THRESHOLD,
     MAX_FOLLOWUPS,
     collect_known_values,
+    missing_required_slots,
 )
 from tekijin.knowledge.answer import answer_from_knowledge
 from tekijin.retrieval.embedding import QUERY, Embedder
@@ -246,18 +247,34 @@ class AgentNodes:
             confidence=state.get("intent_confidence", 0.0),
         )
         followup_count = state.get("followup_count", 0)
-        result = self._sufficiency.check(state["question"], intent, followup_count)
-        # Graph-level termination guarantee: never ask more than MAX_FOLLOWUPS,
-        # whatever the (possibly future vLLM) model returns.
-        capped = followup_count >= MAX_FOLLOWUPS
         # Safety valve (#113): once C1 has confidently identified the topic, we can
         # already decide WHO to route to — the responder can ask for any missing
         # detail (現行製品/対象拠点数…). So don't let C2 block a confident, on-topic
         # consultation on estimate-style slots, no matter how a (prompt-sensitive)
-        # model feels. This overrides the model, but never fires on a vague/low-signal
-        # request (no topic, or confidence below threshold), which still clarifies.
+        # model feels. This never fires on a vague/low-signal request (no topic, or
+        # confidence below threshold), which still clarifies.
         can_route = bool(intent.topics) and intent.confidence >= INTENT_CONFIDENCE_THRESHOLD
-        sufficient = result.sufficient or capped or can_route
+        # Speed (#376): ``can_route`` is decidable from C1's output ALONE, and it
+        # forces ``sufficient=True`` anyway — so on the common confident path SKIP the
+        # C2 sufficiency LLM call entirely, removing one of the three serial
+        # generations on the critical path. We still compute ``missing`` DETERMINISTICALLY
+        # (LLM-free, same slot logic the rule model uses) so C7's hand-off draft keeps
+        # its 「補足いただきたい点」hint — matching the pre-#376 behaviour, where the
+        # model's ``missing`` flowed through even though ``sufficient`` was already
+        # forced True by ``can_route``. ``followup_question`` is unused when sufficient
+        # (graph goes to C3), and ``intent_unresolved`` is False whenever topics exist.
+        if can_route:
+            return {
+                "sufficient": True,
+                "missing": missing_required_slots(state["question"], intent),
+                "followup_question": None,
+                "intent_unresolved": False,
+            }
+        result = self._sufficiency.check(state["question"], intent, followup_count)
+        # Graph-level termination guarantee: never ask more than MAX_FOLLOWUPS,
+        # whatever the (possibly future vLLM) model returns.
+        capped = followup_count >= MAX_FOLLOWUPS
+        sufficient = result.sufficient or capped
         # If we have already asked once (capped) and STILL have no topic, the
         # intent is unresolved. Rather than silently search on nothing and land in
         # no_candidate, flag it so the graph routes to an explicit "couldn't

@@ -733,6 +733,40 @@ def test_node_enforces_followup_cap(seed_counts, session, fake_embedder) -> None
     assert agent.get_state(cfg).next == ("send",)  # reached the hand-off, not ask
 
 
+def test_c2_fast_path_keeps_missing_in_handoff_draft(seed_counts, session, fake_embedder) -> None:
+    # #376 end-to-end: a confident 技術相談 with no product / no site count skips the C2
+    # LLM call (the exploding model would raise if consulted), yet the hand-off draft
+    # still surfaces the open estimate slots — the deterministic ``missing`` on the
+    # fast path flows through C7 exactly as the pre-#376 model's ``missing`` did.
+    from tekijin.agent.protocols import IntentResult
+
+    class _ConfidentTechIntent:
+        def analyze(self, question, asker):  # noqa: ARG002
+            return IntentResult(
+                topics=[TOPIC], products=[], question_type="技術相談", confidence=0.9
+            )
+
+    class _ExplodingSufficiency:
+        def check(self, *_a, **_k):
+            raise AssertionError("C2 sufficiency LLM must be skipped when can_route")
+
+    for emp in (1, 2):
+        _seed_skill(session, f"sk_miss_{emp}", emp)
+    agent = build_agent(
+        fake_embedder,
+        session,
+        intent_model=_ConfidentTechIntent(),
+        sufficiency_model=_ExplodingSufficiency(),
+        retriever=_FakeRetriever(people=[1, 2]),
+    )
+    cfg = _cfg("fastmiss")
+    state = agent.invoke(_init(question="ネットワークの技術相談です。"), cfg)
+    assert agent.get_state(cfg).next == ("send",)  # no ask pause: valve proceeded
+    draft = state["draft"]
+    assert "補足いただきたい点" in draft
+    assert "現行製品" in draft and "対象拠点数" in draft
+
+
 # --------------------------------------------------------------------------- #
 # fix G: prior_answer hands off to the past responder, not a higher scorer
 # #307: prior_answer still backfills up to 3 candidates from the general pool

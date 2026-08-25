@@ -122,6 +122,22 @@ def _contains_any(text: str, keywords: tuple[str, ...]) -> bool:
 _SITE_COUNT_RE = re.compile(r"\d+\s*(?:拠点|箇所|店舗|事業所)")
 
 
+def missing_required_slots(question: str, intent: IntentResult) -> list[str]:
+    """Deterministically list the required slots not yet filled for this intent.
+
+    The same slot logic :meth:`RuleSufficiencyModel.check` uses (``_REQUIRED_SLOTS``
+    minus ``_slot_present``), factored out so the C2 fast path (#376) can surface
+    ``missing`` for the hand-off draft WITHOUT the (LLM) sufficiency call. LLM-free
+    and prompt-independent, so a confident, on-topic query still tells the responder
+    which estimate slots (現行製品 / 対象拠点数) remain open.
+    """
+
+    required = _REQUIRED_SLOTS.get(intent.question_type, ())
+    return [
+        slot for slot in required if not RuleSufficiencyModel._slot_present(slot, question, intent)
+    ]
+
+
 def collect_known_values(question: str, question_type: str, products: list[str]) -> dict[str, str]:
     """Concrete values for the required slots that are actually filled (C7 input).
 
@@ -241,8 +257,7 @@ class RuleSufficiencyModel:
     """C2 stub: flag missing required slots; ask back at most once."""
 
     def check(self, question: str, intent: IntentResult, followup_count: int) -> SufficiencyResult:
-        required = _REQUIRED_SLOTS.get(intent.question_type, ())
-        missing = [slot for slot in required if not self._slot_present(slot, question, intent)]
+        missing = missing_required_slots(question, intent)
 
         # Already asked our one clarification -> proceed regardless, but KEEP any
         # still-unresolved slots so C7 can flag them (do not silently clear them).
