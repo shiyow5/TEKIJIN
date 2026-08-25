@@ -291,5 +291,23 @@ describe("AppHeader", () => {
 
       expect(document.getElementById("mobile-nav-menu")).toBeNull();
     });
+
+    // #288 moved logout out of the header row below `md`, so on a phone the
+    // only way to reach it is through this menu. Scope the query to the menu:
+    // the header's own logout button is `hidden md:block`, which keeps it in
+    // the DOM, so an unscoped getByRole would match both and fail.
+    it("keeps logout reachable from the mobile menu (#288)", async () => {
+      const logout = vi.fn().mockResolvedValue(undefined);
+      useAuthMock.mockReturnValue({ ...auth(USER), logout });
+      useCurrentUserMock.mockReturnValue(ADMIN_READY);
+      render(<AppHeader />);
+
+      fireEvent.click(screen.getByRole("button", { name: "メニューを開く" }));
+      const mobileMenu = document.getElementById("mobile-nav-menu") as HTMLElement;
+      fireEvent.click(within(mobileMenu).getByRole("button", { name: "ログアウト" }));
+
+      expect(logout).toHaveBeenCalledTimes(1);
+      await waitFor(() => expect(replaceMock).toHaveBeenCalledWith("/login"));
+    });
   });
 });
