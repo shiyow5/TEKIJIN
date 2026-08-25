@@ -562,7 +562,8 @@
     "gold_source": [
       "doc_007",
       "doc_015",
-      "doc_023"
+      "doc_023",
+      "doc_032"
     ],
     "expect_abstain": false,
     "constraint": {
@@ -1876,6 +1877,150 @@
   },
   {
     "id": 67,
+    "query": "FGX90 が数十分おきに再起動を繰り返し、そのたびに社内から外部サイトに出られなくなります。切り分けを相談したいです。",
+    "difficulty": "L3",
+    "gold_topics": [
+      "ネットワーク・VPN"
+    ],
+    "gold_experts": [],
+    "gold_experts_alt": [
+      6,
+      24,
+      3
+    ],
+    "gold_route": "document",
+    "gold_source": [
+      "doc_031"
+    ],
+    "expect_abstain": false,
+    "constraint": null,
+    "source_topic": null,
+    "label_source": "authored",
+    "alt_label_source": "auto:answers",
+    "note": "型番クエリ（doc_031）。dense無情報・BM25 exact-match で document 経路を測る（#296/#114）"
+  },
+  {
+    "id": 68,
+    "query": "SGD450 の定義ファイル更新が失敗し、通信の遮断ログが大量に出ています。復旧の手順を知りたいです。",
+    "difficulty": "L3",
+    "gold_topics": [
+      "セキュリティ"
+    ],
+    "gold_experts": [],
+    "gold_experts_alt": [
+      6,
+      7,
+      25
+    ],
+    "gold_route": "document",
+    "gold_source": [
+      "doc_032"
+    ],
+    "expect_abstain": false,
+    "constraint": null,
+    "source_topic": null,
+    "label_source": "authored",
+    "alt_label_source": "auto:answers",
+    "note": "型番クエリ（doc_032）。dense無情報・BM25 exact-match で document 経路を測る（#296/#114）"
+  },
+  {
+    "id": 69,
+    "query": "PSV820 を再起動したあと、RAID が縮退したまま戻りません。復旧の進め方を相談したいです。",
+    "difficulty": "L3",
+    "gold_topics": [
+      "サーバー・インフラ運用"
+    ],
+    "gold_experts": [],
+    "gold_experts_alt": [
+      25,
+      33,
+      15
+    ],
+    "gold_route": "document",
+    "gold_source": [
+      "doc_033"
+    ],
+    "expect_abstain": false,
+    "constraint": null,
+    "source_topic": null,
+    "label_source": "authored",
+    "alt_label_source": "auto:answers",
+    "note": "型番クエリ（doc_033）。dense無情報・BM25 exact-match で document 経路を測る（#296/#114）"
+  },
+  {
+    "id": 70,
+    "query": "MFX330 で紙詰まりが頻発し、スキャンした書類の送信も相手に届かなくなりました。対処を知りたいです。",
+    "difficulty": "L3",
+    "gold_topics": [
+      "社内IT・ヘルプデスク"
+    ],
+    "gold_experts": [],
+    "gold_experts_alt": [
+      24,
+      25,
+      6
+    ],
+    "gold_route": "document",
+    "gold_source": [
+      "doc_034"
+    ],
+    "expect_abstain": false,
+    "constraint": null,
+    "source_topic": null,
+    "label_source": "authored",
+    "alt_label_source": "auto:answers",
+    "note": "型番クエリ（doc_034）。dense無情報・BM25 exact-match で document 経路を測る（#296/#114）"
+  },
+  {
+    "id": 71,
+    "query": "NBP14G が起動の途中で電源が落ちてしまいます。キッティング済みの端末で起きています。原因を相談したいです。",
+    "difficulty": "L3",
+    "gold_topics": [
+      "社内IT・ヘルプデスク"
+    ],
+    "gold_experts": [],
+    "gold_experts_alt": [
+      24,
+      25,
+      6
+    ],
+    "gold_route": "document",
+    "gold_source": [
+      "doc_035"
+    ],
+    "expect_abstain": false,
+    "constraint": null,
+    "source_topic": null,
+    "label_source": "authored",
+    "alt_label_source": "auto:answers",
+    "note": "型番クエリ（doc_035）。dense無情報・BM25 exact-match で document 経路を測る（#296/#114）"
+  },
+  {
+    "id": 72,
+    "query": "WAP600 の電波が弱く、会議室で頻繁に切断されます。設置の見直しを相談したいです。",
+    "difficulty": "L3",
+    "gold_topics": [
+      "ネットワーク・VPN"
+    ],
+    "gold_experts": [],
+    "gold_experts_alt": [
+      6,
+      24,
+      3
+    ],
+    "gold_route": "document",
+    "gold_source": [
+      "doc_036"
+    ],
+    "expect_abstain": false,
+    "constraint": null,
+    "source_topic": null,
+    "label_source": "authored",
+    "alt_label_source": "auto:answers",
+    "note": "型番クエリ（doc_036）。dense無情報・BM25 exact-match で document 経路を測る（#296/#114）"
+  },
+  {
+    "id": 73,
     "query": "工場の生産ラインで、装置を止めずに制御の設定を見直したいというご相談です。進め方を相談したいです。",
     "difficulty": "L4",
     "gold_topics": [],
@@ -1891,7 +2036,7 @@
     "note": "製造制御。社内に案件も日報も無い。文面は L2/L3 と同じ体裁にしてある"
   },
   {
-    "id": 68,
+    "id": 74,
     "query": "海外に拠点を新設する際の登記と現地の労務手続きについて、提案の勘所を知りたいです。",
     "difficulty": "L4",
     "gold_topics": [],
@@ -1907,7 +2052,7 @@
     "note": "海外法務。社内に痕跡が無い"
   },
   {
-    "id": 69,
+    "id": 75,
     "query": "自社で考えた仕組みを権利化したいと言われました。出願の実務をどう進めるか相談したいです。",
     "difficulty": "L4",
     "gold_topics": [],
@@ -1923,7 +2068,7 @@
     "note": "知財。社内に痕跡が無い"
   },
   {
-    "id": 70,
+    "id": 76,
     "query": "船舶に載せる通信設備の要件を詰めたいのですが、押さえるべき点を相談したいです。",
     "difficulty": "L4",
     "gold_topics": [],
@@ -1939,7 +2084,7 @@
     "note": "特殊業界。社内に痕跡が無い"
   },
   {
-    "id": 71,
+    "id": 77,
     "query": "医薬品の製造品質監査に向けて記録の整備を求められています。何から着手すべきでしょうか。",
     "difficulty": "L4",
     "gold_topics": [],
@@ -1955,7 +2100,7 @@
     "note": "規制業務。社内に痕跡が無い"
   },
   {
-    "id": 72,
+    "id": 78,
     "query": "建物の内装工事の段取りと職人の手配をどう組むか、進め方を相談したいです。",
     "difficulty": "L4",
     "gold_topics": [],
@@ -1971,7 +2116,7 @@
     "note": "建築施工。社内に痕跡が無い"
   },
   {
-    "id": 73,
+    "id": 79,
     "query": "ビニールハウスの温度と水やりを自動で回したいと言われました。何から手を付けるべきでしょうか。",
     "difficulty": "L4",
     "gold_topics": [],
@@ -1987,7 +2132,7 @@
     "note": "農業。IT の話に見えるが社内に痕跡が無い"
   },
   {
-    "id": 74,
+    "id": 80,
     "query": "診療で使う機器の薬事の届出について、進め方の勘所を知りたいです。",
     "difficulty": "L4",
     "gold_topics": [],
@@ -2003,7 +2148,7 @@
     "note": "薬事。社内に痕跡が無い"
   },
   {
-    "id": 75,
+    "id": 81,
     "query": "研修の中身ではなく、学習の到達度をどう測るかの設計を相談したいです。",
     "difficulty": "L4",
     "gold_topics": [],
@@ -2019,7 +2164,7 @@
     "note": "教育評価。人事に見えるが社内に痕跡が無い"
   },
   {
-    "id": 76,
+    "id": 82,
     "query": "取引先の与信枠をどの基準で決めるか、社内に決まりがなく困っているそうです。",
     "difficulty": "L4",
     "gold_topics": [],
@@ -2035,7 +2180,7 @@
     "note": "与信管理。経理に見えるが社内に痕跡が無い"
   },
   {
-    "id": 77,
+    "id": 83,
     "query": "厨房の衛生の記録をどう残すべきか指摘を受けたそうです。進め方を相談したいです。",
     "difficulty": "L4",
     "gold_topics": [],
@@ -2051,7 +2196,7 @@
     "note": "食品衛生。社内に痕跡が無い"
   },
   {
-    "id": 78,
+    "id": 84,
     "query": "部品の寸法のばらつきをどう抑えるか、工程側の見直しを相談したいです。",
     "difficulty": "L4",
     "gold_topics": [],
@@ -2067,7 +2212,7 @@
     "note": "製造品質。社内に痕跡が無い"
   },
   {
-    "id": 79,
+    "id": 85,
     "query": "撮影した映像の二次利用の許諾をどう進めるか、勘所を知りたいです。",
     "difficulty": "L4",
     "gold_topics": [],
@@ -2083,7 +2228,7 @@
     "note": "映像の権利処理。法務に見えるが社内に痕跡が無い"
   },
   {
-    "id": 80,
+    "id": 86,
     "query": "保険の料率をどう見積もるかの考え方を知りたいと言われました。",
     "difficulty": "L4",
     "gold_topics": [],
@@ -2099,7 +2244,7 @@
     "note": "保険数理。社内に痕跡が無い"
   },
   {
-    "id": 81,
+    "id": 87,
     "query": "テナントの賃貸借の条件をどう詰めるか、実務の進め方を相談したいです。",
     "difficulty": "L4",
     "gold_topics": [],

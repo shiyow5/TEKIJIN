@@ -759,6 +759,45 @@ def main():
             "updated_at": (SNAPSHOT - timedelta(days=random.randint(0, 200))).isoformat(),
         })
 
+    # #296: 型番/製品名を持つ製品スペック文書（doc_031〜）。型番は SudachiPy mode C で
+    # 希少なサブトークン（例 FGX90 -> fgx/90・既存コーパス出現0）になり、dense 埋め込みは
+    # 型番に無情報。「型番で引く」クエリでは BM25 の exact-match だけが手掛かりになるため、
+    # 適応BM25(#114)の利得を測る土台になる。route=document が成立する DOCUMENTED_TOPICS に紐づける。
+    # (topic, 型番, 製品カテゴリ, 手順の骨子)
+    PRODUCT_DOCS = [
+        ("ネットワーク・VPN", "FGX90", "UTM・ファイアウォール",
+         "初期設定はWAN/LANのIP設定、ファーム更新、ポリシー投入の順。VPNトンネルはIKEv2で構成する。"),
+        ("セキュリティ", "SGD450", "セキュリティゲートウェイ",
+         "URLフィルタとサンドボックスを有効化し、定義ファイルを自動更新に設定する。障害時はHAの系切替を確認。"),
+        ("サーバー・インフラ運用", "PSV820", "業務サーバー",
+         "RAID構成の確認、BIOS/ファーム更新、監視エージェント導入までを初期構築で行う。定期再起動は保守窓で。"),
+        ("社内IT・ヘルプデスク", "MFX330", "複合機（コピー機）",
+         "紙詰まりは搬送路のローラーを確認し、トナー交換とドラム清掃を手順どおり行う。スキャン送信はSMB設定を確認。"),
+        ("社内IT・ヘルプデスク", "NBP14G", "業務ノートPC",
+         "キッティングは資産登録、ディスク暗号化、VPNクライアント導入の順。起動不良はバッテリーリセットを試す。"),
+        ("ネットワーク・VPN", "WAP600", "無線アクセスポイント",
+         "SSIDと認証方式を設定し、チャネルは自動割当を無効化して固定する。電波干渉時は設置位置とチャネルを見直す。"),
+    ]
+    # updated_at は**決定的**に振る（random を消費しない）。ここで乱数を引くと後続の
+    # skills 生成の乱数列がずれ、seed=42 固定なのに skills.json に無関係な差分が出るため。
+    for j, (topic, model, category, steps) in enumerate(PRODUCT_DOCS):
+        title = f"{category} {model} 設定・トラブル対応手順"
+        body = (
+            f"本ドキュメントは製品「{category}（型番 {model}）」の社内運用手順書です。"
+            f"対象機器: {model}。{steps} "
+            f"{model} に関する設定変更・障害切り分け・保守作業の参照資料として利用してください。"
+        )
+        out_documents.append({
+            "id": f"doc_{30 + j + 1:03d}",
+            "title": title,
+            "body": body,
+            "source": "運用マニュアル",
+            "updated_at": (SNAPSHOT - timedelta(days=15 * (j + 1))).isoformat(),
+            # 型番eval(#296) と gold_source を突き合わせるためのメタ（loader は読まない）。
+            "product_model": model,
+            "product_topic": topic,
+        })
+
     # -------- 9) self_declared/skills.json（自己申告スキル・弱い証拠 base_score 0.3） --------
     LEVELS = ["初級", "中級", "上級"]
     out_skills = []

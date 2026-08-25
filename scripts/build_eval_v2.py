@@ -405,6 +405,45 @@ HUMAN_ITEMS = [
 ]
 
 # --------------------------------------------------------------------------
+# 型番/製品名クエリ（#296・#114用）: 具体的な型番でピンポイントに文書を引く。
+# dense 埋め込みは型番に無情報（SudachiPy mode C で fgx/90 等の希少サブトークンになり、
+# 既存コーパス出現0）なので、BM25 の exact-match だけが手掛かり＝適応BM25(#114)の利得を測る層。
+# route=document / gold_source=当該製品文書(doc_031〜)。**トピック名・キーワードは書かない**
+# （L3 の leak テストを満たす。症状＋型番だけで書く）。(query, topic, doc_id) の3つ組。
+MODEL_QUERIES = [
+    (
+        "FGX90 が数十分おきに再起動を繰り返し、そのたびに社内から外部サイトに出られなくなります。切り分けを相談したいです。",
+        "ネットワーク・VPN",
+        "doc_031",
+    ),
+    (
+        "SGD450 の定義ファイル更新が失敗し、通信の遮断ログが大量に出ています。復旧の手順を知りたいです。",
+        "セキュリティ",
+        "doc_032",
+    ),
+    (
+        "PSV820 を再起動したあと、RAID が縮退したまま戻りません。復旧の進め方を相談したいです。",
+        "サーバー・インフラ運用",
+        "doc_033",
+    ),
+    (
+        "MFX330 で紙詰まりが頻発し、スキャンした書類の送信も相手に届かなくなりました。対処を知りたいです。",
+        "社内IT・ヘルプデスク",
+        "doc_034",
+    ),
+    (
+        "NBP14G が起動の途中で電源が落ちてしまいます。キッティング済みの端末で起きています。原因を相談したいです。",
+        "社内IT・ヘルプデスク",
+        "doc_035",
+    ),
+    (
+        "WAP600 の電波が弱く、会議室で頻繁に切断されます。設置の見直しを相談したいです。",
+        "ネットワーク・VPN",
+        "doc_036",
+    ),
+]
+
+
 # L4（不能）: 社内に証拠を持つ人が存在しない領域。「わかりません＋エスカレーション」が正解。
 # **文面は L2/L3 と同じ体裁で書く。** 「〜な方はいますか」のような語尾で書くと、
 # 表層だけで abstain を当てられてしまい、専門家不在の検出を測れなくなる。
@@ -851,6 +890,7 @@ def main():
         note,
         constraint=None,
         source_topic=None,
+        gold_source_override=None,
     ):
         nonlocal nid
         nid += 1
@@ -864,7 +904,13 @@ def main():
                 "gold_experts_alt": alt_experts(topics),
                 "gold_route": route,
                 # #296: sources a self-answer should cite (data-derived routes only).
-                "gold_source": gold_source_for(route, topics),
+                # A 型番/製品名クエリ(#296) points at ONE specific product doc, which the
+                # topic-prefix rule can't derive, so it is passed explicitly here.
+                "gold_source": (
+                    gold_source_override
+                    if gold_source_override is not None
+                    else gold_source_for(route, topics)
+                ),
                 "expect_abstain": route == "none",
                 "constraint": constraint,
                 "source_topic": source_topic,
@@ -964,6 +1010,22 @@ def main():
         route = "person" if merged else "none"
         add(q, "L3", ts, merged, route, "authored", note)
 
+    # 型番/製品名クエリ（#296・#114用）: route=document・gold_source=特定の製品文書。
+    # gold_experts は空（人ではなく文書で答える）。難易度は L3（dense 無情報・製品名の難所）。
+    doc_ids = {d["id"] for d in documents}
+    for q, topic, doc_id in MODEL_QUERIES:
+        assert doc_id in doc_ids, f"型番クエリの gold_source {doc_id} が documents に無い"
+        add(
+            q,
+            "L3",
+            [topic],
+            [],
+            "document",
+            "authored",
+            f"型番クエリ（{doc_id}）。dense無情報・BM25 exact-match で document 経路を測る（#296/#114）",
+            gold_source_override=[doc_id],
+        )
+
     for q, note in L4_ITEMS:
         add(q, "L4", [], [], "none", "authored", note)
 
@@ -987,6 +1049,9 @@ def main():
             chunks += doc_by_topic[t]
             chunks += proj_by_topic[t][:5]
         chunks += [f"profile:{e}" for e in it["gold_experts"]]
+        # #296: a 型番 row's gold_source is a specific product doc the topic-prefix
+        # rule can't derive — add it explicitly so the retrieval gold points at it.
+        chunks += [f"doc:{s}" for s in it.get("gold_source", []) if s.startswith("doc_")]
         # gold_topics が空（自前22トピック体系に無い領域）の項目は profile だけが根拠になる
         retrieval.append(
             {
@@ -1028,7 +1093,7 @@ def main():
     print(f"  eval_person.json     {len(person)} 件")
     print(f"  eval_retrieval.json  {len(retrieval)} 件")
     print(f"  eval_robustness.json {len(robustness)} 件")
-    assert len(person) == 81, f"person が81件でない: {len(person)}"
+    assert len(person) == 87, f"person が87件でない: {len(person)}"
     assert len(robustness) == 20, "robustness が20件でない"
 
     print("難易度分布:", dict(Counter(q["difficulty"] for q in person)))

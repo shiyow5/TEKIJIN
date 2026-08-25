@@ -333,6 +333,7 @@
       "doc:doc_007",
       "doc:doc_015",
       "doc:doc_023",
+      "doc:doc_032",
       "profile:25",
       "proj:101",
       "proj:15"
@@ -893,6 +894,7 @@
       "doc:doc_017",
       "doc:doc_023",
       "doc:doc_025",
+      "doc:doc_032",
       "profile:25",
       "profile:6",
       "proj:100",
@@ -1013,6 +1015,7 @@
       "doc:doc_007",
       "doc:doc_015",
       "doc:doc_023",
+      "doc:doc_032",
       "profile:1",
       "profile:21",
       "profile:25",
@@ -1140,6 +1143,7 @@
       "doc:doc_022",
       "doc:doc_023",
       "doc:doc_030",
+      "doc:doc_032",
       "profile:24",
       "profile:25",
       "profile:6",
@@ -1241,6 +1245,7 @@
       "doc:doc_007",
       "doc:doc_015",
       "doc:doc_023",
+      "doc:doc_032",
       "profile:14",
       "profile:15",
       "profile:25",
@@ -1324,6 +1329,127 @@
       "proj:33",
       "proj:36",
       "proj:8"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 67,
+    "query": "FGX90 が数十分おきに再起動を繰り返し、そのたびに社内から外部サイトに出られなくなります。切り分けを相談したいです。",
+    "difficulty": "L3",
+    "gold_topics": [
+      "ネットワーク・VPN"
+    ],
+    "gold_chunks": [
+      "doc:doc_006",
+      "doc:doc_014",
+      "doc:doc_022",
+      "doc:doc_030",
+      "doc:doc_031",
+      "proj:10",
+      "proj:24",
+      "proj:32",
+      "proj:62",
+      "proj:75"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 68,
+    "query": "SGD450 の定義ファイル更新が失敗し、通信の遮断ログが大量に出ています。復旧の手順を知りたいです。",
+    "difficulty": "L3",
+    "gold_topics": [
+      "セキュリティ"
+    ],
+    "gold_chunks": [
+      "doc:doc_007",
+      "doc:doc_015",
+      "doc:doc_023",
+      "doc:doc_032",
+      "proj:101",
+      "proj:15"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 69,
+    "query": "PSV820 を再起動したあと、RAID が縮退したまま戻りません。復旧の進め方を相談したいです。",
+    "difficulty": "L3",
+    "gold_topics": [
+      "サーバー・インフラ運用"
+    ],
+    "gold_chunks": [
+      "doc:doc_008",
+      "doc:doc_016",
+      "doc:doc_024",
+      "doc:doc_033",
+      "proj:15",
+      "proj:16",
+      "proj:22",
+      "proj:27",
+      "proj:9"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 70,
+    "query": "MFX330 で紙詰まりが頻発し、スキャンした書類の送信も相手に届かなくなりました。対処を知りたいです。",
+    "difficulty": "L3",
+    "gold_topics": [
+      "社内IT・ヘルプデスク"
+    ],
+    "gold_chunks": [
+      "doc:doc_001",
+      "doc:doc_009",
+      "doc:doc_017",
+      "doc:doc_025",
+      "doc:doc_034",
+      "proj:100",
+      "proj:23",
+      "proj:26",
+      "proj:74",
+      "proj:84"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 71,
+    "query": "NBP14G が起動の途中で電源が落ちてしまいます。キッティング済みの端末で起きています。原因を相談したいです。",
+    "difficulty": "L3",
+    "gold_topics": [
+      "社内IT・ヘルプデスク"
+    ],
+    "gold_chunks": [
+      "doc:doc_001",
+      "doc:doc_009",
+      "doc:doc_017",
+      "doc:doc_025",
+      "doc:doc_035",
+      "proj:100",
+      "proj:23",
+      "proj:26",
+      "proj:74",
+      "proj:84"
+    ],
+    "label_source": "auto:document_project_profile"
+  },
+  {
+    "id": 72,
+    "query": "WAP600 の電波が弱く、会議室で頻繁に切断されます。設置の見直しを相談したいです。",
+    "difficulty": "L3",
+    "gold_topics": [
+      "ネットワーク・VPN"
+    ],
+    "gold_chunks": [
+      "doc:doc_006",
+      "doc:doc_014",
+      "doc:doc_022",
+      "doc:doc_030",
+      "doc:doc_036",
+      "proj:10",
+      "proj:24",
+      "proj:32",
+      "proj:62",
+      "proj:75"
     ],
     "label_source": "auto:document_project_profile"
   }

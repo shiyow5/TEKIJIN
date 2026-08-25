@@ -408,7 +408,8 @@ def test_seed_counts(seed_counts) -> None:
     assert seed_counts["project_members"] == 237
     assert seed_counts["daily_reports"] == 3070
     # #51/#52 で skills が 58 -> 61 になった分、合計が 5993 -> 5996
-    assert sum(seed_counts.values()) == 5996
+    # #296 で型番/製品文書を6件追加（documents 30 -> 36）→ 合計 5996 -> 6002
+    assert sum(seed_counts.values()) == 6002
 
 
 def test_seed_leaves_embeddings_null(seed_counts, session) -> None:
@@ -553,7 +554,7 @@ def test_questions_answers_documents(seed_counts, session) -> None:
     questions = repo.list_questions()
     assert len(questions) == 150
     docs = repo.list_documents()
-    assert len(docs) == 30
+    assert len(docs) == 36  # #296: 型番/製品文書6件を追加（30 -> 36）
     # answers_for_question resolves a real FK link.
     linked = repo.answers_for_question(questions[0].id)
     assert all(a.question_id == questions[0].id for a in linked)

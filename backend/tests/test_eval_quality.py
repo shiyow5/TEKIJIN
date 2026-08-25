@@ -164,7 +164,8 @@ def test_enough_independent_samples(person):
 
 def test_difficulty_layers_present(person):
     dist = Counter(q["difficulty"] for q in person)
-    assert dist == {"L1": 10, "L2": 36, "L3": 20, "L4": 15}, dist
+    # #296: L3 に型番/製品名クエリ6件を追加（20→26・route=document）。
+    assert dist == {"L1": 10, "L2": 36, "L3": 26, "L4": 15}, dist
 
 
 def test_l4_expects_abstain(person):

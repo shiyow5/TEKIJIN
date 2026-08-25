@@ -321,7 +321,7 @@ def test_evaluate_source_recall_empty_without_obligations() -> None:
 # --------------------------------------------------------------------------- #
 def test_load_bundled_eval_person() -> None:
     queries = load_eval_queries()
-    assert len(queries) == 81  # eval_person.json v2 (#158 で L3 を10件足した)
+    assert len(queries) == 87  # eval_person.json v2 (#296 で型番6件を L3 に追加)
     assert all(isinstance(q, EvalQuery) for q in queries)
     assert {q.gold_route for q in queries} <= VALID_ROUTES
     # L4 abstain queries carry no gold experts and route "none".
@@ -832,7 +832,7 @@ def test_run_eval_real_pipeline_over_seed(seed_counts, session, fake_embedder) -
     report = run_eval(queries, ranker)
 
     m = report.metrics
-    assert m.n == 81  # ran over every query
+    assert m.n == 87  # ran over every query (#296: 型番6件を追加)
     assert m.n_ranked > 0 and m.n_routed > 0
     for value in (m.top1_accuracy, m.recall_at_3, m.mrr, m.route_accuracy):
         assert 0.0 <= value <= 1.0
@@ -881,11 +881,11 @@ def test_run_eval_real_pipeline_over_seed(seed_counts, session, fake_embedder) -
     assert m.route_accuracy >= 0.65
 
     # #297 recall-centric metrics are produced over the real seed. The LLM-free
-    # pipeline ranker never self-answers, so C7' source recall is 0 over the 17
-    # citation-obligated rows (document 10 + prior_answer 7) — this asserts the
+    # pipeline ranker never self-answers, so C7' source recall is 0 over the 23
+    # citation-obligated rows (document 16 + prior_answer 7) — this asserts the
     # obligation denominator is wired, not that the (absent) self-answer works.
     sr = report.source_recall
-    assert sr.n == 17  # document 10 + prior_answer 7 carry gold_source
+    assert sr.n == 23  # document 16 (#296: 型番6件追加) + prior_answer 7 carry gold_source
     assert sr.recall == 0.0 and sr.n_cited == 0 and sr.grounded_rate == 0.0
     # C5 decision recall covers all three product decisions on this set.
     dr = report.decision_recall
