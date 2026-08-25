@@ -175,6 +175,15 @@ export default function HomePage() {
             </li>
           ))}
         </ol>
+        {/* #337: today this 3-step flow is always "AI forwards, a person
+            answers" (self_answer_enabled is still off). Rather than restate
+            the hero's accumulation line, this names the steps themselves as
+            today's shape, not the only possible one — so it doesn't quietly
+            reintroduce the "answer source is always a person" claim #324
+            removed. */}
+        <p className="text-on-surface-variant text-xs leading-relaxed">
+          この3ステップは今のかたちです。社内に知見が貯まるほど、一部はAIの直接回答に置き換わっていきます。
+        </p>
       </section>
     </div>
   );
