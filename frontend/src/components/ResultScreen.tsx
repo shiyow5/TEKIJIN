@@ -2,10 +2,12 @@
 
 /**
  * Result screen (product-spec 画面3) — reads the session SSE state from context
- * and branches on the `route`:
- *   - "prior_answer" -> auxiliary view (past answer as evidence of expertise),
- *     with "追加で聞く" dropping to the main line so it never dead-ends;
- *   - otherwise (person / unset) -> main line (candidate cards + sendable draft).
+ * and renders the main line (candidate cards + sendable draft) whenever there is
+ * a candidate or draft to show, regardless of `route` ("person" or the
+ * single-candidate "prior_answer" auxiliary route alike, #310): both already
+ * carry the past-answer evidence in `recommendations[].reasons`, which
+ * `CandidateCard` renders, so there is nothing route-specific left to show on a
+ * separate screen.
  *
  * Data comes from `SessionStreamProvider` (mounted in the route layout), so the
  * recommend/route/draft accumulated on the processing screen are available here.
@@ -15,9 +17,7 @@
 
 import { useOptionalSessionId, useOptionalSessionStream } from "@/components/SessionStreamProvider";
 import { PersonRouteView } from "@/components/result/PersonRouteView";
-import { PriorAnswerView } from "@/components/result/PriorAnswerView";
 import type { EventStreamState } from "@/hooks/useEventStream";
-import { useState } from "react";
 
 export interface ResultScreenProps {
   /** Test seam: provide a fixed stream state instead of reading context. */
@@ -125,11 +125,8 @@ export function ResultScreen({ streamState, sessionId }: ResultScreenProps) {
   const stream = streamState ?? contextStream ?? EMPTY_STREAM;
   const effectiveSessionId = sessionId ?? contextSessionId;
 
-  const [forceMainLine, setForceMainLine] = useState(false);
-
   const recommendations = stream.recommend?.recommendations ?? [];
   const draft = stream.draft?.draft ?? "";
-  const routeName = forceMainLine ? "person" : stream.route?.route;
 
   // A failed stream can no longer advance: surface it before any data gating.
   if (stream.error) {
@@ -146,17 +143,6 @@ export function ResultScreen({ streamState, sessionId }: ResultScreenProps) {
   const hasAnyData = hasMainLineData || Boolean(stream.route);
   if (!hasAnyData) {
     return <ResultPending />;
-  }
-
-  if (routeName === "prior_answer") {
-    return (
-      <PriorAnswerView
-        answerer={recommendations[0]}
-        reason={stream.route?.reason}
-        canAskMore={hasMainLineData}
-        onAskMore={() => setForceMainLine(true)}
-      />
-    );
   }
 
   if (hasMainLineData) {
