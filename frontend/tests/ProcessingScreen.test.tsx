@@ -11,8 +11,10 @@ vi.mock("next/navigation", () => ({
 }));
 
 const postAnswerMock = vi.fn();
+const requestDocumentFallbackMock = vi.fn();
 vi.mock("@/lib/api-client", () => ({
   postAnswer: (...args: unknown[]) => postAnswerMock(...args),
+  requestDocumentFallback: (...args: unknown[]) => requestDocumentFallbackMock(...args),
   // Real-shaped ApiError so `err instanceof ApiError` + `.status` work.
   ApiError: class ApiError extends Error {
     status: number;
@@ -37,6 +39,11 @@ describe("ProcessingScreen", () => {
     pushMock.mockReset();
     postAnswerMock.mockReset();
     postAnswerMock.mockResolvedValue({ session_id: "abc-123", status: "accepted" });
+    requestDocumentFallbackMock.mockReset();
+    requestDocumentFallbackMock.mockResolvedValue({
+      session_id: "abc-123",
+      status: "handoff_queued",
+    });
   });
 
   afterEach(() => vi.restoreAllMocks());
@@ -170,6 +177,69 @@ describe("ProcessingScreen", () => {
     const link = screen.getByRole("link", { name: /文書を見る/ });
     // Carries the session id so the viewer can send the reader back here (#179).
     expect(link).toHaveAttribute("href", "/documents/doc_001?from=abc-123");
+  });
+
+  it("offers the ranked person and continues the same document session (#351)", async () => {
+    renderScreen(
+      state({
+        terminal: true,
+        message: {
+          status: "document",
+          message: "社内文書に該当がありそうです。",
+          doc_id: "doc_001",
+          fallback_responder: {
+            person_id: "E001",
+            name: "中島 健一",
+            score: 0.9,
+            confidence: "高",
+            reasons: [],
+          },
+        },
+      }),
+    );
+
+    expect(screen.getByRole("heading")).toHaveTextContent("関連する社内文書が見つかりました");
+    fireEvent.click(screen.getByRole("button", { name: "中島 健一さんに聞く" }));
+    await waitFor(() => {
+      expect(requestDocumentFallbackMock).toHaveBeenCalledWith({ session_id: "abc-123" });
+      expect(pushMock).toHaveBeenCalledWith("/session/abc-123/result");
+    });
+  });
+
+  it("does not offer a person action when the document has no fallback candidate", () => {
+    renderScreen(
+      state({
+        terminal: true,
+        message: { status: "document", message: "社内文書に該当", doc_id: "doc_001" },
+      }),
+    );
+    expect(screen.queryByRole("button", { name: /さんに聞く/ })).not.toBeInTheDocument();
+  });
+
+  it("keeps the document result usable when starting the fallback fails", async () => {
+    requestDocumentFallbackMock.mockRejectedValueOnce(new Error("network"));
+    renderScreen(
+      state({
+        terminal: true,
+        message: {
+          status: "document",
+          message: "社内文書に該当",
+          fallback_responder: {
+            person_id: "E001",
+            name: "中島 健一",
+            score: 0.9,
+            confidence: "高",
+            reasons: [],
+          },
+        },
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "中島 健一さんに聞く" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "候補者への取り次ぎを開始できませんでした",
+    );
+    expect(pushMock).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "中島 健一さんに聞く" })).toBeEnabled();
   });
 
   it("shows no document link when a terminal message carries no doc_id", () => {

@@ -152,3 +152,8 @@ class AgentState(TypedDict, total=False):
     # -- terminal output ---------------------------------------------------
     answer: str | None
     document_id: str | None  # document route: the cited doc, surfaced to the client
+    # Document route only: the already-ranked person offered when the document
+    # does not solve the question. Structured separately from the prose so the
+    # client can render an actionable hand-off button (#351).
+    fallback_responder: dict[str, Any] | None
+    document_fallback_requested: bool

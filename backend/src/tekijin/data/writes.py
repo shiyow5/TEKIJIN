@@ -120,6 +120,20 @@ def update_question_route(session: Session, question_id: str, route: str) -> Non
     session.execute(update(Question).where(Question.id == question_id).values(route=route))
 
 
+def reopen_question_for_handoff(session: Session, question_id: str) -> None:
+    """Reopen a document-resolved question before its explicit person hand-off.
+
+    The same Question row/session is retained; only the resolution markers and
+    route change, so history never gains a duplicate question (#351).
+    """
+
+    session.execute(
+        update(Question)
+        .where(Question.id == question_id)
+        .values(route="person", status="open", resolved_at=None, resolution_kind=None)
+    )
+
+
 def update_question_body(session: Session, question_id: str, body: str) -> None:
     """Persist an enriched question body (#268).
 
@@ -300,6 +314,24 @@ def latest_primary_recommendation(session: Session, question_id: str) -> int | N
         .limit(1)
     ).first()
     return row[0] if row else None
+
+
+def shown_recommendation_ids(session: Session, question_id: str) -> list[int]:
+    """Existing shown recommendation ids for a question, in display order.
+
+    Used by the document-fallback continuation to recover from a disconnect after
+    SQL persistence but before the ids reached the graph checkpoint (#351).
+    """
+
+    return list(
+        session.execute(
+            select(Recommendation.id)
+            .where(Recommendation.question_id == question_id)
+            .order_by(Recommendation.rank, Recommendation.id)
+        )
+        .scalars()
+        .all()
+    )
 
 
 def recommendation_outcome(session: Session, recommendation_id: int) -> str | None:

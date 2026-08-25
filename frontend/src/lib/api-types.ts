@@ -27,6 +27,11 @@ export interface AskRequest {
   session_id: string;
 }
 
+/** POST /handoff/document-fallback — continue a document result with its candidate. */
+export interface DocumentFallbackRequest {
+  session_id: string;
+}
+
 /**
  * POST /answer body — resume a paused run with exactly one of `outcome`
  * (responder accept/decline) or `reply` (clarification answer). Defined for
@@ -457,6 +462,8 @@ export interface MessageData {
   message: string;
   /** For the "document" route: the cited document's id (GET /documents/{doc_id}). */
   doc_id?: string | null;
+  /** Person already ranked as the document route's optional fallback (#351). */
+  fallback_responder?: Recommendation | null;
   /**
    * #291/#293: sources the self-answer grounded on, rendered as links in chat.
    * Empty on non-self-answer terminals. Optional so older payloads parse.

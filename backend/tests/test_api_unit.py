@@ -186,6 +186,7 @@ def test_node_event_terminals_are_messages() -> None:
             "status": status,
             "message": "終端メッセージ",
             "doc_id": None,
+            "fallback_responder": None,
             "citations": [],  # #291: only the self_answered terminal populates this
             "latency_ms": None,
         }
@@ -199,6 +200,7 @@ def test_node_event_document_carries_doc_id() -> None:
         "status": "document",
         "message": "社内文書に該当",
         "doc_id": "doc_001",
+        "fallback_responder": None,
         "citations": [],
         "latency_ms": None,
     }
@@ -221,9 +223,23 @@ def test_node_event_self_answered_carries_citations() -> None:
         "status": "self_answered",
         "message": "保守時間内に更新します。",
         "doc_id": None,
+        "fallback_responder": None,
         "citations": [{"source_id": "doc_001", "kind": "document"}],
         "latency_ms": None,
     }
+
+
+def test_node_event_document_carries_structured_fallback_responder() -> None:
+    rec = {
+        "person_id": 1,
+        "name": "社員1",
+        "dept": "営業部",
+        "score": 0.89,
+        "confidence": "中",
+        "reasons": [],
+    }
+    sse = _ev(events.node_event("document", {"answer": "文書あり", "fallback_responder": rec}))
+    assert _data(sse)["fallback_responder"] == {**rec, "person_id": "E001"}
 
 
 def test_node_event_internal_nodes_emit_nothing() -> None:

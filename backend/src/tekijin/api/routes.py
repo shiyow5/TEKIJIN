@@ -208,6 +208,34 @@ def handoff(
         raise HTTPException(status_code=500, detail="内部エラーが発生しました") from exc
 
 
+@router.post("/handoff/document-fallback", response_model=schemas.AckResponse)
+def document_fallback(
+    req: schemas.DocumentFallbackRequest,
+    request: Request,
+    principal: Principal = Depends(require_principal),
+) -> schemas.AckResponse:
+    """Let the asker turn a completed document result into a person hand-off."""
+
+    service = _service(request)
+    asker_id, _ = service.session_participants(req.session_id)
+    if asker_id is not None:
+        # This transition belongs to the asker; a suggested responder must not be
+        # able to volunteer the asker into a hand-off. Admin impersonation remains.
+        require_can_act_as(principal, asker_id)
+    try:
+        service.request_document_fallback(req.session_id)
+    except HandoffNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SessionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except SessionInvalid as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("POST /handoff/document-fallback failed for %s", req.session_id)
+        raise HTTPException(status_code=500, detail="内部エラーが発生しました") from exc
+    return schemas.AckResponse(session_id=req.session_id, status="handoff_queued")
+
+
 @router.post("/handoff/draft", response_model=schemas.AckResponse)
 def handoff_draft(
     req: schemas.HandoffDraftRequest,

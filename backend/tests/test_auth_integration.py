@@ -304,6 +304,33 @@ def test_non_participant_is_forbidden_on_session_endpoints(
         ).status_code
         == 403
     )
+    # Only the asker may decide that a document was insufficient and start a
+    # person hand-off; the suggested responder cannot opt the asker into it.
+    fallback_body = {"session_id": "s1"}
+    assert (
+        client.post("/handoff/document-fallback", json=fallback_body, headers=stranger).status_code
+        == 403
+    )
+    assert (
+        client.post(
+            "/handoff/document-fallback", json=fallback_body, headers=_bearer(1)
+        ).status_code
+        == 403
+    )
+    assert (
+        client.post(
+            "/handoff/document-fallback", json=fallback_body, headers=_bearer(10)
+        ).status_code
+        != 403
+    )
+    assert (
+        client.post(
+            "/handoff/document-fallback",
+            json=fallback_body,
+            headers=_bearer(None, is_admin=True),
+        ).status_code
+        != 403
+    )
 
     # The responder (id 1) passes the participant guard (then hits the normal
     # 404/flow, NOT 403).

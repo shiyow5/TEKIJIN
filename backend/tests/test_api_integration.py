@@ -556,6 +556,7 @@ def test_document_route_stamps_resolved_at(seed_counts, engine, fake_embedder) -
     assert "recommend" not in names
     message = next(data for e, data in events if e == "message")
     assert "社員1さん" in message.get("message", "")  # the inline person fallback
+    assert message["fallback_responder"]["person_id"] == "E001"
 
     check = get_sessionmaker(engine)()
     try:
@@ -566,6 +567,57 @@ def test_document_route_stamps_resolved_at(seed_counts, engine, fake_embedder) -
         assert check.query(Recommendation).filter(Recommendation.question_id == q.id).count() == 0
     finally:
         check.close()
+
+
+def test_document_fallback_reuses_question_and_enters_existing_handoff_flow(
+    seed_counts, engine, fake_embedder
+) -> None:
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(
+            documents=[{"doc_id": "doc_001", "score": 0.05}],
+            document_confidence=0.8,
+            people_confidence=0.2,
+            people=[1, 2],
+        ),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    client.post("/ask", json={"asker_id": 8, "question": GOOD_Q, "session_id": "docfallback"})
+    _events(client, "docfallback")
+
+    ack = client.post("/handoff/document-fallback", json={"session_id": "docfallback"})
+    assert ack.status_code == 200
+    assert ack.json() == {"session_id": "docfallback", "status": "handoff_queued"}
+
+    resumed = _events(client, "docfallback")
+    assert [name for name, _ in resumed] == ["recommend", "draft"]
+    assert resumed[0][1]["recommendations"][0]["person_id"] == "E001"
+    assert "社員1さん" in resumed[1][1]["draft"]
+
+    check = get_sessionmaker(engine)()
+    try:
+        questions = check.query(Question).filter(Question.session_id == "docfallback").all()
+        assert len(questions) == 1  # the original question is reused, never duplicated
+        question = questions[0]
+        assert question.route == "person"
+        assert question.resolved_at is None
+        recs = (
+            check.query(Recommendation)
+            .filter(Recommendation.question_id == question.id)
+            .order_by(Recommendation.rank)
+            .all()
+        )
+        assert [rec.employee_id for rec in recs] == [1, 2]
+    finally:
+        check.close()
+
+    handoff = client.get("/handoff/docfallback")
+    assert handoff.status_code == 200
+    assert handoff.json()["responder"]["person_id"] == "E001"
+
+    duplicate = client.post("/handoff/document-fallback", json={"session_id": "docfallback"})
+    assert duplicate.status_code == 409
 
 
 # --------------------------------------------------------------------------- #

@@ -556,9 +556,10 @@ class AgentNodes:
         # at zero person-recall. Self-resolution stays the main line (no hand-off
         # interrupt); the person is a "if this does not solve it" backstop.
         recs = state.get("recommendations") or []
-        if recs:
-            answer += f"（解決しない場合は{recs[0]['name']}さんにも取り次げます）"
-        return {"answer": answer, "document_id": doc_id}
+        fallback = recs[0] if recs else None
+        if fallback:
+            answer += f"（解決しない場合は{fallback['name']}さんにも取り次げます）"
+        return {"answer": answer, "document_id": doc_id, "fallback_responder": fallback}
 
     def no_candidate(self, state: AgentState) -> AgentState:
         return {

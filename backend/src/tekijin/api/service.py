@@ -77,8 +77,10 @@ from tekijin.data.writes import (
     persist_question,
     recommendation_outcome,
     record_events,
+    reopen_question_for_handoff,
     reorder_recommendation_ranks,
     set_recommendation_outcome,
+    shown_recommendation_ids,
     update_question_body,
     update_question_consult_method,
     update_question_route,
@@ -381,6 +383,59 @@ class AgentService:
         recs = values.get("recommendations") or []
         responder_id = recs[0]["person_id"] if recs else None
         return (asker_id, responder_id)
+
+    def request_document_fallback(self, session_id: str) -> None:
+        """Reopen a completed document route at C7 using its ranked candidate.
+
+        C6 already ranked the fallback while producing the document message. The
+        explicit asker action converts that dormant result into a real hand-off;
+        recommendation rows are deliberately created later, as C7 streams.
+        """
+
+        with self._lock(session_id):
+            session = self._session_factory()
+            try:
+                graph = self._graph(session)
+                config = self._config(session_id)
+                snapshot = graph.get_state(config)
+                values = snapshot.values or {}
+                if snapshot.next:
+                    raise SessionConflict("session is already awaiting a response")
+                if values.get("route") != "document" or not values.get("question_id"):
+                    raise HandoffNotFound("no document fallback for this session")
+                if values.get("self_answer_grounded"):
+                    raise HandoffNotFound("the session was already answered")
+                if not values.get("recommendations"):
+                    raise SessionInvalid("no fallback responder is available")
+                if not values.get("fallback_responder"):
+                    raise SessionInvalid("no fallback responder is available")
+                last_event = values.get("last_event") or {}
+                if last_event.get("event") != "message":
+                    raise HandoffNotFound("no completed document result for this session")
+
+                # Pretend C6 just completed on the person route. LangGraph then
+                # schedules the existing C7/answerability path without re-ranking.
+                graph.update_state(
+                    config,
+                    {
+                        "route": "person",
+                        "route_reason": "文書で解決しなかったため、候補者へ取り次ぎます。",
+                        "answer": None,
+                        "document_id": None,
+                        "fallback_responder": None,
+                        "draft": None,
+                        "outcome": None,
+                        "last_event": None,
+                        "document_fallback_requested": True,
+                    },
+                    as_node="c6_score",
+                )
+                with session_scope(self._session_factory) as write_session:
+                    reopen_question_for_handoff(write_session, values["question_id"])
+                ctx = self._reg_ensure(session_id)
+                ctx.touched_at = self._clock()
+            finally:
+                session.close()
 
     # -- /ask : start a new question -------------------------------------- #
     def start_question(self, session_id: str, asker_id: int, question: str) -> None:
@@ -1159,6 +1214,26 @@ class AgentService:
                                 pending_rec_data = data
                             else:
                                 rec_ids = self._persist_recommendations(question_id, data)
+                        elif node == "c7_draft":
+                            # An explicit document fallback resumes *after* C6. Turn
+                            # its dormant ranking into the visible/persisted hand-off
+                            # now (normal person runs already have rec_ids from C6).
+                            values = graph.get_state(config).values
+                            if values.get("document_fallback_requested") and not values.get(
+                                "recommendation_ids"
+                            ):
+                                rec_data = {"recommendations": values.get("recommendations") or []}
+                                # A disconnect can happen after SQL insert but
+                                # before _persist_run_state. Reuse those ids instead
+                                # of double-inserting on the continuation.
+                                if question_id is not None:
+                                    with session_scope(self._session_factory) as session:
+                                        rec_ids = shown_recommendation_ids(session, question_id)
+                                if not rec_ids:
+                                    rec_ids = self._persist_recommendations(question_id, rec_data)
+                                recommend = node_event("c6_score", rec_data)
+                                if recommend is not None:
+                                    yield recommend
                         if node == "__interrupt__":
                             event = interrupt_event(_interrupt_payload(data))
                         else:
@@ -1235,6 +1310,7 @@ class AgentService:
         if rec_ids:
             updates["recommendation_ids"] = rec_ids
             updates["primary_recommendation_id"] = rec_ids[0]
+            updates["document_fallback_requested"] = False
         if terminal is not None:
             updates["last_event"] = {"event": terminal.event, "data": terminal.data}
         if updates:
