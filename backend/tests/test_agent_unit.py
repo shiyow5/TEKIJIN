@@ -287,6 +287,61 @@ def test_c1_lets_a_clean_question_through_to_the_model() -> None:
     assert out["intent_confidence"] == 0.7
 
 
+# --------------------------------------------------------------------------- #
+# C4 query expansion (#371): fold C1 topics into the retrieval query (feat-gate)
+# --------------------------------------------------------------------------- #
+class _RecordingRetriever:
+    """Records each ``search`` call as ``(query, query_vector)``."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, Any]] = []
+
+    def search(self, query: str, *, query_vector: Any = None) -> dict[str, Any]:
+        self.calls.append((query, query_vector))
+        return {"candidate_people": []}
+
+
+def _nodes_for_retrieve(retriever: Any, *, query_expansion_enabled: bool = False) -> AgentNodes:
+    stub: Any = object()
+    return AgentNodes(
+        intent_model=stub,
+        sufficiency_model=stub,
+        draft_model=stub,
+        embedder=stub,
+        retriever=retriever,
+        scorer=stub,
+        query_expansion_enabled=query_expansion_enabled,
+    )
+
+
+def test_c4_retrieve_default_uses_raw_query_and_reuses_c3_vector() -> None:
+    # OFF (default): byte-for-byte the pre-#371 behaviour — raw question, reused C3
+    # embedding (no re-embed), topics ignored by retrieval.
+    rec = _RecordingRetriever()
+    nodes = _nodes_for_retrieve(rec)
+    nodes.c4_retrieve({"question": "Q", "topics": ["A", "B"], "query_vector": [0.1]})
+    assert rec.calls == [("Q", [0.1])]
+
+
+def test_c4_retrieve_expansion_folds_topics_and_reembeds() -> None:
+    # ON + topics present: the retrieval query is the question plus the C1 topics,
+    # and the reused C3 vector (which embeds only the raw question) is dropped so the
+    # dense channel re-embeds the expanded string.
+    rec = _RecordingRetriever()
+    nodes = _nodes_for_retrieve(rec, query_expansion_enabled=True)
+    nodes.c4_retrieve({"question": "Q", "topics": ["A", "B"], "query_vector": [0.1]})
+    assert rec.calls == [("Q A B", None)]
+
+
+def test_c4_retrieve_expansion_without_topics_falls_back_to_raw() -> None:
+    # ON but no topics (C1 found none): nothing to expand, so stay on the raw-query
+    # path and keep reusing the C3 vector — never degrade a topic-less run.
+    rec = _RecordingRetriever()
+    nodes = _nodes_for_retrieve(rec, query_expansion_enabled=True)
+    nodes.c4_retrieve({"question": "Q", "topics": [], "query_vector": [0.1]})
+    assert rec.calls == [("Q", [0.1])]
+
+
 def test_top_by_score_picks_max_and_handles_empty() -> None:
     assert _top_by_score([]) is None
     items = [{"doc_id": "a", "score": 0.01}, {"doc_id": "b", "score": 0.03}]

@@ -116,6 +116,7 @@ class AgentNodes:
         prior_answer_relevance_floor: float = 0.15,
         knowledge_session: Any | None = None,
         knowledge_answer_min_similarity: float | None = None,
+        query_expansion_enabled: bool = False,
     ) -> None:
         self._intent = intent_model
         self._sufficiency = sufficiency_model
@@ -141,6 +142,10 @@ class AgentNodes:
         # #327: corpus-count routing for prior_answer (None = OFF, dormant route).
         self._prior_answer_reuse_min = prior_answer_reuse_min
         self._prior_answer_relevance_floor = prior_answer_relevance_floor
+        # #371: fold the C1 topics into the C4 retrieval query. False (default) keeps
+        # c4_retrieve byte-for-byte the pre-#371 behaviour (raw query + reused C3
+        # vector). See c4_retrieve for the multi-facet rationale.
+        self._query_expansion_enabled = query_expansion_enabled
 
     # -- entry: validate input, reset per-question control fields ---------
     def reset(self, state: AgentState) -> AgentState:
@@ -286,11 +291,21 @@ class AgentNodes:
 
     # -- C4: hybrid retrieval ---------------------------------------------
     def c4_retrieve(self, state: AgentState) -> AgentState:
-        # Reuse the C3 embedding so the dense channels do not re-embed the query
-        # (halves embedding calls under a real vLLM; BM25 still uses raw text).
-        retrieval = self._retriever.search(
-            state["question"], query_vector=state.get("query_vector")
-        )
+        question = state["question"]
+        topics = state.get("topics") or []
+        # #371: on a multi-facet question (e.g. "経理×データ基盤") the raw query's dense
+        # signal collapses onto the facet with the thicker corpus, dropping the other
+        # department's experts out of the top_k candidate pool — the measured cause of
+        # ~2/3 of R@3 misses. Folding the C1 topics into the query surfaces each facet
+        # (DGX: R@3 0.79->0.83). The expanded string must be RE-EMBEDDED, so the reused
+        # C3 vector (which embeds only the raw question) is dropped on this path.
+        if self._query_expansion_enabled and topics:
+            expanded = f"{question} {' '.join(topics)}"
+            retrieval = self._retriever.search(expanded)
+        else:
+            # Reuse the C3 embedding so the dense channels do not re-embed the query
+            # (halves embedding calls under a real vLLM; BM25 still uses raw text).
+            retrieval = self._retriever.search(question, query_vector=state.get("query_vector"))
         return {"retrieval": retrieval}
 
     # -- C5: route decision (deterministic) -------------------------------
