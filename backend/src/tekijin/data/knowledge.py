@@ -15,6 +15,7 @@ Callers own the transaction (``session_scope``).
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Any
 
 from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -163,3 +164,33 @@ def knowledge_units_by_topics(
         stmt = stmt.where(KnowledgeUnit.review_status == review_status)
     stmt = stmt.order_by(KnowledgeUnit.id)
     return [KnowledgeUnitDTO.from_row(r) for r in session.scalars(stmt)]
+
+
+def search_knowledge_units(
+    session: Session,
+    query_vec: Sequence[float],
+    *,
+    top_k: int = 10,
+    review_status: str | None = "approved",
+) -> list[tuple[KnowledgeUnitDTO, float]]:
+    """Nearest knowledge units to ``query_vec`` by cosine similarity (the retrieval).
+
+    This is the "structured knowledge探索" the #357 RFC replaces raw-text search with:
+    a query hits the *unit* embeddings (problem→action→result), not the source text.
+    Mirrors :func:`tekijin.retrieval.dense.search` — exact cosine scan, NULL
+    embeddings excluded, ties broken on the id for determinism — but adds the review
+    gate: defaults to ``review_status='approved'`` so only human-trusted units are
+    returned (pass ``None`` for every status). Returns ``(unit, similarity)`` pairs,
+    similarity = ``1 - cosine_distance`` (higher is better), most similar first.
+    """
+
+    if review_status is not None and review_status not in VALID_REVIEW_STATUSES:
+        raise ValueError(f"unknown review status: {review_status!r}")
+    column: Any = KnowledgeUnit.embedding
+    distance = column.cosine_distance(query_vec).label("distance")
+    stmt = select(KnowledgeUnit, distance).where(KnowledgeUnit.embedding.isnot(None))
+    if review_status is not None:
+        stmt = stmt.where(KnowledgeUnit.review_status == review_status)
+    stmt = stmt.order_by(distance, KnowledgeUnit.id).limit(top_k)
+    rows = session.execute(stmt).all()
+    return [(KnowledgeUnitDTO.from_row(obj), 1.0 - float(dist)) for obj, dist in rows]
