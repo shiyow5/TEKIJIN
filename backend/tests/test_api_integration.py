@@ -32,7 +32,8 @@ from tekijin.auth.tokens import create_access_token
 from tekijin.config import get_settings
 from tekijin.data.dashboard import dashboard_summary
 from tekijin.data.db import get_sessionmaker
-from tekijin.data.slack_links import get_slack_link, upsert_slack_link
+from tekijin.data.slack_channel_links import get_channel_link
+from tekijin.data.slack_links import upsert_slack_link
 from tekijin.models.tables import Answer, Event, Feedback, Message, Question, Recommendation
 
 NOW = dt.datetime(2026, 9, 15, 12, 0, 0)
@@ -1223,18 +1224,64 @@ def test_accepted_thread_is_seeded_with_the_asker_draft_as_first_message(
     assert listing["last_message"] == draft
 
 
-def test_accepting_a_chat_handoff_delivers_the_draft_to_a_linked_responder_via_slack(
+def _wait_until(predicate, *, timeout: float = 2.0, interval: float = 0.02) -> bool:
+    """Poll ``predicate`` until it's true or ``timeout`` elapses — used to wait
+    for the fire-and-forget background thread `schedule_channel_setup_and_draft`
+    spawns (accept-time Slack channel setup has no request/response cycle to
+    hook a synchronous check into, unlike ``BackgroundTasks``-based sends)."""
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if predicate():
+            return True
+        time.sleep(interval)
+    return predicate()
+
+
+def _reset_channel_link(engine, employee_a: int, employee_b: int) -> None:
+    """Delete any pre-existing SlackChannelLink for this pair.
+
+    Every hand-off test below asks as E010 and gets routed to responder E001
+    (the shared `_recs`/`_FakeRetriever` boilerplate always ranks candidate 1
+    first), so every one of them shares the SAME (1, 10) pair. `engine` is a
+    session-scoped fixture — the DB persists across every test in the run —
+    so without this, a channel a PRIOR test created would leak into the next
+    one and be silently reused instead of freshly created.
+    """
+
+    with get_sessionmaker(engine)() as session:
+        link = get_channel_link(session, employee_a, employee_b)
+        if link is not None:
+            session.delete(link)
+            session.commit()
+
+
+def test_accepting_a_chat_handoff_sets_up_the_pair_channel_and_posts_the_draft(
     monkeypatch, seed_counts, engine, fake_embedder
 ) -> None:
-    """#hand-off-chat: accepting drops the responder straight into a Slack DM
-    with the draft already "sent" — no separate POST /messages needed."""
+    """#hand-off-chat: accepting (with BOTH parties Slack-linked) creates their
+    shared private channel, invites them, and posts the draft into it — a
+    background thread (see `schedule_channel_setup_and_draft`), so this waits
+    briefly for it to land rather than asserting immediately."""
 
     with get_sessionmaker(engine)() as session:
         upsert_slack_link(session, 1, slack_user_id="U_RESPONDER", slack_team_id="T1", now=NOW)
+        upsert_slack_link(session, 10, slack_user_id="U_ASKER", slack_team_id="T1", now=NOW)
         session.commit()
+    _reset_channel_link(engine, 1, 10)
 
-    sent: list[dict] = []
-    monkeypatch.setattr("tekijin.slack.notify.send_dm", lambda **kwargs: sent.append(kwargs))
+    created: list[dict] = []
+    invited: list[dict] = []
+    posted: list[dict] = []
+    monkeypatch.setattr(
+        "tekijin.slack.notify.create_private_channel",
+        lambda **kw: (created.append(kw), "C1")[1],
+    )
+    monkeypatch.setattr(
+        "tekijin.slack.notify.invite_to_channel",
+        lambda **kw: (invited.append(kw), True)[1],
+    )
+    monkeypatch.setattr("tekijin.slack.notify.post_message", lambda **kw: posted.append(kw))
     monkeypatch.setenv("TEKIJIN_SLACK_BOT_TOKEN", "xoxb-test")
     get_settings.cache_clear()
     try:
@@ -1254,19 +1301,25 @@ def test_accepting_a_chat_handoff_delivers_the_draft_to_a_linked_responder_via_s
         thread_id = client.get("/messages/threads", params={"employee_id": "E010"}).json()["items"][
             0
         ]["thread_id"]
+
+        assert _wait_until(lambda: len(posted) == 1)
     finally:
         get_settings.cache_clear()
 
-    assert len(sent) == 1
-    assert sent[0]["slack_user_id"] == "U_RESPONDER"
-    assert sent[0]["bot_token"] == "xoxb-test"
-    assert draft in sent[0]["text"]
+    assert created == [{"bot_token": "xoxb-test", "name": "tekijin-1-10"}]
+    assert invited == [
+        {"bot_token": "xoxb-test", "channel_id": "C1", "user_ids": ["U_ASKER", "U_RESPONDER"]}
+    ]
+    assert posted == [{"bot_token": "xoxb-test", "channel_id": "C1", "text": draft}]
 
     with get_sessionmaker(engine)() as session:
-        assert get_slack_link(session, 1).last_notified_thread_id == thread_id
+        link = get_channel_link(session, 1, 10)
+        assert link is not None
+        assert link.slack_channel_id == "C1"
+        assert link.current_thread_id == thread_id
 
 
-def test_accepting_a_direct_handoff_never_notifies_slack(
+def test_accepting_a_direct_handoff_never_sets_up_a_slack_channel(
     monkeypatch, seed_counts, engine, fake_embedder
 ) -> None:
     """ "直接相談" never gets a chat thread at all (existing behaviour) — the new
@@ -1274,10 +1327,15 @@ def test_accepting_a_direct_handoff_never_notifies_slack(
 
     with get_sessionmaker(engine)() as session:
         upsert_slack_link(session, 1, slack_user_id="U_RESPONDER", slack_team_id="T1", now=NOW)
+        upsert_slack_link(session, 10, slack_user_id="U_ASKER", slack_team_id="T1", now=NOW)
         session.commit()
+    _reset_channel_link(engine, 1, 10)
 
-    sent: list[dict] = []
-    monkeypatch.setattr("tekijin.slack.notify.send_dm", lambda **kwargs: sent.append(kwargs))
+    created: list[dict] = []
+    monkeypatch.setattr(
+        "tekijin.slack.notify.create_private_channel",
+        lambda **kw: (created.append(kw), "C1")[1],
+    )
     monkeypatch.setenv("TEKIJIN_SLACK_BOT_TOKEN", "xoxb-test")
     get_settings.cache_clear()
     try:
@@ -1299,10 +1357,11 @@ def test_accepting_a_direct_handoff_never_notifies_slack(
         )
         client.post("/answer", json={"session_id": "msg-seed3", "outcome": "accepted"})
         _events(client, "msg-seed3")
+        time.sleep(0.2)  # give any (unexpected) background thread a chance to run
     finally:
         get_settings.cache_clear()
 
-    assert sent == []
+    assert created == []
 
 
 def test_direct_consultation_gets_no_seeded_message(seed_counts, engine, fake_embedder) -> None:
@@ -1477,17 +1536,23 @@ def test_send_and_list_messages_round_trip(seed_counts, engine, fake_embedder) -
     assert listing["last_message_at"] is not None
 
 
-def test_send_message_notifies_the_other_party_via_slack_when_linked(
+def test_send_message_relays_into_the_pairs_existing_slack_channel(
     monkeypatch, seed_counts, engine, fake_embedder
 ) -> None:
-    """The OTHER party's linked Slack account gets a best-effort DM notification."""
+    """An ordinary chat send, once the pair's Slack channel exists, is relayed
+    into it as a background task (unlike accept-time setup, `POST /messages`
+    runs inside a normal request with `BackgroundTasks` — no polling needed;
+    `TestClient` runs them before returning the response)."""
 
     with get_sessionmaker(engine)() as session:
         upsert_slack_link(session, 1, slack_user_id="U_RESPONDER", slack_team_id="T1", now=NOW)
+        upsert_slack_link(session, 10, slack_user_id="U_ASKER", slack_team_id="T1", now=NOW)
         session.commit()
+    _reset_channel_link(engine, 1, 10)
 
-    sent: list[dict] = []
-    monkeypatch.setattr("tekijin.slack.notify.send_dm", lambda **kwargs: sent.append(kwargs))
+    monkeypatch.setattr("tekijin.slack.notify.create_private_channel", lambda **kw: "C1")
+    monkeypatch.setattr("tekijin.slack.notify.invite_to_channel", lambda **kw: True)
+    monkeypatch.setattr("tekijin.slack.notify.post_message", lambda **kw: None)
     monkeypatch.setenv("TEKIJIN_SLACK_BOT_TOKEN", "xoxb-test")
     get_settings.cache_clear()
     try:
@@ -1504,9 +1569,16 @@ def test_send_message_notifies_the_other_party_via_slack_when_linked(
         thread_id = client.get("/messages/threads", params={"employee_id": "E010"}).json()["items"][
             0
         ]["thread_id"]
-        # Accepting already sent one notification for the auto-seeded draft
-        # (#hand-off-chat) — clear it so `sent` below is only this POST /messages.
-        sent.clear()
+
+        # Accept-time channel setup is its own background thread — wait for it.
+        def _channel_ready() -> bool:
+            with get_sessionmaker(engine)() as session:
+                return get_channel_link(session, 1, 10) is not None
+
+        assert _wait_until(_channel_ready)
+
+        relayed: list[dict] = []
+        monkeypatch.setattr("tekijin.slack.notify.post_message", lambda **kw: relayed.append(kw))
 
         resp = client.post(
             "/messages",
@@ -1516,30 +1588,31 @@ def test_send_message_notifies_the_other_party_via_slack_when_linked(
     finally:
         get_settings.cache_clear()
 
-    assert len(sent) == 1
-    assert sent[0]["slack_user_id"] == "U_RESPONDER"
-    assert sent[0]["bot_token"] == "xoxb-test"
-    assert "よろしくお願いします" in sent[0]["text"]
-    assert f"/chat?thread={thread_id}" in sent[0]["text"]
-
-    # #388: this notification is also what lets a reply typed directly in
-    # Slack find its way back to the right TEKIJIN thread.
-    with get_sessionmaker(engine)() as session:
-        assert get_slack_link(session, 1).last_notified_thread_id == thread_id
+    assert len(relayed) == 1
+    assert relayed[0]["bot_token"] == "xoxb-test"
+    assert relayed[0]["channel_id"] == "C1"
+    assert "よろしくお願いします" in relayed[0]["text"]
 
 
-def test_send_message_skips_slack_notification_when_not_configured(
+def test_send_message_skips_slack_when_not_configured(
     monkeypatch, seed_counts, engine, fake_embedder
 ) -> None:
-    """No bot token configured (the default) -> no Slack call attempted at all,
-    even for a linked recipient."""
+    """No bot token configured (the default) -> no Slack channel setup or
+    relay attempted at all, even for two linked employees."""
 
     with get_sessionmaker(engine)() as session:
         upsert_slack_link(session, 1, slack_user_id="U_RESPONDER", slack_team_id="T1", now=NOW)
+        upsert_slack_link(session, 10, slack_user_id="U_ASKER", slack_team_id="T1", now=NOW)
         session.commit()
+    _reset_channel_link(engine, 1, 10)
 
-    sent: list[dict] = []
-    monkeypatch.setattr("tekijin.slack.notify.send_dm", lambda **kwargs: sent.append(kwargs))
+    created: list[dict] = []
+    posted: list[dict] = []
+    monkeypatch.setattr(
+        "tekijin.slack.notify.create_private_channel",
+        lambda **kw: (created.append(kw), "C1")[1],
+    )
+    monkeypatch.setattr("tekijin.slack.notify.post_message", lambda **kw: posted.append(kw))
 
     client = _client(
         engine,
@@ -1554,13 +1627,15 @@ def test_send_message_skips_slack_notification_when_not_configured(
     thread_id = client.get("/messages/threads", params={"employee_id": "E010"}).json()["items"][0][
         "thread_id"
     ]
+    time.sleep(0.2)  # give any (unexpected) background thread a chance to run
 
     resp = client.post(
         "/messages",
         json={"thread_id": thread_id, "sender_id": "E010", "body": "よろしくお願いします"},
     )
     assert resp.status_code == 200
-    assert sent == []
+    assert created == []
+    assert posted == []
 
 
 # --- POST /slack/events (#388: Slack -> TEKIJIN direction) ------------------ #
@@ -1611,20 +1686,23 @@ def test_slack_events_rejects_an_invalid_signature(engine, fake_embedder) -> Non
     assert resp.status_code == 401
 
 
-def test_slack_events_reply_lands_in_the_last_notified_thread(
+def test_slack_events_message_lands_in_the_channels_current_thread(
     monkeypatch, seed_counts, engine, fake_embedder
 ) -> None:
-    """A DM typed by the (linked) responder in Slack shows up as a chat message
-    in the TEKIJIN thread they were last notified about, and — since the asker
-    is ALSO linked here — the asker gets notified of it in turn."""
+    """A message posted in a hand-off's shared Slack channel is mirrored into
+    the TEKIJIN thread its `current_thread_id` names. No relay back into
+    Slack is needed here — both parties already see it there natively, since
+    they're both members of the same channel."""
 
     with get_sessionmaker(engine)() as session:
         upsert_slack_link(session, 1, slack_user_id="U_RESPONDER", slack_team_id="T1", now=NOW)
         upsert_slack_link(session, 10, slack_user_id="U_ASKER", slack_team_id="T1", now=NOW)
         session.commit()
+    _reset_channel_link(engine, 1, 10)
 
-    sent: list[dict] = []
-    monkeypatch.setattr("tekijin.slack.notify.send_dm", lambda **kwargs: sent.append(kwargs))
+    monkeypatch.setattr("tekijin.slack.notify.create_private_channel", lambda **kw: "C1")
+    monkeypatch.setattr("tekijin.slack.notify.invite_to_channel", lambda **kw: True)
+    monkeypatch.setattr("tekijin.slack.notify.post_message", lambda **kw: None)
     monkeypatch.setenv("TEKIJIN_SLACK_BOT_TOKEN", "xoxb-test")
     _slack_configured(monkeypatch)
     try:
@@ -1642,20 +1720,20 @@ def test_slack_events_reply_lands_in_the_last_notified_thread(
             0
         ]["thread_id"]
 
-        # Establishes last_notified_thread_id for the responder (E001/id 1).
-        client.post(
-            "/messages",
-            json={"thread_id": thread_id, "sender_id": "E010", "body": "よろしくお願いします"},
-        )
-        sent.clear()
+        def _channel_ready() -> bool:
+            with get_sessionmaker(engine)() as session:
+                return get_channel_link(session, 1, 10) is not None
+
+        assert _wait_until(_channel_ready)
 
         resp = _post_slack_event(
             client,
             {
                 "type": "event_callback",
+                "event_id": "Ev-lands-in-thread",
                 "event": {
                     "type": "message",
-                    "channel_type": "im",
+                    "channel": "C1",
                     "user": "U_RESPONDER",
                     "text": "承知しました（Slackから返信）",
                 },
@@ -1671,29 +1749,10 @@ def test_slack_events_reply_lands_in_the_last_notified_thread(
     finally:
         get_settings.cache_clear()
 
-    # The asker (linked too) gets notified in turn of the Slack-originated reply.
-    assert len(sent) == 1
-    assert sent[0]["slack_user_id"] == "U_ASKER"
-    assert "承知しました（Slackから返信）" in sent[0]["text"]
 
-
-def test_slack_events_ignores_the_bots_own_message(
-    monkeypatch, seed_counts, engine, fake_embedder
-) -> None:
-    """Without this, the bot's own notification landing in the same DM channel
-    would loop back in as if the user had sent it."""
-
-    with get_sessionmaker(engine)() as session:
-        upsert_slack_link(
-            session,
-            1,
-            slack_user_id="U_RESPONDER",
-            slack_team_id="T1",
-            now=NOW,
-        )
-        link = get_slack_link(session, 1)
-        link.last_notified_thread_id = 999999  # any id; must never be reached
-        session.commit()
+def test_slack_events_ignores_the_bots_own_message(monkeypatch, engine, fake_embedder) -> None:
+    """Without this, the bot's own post landing back in the channel it just
+    sent to would loop back in as if a human had sent it."""
 
     _slack_configured(monkeypatch)
     try:
@@ -1702,50 +1761,27 @@ def test_slack_events_ignores_the_bots_own_message(
             client,
             {
                 "type": "event_callback",
+                "event_id": "Ev-bot-own-message",
                 "event": {
                     "type": "message",
-                    "channel_type": "im",
+                    "channel": "C1",
                     "user": "U_RESPONDER",
                     "bot_id": "B_TEKIJIN",
                     "text": "通知メッセージ本文",
                 },
             },
         )
-        assert resp.status_code == 200
-    finally:
-        get_settings.cache_clear()
-
-    with get_sessionmaker(engine)() as session:
-        assert get_slack_link(session, 1).last_notified_thread_id == 999999
-
-
-def test_slack_events_ignores_an_unlinked_sender(monkeypatch, engine, fake_embedder) -> None:
-    _slack_configured(monkeypatch)
-    try:
-        client = _client(engine, fake_embedder)
-        resp = _post_slack_event(
-            client,
-            {
-                "type": "event_callback",
-                "event": {
-                    "type": "message",
-                    "channel_type": "im",
-                    "user": "U_UNKNOWN",
-                    "text": "hello",
-                },
-            },
-        )
-        assert resp.status_code == 200  # ack'd; nothing to route it to
+        assert resp.status_code == 200  # ack'd; the bot_id short-circuit never touches the DB
     finally:
         get_settings.cache_clear()
 
 
-def test_slack_events_ignores_a_reply_with_no_remembered_thread(
-    monkeypatch, seed_counts, engine, fake_embedder
+def test_slack_events_ignores_a_message_for_an_unmanaged_channel(
+    monkeypatch, engine, fake_embedder
 ) -> None:
-    with get_sessionmaker(engine)() as session:
-        upsert_slack_link(session, 1, slack_user_id="U_RESPONDER", slack_team_id="T1", now=NOW)
-        session.commit()  # last_notified_thread_id stays NULL — never notified yet
+    """A message in some other Slack channel the app happens to be able to see
+    (not one TEKIJIN created) is ack'd and dropped — there's no SlackChannelLink
+    to route it through."""
 
     _slack_configured(monkeypatch)
     try:
@@ -1754,9 +1790,10 @@ def test_slack_events_ignores_a_reply_with_no_remembered_thread(
             client,
             {
                 "type": "event_callback",
+                "event_id": "Ev-unmanaged-channel",
                 "event": {
                     "type": "message",
-                    "channel_type": "im",
+                    "channel": "C_UNMANAGED",
                     "user": "U_RESPONDER",
                     "text": "hello",
                 },
@@ -1765,6 +1802,130 @@ def test_slack_events_ignores_a_reply_with_no_remembered_thread(
         assert resp.status_code == 200
     finally:
         get_settings.cache_clear()
+
+
+def test_slack_events_deduplicates_a_retried_delivery(
+    monkeypatch, seed_counts, engine, fake_embedder
+) -> None:
+    """Slack retries a delivery whenever it didn't get a fast-enough ack — the
+    SAME event_id arriving twice must only create one chat message."""
+
+    with get_sessionmaker(engine)() as session:
+        upsert_slack_link(session, 1, slack_user_id="U_RESPONDER", slack_team_id="T1", now=NOW)
+        upsert_slack_link(session, 10, slack_user_id="U_ASKER", slack_team_id="T1", now=NOW)
+        session.commit()
+    _reset_channel_link(engine, 1, 10)
+
+    monkeypatch.setattr("tekijin.slack.notify.create_private_channel", lambda **kw: "C1")
+    monkeypatch.setattr("tekijin.slack.notify.invite_to_channel", lambda **kw: True)
+    monkeypatch.setattr("tekijin.slack.notify.post_message", lambda **kw: None)
+    monkeypatch.setenv("TEKIJIN_SLACK_BOT_TOKEN", "xoxb-test")
+    _slack_configured(monkeypatch)
+    try:
+        client = _client(
+            engine,
+            fake_embedder,
+            retriever=_FakeRetriever(people=[1, 2, 3], people_confidence=0.2),
+            scorer=_FakeScorer(_recs(1, 2, 3)),
+        )
+        client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "msg-slack4"})
+        _events(client, "msg-slack4")
+        client.post("/answer", json={"session_id": "msg-slack4", "outcome": "accepted"})
+        _events(client, "msg-slack4")
+        thread_id = client.get("/messages/threads", params={"employee_id": "E010"}).json()["items"][
+            0
+        ]["thread_id"]
+
+        def _channel_ready() -> bool:
+            with get_sessionmaker(engine)() as session:
+                return get_channel_link(session, 1, 10) is not None
+
+        assert _wait_until(_channel_ready)
+
+        payload = {
+            "type": "event_callback",
+            "event_id": "Ev-retry-dedup",
+            "event": {
+                "type": "message",
+                "channel": "C1",
+                "user": "U_RESPONDER",
+                "text": "重複チェック用メッセージ",
+            },
+        }
+        assert _post_slack_event(client, payload).status_code == 200
+        assert _post_slack_event(client, payload).status_code == 200  # Slack's retry
+
+        detail = client.get(f"/messages/threads/{thread_id}", params={"employee_id": "E010"}).json()
+        matching = [m for m in detail["messages"] if m["body"] == "重複チェック用メッセージ"]
+        assert len(matching) == 1
+    finally:
+        get_settings.cache_clear()
+
+
+def test_accepting_a_second_chat_handoff_between_the_same_pair_reuses_the_channel(
+    monkeypatch, seed_counts, engine, fake_embedder
+) -> None:
+    """Consulting the same colleague again doesn't create a second channel —
+    the existing one is reused and current_thread_id moves to the new thread."""
+
+    with get_sessionmaker(engine)() as session:
+        upsert_slack_link(session, 1, slack_user_id="U_RESPONDER", slack_team_id="T1", now=NOW)
+        upsert_slack_link(session, 10, slack_user_id="U_ASKER", slack_team_id="T1", now=NOW)
+        session.commit()
+    _reset_channel_link(engine, 1, 10)
+
+    created: list[dict] = []
+    monkeypatch.setattr(
+        "tekijin.slack.notify.create_private_channel",
+        lambda **kw: (created.append(kw), "C1")[1],
+    )
+    monkeypatch.setattr("tekijin.slack.notify.invite_to_channel", lambda **kw: True)
+    monkeypatch.setattr("tekijin.slack.notify.post_message", lambda **kw: None)
+    monkeypatch.setenv("TEKIJIN_SLACK_BOT_TOKEN", "xoxb-test")
+    get_settings.cache_clear()
+    try:
+        client = _client(
+            engine,
+            fake_embedder,
+            retriever=_FakeRetriever(people=[1, 2, 3], people_confidence=0.2),
+            scorer=_FakeScorer(_recs(1, 2, 3)),
+        )
+
+        def _accept(session_id: str) -> int:
+            client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": session_id})
+            _events(client, session_id)
+            client.post("/answer", json={"session_id": session_id, "outcome": "accepted"})
+            _events(client, session_id)
+            return client.get("/messages/threads", params={"employee_id": "E010"}).json()["items"][
+                0
+            ]["thread_id"]
+
+        first_thread_id = _accept("msg-reuse1")
+
+        def _channel_ready() -> bool:
+            with get_sessionmaker(engine)() as session:
+                return get_channel_link(session, 1, 10) is not None
+
+        assert _wait_until(_channel_ready)
+
+        second_thread_id = _accept("msg-reuse2")
+        assert second_thread_id != first_thread_id
+
+        def _current_thread_is_second() -> bool:
+            with get_sessionmaker(engine)() as session:
+                link = get_channel_link(session, 1, 10)
+                return link is not None and link.current_thread_id == second_thread_id
+
+        assert _wait_until(_current_thread_is_second)
+    finally:
+        get_settings.cache_clear()
+
+    # Only ONE channel ever created — the second accept reused it.
+    assert created == [{"bot_token": "xoxb-test", "name": "tekijin-1-10"}]
+    with get_sessionmaker(engine)() as session:
+        link = get_channel_link(session, 1, 10)
+        assert link.slack_channel_id == "C1"
+        assert link.current_thread_id == second_thread_id
 
 
 def test_message_thread_rejects_non_party(seed_counts, engine, fake_embedder) -> None:

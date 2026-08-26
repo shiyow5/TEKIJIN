@@ -77,6 +77,7 @@ const DETAIL_A: ChatThreadDetail = {
       created_at: "2026-08-24T10:00:00",
     },
   ],
+  slack_channel_url: null,
 };
 
 beforeEach(() => {
@@ -166,6 +167,32 @@ describe("ChatScreen", () => {
     await waitFor(() =>
       expect(getChatThreadMock).toHaveBeenCalledWith(42, "E010", expect.anything()),
     );
+  });
+
+  it("shows a per-thread Slack link when the pair has a shared channel", async () => {
+    useCurrentUserMock.mockReturnValue(asUser("E010"));
+    getChatThreadsMock.mockResolvedValue([THREAD_A]);
+    getChatThreadMock.mockResolvedValue({
+      ...DETAIL_A,
+      slack_channel_url: "https://slack.com/app_redirect?channel=C1&team=T1",
+    });
+    render(<ChatScreen />);
+
+    const link = await screen.findByRole("link", { name: "Slackで開く" });
+    expect(link).toHaveAttribute("href", "https://slack.com/app_redirect?channel=C1&team=T1");
+    expect(link).toHaveAttribute("target", "_blank");
+  });
+
+  it("shows no per-thread Slack link when the pair has no shared channel yet", async () => {
+    useCurrentUserMock.mockReturnValue(asUser("E010"));
+    getChatThreadsMock.mockResolvedValue([THREAD_A]);
+    getChatThreadMock.mockResolvedValue(DETAIL_A); // slack_channel_url: null
+    render(<ChatScreen />);
+
+    await waitFor(() =>
+      expect(getChatThreadMock).toHaveBeenCalledWith(42, "E010", expect.anything()),
+    );
+    expect(screen.queryByRole("link", { name: "Slackで開く" })).not.toBeInTheDocument();
   });
 
   it("sends a message from the composer and clears the input", async () => {

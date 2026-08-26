@@ -10,8 +10,10 @@ from tekijin.slack.client import (
     SlackApiError,
     SlackIdentity,
     build_authorize_url,
+    create_private_channel,
     exchange_code,
-    send_dm,
+    invite_to_channel,
+    post_message,
 )
 
 
@@ -76,53 +78,80 @@ def test_exchange_code_propagates_http_errors(monkeypatch) -> None:
         exchange_code(client_id="cid", client_secret="secret", redirect_uri="http://x", code="c")
 
 
-# --- send_dm (best-effort: never raises) --------------------------------------- #
-def test_send_dm_success_opens_conversation_then_posts(monkeypatch) -> None:
-    calls: list[tuple[str, dict]] = []
-
-    def fake_post(url, **kw):
-        calls.append((url, kw.get("data", {})))
-        if url.endswith("conversations.open"):
-            return _response(url, 200, {"ok": True, "channel": {"id": "D1"}})
-        return _response(url, 200, {"ok": True})
-
-    monkeypatch.setattr(httpx, "post", fake_post)
-    send_dm(bot_token="xoxb-1", slack_user_id="U1", text="hello")
-
-    assert [url for url, _ in calls] == [
-        "https://slack.com/api/conversations.open",
-        "https://slack.com/api/chat.postMessage",
-    ]
-    assert calls[0][1] == {"users": "U1"}
-    assert calls[1][1] == {"channel": "D1", "text": "hello"}
+# --- create_private_channel ----------------------------------------------------- #
+def test_create_private_channel_success(monkeypatch) -> None:
+    monkeypatch.setattr(
+        httpx,
+        "post",
+        lambda url, **kw: _response(url, 200, {"ok": True, "channel": {"id": "C1"}}),
+    )
+    assert create_private_channel(bot_token="xoxb-1", name="tekijin-1-2") == "C1"
 
 
-def test_send_dm_swallows_conversations_open_failure(monkeypatch) -> None:
-    calls: list[str] = []
-
-    def fake_post(url, **kw):
-        calls.append(url)
-        return _response(url, 200, {"ok": False, "error": "user_not_found"})
-
-    monkeypatch.setattr(httpx, "post", fake_post)
-    send_dm(bot_token="xoxb-1", slack_user_id="U1", text="hello")  # must not raise
-
-    assert calls == ["https://slack.com/api/conversations.open"]  # postMessage never reached
+def test_create_private_channel_returns_none_on_ok_false(monkeypatch) -> None:
+    monkeypatch.setattr(
+        httpx,
+        "post",
+        lambda url, **kw: _response(url, 200, {"ok": False, "error": "name_taken"}),
+    )
+    assert create_private_channel(bot_token="xoxb-1", name="tekijin-1-2") is None
 
 
-def test_send_dm_swallows_post_message_failure(monkeypatch) -> None:
-    def fake_post(url, **kw):
-        if url.endswith("conversations.open"):
-            return _response(url, 200, {"ok": True, "channel": {"id": "D1"}})
-        return _response(url, 200, {"ok": False, "error": "channel_not_found"})
-
-    monkeypatch.setattr(httpx, "post", fake_post)
-    send_dm(bot_token="xoxb-1", slack_user_id="U1", text="hello")  # must not raise
-
-
-def test_send_dm_swallows_network_errors(monkeypatch) -> None:
+def test_create_private_channel_returns_none_on_network_error(monkeypatch) -> None:
     def fake_post(url, **kw):
         raise httpx.ConnectError("boom")
 
     monkeypatch.setattr(httpx, "post", fake_post)
-    send_dm(bot_token="xoxb-1", slack_user_id="U1", text="hello")  # must not raise
+    assert create_private_channel(bot_token="xoxb-1", name="tekijin-1-2") is None
+
+
+# --- invite_to_channel ------------------------------------------------------------ #
+def test_invite_to_channel_success(monkeypatch) -> None:
+    calls: list[dict] = []
+
+    def fake_post(url, **kw):
+        calls.append(kw.get("data", {}))
+        return _response(url, 200, {"ok": True})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    assert invite_to_channel(bot_token="xoxb-1", channel_id="C1", user_ids=["U1", "U2"]) is True
+    assert calls == [{"channel": "C1", "users": "U1,U2"}]
+
+
+def test_invite_to_channel_returns_false_on_failure(monkeypatch) -> None:
+    monkeypatch.setattr(
+        httpx,
+        "post",
+        lambda url, **kw: _response(url, 200, {"ok": False, "error": "already_in_channel"}),
+    )
+    assert invite_to_channel(bot_token="xoxb-1", channel_id="C1", user_ids=["U1"]) is False
+
+
+# --- post_message (best-effort: never raises) ----------------------------------- #
+def test_post_message_success(monkeypatch) -> None:
+    calls: list[dict] = []
+
+    def fake_post(url, **kw):
+        calls.append(kw.get("data", {}))
+        return _response(url, 200, {"ok": True})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    post_message(bot_token="xoxb-1", channel_id="C1", text="hello")
+    assert calls == [{"channel": "C1", "text": "hello"}]
+
+
+def test_post_message_swallows_ok_false(monkeypatch) -> None:
+    monkeypatch.setattr(
+        httpx,
+        "post",
+        lambda url, **kw: _response(url, 200, {"ok": False, "error": "channel_not_found"}),
+    )
+    post_message(bot_token="xoxb-1", channel_id="C1", text="hello")  # must not raise
+
+
+def test_post_message_swallows_network_errors(monkeypatch) -> None:
+    def fake_post(url, **kw):
+        raise httpx.ConnectError("boom")
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    post_message(bot_token="xoxb-1", channel_id="C1", text="hello")  # must not raise

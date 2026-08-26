@@ -1,113 +1,152 @@
-"""The "tell the other party" step after a chat message is saved.
+"""Bridges chat threads to a shared per-pair Slack channel (#hand-off-chat, #388).
 
-Shared by every entry point into the Slack integration (#388, #hand-off-chat):
-a message can originate from ``POST /messages`` (TEKIJIN -> Slack), a Slack DM
-reply routed in by ``POST /slack/events`` (Slack -> TEKIJIN), or the hand-off
-draft auto-seeded as a thread's first message when a responder accepts
-(``AgentService._record_outcome``) — every one of these needs the same "did
-the OTHER party link Slack? stamp last_notified_thread_id, send the DM"
-handling once the row is in the ``messages`` table.
+A "chat" hand-off, once accepted with BOTH the asker and responder Slack-linked,
+gets a private Slack channel (bot + the two of them) — created the first time
+that pair consults each other via chat, then REUSED for every later hand-off
+between the same two people (:func:`ensure_pair_channel`), so consulting the
+same colleague again doesn't pile up a fresh channel every time.
+
+Because both humans are members of the same channel, Slack-to-Slack delivery
+is native (Slack does that); only the TEKIJIN <-> Slack edges
+(:func:`relay_to_channel`, ``POST /slack/events``) are this module's job.
+Which TEKIJIN thread an inbound Slack message is attributed to is
+``SlackChannelLink.current_thread_id`` — see that model's docstring for the
+"most recent thread wins" trade-off channel reuse implies.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import datetime as dt
+import logging
+import threading
 
-from fastapi import BackgroundTasks
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from tekijin.config import get_settings
-from tekijin.data.slack_links import SlackLink, get_slack_link
-from tekijin.slack.client import send_dm
+from tekijin.data.db import session_scope
+from tekijin.data.slack_channel_links import create_channel_link, get_channel_link
+from tekijin.data.slack_links import get_slack_link
+from tekijin.slack.client import create_private_channel, invite_to_channel, post_message
+
+logger = logging.getLogger(__name__)
 
 
-def notify_recipient_via_slack(
-    *, recipient_slack_user_id: str, sender_name: str, body: str, thread_id: int
-) -> None:
-    """Best-effort DM: composed here so every caller sends identical wording."""
+def ensure_pair_channel(session: Session, *, thread_id: int, parties: dict) -> str | None:
+    """Create (once per pair) or reuse the Slack channel for this hand-off's
+    two parties, stamping ``current_thread_id`` to ``thread_id`` either way.
 
-    settings = get_settings()
-    link = f"{settings.slack_frontend_url.rstrip('/')}/chat?thread={thread_id}"
-    preview = body if len(body) <= 200 else f"{body[:200]}…"
-    text = f"{sender_name}さんからTEKIJINでメッセージが届きました:\n{preview}\n{link}"
-    send_dm(bot_token=settings.slack_bot_token, slack_user_id=recipient_slack_user_id, text=text)
-
-
-@dataclass(frozen=True)
-class _Recipient:
-    link: SlackLink
-    sender_name: str
-
-
-def _resolve_recipient(
-    session: Session, *, parties: dict, sender_id: int, thread_id: int
-) -> _Recipient | None:
-    """The OTHER party's Slack link, if notifications are on and they have one.
-
-    Also stamps ``last_notified_thread_id`` — this is what lets a reply typed
-    directly in Slack (#388) find its way back to the right TEKIJIN thread, so
-    it must happen regardless of whether the caller sends synchronously or via
-    a background task.
+    Only when BOTH parties are Slack-linked — a channel with just one human
+    plus the bot isn't meaningfully different from a DM, so it isn't worth
+    the extra Slack API calls or channel-list clutter. Returns ``None`` (no
+    channel) if notifications are off, either party is unlinked, or any Slack
+    API call fails; every step is best-effort and logs its own failure.
     """
 
     settings = get_settings()
     if not settings.slack_notifications_enabled():
+        # Checked BEFORE the reuse lookup below: an existing channel from
+        # before the bot token was unset must not still be posted to with an
+        # empty token.
         return None
-    is_asker = sender_id == parties["asker_id"]
-    recipient_id = parties["responder_id"] if is_asker else parties["asker_id"]
-    sender_name = parties["asker_name"] if is_asker else parties["responder_name"]
-    recipient_link = get_slack_link(session, recipient_id)
-    if recipient_link is None:
+
+    asker_id, responder_id = parties["asker_id"], parties["responder_id"]
+    existing = get_channel_link(session, asker_id, responder_id)
+    if existing is not None:
+        existing.current_thread_id = thread_id
+        return existing.slack_channel_id
+
+    asker_link = get_slack_link(session, asker_id)
+    responder_link = get_slack_link(session, responder_id)
+    if asker_link is None or responder_link is None:
         return None
-    recipient_link.last_notified_thread_id = thread_id
-    return _Recipient(link=recipient_link, sender_name=sender_name)
+
+    # Named after the pair, not the thread, so a later reuse doesn't need a
+    # NEW channel name — Slack channel names must be unique workspace-wide.
+    channel_id = create_private_channel(
+        bot_token=settings.slack_bot_token,
+        name=f"tekijin-{min(asker_id, responder_id)}-{max(asker_id, responder_id)}",
+    )
+    if channel_id is None:
+        return None
+    invited = invite_to_channel(
+        bot_token=settings.slack_bot_token,
+        channel_id=channel_id,
+        user_ids=[asker_link.slack_user_id, responder_link.slack_user_id],
+    )
+    if not invited:
+        # The channel exists but nobody could be added to it — useless, and
+        # not persisted, so a later message just tries again from scratch.
+        return None
+    create_channel_link(
+        session,
+        asker_id,
+        responder_id,
+        thread_id=thread_id,
+        slack_channel_id=channel_id,
+        slack_team_id=asker_link.slack_team_id,
+        now=dt.datetime.now(),  # noqa: DTZ005 - naive is intentional, matches created_at elsewhere
+    )
+    return channel_id
 
 
-def maybe_notify_via_slack(
-    session: Session,
-    background_tasks: BackgroundTasks,
+def relay_to_channel(
+    session_factory: sessionmaker[Session],
     *,
-    parties: dict,
-    sender_id: int,
+    employee_a: int,
+    employee_b: int,
+    sender_name: str,
     body: str,
-    thread_id: int,
 ) -> None:
-    """Like :func:`notify_via_slack_now`, but deferred to a background task —
-    for callers that run inside a FastAPI request/response cycle, where
-    ``BackgroundTasks`` keeps the Slack API call from delaying the response.
+    """Best-effort: post a TEKIJIN-originated message into this pair's shared
+    Slack channel, if one already exists. No-op if it doesn't (not both
+    parties linked yet, or notifications are off) — this never CREATES a
+    channel; only :func:`ensure_pair_channel` (at accept time) does that.
+    Does NOT touch ``current_thread_id``: an ordinary message send is not a
+    new hand-off, so it must not silently reroute future Slack replies onto
+    whichever thread happened to send one last.
+
+    Takes a ``session_factory`` (opens its own session) rather than a live
+    ``Session`` — designed to run as a deferred task (a FastAPI
+    ``BackgroundTasks`` job, or the fire-and-forget thread below) after the
+    caller's own session/transaction has already closed.
     """
 
-    recipient = _resolve_recipient(
-        session, parties=parties, sender_id=sender_id, thread_id=thread_id
-    )
-    if recipient is None:
+    settings = get_settings()
+    if not settings.slack_notifications_enabled():
         return
-    background_tasks.add_task(
-        notify_recipient_via_slack,
-        recipient_slack_user_id=recipient.link.slack_user_id,
-        sender_name=recipient.sender_name,
-        body=body,
-        thread_id=thread_id,
+    with session_factory() as session:
+        link = get_channel_link(session, employee_a, employee_b)
+    if link is None:
+        return
+    post_message(
+        bot_token=settings.slack_bot_token,
+        channel_id=link.slack_channel_id,
+        text=f"{sender_name}: {body}",
     )
 
 
-def notify_via_slack_now(
-    session: Session, *, parties: dict, sender_id: int, body: str, thread_id: int
+def schedule_channel_setup_and_draft(
+    session_factory: sessionmaker[Session], *, thread_id: int, parties: dict, draft: str
 ) -> None:
-    """Like :func:`maybe_notify_via_slack`, but sent immediately (synchronously)
-    — for callers with no ``BackgroundTasks`` to defer to (``AgentService``'s
-    outcome recording runs outside any single FastAPI request's lifecycle, so
-    there is nothing to attach a background task to there).
+    """Fire-and-forget: set up (or reuse) this pair's Slack channel and post
+    the hand-off draft into it, without blocking the caller.
+
+    Used from ``AgentService._record_outcome``, which runs synchronously
+    inside ``POST /answer``'s request/response cycle but has no
+    ``BackgroundTasks`` to defer to (that's a FastAPI request-handler
+    concept, and by the time this runs the DB write for the accepted outcome
+    has already committed) — channel creation is 2-3 sequential Slack API
+    calls, so running it inline would hold that response (and the
+    per-session lock ``submit_resume`` takes) for however long Slack takes.
+    A plain daemon thread is enough: every step it calls already swallows its
+    own errors and logs them, so there is nothing here to join or propagate.
     """
 
-    recipient = _resolve_recipient(
-        session, parties=parties, sender_id=sender_id, thread_id=thread_id
-    )
-    if recipient is None:
-        return
-    notify_recipient_via_slack(
-        recipient_slack_user_id=recipient.link.slack_user_id,
-        sender_name=recipient.sender_name,
-        body=body,
-        thread_id=thread_id,
-    )
+    def _run() -> None:
+        with session_scope(session_factory) as session:
+            channel_id = ensure_pair_channel(session, thread_id=thread_id, parties=parties)
+        if channel_id is not None:
+            settings = get_settings()
+            post_message(bot_token=settings.slack_bot_token, channel_id=channel_id, text=draft)
+
+    threading.Thread(target=_run, daemon=True, name="slack-handoff-channel-setup").start()

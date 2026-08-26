@@ -186,9 +186,21 @@ function ChatConversation({
         >
           ← 一覧へ戻る
         </button>
-        <h2 className="font-bold text-on-surface">
-          {detail?.counterpart.name ?? (phase === "loading" ? "読み込み中…" : "不明な相手")}
-        </h2>
+        <div className="flex items-center justify-between gap-sm">
+          <h2 className="font-bold text-on-surface">
+            {detail?.counterpart.name ?? (phase === "loading" ? "読み込み中…" : "不明な相手")}
+          </h2>
+          {detail?.slack_channel_url ? (
+            <a
+              href={detail.slack_channel_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="shrink-0 text-primary text-xs underline hover:text-on-surface"
+            >
+              Slackで開く
+            </a>
+          ) : null}
+        </div>
         {detail?.question_title ? (
           <p className="line-clamp-1 text-on-surface-variant text-xs">{detail.question_title}</p>
         ) : null}

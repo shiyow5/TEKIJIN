@@ -56,8 +56,9 @@ from tekijin.data.messages import (
 )
 from tekijin.data.notifications import pending_decline_notifications_for_asker
 from tekijin.data.repository import Repository
+from tekijin.data.slack_channel_links import get_channel_link
 from tekijin.data.writes import ack_decline_notifications, delete_question, mark_self_resolved
-from tekijin.slack.notify import maybe_notify_via_slack
+from tekijin.slack.notify import relay_to_channel
 
 logger = logging.getLogger(__name__)
 
@@ -779,6 +780,13 @@ def message_thread_detail(
             if parties is None or eid not in (parties["asker_id"], parties["responder_id"]):
                 raise HTTPException(status_code=404, detail="thread not found")
             rows = messages_for_thread(session, thread_id)
+            channel_link = get_channel_link(session, parties["asker_id"], parties["responder_id"])
+        slack_channel_url = (
+            f"https://slack.com/app_redirect"
+            f"?channel={channel_link.slack_channel_id}&team={channel_link.slack_team_id}"
+            if channel_link is not None
+            else None
+        )
         return schemas.MessageThreadDetail(
             thread_id=thread_id,
             question_id=parties["question_id"],
@@ -794,6 +802,7 @@ def message_thread_detail(
                 )
                 for row in rows
             ],
+            slack_channel_url=slack_channel_url,
         )
 
 
@@ -809,10 +818,10 @@ def send_message(
     ``sender_id`` is bound to the authenticated principal (#241): without this a
     party could post as the OTHER party, and anyone could post as anyone.
 
-    If the OTHER party has linked Slack (and a bot token is configured), a DM
-    notification is sent as a background task after the response — Slack being
-    slow or unreachable must never delay or fail sending the chat message itself
-    (:func:`maybe_notify_via_slack`, shared with the Slack-reply path, #388).
+    If this pair has a shared Slack channel (#hand-off-chat), the message is
+    relayed into it as a background task after the response — Slack being
+    slow or unreachable must never delay or fail sending the chat message
+    itself (:func:`relay_to_channel`, shared with the Slack-reply path, #388).
     """
 
     with _generic_500("POST /messages"):
@@ -826,13 +835,15 @@ def send_message(
                 raise HTTPException(status_code=404, detail="thread not found")
             now = dt.datetime.now()  # noqa: DTZ005 - naive is intentional, matches created_at
             row = create_message(session, req.thread_id, req.sender_id, req.body, now)
-            maybe_notify_via_slack(
-                session,
-                background_tasks,
-                parties=parties,
-                sender_id=req.sender_id,
+            is_asker = req.sender_id == parties["asker_id"]
+            sender_name = parties["asker_name"] if is_asker else parties["responder_name"]
+            background_tasks.add_task(
+                relay_to_channel,
+                _service(request).session_factory,
+                employee_a=parties["asker_id"],
+                employee_b=parties["responder_id"],
+                sender_name=sender_name,
                 body=req.body,
-                thread_id=req.thread_id,
             )
         return schemas.MessageItem(
             id=row["id"],

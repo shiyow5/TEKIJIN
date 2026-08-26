@@ -248,8 +248,6 @@ export interface SlackAuthorizeUrlResponse {
 /** GET /slack/status response (schemas.py `SlackStatusResponse`). */
 export interface SlackStatusResponse {
   linked: boolean;
-  /** "Open my Slack DM with the bot" deep link, or null if unavailable. */
-  open_url: string | null;
 }
 
 /** POST /slack/unlink response (schemas.py `SlackUnlinkResponse`). */
@@ -358,6 +356,8 @@ export interface ChatThreadDetail {
   question_title: string;
   counterpart: HandoffAsker;
   messages: ChatMessage[];
+  /** Deep link to this pair's shared Slack channel, or null if none exists yet. */
+  slack_channel_url: string | null;
 }
 
 // --------------------------------------------------------------------------- //

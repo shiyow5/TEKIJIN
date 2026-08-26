@@ -2,10 +2,12 @@
 
 /**
  * Slack account-link control, shown in the chat screen's top-right corner
- * (#slack-integration). A regular employee links their Slack account so a
- * TEKIJIN chat message from the other party also arrives as a Slack DM; the
- * admin account is not a real employee and never receives chat messages, so
- * it renders nothing (mirrors `HomeActions`'s `adminOnly` gating).
+ * (#slack-integration). Once BOTH parties of a "chat" hand-off have linked,
+ * accepting the hand-off creates a shared private Slack channel for the two
+ * of them (#hand-off-chat) — this button is just the identity-linking step;
+ * the per-thread "open in Slack" link lives in the conversation pane itself.
+ * The admin account is not a real employee and never receives chat messages,
+ * so it renders nothing (mirrors `HomeActions`'s `adminOnly` gating).
  *
  * Linking is "Sign in with Slack": clicking navigates the WHOLE page to
  * Slack's authorize URL (an external OAuth flow, not a fetch) and back to
@@ -21,7 +23,6 @@ type Status = "loading" | "unavailable" | "linked" | "unlinked";
 export function SlackLinkButton() {
   const { principal } = useAuth();
   const [status, setStatus] = useState<Status>("loading");
-  const [openUrl, setOpenUrl] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const linkable = principal != null && !principal.is_admin;
 
@@ -30,9 +31,7 @@ export function SlackLinkButton() {
     let active = true;
     getSlackStatus()
       .then((res) => {
-        if (!active) return;
-        setStatus(res.linked ? "linked" : "unlinked");
-        setOpenUrl(res.open_url);
+        if (active) setStatus(res.linked ? "linked" : "unlinked");
       })
       .catch(() => {
         if (active) setStatus("unlinked");
@@ -60,7 +59,6 @@ export function SlackLinkButton() {
     try {
       await postSlackUnlink();
       setStatus("unlinked");
-      setOpenUrl(null);
     } finally {
       setBusy(false);
     }
@@ -76,16 +74,6 @@ export function SlackLinkButton() {
         <span className="rounded-full bg-secondary-container px-sm py-1 font-bold text-on-secondary-container">
           Slack連携済み
         </span>
-        {openUrl ? (
-          <a
-            href={openUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-primary underline transition-colors hover:text-on-surface"
-          >
-            Slackで開く
-          </a>
-        ) : null}
         <button
           type="button"
           onClick={handleUnlink}

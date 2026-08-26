@@ -86,19 +86,10 @@ class EmployeeProfile(Base):
 class SlackLink(Base):
     """One employee's linked Slack account (one row per employee).
 
-    Only the Slack user/team id is stored — no per-user OAuth token. DM
-    notifications (see ``tekijin.slack.client.send_dm``) go through the app's own
-    bot token instead, so there is nothing here to refresh or revoke on Slack's
-    side beyond the identity mapping itself.
-
-    ``last_notified_thread_id`` supports the Slack -> TEKIJIN direction (#388):
-    a Slack DM channel is 1:1 between the bot and the employee, not per chat
-    thread, so a reply typed in Slack carries no thread id of its own. Instead,
-    each outbound notification (``POST /messages`` or a prior Slack-side reply)
-    stamps this with the thread it was about, and ``POST /slack/events`` routes
-    the NEXT inbound reply there. This is a "most recent thread wins" heuristic
-    — good enough for one active conversation, not a guarantee under several
-    concurrent threads with the same person.
+    Only the Slack user/team id is stored — no per-user OAuth token. Every
+    Slack-side action (posting into a thread's channel, inviting a member)
+    goes through the app's own bot token instead, so there is nothing here to
+    refresh or revoke on Slack's side beyond the identity mapping itself.
     """
 
     __tablename__ = "slack_links"
@@ -109,7 +100,37 @@ class SlackLink(Base):
     slack_user_id: Mapped[str] = mapped_column(String(32), unique=True, index=True)
     slack_team_id: Mapped[str] = mapped_column(String(32))
     linked_at: Mapped[dt.datetime] = mapped_column(DateTime)
-    last_notified_thread_id: Mapped[int | None] = mapped_column(Integer)
+
+
+class SlackChannelLink(Base):
+    """The shared private Slack channel for one PAIR of employees (#hand-off-chat).
+
+    Created once, the first time a "chat" hand-off between two Slack-linked
+    employees is accepted (a private channel containing the bot plus both of
+    them), then REUSED for every later hand-off between the same pair — one
+    channel per relationship, not one per question, so consulting the same
+    person again doesn't pile up a fresh channel every time.
+
+    ``current_thread_id`` is which TEKIJIN thread an inbound Slack message in
+    this channel is attributed to. It is stamped to the new thread whenever
+    the channel is reused for another hand-off, so it always points at the
+    pair's most recent consultation — a "most recent thread wins" heuristic:
+    if the same two people have two hand-offs open at once, a Slack reply
+    lands on whichever was accepted last, even if a human meant it for the
+    other. Naming the row by the pair (not by ``thread_id``, an earlier
+    design) is what makes channel reuse possible at all.
+    """
+
+    __tablename__ = "slack_channel_links"
+
+    # Canonicalized so the pair (A, B) and (B, A) are always the same row:
+    # employee_low_id < employee_high_id, enforced by the writer, not the DB.
+    employee_low_id: Mapped[int] = mapped_column(ForeignKey("employees.id"), primary_key=True)
+    employee_high_id: Mapped[int] = mapped_column(ForeignKey("employees.id"), primary_key=True)
+    slack_channel_id: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    slack_team_id: Mapped[str] = mapped_column(String(32))
+    current_thread_id: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime)
 
 
 class AiChatHistory(Base):

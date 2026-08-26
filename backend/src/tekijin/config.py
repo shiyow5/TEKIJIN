@@ -378,10 +378,6 @@ class Settings(BaseSettings):
     slack_signing_secret: str = ""
     # Where the OAuth callback sends the browser back to once linking finishes.
     slack_frontend_url: str = "http://localhost:3000"
-    # App ID (Slack App -> Basic Information -> App Credentials). Used only to
-    # build an "open my Slack DM with the bot" deep link (`app_redirect`) for a
-    # linked employee — optional; leaving it blank just omits that link.
-    slack_app_id: str = ""
 
     def slack_configured(self) -> bool:
         """True once the OAuth app credentials needed to start linking exist.

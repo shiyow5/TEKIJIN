@@ -11,11 +11,15 @@ session, matching this API's existing stateless-bearer-token design: the
 callback is a plain browser redirect from Slack with no ``Authorization``
 header available, so the state itself has to prove which employee is linking.
 
-``POST /slack/events`` is the Slack -> TEKIJIN direction (#388): Slack's Events
-API calls this directly (no TEKIJIN principal — it authenticates itself via a
-request signature instead, :func:`tekijin.slack.verify.verify_signature`), and
-a DM reply is routed into whichever thread that employee was last notified
-about (see ``SlackLink.last_notified_thread_id``).
+``POST /slack/events`` is the Slack -> TEKIJIN direction (#388, #hand-off-chat):
+Slack's Events API calls this directly (no TEKIJIN principal — it
+authenticates itself via a request signature instead,
+:func:`tekijin.slack.verify.verify_signature`). A message posted in a
+hand-off's shared Slack channel is routed to whichever TEKIJIN thread that
+channel's ``current_thread_id`` currently names (see
+``tekijin.slack.notify``'s module docstring) — no relay back into Slack is
+needed here, since both parties already see each other's messages natively
+in the same channel; this only mirrors them into TEKIJIN.
 """
 
 from __future__ import annotations
@@ -25,7 +29,8 @@ import json
 import logging
 
 import jwt
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse, Response
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -35,6 +40,7 @@ from tekijin.auth.principal import Principal
 from tekijin.config import get_settings
 from tekijin.data.db import session_scope
 from tekijin.data.messages import create_message, thread_parties
+from tekijin.data.slack_channel_links import get_channel_link_by_channel_id
 from tekijin.data.slack_links import (
     delete_slack_link,
     get_slack_link,
@@ -42,7 +48,6 @@ from tekijin.data.slack_links import (
     upsert_slack_link,
 )
 from tekijin.slack.client import build_authorize_url, exchange_code
-from tekijin.slack.notify import maybe_notify_via_slack
 from tekijin.slack.verify import verify_signature
 
 logger = logging.getLogger(__name__)
@@ -165,15 +170,7 @@ def status(
     service = request.app.state.agent_service
     with service.session_factory() as session:
         link = get_slack_link(session, principal.employee_id)
-    if link is None:
-        return schemas.SlackStatusResponse(linked=False)
-    settings = get_settings()
-    open_url = (
-        f"https://slack.com/app_redirect?app={settings.slack_app_id}&team={link.slack_team_id}"
-        if settings.slack_app_id
-        else None
-    )
-    return schemas.SlackStatusResponse(linked=True, open_url=open_url)
+    return schemas.SlackStatusResponse(linked=link is not None)
 
 
 @router.post("/unlink", response_model=schemas.SlackUnlinkResponse)
@@ -188,63 +185,65 @@ def unlink(
     return schemas.SlackUnlinkResponse()
 
 
-def _handle_message_event(
-    session_factory: sessionmaker[Session], background_tasks: BackgroundTasks, event: dict
-) -> None:
-    """Route one inbound Slack DM into the matching TEKIJIN thread (#388).
+def _handle_message_event(session_factory: sessionmaker[Session], event: dict) -> None:
+    """Mirror one message posted in a hand-off's shared Slack channel into
+    the TEKIJIN thread it currently belongs to (#hand-off-chat).
 
-    Silently drops anything it cannot confidently route (unknown sender, no
-    remembered thread, sender no longer a party) rather than erroring — this
-    runs inside a webhook Slack will retry on any non-2xx, so "nothing to do"
-    must look identical to "handled" from Slack's side.
+    Silently drops anything it cannot confidently route (channel isn't one of
+    ours, unknown sender, sender no longer a party) rather than erroring —
+    this runs inside a webhook Slack will retry on any non-2xx, so "nothing
+    to do" must look identical to "handled" from Slack's side. Synchronous
+    (plain ``def``, run via ``run_in_threadpool`` by the caller): does
+    blocking DB I/O, which must never run directly on the asyncio event loop
+    that ``POST /slack/events`` (an ``async def`` handler) shares with every
+    other concurrent request this worker is serving.
     """
 
     if event.get("type") != "message":
         return
-    # Only DMs to the bot (not channel/group messages some other subscribed
-    # scope might deliver), and never the bot's own notification landing back
-    # in the same DM channel it was posted to (that would loop).
-    if event.get("channel_type") != "im" or event.get("bot_id"):
+    # Never the bot's own post landing back in the same channel it was sent
+    # to (that would loop), and message_changed / message_deleted / channel
+    # joins etc. are not a new human message.
+    if event.get("bot_id") or event.get("subtype"):
         return
-    # message_changed / message_deleted / channel_join etc. — not a new reply.
-    if event.get("subtype"):
-        return
+    channel_id = event.get("channel")
     slack_user_id = event.get("user")
     text = event.get("text")
-    if not slack_user_id or not text or not text.strip():
+    if not channel_id or not slack_user_id or not text or not text.strip():
         return
 
     with session_scope(session_factory) as session:
-        link = get_slack_link_by_slack_user_id(session, slack_user_id)
-        if link is None or link.last_notified_thread_id is None:
+        channel_link = get_channel_link_by_channel_id(session, channel_id)
+        if channel_link is None:
+            return  # not a channel TEKIJIN created — ignore
+        sender_link = get_slack_link_by_slack_user_id(session, slack_user_id)
+        if sender_link is None:
             return
-        thread_id = link.last_notified_thread_id
-        sender_id = link.employee_id
+        thread_id = channel_link.current_thread_id
+        sender_id = sender_link.employee_id
         parties = thread_parties(session, thread_id)
         if parties is None or sender_id not in (parties["asker_id"], parties["responder_id"]):
             return
         now = dt.datetime.now()  # noqa: DTZ005 - naive is intentional, matches created_at elsewhere
         create_message(session, thread_id, sender_id, text, now)
-        maybe_notify_via_slack(
-            session,
-            background_tasks,
-            parties=parties,
-            sender_id=sender_id,
-            body=text,
-            thread_id=thread_id,
-        )
 
 
 @router.post("/events")
-async def events(request: Request, background_tasks: BackgroundTasks) -> Response:
+async def events(request: Request) -> Response:
     """Slack Events API endpoint: the URL-verification handshake, plus inbound
-    DM replies relayed into the matching TEKIJIN chat thread (#388).
+    hand-off-channel messages mirrored into the matching TEKIJIN chat thread
+    (#hand-off-chat).
 
     No TEKIJIN auth — Slack calls this directly, authenticated instead by its
     own request signature. Always acks within Slack's 3s budget and never
     raises past a signature failure: anything else it can't route is just a
     no-op (see :func:`_handle_message_event`), so a malformed or duplicate
     delivery never turns into a 5xx that trains Slack to keep retrying.
+
+    ``event_id`` de-dup guards against Slack's OWN retries (it re-delivers
+    whenever an earlier attempt didn't ack in time — plausible before the
+    event-loop fix above, but Slack does not guarantee exactly-once even
+    otherwise) so a retried delivery can never insert the same message twice.
     """
 
     settings = get_settings()
@@ -263,8 +262,11 @@ async def events(request: Request, background_tasks: BackgroundTasks) -> Respons
         return PlainTextResponse(str(payload.get("challenge", "")))
 
     if payload.get("type") == "event_callback":
-        event = payload.get("event") or {}
-        service = request.app.state.agent_service
-        _handle_message_event(service.session_factory, background_tasks, event)
+        event_id = payload.get("event_id")
+        seen_events = request.app.state.slack_seen_event_ids
+        if event_id is None or not seen_events.seen_before(event_id):
+            event = payload.get("event") or {}
+            service = request.app.state.agent_service
+            await run_in_threadpool(_handle_message_event, service.session_factory, event)
 
     return JSONResponse({"ok": True})

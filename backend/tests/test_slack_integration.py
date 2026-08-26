@@ -2,8 +2,8 @@
 GET /slack/oauth/callback, GET /slack/status, POST /slack/unlink).
 
 Talks to the live seeded DB (pgserver/CI), same as ``test_auth_integration.py``.
-No real Slack API calls: ``exchange_code``/``send_dm`` are monkeypatched at the
-module boundary they're imported into.
+No real Slack API calls: ``exchange_code`` is monkeypatched at the module
+boundary it's imported into.
 """
 
 from __future__ import annotations
@@ -131,32 +131,12 @@ def test_status_and_unlink_roundtrip(seed_counts, engine, fake_embedder) -> None
     client = _raw_client(engine, fake_embedder)
     status = client.get("/slack/status", headers=_user_headers(6)).json()
     assert status["linked"] is True
-    assert status["open_url"] is None  # TEKIJIN_SLACK_APP_ID unset
 
     unlink_resp = client.post("/slack/unlink", headers=_user_headers(6))
     assert unlink_resp.status_code == 200
     assert unlink_resp.json()["ok"] is True
 
     assert client.get("/slack/status", headers=_user_headers(6)).json()["linked"] is False
-
-
-def test_status_open_url_present_when_linked_and_app_id_configured(
-    monkeypatch, seed_counts, engine, fake_embedder
-) -> None:
-    with get_sessionmaker(engine)() as session:
-        upsert_slack_link(session, 6, slack_user_id="U_SIX", slack_team_id="T_ACME", now=NOW)
-        session.commit()
-
-    monkeypatch.setenv("TEKIJIN_SLACK_APP_ID", "A123456")
-    get_settings.cache_clear()
-    try:
-        client = _raw_client(engine, fake_embedder)
-        status = client.get("/slack/status", headers=_user_headers(6)).json()
-    finally:
-        get_settings.cache_clear()
-
-    assert status["linked"] is True
-    assert status["open_url"] == "https://slack.com/app_redirect?app=A123456&team=T_ACME"
 
 
 def test_status_false_for_an_unlinked_employee(seed_counts, engine, fake_embedder) -> None:

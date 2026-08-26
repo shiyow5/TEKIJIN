@@ -1,13 +1,17 @@
-"""Thin Slack Web API client: OAuth identity exchange + DM notification.
+"""Thin Slack Web API client: OAuth identity exchange + per-thread channel
+management + posting.
 
-No Slack SDK dependency — two documented REST calls cover this feature's needs:
+No Slack SDK dependency — documented REST calls cover this feature's needs:
 
 * ``oauth.v2.access`` — exchange an authorization code for the authorizing
   user's Slack identity ("Sign in with Slack", ``user_scope=identity.basic``).
   Only the returned user/team id is kept; no per-user token is stored, so there
   is nothing to refresh or revoke on Slack's side beyond the identity mapping.
-* ``conversations.open`` + ``chat.postMessage`` — open a DM with a linked user
-  and post a notification, authenticated with the app's own bot token.
+* ``conversations.create`` + ``conversations.invite`` — create the private
+  channel for one chat thread (bot + asker + responder) and add the two
+  humans (the bot is already a member as the creator).
+* ``chat.postMessage`` — post into that channel, authenticated with the app's
+  own bot token (never a per-user token).
 """
 
 from __future__ import annotations
@@ -22,7 +26,8 @@ logger = logging.getLogger(__name__)
 
 _AUTHORIZE_URL = "https://slack.com/oauth/v2/authorize"
 _OAUTH_ACCESS_URL = "https://slack.com/api/oauth.v2.access"
-_CONVERSATIONS_OPEN_URL = "https://slack.com/api/conversations.open"
+_CONVERSATIONS_CREATE_URL = "https://slack.com/api/conversations.create"
+_CONVERSATIONS_INVITE_URL = "https://slack.com/api/conversations.invite"
 _POST_MESSAGE_URL = "https://slack.com/api/chat.postMessage"
 # Identity-only scope: enough to know WHO signed in, not to act as them.
 _USER_SCOPE = "identity.basic"
@@ -83,37 +88,69 @@ def exchange_code(
     return SlackIdentity(slack_user_id=user_id, slack_team_id=team_id)
 
 
-def send_dm(*, bot_token: str, slack_user_id: str, text: str) -> None:
-    """Best-effort: DM ``text`` to ``slack_user_id`` via the app's bot token.
+def create_private_channel(*, bot_token: str, name: str) -> str | None:
+    """Create a private channel named ``name``; return its id, or ``None`` on
+    any failure (logged only — the caller decides whether/how to retry)."""
 
-    Never raises — a Slack outage or a revoked/invalid link must not break
-    sending a TEKIJIN chat message (the caller runs this as a background task
-    after the message is already saved). Failures are logged only.
+    headers = {"Authorization": f"Bearer {bot_token}"}
+    try:
+        resp = httpx.post(
+            _CONVERSATIONS_CREATE_URL,
+            headers=headers,
+            data={"name": name, "is_private": "true"},
+            timeout=_TIMEOUT_SECONDS,
+        )
+        resp.raise_for_status()
+        body = resp.json()
+        if not body.get("ok"):
+            raise SlackApiError(body.get("error", "unknown_error"))
+        return body["channel"]["id"]
+    except Exception:
+        logger.warning("Slack channel creation failed", exc_info=True)
+        return None
+
+
+def invite_to_channel(*, bot_token: str, channel_id: str, user_ids: list[str]) -> bool:
+    """Invite ``user_ids`` into ``channel_id``; return whether it succeeded
+    (logged only on failure — the caller decides whether to keep the channel)."""
+
+    headers = {"Authorization": f"Bearer {bot_token}"}
+    try:
+        resp = httpx.post(
+            _CONVERSATIONS_INVITE_URL,
+            headers=headers,
+            data={"channel": channel_id, "users": ",".join(user_ids)},
+            timeout=_TIMEOUT_SECONDS,
+        )
+        resp.raise_for_status()
+        body = resp.json()
+        if not body.get("ok"):
+            raise SlackApiError(body.get("error", "unknown_error"))
+        return True
+    except Exception:
+        logger.warning("Slack channel invite failed", exc_info=True)
+        return False
+
+
+def post_message(*, bot_token: str, channel_id: str, text: str) -> None:
+    """Best-effort: post ``text`` into ``channel_id`` via the app's bot token.
+
+    Never raises — a Slack outage must not break sending a TEKIJIN chat
+    message (callers run this as a background task / thread after the
+    message is already saved). Failures are logged only.
     """
 
     headers = {"Authorization": f"Bearer {bot_token}"}
     try:
-        opened = httpx.post(
-            _CONVERSATIONS_OPEN_URL,
-            headers=headers,
-            data={"users": slack_user_id},
-            timeout=_TIMEOUT_SECONDS,
-        )
-        opened.raise_for_status()
-        channel_body = opened.json()
-        if not channel_body.get("ok"):
-            raise SlackApiError(channel_body.get("error", "unknown_error"))
-        channel_id = channel_body["channel"]["id"]
-
-        posted = httpx.post(
+        resp = httpx.post(
             _POST_MESSAGE_URL,
             headers=headers,
             data={"channel": channel_id, "text": text},
             timeout=_TIMEOUT_SECONDS,
         )
-        posted.raise_for_status()
-        post_body = posted.json()
-        if not post_body.get("ok"):
-            raise SlackApiError(post_body.get("error", "unknown_error"))
+        resp.raise_for_status()
+        body = resp.json()
+        if not body.get("ok"):
+            raise SlackApiError(body.get("error", "unknown_error"))
     except Exception:
-        logger.warning("Slack DM notification failed", exc_info=True)
+        logger.warning("Slack channel post failed", exc_info=True)

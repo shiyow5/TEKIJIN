@@ -550,6 +550,12 @@ class MessageThreadDetail(BaseModel):
     question_title: str
     counterpart: HandoffAsker
     messages: list[MessageItem] = Field(default_factory=list)
+    # Deep link to this pair's shared Slack channel (#hand-off-chat) — present
+    # only once one exists (both parties linked Slack and a "chat" hand-off
+    # between them was accepted). The channel is shared across every thread
+    # between the two, so this link is the same regardless of which of their
+    # threads it's fetched from.
+    slack_channel_url: str | None = None
 
 
 # --------------------------------------------------------------------------- #
@@ -750,9 +756,6 @@ class SlackStatusResponse(BaseModel):
     """Whether the acting employee currently has a linked Slack account."""
 
     linked: bool
-    # "Open my Slack DM with the bot" deep link — present only when linked AND
-    # TEKIJIN_SLACK_APP_ID is configured (#hand-off-chat).
-    open_url: str | None = None
 
 
 class SlackUnlinkResponse(BaseModel):

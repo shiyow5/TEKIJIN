@@ -89,7 +89,7 @@ from tekijin.data.writes import (
     update_question_topics,
 )
 from tekijin.retrieval.embedding import PASSAGE, Embedder
-from tekijin.slack.notify import notify_via_slack_now
+from tekijin.slack.notify import schedule_channel_setup_and_draft
 
 logger = logging.getLogger(__name__)
 
@@ -616,23 +616,23 @@ class AgentService:
                         # dt.datetime.now() (routes.py) regardless of the
                         # graph's (possibly injected/frozen) clock.
                         create_message(session, primary, asker_id, draft, dt.datetime.now())
-                        # If the responder has linked Slack, this is also their
-                        # very first look at the request — deliver the SAME
-                        # draft as a Slack DM (#hand-off-chat) so accepting via
-                        # TEKIJIN drops them straight into a normal-looking
-                        # Slack conversation with the draft already "sent".
-                        # Synchronous: this method runs outside any single
-                        # FastAPI request (see `notify_via_slack_now`'s
-                        # docstring), so there is no `BackgroundTasks` to defer
-                        # to here the way `POST /messages` does.
+                        # If both parties have linked Slack, this is also their
+                        # very first look at the request — set up (or reuse)
+                        # their shared Slack channel and post the SAME draft
+                        # into it (#hand-off-chat), so accepting via TEKIJIN
+                        # drops them straight into a normal-looking Slack
+                        # conversation with the draft already "sent". Fire and
+                        # forget: this method runs synchronously inside
+                        # POST /answer's request/response cycle with no
+                        # `BackgroundTasks` to defer to (see
+                        # `schedule_channel_setup_and_draft`'s docstring).
                         parties = thread_parties(session, primary)
                         if parties is not None:
-                            notify_via_slack_now(
-                                session,
-                                parties=parties,
-                                sender_id=asker_id,
-                                body=draft,
+                            schedule_channel_setup_and_draft(
+                                self._session_factory,
                                 thread_id=primary,
+                                parties=parties,
+                                draft=draft,
                             )
             return "recorded", outcome
 
