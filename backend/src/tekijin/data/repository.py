@@ -250,6 +250,14 @@ class Repository:
         rows = self._session.scalars(select(Document).where(Document.id.in_(ids)))
         return {row.id: DocumentDTO.from_row(row) for row in rows}
 
+    def daily_reports_by_ids(self, ids: Sequence[int]) -> dict[int, DailyReportDTO]:
+        """Resolve several daily reports by id in one query (#433 knowledge source)."""
+
+        if not ids:
+            return {}
+        rows = self._session.scalars(select(DailyReport).where(DailyReport.id.in_(ids)))
+        return {row.id: DailyReportDTO.from_row(row) for row in rows}
+
     # -- projects --------------------------------------------------------- #
     def list_projects_with_members(self) -> list[ProjectWithMembersDTO]:
         stmt = select(Project).options(selectinload(Project.members)).order_by(Project.id)

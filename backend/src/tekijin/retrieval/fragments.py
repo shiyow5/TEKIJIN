@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:  # pragma: no cover - typing only (avoids import cycles)
     from tekijin.agent.state import RetrievalResult
-    from tekijin.data.dto import AnswerDTO, DocumentDTO, QuestionDTO
+    from tekijin.data.dto import AnswerDTO, DailyReportDTO, DocumentDTO, QuestionDTO
 
 # How many fragments to surface, and how long each may be. Kept small on purpose:
 # C1 needs a hint of the retrieved evidence's vocabulary, not the full corpus —
@@ -37,10 +37,11 @@ DEFAULT_EVIDENCE_CHARS = 400
 class CitedEvidence:
     """One retrieved source, id-paired with its text, for a cited self-answer (#291).
 
-    ``source_id`` is the durable id of the past Q&A (``qa_id``) or internal document
-    (``doc_id``) — kept so the composed answer can CITE it and the chat can render a
-    link back to the source. ``kind`` (``"qa"`` / ``"document"``) selects which link
-    the UI builds. ``text`` is the (clipped) evidence the model may draw from.
+    ``source_id`` is the durable id of the past Q&A (``qa_id``), internal document
+    (``doc_id``), or daily report (``"daily_<id>"``, #433) — kept so the composed
+    answer can CITE it and the chat can render a link back to the source. ``kind``
+    (``"qa"`` / ``"document"`` / ``"daily"``) selects which link the UI builds.
+    ``text`` is the (clipped) evidence the model may draw from.
     """
 
     source_id: str
@@ -60,6 +61,8 @@ class FragmentSource(Protocol):
     def questions_by_ids(self, ids: Sequence[str]) -> dict[str, QuestionDTO]: ...
 
     def documents_by_ids(self, ids: Sequence[str]) -> dict[str, DocumentDTO]: ...
+
+    def daily_reports_by_ids(self, ids: Sequence[int]) -> dict[int, DailyReportDTO]: ...
 
 
 def _clip(text: str, max_chars: int) -> str:
@@ -142,13 +145,16 @@ def collect_cited_evidence(
 
     qa_ids = [hit["qa_id"] for hit in retrieval["past_answers"]]
     doc_ids = [hit["doc_id"] for hit in retrieval["documents"]]
-    if not qa_ids and not doc_ids:
+    # #433: daily-report hits are present but empty unless daily_knowledge_enabled.
+    daily_ids = [hit["daily_id"] for hit in retrieval.get("daily_reports", [])]
+    if not qa_ids and not doc_ids and not daily_ids:
         return []
 
     answers = source.answers_by_ids(qa_ids) if qa_ids else {}
     question_ids = [a.question_id for a in answers.values() if a.question_id]
     questions = source.questions_by_ids(question_ids) if question_ids else {}
     documents = source.documents_by_ids(doc_ids) if doc_ids else {}
+    dailies = source.daily_reports_by_ids(daily_ids) if daily_ids else {}
 
     answer_items: list[CitedEvidence] = []
     for qa_id in qa_ids:
@@ -168,9 +174,25 @@ def collect_cited_evidence(
         if text:
             document_items.append(CitedEvidence(source_id=doc_id, kind="document", text=text))
 
+    # #433: daily reports as a knowledge source. ``source_id`` is prefixed
+    # ("daily_<id>") so it never collides with a qa/doc id in the citation
+    # whitelist, and the frontend can route the "daily" kind distinctly.
+    daily_items: list[CitedEvidence] = []
+    for daily_id in daily_ids:
+        report = dailies.get(daily_id)
+        if report is None:
+            continue
+        text = _daily_evidence_text(report, max_chars)
+        if text:
+            daily_items.append(
+                CitedEvidence(source_id=f"daily_{daily_id}", kind="daily", text=text)
+            )
+
     interleaved: list[CitedEvidence] = []
-    for answer_item, document_item in zip_longest(answer_items, document_items):
-        for item in (answer_item, document_item):
+    for answer_item, document_item, daily_item in zip_longest(
+        answer_items, document_items, daily_items
+    ):
+        for item in (answer_item, document_item, daily_item):
             if item is not None:
                 interleaved.append(item)
     return interleaved[:max_fragments]
@@ -198,6 +220,15 @@ def _document_evidence_text(document: DocumentDTO, max_chars: int) -> str:
     title = (document.title or "").strip()
     body = (document.body or "").strip()
     text = f"{title}: {body}" if title and body else title or body
+    return _clip(text, max_chars) if text else ""
+
+
+def _daily_evidence_text(report: DailyReportDTO, max_chars: int) -> str:
+    """Unlabelled daily-report evidence text (issue + content), clipped (#433)."""
+
+    issue = (report.issue or "").strip()
+    content = (report.content or "").strip()
+    text = f"{issue} / {content}" if issue and content else issue or content
     return _clip(text, max_chars) if text else ""
 
 
