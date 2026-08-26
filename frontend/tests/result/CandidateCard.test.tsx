@@ -45,3 +45,23 @@ describe("CandidateCard — comparison info on non-top cards (#204)", () => {
     expect(screen.getByText(fullText("距離の近さ：全社から選定"))).toBeInTheDocument();
   });
 });
+
+describe("CandidateCard — staggered entrance reveal (#475 Screen 01)", () => {
+  it("fades in with the reveal animation, disabled under reduced motion", () => {
+    render(<CandidateCard candidate={candidate()} rank={1} expanded={true} selected={true} />);
+    const card = screen.getByRole("article");
+    // Content stays in the DOM (reveal is opacity/transform only), so this never
+    // hides the card from tests or screen readers.
+    expect(card).toHaveClass("animate-reveal");
+    expect(card).toHaveClass("motion-reduce:animate-none");
+  });
+
+  it("staggers later ranks so cards arrive in sequence", () => {
+    const { rerender } = render(
+      <CandidateCard candidate={candidate()} rank={1} expanded={true} selected={false} />,
+    );
+    expect(screen.getByRole("article")).toHaveStyle({ animationDelay: "0ms" });
+    rerender(<CandidateCard candidate={candidate()} rank={3} expanded={false} selected={false} />);
+    expect(screen.getByRole("article")).toHaveStyle({ animationDelay: "140ms" });
+  });
+});
