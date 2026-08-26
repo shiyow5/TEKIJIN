@@ -147,6 +147,21 @@ describe("useEventStream", () => {
     expect(source().closed).toBe(true);
   });
 
+  it("records a reference (additive cited answer) without terminating (#413)", () => {
+    const { view, source } = setup();
+    act(() =>
+      source().emit("reference", {
+        answer: "過去の類似回答です。",
+        citations: [{ source_id: "qa_1", kind: "qa" }],
+      }),
+    );
+
+    expect(view.result.current.reference?.answer).toBe("過去の類似回答です。");
+    expect(view.result.current.reference?.citations).toHaveLength(1);
+    expect(view.result.current.terminal).toBe(false);
+    expect(source().closed).toBe(false);
+  });
+
   it("records a followup without terminating", () => {
     const { view, source } = setup();
     act(() => source().emit("followup", { question: "製品名は？", missing: ["product"] }));

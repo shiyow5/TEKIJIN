@@ -22,6 +22,7 @@ import type {
   FollowupData,
   MessageData,
   RecommendData,
+  ReferenceData,
   RouteData,
   SseEventName,
   UnderstoodData,
@@ -35,6 +36,7 @@ export type StreamEvent =
   | { event: "understood"; data: UnderstoodData }
   | { event: "followup"; data: FollowupData }
   | { event: "route"; data: RouteData }
+  | { event: "reference"; data: ReferenceData }
   | { event: "recommend"; data: RecommendData }
   | { event: "draft"; data: DraftData }
   | { event: "done"; data: DoneData }
@@ -46,6 +48,8 @@ export interface EventStreamState {
   events: StreamEvent[];
   understood?: UnderstoodData;
   route?: RouteData;
+  /** #413: additive cited answer shown alongside the person hand-off. */
+  reference?: ReferenceData;
   recommend?: RecommendData;
   draft?: DraftData;
   followup?: FollowupData;
@@ -72,6 +76,7 @@ const EVENT_NAMES: readonly SseEventName[] = [
   "understood",
   "followup",
   "route",
+  "reference",
   "recommend",
   "draft",
   "done",
@@ -138,6 +143,10 @@ function reduceEvent(prev: EventStreamState, name: SseEventName, data: unknown):
       return { ...prev, events, understood: data as UnderstoodData };
     case "route":
       return { ...prev, events, route: data as RouteData };
+    case "reference":
+      // #413: additive cited answer on the person route. Non-terminal — it is
+      // shown alongside the recommendation, never in place of the hand-off.
+      return { ...prev, events, reference: data as ReferenceData };
     case "recommend":
       // A fresh recommendation (including a reroute after a decline) invalidates
       // the previous candidate's draft; the following draft event resets it.
