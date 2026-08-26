@@ -23,7 +23,13 @@ name: tekijin-local
 
 services:
   db:
-    image: pgvector/pgvector:pg16
+    # Pinned, not `:pg16` (#101). That tag floats to whatever pgvector release is
+    # current for PG16, so an upstream bump would change the database under CI and
+    # local development with no commit here to blame it on. It also has to stay
+    # >= 0.7 for `halfvec`, which #101 needs before an ANN index can be built at
+    # 2048 dimensions. `backend/tests/test_pgvector_image_pin.py` holds both rules,
+    # and requires this tag and the one in `.github/workflows/test.yml` to match.
+    image: pgvector/pgvector:0.8.6-pg16
     environment:
       POSTGRES_USER: tekijin
       POSTGRES_PASSWORD: tekijin
