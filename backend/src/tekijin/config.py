@@ -145,7 +145,14 @@ class Settings(BaseSettings):
     #   confirm with the product owner that past answers are org-wide readable.
     # The compose call is best-effort: a failure degrades to a plain hand-off (the
     # additive_answer node swallows it), so person recall never regresses.
-    additive_self_answer_enabled: bool = False
+    #
+    # Enabled by default (#413 → task3): the DGX full-graph floor sweep confirmed
+    # floor 0.20 is the sweet spot — person route recall stays 1.000 at every floor
+    # (additive is routing-safe by construction), and 0.20 fires on 17/76 person rows
+    # at precision 0.740, while 0.15 collapses precision to 0.583 for one extra firing
+    # and 0.30 fires on only 6/76. The product owner confirmed past answers are
+    # org-wide readable (already surfaced by the knowledge library, #293).
+    additive_self_answer_enabled: bool = True
     additive_self_answer_floor: float = 0.20
 
     # #327: corpus-count routing for prior_answer. Nemotron's answer cosine cannot
@@ -174,7 +181,16 @@ class Settings(BaseSettings):
     # (research_knowledge_source.py): person-route self-answer grounded rate
     # 0.265->0.347 (+0.082, daily cited on 6%) — chat was noise and even hurt, so
     # ONLY daily is wired. Requires the daily embedding column filled (make embed).
-    daily_knowledge_enabled: bool = False
+    #
+    # Enabled by default (#433 → task3): the DGX full-graph run (--additive
+    # --daily-knowledge, floor 0.20) held person route recall at 1.000 and raised the
+    # self-answer grounded rate 0.217->0.261 (+0.044) with source recall +0.010. Daily
+    # is routing-safe (C5 reads retrieval *_confidence, not the daily channel). The
+    # daily embedding column starts NULL after migrate; deploy.sh's embed_missing step
+    # (best-effort, only-missing) fills it on the next deploy, so the flag is inert
+    # (no daily hits, never an error) only until that first post-enable deploy runs —
+    # if that embed is skipped/fails, the channel simply stays empty until it succeeds.
+    daily_knowledge_enabled: bool = True
 
     # #405: add a question↔past-answer similarity (qsim) term to the C6 score. The
     # scorer's topic_fit sees only the topic TAG and saturates (ADR-0006), so it
