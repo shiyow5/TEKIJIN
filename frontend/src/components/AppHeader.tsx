@@ -4,16 +4,21 @@
  * Application header: product identity, global navigation, the current user, and
  * (admin only) the demo user switcher.
  *
- * Navigation (#122) makes every main screen reachable in one click. The dashboard
- * link is ADMIN-ONLY (#241) — it aggregates everyone's activity. The brand links
- * home; the active link is marked with ``aria-current``.
+ * Navigation (#122, unified to a single hamburger menu at every width by #391 —
+ * the old desktop tab row and its own separate logout button are gone) makes
+ * every main screen reachable in one click. The dashboard link is ADMIN-ONLY
+ * (#241) — it aggregates everyone's activity. The brand links home; the active
+ * link is marked with ``aria-current``. "質問する" is deliberately NOT in the
+ * nav — it is folded into the top page's own question bar instead (#391).
  *
- * Auth (#241): a regular user sees their own name and a logout button. The ADMIN
- * additionally gets the demo switcher — choosing the acting employee from the
- * directory (``GET /employees`` via {@link useCurrentUser}); the asker screen's
- * ``asker_id`` and the inbox follow the selection. Switching also navigates home
- * (#210): becoming a different person mid-flow makes the previous screen
- * meaningless, so we start over at the hub.
+ * Auth (#241): the menu's first line is the acting principal's own name
+ * (display-only — #391 explicitly keeps this un-clickable), followed by the
+ * nav links, then the one and only logout button. The ADMIN additionally gets
+ * the demo switcher OUTSIDE the menu, in the header row — choosing the acting
+ * employee from the directory (``GET /employees`` via {@link useCurrentUser});
+ * the asker screen's ``asker_id`` and the inbox follow the selection.
+ * Switching also navigates home (#210): becoming a different person mid-flow
+ * makes the previous screen meaningless, so we start over at the hub.
  */
 
 import { useAuth } from "@/components/AuthProvider";
@@ -22,16 +27,120 @@ import { NotificationBell } from "@/components/NotificationBell";
 import type { EmployeeSummary } from "@/lib/api-types";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { type ComponentType, useEffect, useRef, useState } from "react";
+
+function IconHome({ className }: { className: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      aria-hidden="true"
+      className={className}
+    >
+      <path d="M4 11l8-7 8 7M6 10v9h5v-5h2v5h5v-9" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function IconHistory({ className }: { className: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      aria-hidden="true"
+      className={className}
+    >
+      <path d="M7 3h7l4 4v14H7z" strokeLinejoin="round" />
+      <path d="M14 3v4h4" strokeLinejoin="round" />
+      <path d="M9 12h6M9 16h6" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function IconInboxNav({ className }: { className: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      aria-hidden="true"
+      className={className}
+    >
+      <path d="M4 13l2.5-7h11L20 13v5H4v-5z" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M4 13h4l1.5 2.5h5L16 13h4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function IconChatNav({ className }: { className: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      aria-hidden="true"
+      className={className}
+    >
+      <path d="M4 5h16v11H8l-4 4V5z" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M8 9h8M8 12h5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function IconKnowledge({ className }: { className: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      aria-hidden="true"
+      className={className}
+    >
+      <path
+        d="M12 6c-1.5-1.3-3.5-2-6-2v14c2.5 0 4.5.7 6 2 1.5-1.3 3.5-2 6-2V4c-2.5 0-4.5.7-6 2z"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function IconDashboardNav({ className }: { className: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      aria-hidden="true"
+      className={className}
+    >
+      <path d="M4 20V4M4 20h16" strokeLinecap="round" />
+      <path d="M8 20v-6M12 20V8M16 20v-9" strokeLinecap="round" />
+    </svg>
+  );
+}
 
 const NAV = [
-  { href: "/questions", label: "質問する", adminOnly: false },
-  { href: "/history", label: "質問履歴", adminOnly: false },
-  { href: "/inbox", label: "受信箱", adminOnly: false },
+  // Returns to the hub — placed first so it reads as "back to the top" right
+  // below the acting principal's name in the drawer.
+  { href: "/", label: "トップ", icon: IconHome, adminOnly: false },
+  { href: "/history", label: "質問履歴", icon: IconHistory, adminOnly: false },
+  { href: "/inbox", label: "受信箱", icon: IconInboxNav, adminOnly: false },
   // Chat is per-person (only your own accepted threads), so unlike the dashboard
   // it is NOT admin-only (#224).
-  { href: "/chat", label: "チャット", adminOnly: false },
-  { href: "/dashboard", label: "ダッシュボード", adminOnly: true },
+  { href: "/chat", label: "チャット", icon: IconChatNav, adminOnly: false },
+  // Company-wide (not scoped to the acting user), but still NOT admin-only:
+  // the point is every user can discover someone else's past answer (#293, #301).
+  { href: "/knowledge", label: "ナレッジ", icon: IconKnowledge, adminOnly: false },
+  { href: "/dashboard", label: "ダッシュボード", icon: IconDashboardNav, adminOnly: true },
 ] as const;
 
 function isActive(pathname: string, href: string): boolean {
@@ -74,15 +183,21 @@ function NavLinks({
   onNavigate,
   className,
 }: {
-  items: readonly { href: string; label: string }[];
+  items: readonly { href: string; label: string; icon: ComponentType<{ className: string }> }[];
   pathname: string;
   onNavigate?: () => void;
   className: string;
 }) {
   return (
-    <ul className={className}>
+    // `divide-y` + a border framing the whole list turns the items into a
+    // clearly separated block (each entry its own row), rather than a loose
+    // stack of pills floating in the drawer's own padding. Every row keeps a
+    // 4px left border — transparent unless active — so the accent bar doesn't
+    // shift the icon/label horizontally when a row becomes current.
+    <ul className={`divide-y divide-outline-variant border-outline-variant border-y ${className}`}>
       {items.map((item) => {
         const active = isActive(pathname, item.href);
+        const Icon = item.icon;
         return (
           <li key={item.href}>
             <Link
@@ -91,10 +206,11 @@ function NavLinks({
               onClick={onNavigate}
               className={
                 active
-                  ? "block rounded-md bg-secondary-container px-sm py-xs font-bold text-on-secondary-container text-sm"
-                  : "block rounded-md px-sm py-xs text-on-surface-variant text-sm transition-colors hover:bg-surface-container-low"
+                  ? "flex items-center gap-sm border-l-4 border-primary bg-secondary-container px-md py-sm font-bold text-base text-on-secondary-container"
+                  : "flex items-center gap-sm border-l-4 border-transparent px-md py-sm text-base text-on-surface-variant transition-colors hover:bg-surface-container-low"
               }
             >
+              <Icon className="h-5 w-5 shrink-0" />
               {item.label}
             </Link>
           </li>
@@ -104,11 +220,10 @@ function NavLinks({
   );
 }
 
-// The admin-only demo switcher (badge + label + select + retry button),
-// factored out so it can be rendered inline in the header row at every
-// breakpoint while logout moves into the hamburger menu on narrow screens
-// (#288) — the row itself needs `flex-wrap` (already on its parent) to absorb
-// this cluster gracefully instead of overflowing.
+// The admin-only demo switcher (badge + label + select + retry button) stays
+// in the header row at every width — the menu (#391) holds only navigation +
+// identity + logout, not this demo-only control (#293/#301 review-adjacent:
+// keep each surface's own concern where it belongs).
 function UserSwitcher({
   loading,
   error,
@@ -183,11 +298,26 @@ export function AppHeader() {
 
   const nav = NAV.filter((item) => !item.adminOnly || principal?.is_admin);
   const [menuOpen, setMenuOpen] = useState(false);
+  // Drives the slide-in transform separately from `menuOpen`: mounting the
+  // panel already translated off-screen and flipping this on the next frame
+  // is what makes the entrance animate instead of popping in at its resting
+  // position. Closing un-mounts immediately (see `menuOpen ? ... : null`
+  // below) — the drawer is not kept around for an exit animation.
+  const [menuVisible, setMenuVisible] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
 
-  // Route changes (including the switcher's "go home") always close the mobile
-  // menu — staying open after navigating away would sit there stale.
+  useEffect(() => {
+    if (!menuOpen) {
+      setMenuVisible(false);
+      return;
+    }
+    const frame = requestAnimationFrame(() => setMenuVisible(true));
+    return () => cancelAnimationFrame(frame);
+  }, [menuOpen]);
+
+  // Route changes (including the switcher's "go home") always close the menu —
+  // staying open after navigating away would sit there stale.
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-run only when pathname changes.
   useEffect(() => {
     setMenuOpen(false);
@@ -218,99 +348,115 @@ export function AppHeader() {
   }, [menuOpen]);
 
   return (
-    // The white background spans the full viewport; the CONTENT is centred at
-    // `max-w-content` by the inner wrapper. Constraining the <header> itself let
-    // the body's tinted background show through beside it above 1440px (#250).
-    <header className="border-outline-variant border-b bg-surface-container-lowest px-margin py-sm">
-      <div className="mx-auto flex w-full max-w-content flex-wrap items-center justify-between gap-sm">
-        <div className="flex flex-wrap items-center gap-md">
+    <>
+      {/* The white background spans the full viewport; the CONTENT is centred at
+        `max-w-content` by the inner wrapper. Constraining the <header> itself let
+        the body's tinted background show through beside it above 1440px (#250). */}
+      <header className="border-outline-variant border-b bg-surface-container-lowest px-margin py-sm">
+        <div className="mx-auto flex w-full max-w-content flex-wrap items-center justify-between gap-sm">
           <Link href="/" aria-label="TEKIJIN ホーム">
             {/* Transparent-background logo from Next's /public (aspect ≈ 2.8:1).
                 alt carries the brand name so the link's accessible name stays
                 "TEKIJIN". */}
             <img src="/tekijin-logo.png" alt="TEKIJIN" className="h-10 w-auto" />
           </Link>
-          <nav aria-label="メインナビゲーション" className="hidden md:block">
-            <NavLinks items={nav} pathname={pathname} className="flex items-center gap-xs" />
-          </nav>
-        </div>
 
-        <div className="flex flex-wrap items-center gap-sm">
-          {/* Decline notifications (#225). Logged out there is no acting user to
-            poll for, so the bell stays out of the tree entirely. */}
-          {principal ? <NotificationBell /> : null}
-          {canSwitch ? (
-            <UserSwitcher
-              loading={loading}
-              error={error}
-              reload={reload}
-              ready={ready}
-              currentUserId={currentUserId}
-              employees={employees}
-              onChange={(id) => {
-                setCurrentUserId(id);
-                router.push("/");
-              }}
-              className="flex flex-wrap items-center gap-xs text-on-surface-variant text-xs"
-            />
-          ) : (
-            <span className="text-on-surface-variant text-sm">
-              {principal?.name ?? ""}
-              {principal?.is_admin ? "（管理者）" : ""}
-            </span>
-          )}
-          {/* Logout stays reachable inline on desktop; on narrow screens it
-            moves into the hamburger menu so the row stays bell + switcher +
-            menu toggle (#288). */}
-          {principal ? (
+          <div className="flex flex-wrap items-center gap-sm">
+            {/* Decline notifications (#225). Logged out there is no acting user to
+              poll for, so the bell stays out of the tree entirely. */}
+            {principal ? <NotificationBell /> : null}
+            {canSwitch ? (
+              <UserSwitcher
+                loading={loading}
+                error={error}
+                reload={reload}
+                ready={ready}
+                currentUserId={currentUserId}
+                employees={employees}
+                onChange={(id) => {
+                  setCurrentUserId(id);
+                  router.push("/");
+                }}
+                className="flex flex-wrap items-center gap-xs text-on-surface-variant text-xs"
+              />
+            ) : null}
+
             <button
+              ref={menuButtonRef}
               type="button"
-              onClick={handleLogout}
-              className="hidden rounded-md border border-outline px-sm py-xs text-on-surface-variant text-sm transition-colors hover:bg-surface-container-low md:block"
+              aria-expanded={menuOpen}
+              aria-controls="nav-menu"
+              aria-label={menuOpen ? "メニューを閉じる" : "メニューを開く"}
+              onClick={() => setMenuOpen((open) => !open)}
+              className="flex h-9 w-9 items-center justify-center rounded-md text-on-surface-variant transition-colors hover:bg-surface-container-low"
             >
-              ログアウト
+              {menuOpen ? <IconClose /> : <IconMenu />}
             </button>
-          ) : null}
-
-          <button
-            ref={menuButtonRef}
-            type="button"
-            aria-expanded={menuOpen}
-            aria-controls="mobile-nav-menu"
-            aria-label={menuOpen ? "メニューを閉じる" : "メニューを開く"}
-            onClick={() => setMenuOpen((open) => !open)}
-            className="flex h-9 w-9 items-center justify-center rounded-md text-on-surface-variant transition-colors hover:bg-surface-container-low md:hidden"
-          >
-            {menuOpen ? <IconClose /> : <IconMenu />}
-          </button>
+          </div>
         </div>
-      </div>
+      </header>
 
       {menuOpen ? (
-        <div
-          id="mobile-nav-menu"
-          ref={menuRef}
-          className="mx-auto mt-sm w-full max-w-content border-outline-variant border-t pt-sm md:hidden"
-        >
-          <NavLinks
-            items={nav}
-            pathname={pathname}
-            onNavigate={() => setMenuOpen(false)}
-            className="flex flex-col gap-xs"
+        <>
+          {/* biome-ignore lint/a11y/useKeyWithClickEvents: mouse-only dismissal;
+          the keyboard path is the document-level Escape listener registered
+          above, not a key event on this element (matches ModalDialog's overlay). */}
+          <div
+            aria-hidden="true"
+            onClick={() => setMenuOpen(false)}
+            className="fixed inset-0 z-50 bg-on-surface/40"
           />
-          {principal ? (
-            <div className="mt-sm border-outline-variant border-t pt-sm">
-              <button
-                type="button"
-                onClick={handleLogout}
-                className="rounded-md border border-outline px-sm py-xs text-on-surface-variant text-sm transition-colors hover:bg-surface-container-low"
-              >
-                ログアウト
-              </button>
-            </div>
-          ) : null}
-        </div>
+          <div
+            id="nav-menu"
+            ref={menuRef}
+            className={`fixed inset-y-0 right-0 z-50 flex w-full max-w-xs flex-col gap-md overflow-y-auto border-outline-variant border-l bg-surface-container-lowest p-lg shadow-md transition-transform duration-200 ${
+              menuVisible ? "translate-x-0" : "translate-x-full"
+            }`}
+          >
+            {/* The drawer sits above the header (it can be taller than the
+                header on narrow admin-switcher widths where the header row
+                wraps), so it needs its own close control — the header's
+                toggle button underneath is not reachable while this is open. */}
+            <button
+              type="button"
+              aria-label="閉じる"
+              onClick={() => setMenuOpen(false)}
+              className="ml-auto flex h-9 w-9 items-center justify-center rounded-md text-on-surface-variant transition-colors hover:bg-surface-container-low"
+            >
+              <IconClose />
+            </button>
+            {/* Display-only (#391 scope: no profile-edit link) — just names who is
+                acting, ahead of the nav links. */}
+            {principal ? (
+              <p className="px-md py-sm font-bold text-lg text-on-surface-variant">
+                {principal.name}
+                {principal.is_admin ? "（管理者）" : ""}
+              </p>
+            ) : null}
+            <nav aria-label="メインナビゲーション">
+              <NavLinks
+                items={nav}
+                pathname={pathname}
+                onNavigate={() => setMenuOpen(false)}
+                className="flex flex-col"
+              />
+            </nav>
+            {principal ? (
+              // `mt-auto` pins logout to the bottom of the full-height drawer,
+              // rather than immediately trailing a short nav list.
+              <div className="mt-auto border-outline-variant border-t pt-md">
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  className="rounded-md border border-outline px-md py-sm text-base text-on-surface-variant transition-colors hover:bg-surface-container-low"
+                >
+                  ログアウト
+                </button>
+              </div>
+            ) : null}
+          </div>
+        </>
       ) : null}
-    </header>
+    </>
   );
 }

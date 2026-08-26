@@ -28,22 +28,34 @@ async function mockChrome(page: Page): Promise<void> {
   await page.route(`${API_BASE}/dashboard`, (route) => fulfillJson(route, DASHBOARD));
 }
 
+// The nav is unified into a single hamburger menu at every width (#391), so it
+// only exists in the DOM once opened.
+async function openNav(page: Page) {
+  await page.getByRole("button", { name: "メニューを開く" }).click();
+  return page.getByRole("navigation", { name: "メインナビゲーション" });
+}
+
 test.describe("navigation", () => {
   test("header nav moves between screens and marks the current one", async ({ page }) => {
     await mockChrome(page);
     await page.goto("/questions");
 
-    const nav = page.getByRole("navigation", { name: "メインナビゲーション" });
+    let nav = await openNav(page);
     await nav.getByRole("link", { name: "受信箱" }).click();
     await page.waitForURL(/\/inbox$/);
+    nav = await openNav(page);
     await expect(nav.getByRole("link", { name: "受信箱" })).toHaveAttribute("aria-current", "page");
 
     await nav.getByRole("link", { name: "ダッシュボード" }).click();
     await page.waitForURL(/\/dashboard$/);
+    nav = await openNav(page);
     await expect(nav.getByRole("link", { name: "ダッシュボード" })).toHaveAttribute(
       "aria-current",
       "page",
     );
+    // The drawer's backdrop covers the whole viewport, so it must be closed
+    // before the brand link underneath is reachable again.
+    await page.keyboard.press("Escape");
 
     // The brand links home.
     await page.getByRole("link", { name: /TEKIJIN/ }).click();
@@ -60,10 +72,12 @@ test.describe("navigation", () => {
     await page.waitForURL(/\/inbox$/);
     await expect(page.getByRole("heading", { name: "受信箱" })).toBeVisible();
 
-    await page
-      .getByRole("navigation", { name: "メインナビゲーション" })
-      .getByRole("link", { name: "質問する" })
-      .click();
+    await page.getByRole("link", { name: /TEKIJIN/ }).click();
+    await page.waitForURL(/\/$/);
+    // 質問する was removed from the nav (#391) — it lives only on the hero CTA and
+    // hub card now (both link to /questions, hence .first() to sidestep the
+    // strict-mode ambiguity between them).
+    await page.getByRole("link", { name: "質問する" }).first().click();
     await page.waitForURL(/\/questions$/);
     await expect(page.getByRole("heading", { name: "何を知りたいですか？" })).toBeVisible();
   });
@@ -113,30 +127,29 @@ test.describe("navigation", () => {
     // being capped there, letting the body's tinted background show beside it.
     await page.setViewportSize({ width: 1920, height: 900 });
     await page.goto("/questions");
-    await expect(page.getByRole("navigation", { name: "メインナビゲーション" })).toBeVisible();
+    const nav = await openNav(page);
+    await expect(nav).toBeVisible();
 
-    const { headerWidth, viewportWidth, navRight } = await page.evaluate(() => {
+    const { headerWidth, viewportWidth } = await page.evaluate(() => {
       const header = document.querySelector("header") as HTMLElement;
-      const nav = document.querySelector('nav[aria-label="メインナビゲーション"]') as HTMLElement;
       return {
         headerWidth: header.getBoundingClientRect().width,
         viewportWidth: document.documentElement.clientWidth,
-        navRight: nav.getBoundingClientRect().right,
       };
     });
 
     expect(headerWidth).toBe(viewportWidth);
-    // ...while the CONTENT stays centred: the nav must not run past the
-    // centred 1440px column, or we have merely widened everything.
-    expect(navRight).toBeLessThanOrEqual((viewportWidth - 1440) / 2 + 1440 + 1);
+    // The nav itself no longer needs to stay inside the centred content column:
+    // it now lives in a drawer docked to the screen's right edge, by design
+    // (#391's slide-in redesign), not the header's own centred row.
   });
 
-  test("mobile width collapses the nav behind a hamburger (#254)", async ({ page }) => {
+  test("mobile width reaches the nav through the hamburger (#254)", async ({ page }) => {
     await mockChrome(page);
     await page.setViewportSize({ width: 375, height: 780 });
     await page.goto("/questions");
 
-    // The desktop nav is display:none below `md`, so its links are not reachable.
+    // The nav only exists once the menu is opened (#391: no separate desktop tabs).
     const nav = page.getByRole("navigation", { name: "メインナビゲーション" });
     await expect(nav).toBeHidden();
     await expect(page.getByRole("link", { name: "ホームへ戻る" })).toBeVisible();
@@ -145,12 +158,12 @@ test.describe("navigation", () => {
     await expect(toggle).toBeVisible();
     await toggle.click();
 
-    const menu = page.locator("#mobile-nav-menu");
+    const menu = page.locator("#nav-menu");
     await expect(menu.getByRole("link", { name: "受信箱" })).toBeVisible();
     await menu.getByRole("link", { name: "受信箱" }).click();
     await page.waitForURL(/\/inbox$/);
     // Navigating closes it.
-    await expect(page.locator("#mobile-nav-menu")).toHaveCount(0);
+    await expect(page.locator("#nav-menu")).toHaveCount(0);
 
     // Nothing overflows the viewport at phone width (the崩れ #254 reports).
     const overflow = await page.evaluate(
@@ -159,17 +172,22 @@ test.describe("navigation", () => {
     expect(overflow).toBeLessThanOrEqual(0);
   });
 
-  test("desktop width keeps the inline nav and no hamburger (#254)", async ({ page }) => {
+  test("desktop width also uses the single hamburger menu (#391)", async ({ page }) => {
     await mockChrome(page);
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto("/questions");
+
+    // No separate always-on desktop tab row (#391) — the nav only exists once opened.
+    await expect(page.getByRole("navigation", { name: "メインナビゲーション" })).toBeHidden();
+    const toggle = page.getByRole("button", { name: /メニューを(開く|閉じる)/ });
+    await expect(toggle).toBeVisible();
+    await toggle.click();
 
     await expect(
       page.getByRole("navigation", { name: "メインナビゲーション" }).getByRole("link", {
         name: "受信箱",
       }),
     ).toBeVisible();
-    await expect(page.getByRole("button", { name: /メニューを(開く|閉じる)/ })).toBeHidden();
   });
 
   // Where the bell actually lands depends on real header content width, not a
@@ -208,8 +226,11 @@ test.describe("navigation", () => {
     // #316 AI review: `md:right-0` alone still breaks once real content, not
     // just narrow viewports, pushes the bell to the wrapped row's left edge).
     // Registered after `mockChrome` so it overrides its default EMPLOYEES.
+    // The repeat count was bumped for #391: removing the standalone desktop
+    // logout button (now menu-only) narrowed the row, so the shorter name used
+    // before no longer forced a wrap at this width.
     await mockEmployees(page, [
-      { id: "E001", name: "山田 太郎太郎太郎太郎太郎太郎", dept: "カスタマーサポート推進部" },
+      { id: "E001", name: `山田 ${"太郎".repeat(14)}`, dept: "カスタマーサポート推進部" },
     ]);
     await page.setViewportSize({ width: 1024, height: 800 });
     await page.goto("/questions");
