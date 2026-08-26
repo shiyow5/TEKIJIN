@@ -127,6 +127,9 @@ restart_backend() {
   sleep 2
   (
     cd "$DEPLOY_DIR"
+    # TZ is pinned to UTC inside start_backend.sh (#456), so every launch path —
+    # this one, a bare nohup, and the systemd unit — agrees without each caller
+    # having to remember.
     setsid env -u RUNNER_TRACKING_ID \
       TEKIJIN_PORT="$PORT" TEKIJIN_VENV_PY="$VENV_PY" CUDA_VISIBLE_DEVICES="" \
       bash -c 'exec deploy/start_backend.sh' >"${HOME}/backend.log" 2>&1 </dev/null &
