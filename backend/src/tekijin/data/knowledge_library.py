@@ -41,7 +41,6 @@ def _qa_items(
     department: str | None,
     topic: str | None,
     since: dt.date | None,
-    until: dt.date | None,
 ) -> list[dict[str, Any]]:
     """Past-Q&A knowledge items (``kind="qa"``), newest answer first."""
 
@@ -70,8 +69,6 @@ def _qa_items(
         stmt = stmt.where(Question.topics.any(topic))  # type: ignore[arg-type]
     if since:
         stmt = stmt.where(Answer.created_at >= since)
-    if until:
-        stmt = stmt.where(Answer.created_at <= until)
 
     items: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -107,7 +104,7 @@ def _qa_items(
 
 
 def _document_items(
-    session: Session, *, q: str | None, since: dt.date | None, until: dt.date | None
+    session: Session, *, q: str | None, since: dt.date | None
 ) -> list[dict[str, Any]]:
     """Internal-document knowledge items (``kind="document"``), newest first.
 
@@ -123,8 +120,6 @@ def _document_items(
         stmt = stmt.where(Document.title.ilike(f"%{q}%") | Document.body.ilike(f"%{q}%"))
     if since:
         stmt = stmt.where(Document.updated_at >= since)
-    if until:
-        stmt = stmt.where(Document.updated_at <= until)
 
     return [
         {
@@ -150,7 +145,6 @@ def list_knowledge(
     department: str | None = None,
     topic: str | None = None,
     since: dt.date | None = None,
-    until: dt.date | None = None,
     offset: int = 0,
     limit: int = 50,
 ) -> tuple[list[dict[str, Any]], int, dict[str, Any]]:
@@ -160,8 +154,13 @@ def list_knowledge(
     ``q`` is a case-insensitive substring match (question body for ``"qa"``,
     title/body for ``"document"``); ``topic``/``department`` are QA-specific
     (documents carry neither, so either filter excludes them entirely);
-    ``since``/``until`` bound each item's own timestamp (the ANSWER's for
-    ``"qa"``, the document's ``updated_at`` for ``"document"``).
+    ``since`` bounds each item's own timestamp (the ANSWER's for ``"qa"``, the
+    document's ``updated_at`` for ``"document"``) and is the ONLY period bound:
+    the matching ``until`` was removed in #394 — no screen ever sent it, nothing
+    tested it, and it compared a TIMESTAMP column against a bare date, so
+    ``until=<day>`` dropped everything answered after that day's 00:00.
+    Re-adding an end bound means a half-open ``< until + 1 day`` (or a timestamp)
+    plus the UI that sends it.
 
     Returns ``(items, total_matching, summary)``: ``total_matching`` is the
     count of items matching the filters above, BEFORE the ``offset``/``limit``
@@ -181,10 +180,8 @@ def list_knowledge(
         "self_resolution_rate": _self_resolution_rate(session),
     }
 
-    qa_items = _qa_items(session, q=q, department=department, topic=topic, since=since, until=until)
-    doc_items = (
-        [] if (department or topic) else _document_items(session, q=q, since=since, until=until)
-    )
+    qa_items = _qa_items(session, q=q, department=department, topic=topic, since=since)
+    doc_items = [] if (department or topic) else _document_items(session, q=q, since=since)
     matching = _interleave(qa_items, doc_items)
     return matching[offset : offset + limit], len(matching), summary
 

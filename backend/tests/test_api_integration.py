@@ -13,12 +13,14 @@ import hmac
 import json
 import threading
 import time
+from inspect import signature
 
 import pytest
 from fastapi.testclient import TestClient
 from langgraph.checkpoint.memory import MemorySaver
 
 from tekijin.agent.stubs import KeywordIntentModel, RuleSufficiencyModel, TemplateDraftModel
+from tekijin.api.routes import knowledge as knowledge_route
 from tekijin.api.service import (
     SESSION_TTL_SECONDS,
     AgentService,
@@ -5482,6 +5484,55 @@ def test_knowledge_filters_by_department(seed_counts, engine, fake_embedder) -> 
     assert all(i["responder_department"] == dept for i in items)
     # department is QA-specific: documents (which carry no department) are excluded.
     assert all(i["kind"] == "qa" for i in items)
+
+
+def test_knowledge_since_includes_items_from_the_start_day_itself(
+    seed_counts, engine, fake_embedder
+) -> None:
+    """`since` is the screen's only period filter and had no test at all (#394).
+
+    The boundary is the whole point: `since` is bound against a TIMESTAMP column,
+    so a bare date becomes that day's 00:00 — inclusive for a start bound. An
+    item answered at 05:24 on the start day must still be listed.
+    """
+    client = _client(engine, fake_embedder)
+    baseline = client.get("/knowledge", params={"limit": 200}).json()["items"]
+    newest = max(baseline, key=lambda i: i["resolved_at"])
+    day = newest["resolved_at"][:10]
+
+    resp = client.get("/knowledge", params={"since": day, "limit": 200})
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    assert any(i["source_id"] == newest["source_id"] for i in items)
+    assert all(i["resolved_at"][:10] >= day for i in items)
+    assert len(items) < len(baseline)  # the filter actually narrows the set
+
+
+def test_knowledge_has_no_end_date_filter(seed_counts, engine, fake_embedder) -> None:
+    """`until` was removed (#394), and re-adding it needs UI + a boundary test.
+
+    It existed on the endpoint, `list_knowledge` and `api-client`, but no screen
+    ever sent it (KnowledgeScreen exposes 「この日以降」 only, by request) and
+    nothing tested it — and it was WRONG: bound against a TIMESTAMP column, a bare
+    date means that day's 00:00, so `until=<day>` silently dropped every item from
+    the end day (measured: an answer at 2026-08-21 05:24 was excluded by
+    `until=2026-08-21`). An inclusive-sounding 「この日まで」 that loses the last
+    day is worse than no filter.
+
+    This pins the removal at the HTTP boundary: an unknown query param is ignored
+    by FastAPI, so `until` must not narrow anything.
+    """
+    client = _client(engine, fake_embedder)
+    baseline = client.get("/knowledge", params={"limit": 200}).json()
+    filtered = client.get("/knowledge", params={"until": "2000-01-01", "limit": 200}).json()
+    assert filtered["total_matching"] == baseline["total_matching"]
+    assert [i["source_id"] for i in filtered["items"]] == [
+        i["source_id"] for i in baseline["items"]
+    ]
+
+    params = signature(knowledge_route).parameters
+    assert "until" not in params
+    assert "since" in params  # the surviving half of the period filter
 
 
 def test_knowledge_detail_returns_full_qa_item(seed_counts, engine, fake_embedder) -> None:

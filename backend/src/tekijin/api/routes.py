@@ -611,7 +611,6 @@ def knowledge(
     department: str | None = Query(default=None, min_length=1),
     topic: str | None = Query(default=None, min_length=1),
     since: dt.date | None = None,
-    until: dt.date | None = None,
     offset: int = Query(0, ge=0),
     limit: int = Query(8, ge=1, le=200),
     principal: Principal = Depends(require_principal),
@@ -638,7 +637,6 @@ def knowledge(
                 department=department,
                 topic=topic,
                 since=since,
-                until=until,
                 offset=offset,
                 limit=limit,
             )
