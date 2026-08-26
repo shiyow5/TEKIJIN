@@ -25,11 +25,23 @@ const VIEWPORT_MARGIN_PX = 8;
 /**
  * Bell icon in the header's own idiom (#346).
  *
- * This was a literal 🔔 emoji, which the platform draws in its own colour and
- * weight — it cannot take `currentColor`, ignores `strokeWidth`, and so sat at a
- * different tone from the stroked nav icons next to it and did not follow the
- * dark theme. Same `viewBox` / `strokeWidth` / sizing as `AppHeader`'s icons, so
- * hover and focus states inherit from the button rather than being restyled here.
+ * This was a literal 🔔 emoji. Colour-emoji fonts draw from their own colour
+ * tables, so the glyph ignores `color` and has no stroke to weight — it could not
+ * be made to match the stroked nav icons at any value. Now the same `viewBox` /
+ * `fill` / `stroke` / `strokeWidth` as `AppHeader`'s icons.
+ *
+ * Two things this deliberately does NOT claim, because neither is true today:
+ * there is no dark theme in this app (no `darkMode` in the Tailwind config, no
+ * `prefers-color-scheme`, one light palette in `design-tokens.ts`), and the
+ * button has no `hover:text-*`, so its hover is a background change and always
+ * was. What `currentColor` buys is that the icon now tracks
+ * `text-on-surface-variant` — and will track a theme if one is ever added, and
+ * adapts under forced-colors, which an emoji glyph cannot.
+ *
+ * Sized `h-5 w-5` to match the nav icons in the drawer. Note the icon actually
+ * ADJACENT to it in the header row is the hamburger, which is `h-6 w-6` in an
+ * identically sized button — so the pair a user sees together is 20px next to
+ * 24px. That is a deliberate match to the icon SET, not to the neighbour.
  */
 function IconBell({ className }: { className: string }) {
   return (

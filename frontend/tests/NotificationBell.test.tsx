@@ -65,10 +65,12 @@ describe("NotificationBell", () => {
     expect(await screen.findByRole("button", { name: "通知（未読1件）" })).toBeInTheDocument();
   });
 
-  it("draws the bell with the same stroked icon idiom as the other header icons (#346)", async () => {
-    // It used to be a literal 🔔 emoji, which renders in the platform's own colour
-    // and weight: it cannot inherit `currentColor`, ignores `strokeWidth`, and so
-    // never matched the nav icons beside it — nor followed the dark theme.
+  it("uses the same stroked icon idiom as the other header icons (#346)", async () => {
+    // It used to be a literal 🔔 emoji, drawn from a colour-emoji font: it ignores
+    // `color` and has no stroke to weight, so it could not match the nav icons at
+    // any value. This pins the IDIOM, not the drawing — a square with the same
+    // attributes would pass, and asserting the path data would be brittle and
+    // worthless. The bell shape is a visual review's job.
     useCurrentUserMock.mockReturnValue(asUser("E010"));
     getNotificationsMock.mockResolvedValue([]);
     const { container } = render(<NotificationBell />);
