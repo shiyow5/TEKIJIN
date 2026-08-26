@@ -12,6 +12,7 @@
 import { PageBackLink } from "@/components/PageBackLink";
 import { getDocument } from "@/lib/api-client";
 import type { DocumentDetail } from "@/lib/api-types";
+import { formatDateJst as formatUpdatedAt } from "@/lib/datetime";
 import { useEffect, useState } from "react";
 
 type Phase = "loading" | "ready" | "notfound" | "error";
@@ -19,12 +20,6 @@ type Phase = "loading" | "ready" | "notfound" | "error";
 interface ViewerState {
   phase: Phase;
   doc?: DocumentDetail;
-}
-
-/** ISO 8601 → "YYYY-MM-DD" without locale/timezone drift (string slice). */
-function formatUpdatedAt(iso: string | null | undefined): string | null {
-  if (!iso || iso.length < 10) return null;
-  return iso.slice(0, 10);
 }
 
 export function DocumentViewer({

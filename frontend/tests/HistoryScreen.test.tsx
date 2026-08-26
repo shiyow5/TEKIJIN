@@ -103,7 +103,8 @@ describe("HistoryScreen", () => {
     // fetch was issued, not that its result rendered.
     expect(await screen.findByText("UTMの移行時の注意点")).toBeInTheDocument();
     expect(screen.getByText("社内Wi-Fiの申請方法")).toBeInTheDocument();
-    expect(screen.getByText("2026-08-20 10:00")).toBeInTheDocument();
+    // Naive-UTC on the wire -> JST display is +9h (#418).
+    expect(screen.getByText("2026-08-20 19:00")).toBeInTheDocument();
     expect(screen.getByText("回答者: 高梨 健太")).toBeInTheDocument();
     expect(screen.getByText("取り次ぎ先を調整中")).toBeInTheDocument();
 

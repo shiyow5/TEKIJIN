@@ -11,6 +11,7 @@
 import { PageBackLink } from "@/components/PageBackLink";
 import { getKnowledgeDetail } from "@/lib/api-client";
 import type { KnowledgeItem } from "@/lib/api-types";
+import { formatDateJst as formatDate } from "@/lib/datetime";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
@@ -19,12 +20,6 @@ type Phase = "loading" | "ready" | "notfound" | "error";
 interface ViewerState {
   phase: Phase;
   item?: KnowledgeItem;
-}
-
-/** ISO 8601 → "YYYY-MM-DD" without locale/timezone drift (string slice). */
-function formatDate(iso: string | null | undefined): string | null {
-  if (!iso || iso.length < 10) return null;
-  return iso.slice(0, 10);
 }
 
 export function KnowledgeDetailScreen({ sourceId }: { sourceId: string }) {

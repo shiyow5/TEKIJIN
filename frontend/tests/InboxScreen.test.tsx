@@ -135,7 +135,8 @@ describe("InboxScreen", () => {
     // when the handoff fetch lands. Same defect the e2e hit in #283/#284.
     expect(listItem).toHaveTextContent(ITEM.question);
     expect(listItem).toHaveTextContent("ネットワーク");
-    expect(listItem).toHaveTextContent("2026-08-23 09:30");
+    // Naive-UTC on the wire -> JST display is +9h (#418).
+    expect(listItem).toHaveTextContent("2026-08-23 18:30");
 
     // The detail pane (AnswerScreen) renders for the first item with no click.
     await waitFor(() => expect(getHandoffMock).toHaveBeenCalledWith("sess-42"));

@@ -21,6 +21,7 @@ import { SlackLinkButton } from "@/components/SlackLinkButton";
 import { useChatThread } from "@/hooks/useChatThread";
 import { useChatThreads } from "@/hooks/useChatThreads";
 import type { ChatMessage, ChatThreadSummary } from "@/lib/api-types";
+import { formatDateTimeJst } from "@/lib/datetime";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
@@ -29,12 +30,6 @@ export interface ChatScreenProps {
   initialThreadId?: string;
   /** Result of a just-completed Slack OAuth round trip (`?slack=linked|error`). */
   initialSlackResult?: "linked" | "error";
-}
-
-/** ISO 8601 → "YYYY-MM-DD HH:mm" without locale/timezone drift (string slice). */
-function formatTimestamp(iso: string | null | undefined): string | null {
-  if (!iso || iso.length < 16) return null;
-  return `${iso.slice(0, 10)} ${iso.slice(11, 16)}`;
 }
 
 function ChatThreadListItem({
@@ -46,7 +41,7 @@ function ChatThreadListItem({
   active: boolean;
   onSelect: () => void;
 }) {
-  const when = formatTimestamp(thread.last_message_at ?? thread.created_at);
+  const when = formatDateTimeJst(thread.last_message_at ?? thread.created_at);
   return (
     <li>
       <button
@@ -125,7 +120,7 @@ function ChatThreadList({
 }
 
 function ChatBubble({ message, mine }: { message: ChatMessage; mine: boolean }) {
-  const when = formatTimestamp(message.created_at);
+  const when = formatDateTimeJst(message.created_at);
   return (
     <li className={`flex flex-col ${mine ? "items-end" : "items-start"}`}>
       <div

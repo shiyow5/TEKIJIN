@@ -456,6 +456,18 @@ class Settings(BaseSettings):
     feedback_max_per_window: int = 60
     feedback_window_seconds: float = 60.0
 
+    # FastAPI's auto-docs (``/docs``, ``/redoc``, ``/openapi.json``). Default OFF:
+    # ``/openapi.json`` publishes every endpoint's path, parameters and types, which
+    # is a map of the protected surface even though no data leaks. It was reachable
+    # on the internet-exposed deploy (#452/#457) purely because nobody set anything,
+    # so the default has to be the safe one.
+    #
+    # A SEPARATE knob, not derived from ``app_env`` — the DGX runs
+    # ``app_env=development`` for an unrelated reason (#108/#173), so gating on that
+    # would leave production open. Same reasoning as ``strict_durability`` /
+    # ``strict_auth``; set ``TEKIJIN_EXPOSE_API_DOCS=true`` on a dev box that wants them.
+    expose_api_docs: bool = False
+
     # Fail-closed on insecure auth defaults (#241), mirroring ``strict_durability``.
     # ``None`` (default) derives from ``app_env`` (enforced when not "development").
     # A SEPARATE knob because the DGX host runs app_env=development for an unrelated
