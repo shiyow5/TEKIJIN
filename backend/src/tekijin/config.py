@@ -467,6 +467,18 @@ class Settings(BaseSettings):
     feedback_max_per_window: int = 60
     feedback_window_seconds: float = 60.0
 
+    # The ONE Slack workspace this deployment belongs to (``T...``), from
+    # ``auth.test`` or the App's Basic Information. Slack's OAuth authenticates
+    # any workspace's user against our client id, so the team the token comes
+    # back with is the only thing separating a colleague from a stranger who
+    # found the callback URL.
+    #
+    # Blank = accept any workspace, which is the pre-#406 behaviour kept for
+    # local/demo setups that have no real workspace to name. Anything that turns
+    # workspace membership into an AUTHORISATION decision must require it
+    # explicitly rather than inherit this permissive default.
+    slack_team_id: str = ""
+
     # FastAPI's auto-docs (``/docs``, ``/redoc``, ``/openapi.json``). Default OFF:
     # ``/openapi.json`` publishes every endpoint's path, parameters and types, which
     # is a map of the protected surface even though no data leaks. It was reachable

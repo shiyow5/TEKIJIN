@@ -205,6 +205,92 @@ def test_oauth_callback_success_links_and_redirects(
         assert link.slack_user_id == "U_EIGHT"
 
 
+def _state_for(client, employee_id: int) -> str:
+    resp = client.get("/slack/authorize-url", headers=_user_headers(employee_id))
+    query = resp.json()["url"].split("?", 1)[1]
+    return dict(pair.split("=", 1) for pair in query.split("&"))["state"]
+
+
+def test_oauth_callback_rejects_a_foreign_workspace(
+    monkeypatch, slack_app_configured, seed_counts, engine, fake_embedder
+) -> None:
+    """A Slack identity from a workspace we did not install into must not link.
+
+    Slack's OAuth will happily authenticate ANY workspace's user against this
+    client id, so the team the token came back with is the only thing separating
+    "a colleague" from "a stranger who found the URL". This matters most once
+    the same callback becomes a LOGIN route (#406): without it, membership of
+    any Slack workspace would be enough to sign in.
+    """
+
+    monkeypatch.setenv("TEKIJIN_SLACK_TEAM_ID", "T_OURS")
+    get_settings.cache_clear()
+    monkeypatch.setattr(
+        "tekijin.api.slack_routes.exchange_code",
+        lambda **kwargs: SlackIdentity(slack_user_id="U_OUTSIDER", slack_team_id="T_THEIRS"),
+    )
+    client = _raw_client(engine, fake_embedder)
+
+    resp = client.get(
+        "/slack/oauth/callback",
+        params={"code": "c", "state": _state_for(client, 12)},
+        follow_redirects=False,
+    )
+
+    assert resp.status_code in (302, 307)
+    assert "slack=error" in resp.headers["location"]
+    # Employee 12 is used by this test ALONE — 8 is already linked by the success
+    # case above, so asserting "no link" there would depend on suite order.
+    with get_sessionmaker(engine)() as session:
+        assert get_slack_link(session, 12) is None
+
+
+def test_oauth_callback_accepts_the_configured_workspace(
+    monkeypatch, slack_app_configured, seed_counts, engine, fake_embedder
+) -> None:
+    monkeypatch.setenv("TEKIJIN_SLACK_TEAM_ID", "T_OURS")
+    get_settings.cache_clear()
+    monkeypatch.setattr(
+        "tekijin.api.slack_routes.exchange_code",
+        lambda **kwargs: SlackIdentity(slack_user_id="U_INSIDER", slack_team_id="T_OURS"),
+    )
+    client = _raw_client(engine, fake_embedder)
+
+    resp = client.get(
+        "/slack/oauth/callback",
+        params={"code": "c", "state": _state_for(client, 9)},
+        follow_redirects=False,
+    )
+
+    assert "slack=linked" in resp.headers["location"]
+    with get_sessionmaker(engine)() as session:
+        assert get_slack_link(session, 9).slack_user_id == "U_INSIDER"
+
+
+def test_oauth_callback_links_any_workspace_when_team_is_unset(
+    monkeypatch, slack_app_configured, seed_counts, engine, fake_embedder
+) -> None:
+    # Unset stays permissive ON PURPOSE: this is the pre-#406 behaviour and the
+    # dev/demo default, where no real workspace exists to name. The fail-closed
+    # requirement belongs to the LOGIN route, which refuses to enable without it
+    # — not here, where it would break every existing local setup.
+    monkeypatch.delenv("TEKIJIN_SLACK_TEAM_ID", raising=False)
+    get_settings.cache_clear()
+    monkeypatch.setattr(
+        "tekijin.api.slack_routes.exchange_code",
+        lambda **kwargs: SlackIdentity(slack_user_id="U_ANY", slack_team_id="T_WHATEVER"),
+    )
+    client = _raw_client(engine, fake_embedder)
+
+    resp = client.get(
+        "/slack/oauth/callback",
+        params={"code": "c", "state": _state_for(client, 11)},
+        follow_redirects=False,
+    )
+
+    assert "slack=linked" in resp.headers["location"]
+
+
 def test_oauth_callback_redirects_to_error_when_slack_account_already_linked_elsewhere(
     monkeypatch, slack_app_configured, seed_counts, engine, fake_embedder
 ) -> None:

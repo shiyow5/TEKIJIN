@@ -143,6 +143,15 @@ def oauth_callback(
             redirect_uri=settings.slack_redirect_uri,
             code=code,
         )
+        if settings.slack_team_id and identity.slack_team_id != settings.slack_team_id:
+            # Same redirect as any other failure — the person is not one of ours,
+            # so telling them WHICH workspace we expect would leak it.
+            logger.warning(
+                "Slack OAuth from unexpected workspace %s (expected %s)",
+                identity.slack_team_id,
+                settings.slack_team_id,
+            )
+            return RedirectResponse(f"{frontend_chat_url}?slack=error")
         service = request.app.state.agent_service
         with session_scope(service.session_factory) as session:
             # Also covers the DB write: `slack_user_id` is unique, so a Slack
