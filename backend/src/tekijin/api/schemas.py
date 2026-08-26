@@ -791,10 +791,18 @@ class DoneData(BaseModel):
 
 
 class SourceCitation(BaseModel):
-    """One source a self-answer (#291) drew from, so the chat can link to it."""
+    """One source a self-answer (#291) drew from, so the chat can show where it came from.
+
+    The frontend branches on ``kind``, and its fallback branch reads 「過去の回答」 —
+    so an unlisted kind is not merely unstyled, it is MISLABELLED as a past answer
+    (#366). Keep this comment and ``SourceCitation.kind`` in
+    ``frontend/src/lib/api-types.ts`` in step.
+    """
 
     source_id: str
-    kind: str  # "qa" (past Q&A) | "document" (internal doc)
+    # "qa" (past Q&A) | "document" (internal doc) | "daily" (daily report, #433)
+    # | "knowledge" (structured knowledge unit, #357 — emitted by `knowledge_answer`)
+    kind: str
 
 
 class ReferenceData(BaseModel):
