@@ -384,8 +384,11 @@ class AgentNodes:
         # question-fit term. When the feature is off, the kwarg is omitted entirely,
         # so rank() is called exactly as before (develop byte-identical, and any
         # scorer double that predates #405 keeps working).
+        # ``or {}`` so an enabled feature never silently degrades to dormant on a
+        # malformed retrieval missing the key: an empty map -> every qsim is 0.0
+        # (no boost) but the feature is genuinely ON, not accidentally None-disabled.
         qsim_kw: dict[str, Any] = (
-            {"question_similarity": retrieval.get("person_question_similarity")}
+            {"question_similarity": retrieval.get("person_question_similarity") or {}}
             if self._question_fit_enabled
             else {}
         )

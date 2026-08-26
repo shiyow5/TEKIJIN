@@ -402,6 +402,24 @@ def test_question_similarity_reranks_and_adds_reason(seed_counts, session) -> No
     assert qfit  # the boost is explained, not silent
 
 
+def test_question_similarity_below_floor_scores_without_reason(seed_counts, session) -> None:
+    """A noise-level qsim still nudges the score (continuous signal, as measured)
+    but must NOT show the assertive "一致" reason — the reason is floored (#405)."""
+    from tekijin.scorer.weights import DEFAULT_WEIGHTS, QUESTION_FIT_REASON_FLOOR
+
+    _add_skill(session, "sk_qsim_floor", 4)
+    scorer = ExpertiseScorer(Repository(session))
+    base = _scores_by_person(scorer.rank(TOPIC, [4], asker_id=None, now=NOW, top_k=3))
+
+    tiny = QUESTION_FIT_REASON_FLOOR / 2  # below the reason floor
+    res = scorer.rank(TOPIC, [4], asker_id=None, now=NOW, top_k=3, question_similarity={4: tiny})
+    rec = res["recommendations"][0]
+    # Score is nudged by the continuous term...
+    assert rec["score"] == round(base[4] + DEFAULT_WEIGHTS.question_fit * tiny, 4)
+    # ...but the misleading "matches" reason is suppressed below the floor.
+    assert all(r["type"] != "question_fit" for r in rec["reasons"])
+
+
 def test_question_similarity_absent_is_byte_identical(seed_counts, session) -> None:
     """Omitting ``question_similarity`` keeps develop behaviour byte-identical:
     no score change, no question_fit reason (dormant by default)."""

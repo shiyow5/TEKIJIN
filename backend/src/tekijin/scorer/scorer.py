@@ -36,6 +36,7 @@ from tekijin.scorer.weights import (
     DAYS_PER_MONTH,
     DEFAULT_WEIGHTS,
     LOAD_WINDOW_DAYS,
+    QUESTION_FIT_REASON_FLOOR,
     RECENCY_SOURCE_TYPES,
     REGION_OF_BRANCH,
     Weights,
@@ -182,7 +183,7 @@ class ExpertiseScorer:
                 load_count=rec_counts.get(person_id, 0) + ans_counts.get(person_id, 0),
                 asker_branch=asker_branch,
                 now=now,
-                question_fit=(
+                question_fit_score=(
                     question_similarity.get(person_id, 0.0)
                     if question_similarity is not None
                     else None
@@ -213,7 +214,7 @@ class ExpertiseScorer:
         load_count: int,
         asker_branch: str | None,
         now: dt.datetime,
-        question_fit: float | None = None,
+        question_fit_score: float | None = None,
     ) -> tuple[ScoredCandidate, float]:
         # Evidence is pre-fetched in a batch by ``rank`` (no per-candidate query, #58).
         evidence = collect_topic_evidence(
@@ -238,8 +239,8 @@ class ExpertiseScorer:
         )
         # #405: additive question↔past-answer term. ``None`` -> dormant (develop
         # byte-identical); a float (incl. 0.0) adds ``weights.question_fit * qsim``.
-        if question_fit is not None:
-            score += weights.question_fit * question_fit
+        if question_fit_score is not None:
+            score += weights.question_fit * question_fit_score
 
         reasons = self._build_reasons(
             evidence=evidence,
@@ -254,7 +255,7 @@ class ExpertiseScorer:
             employee_branch=employee_branch,
             asker_branch=asker_branch,
             now=now,
-            question_fit=question_fit,
+            question_fit_score=question_fit_score,
         )
         record: ScoredCandidate = {
             "person_id": employee_id,
@@ -284,7 +285,7 @@ class ExpertiseScorer:
         employee_branch: str | None,
         asker_branch: str | None,
         now: dt.datetime,
-        question_fit: float | None = None,
+        question_fit_score: float | None = None,
     ) -> list[ScoredReason]:
         weights = self._weights
         base_total = sum(e.base_score for e in evidence)
@@ -349,12 +350,13 @@ class ExpertiseScorer:
                 )
             )
 
-        # #405: explain the question-fit boost so the score stays fully accounted
-        # for. Only surfaced when it actually contributes (qsim > 0).
-        if question_fit is not None and question_fit > 0.0:
+        # #405: explain the question-fit boost. Shown only above a noise floor —
+        # below it the cosine is not a meaningful "match" so the assertive detail
+        # would mislead (the tiny continuous score nudge is still applied above).
+        if question_fit_score is not None and question_fit_score >= QUESTION_FIT_REASON_FLOOR:
             entries.append(
                 (
-                    weights.question_fit * question_fit,
+                    weights.question_fit * question_fit_score,
                     {"type": "question_fit", "detail": "質問内容が過去の回答と一致"},
                 )
             )

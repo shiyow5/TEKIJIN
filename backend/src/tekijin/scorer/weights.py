@@ -31,6 +31,13 @@ class Weights:
     proximity: float = 0.10
     load: float = 0.20
     # #405: additive weight for the question↔past-answer similarity term (qsim).
+    # NOTE: 1.0 is an EMPIRICAL coefficient, not a theoretical co-equal bound — on
+    # the eval corpus a matching answer's qsim lands in the same range as a strong
+    # topic_fit contribution (~0.45), which is why the two behave co-equally there.
+    # It is NOT normalised: qsim's theoretical max is 1.0 (> topic_fit's 0.45 cap),
+    # so if the embedding model is swapped and qsim's distribution shifts upward the
+    # term could quietly dominate — re-calibrate on the eval when changing the
+    # embedder (scripts/research_c6_qsim.py sweeps this weight).
     # topic_fit sees only the topic TAG and saturates at 2-3 evidence pieces
     # (ADR-0006), so it cannot re-rank on the specific QUESTION — and when C1
     # predicts the wrong topic it scores the gold expert against the wrong tag and
@@ -48,6 +55,13 @@ class Weights:
 
 
 DEFAULT_WEIGHTS = Weights()
+
+# #405: minimum qsim for the question-fit REASON to be shown. The score always adds
+# ``question_fit * qsim`` continuously (that continuous signal is what the eval
+# measured), but the assertive reason "質問内容が過去の回答と一致" must not appear for a
+# noise-level cosine — mirroring the noise floors elsewhere (prior_answer 0.15,
+# knowledge 0.20). Below this, the tiny score nudge is unexplained but immaterial.
+QUESTION_FIT_REASON_FLOOR = 0.15
 
 # Evidence base_scores (doc15 / db-schema.md): helpful answer 1.0 > project lead
 # 0.8 > past answer 0.7 > certification 0.6 > project member 0.5 > self-declared
