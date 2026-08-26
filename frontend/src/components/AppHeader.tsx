@@ -374,8 +374,16 @@ export function AppHeader() {
     <>
       {/* The white background spans the full viewport; the CONTENT is centred at
         `max-w-content` by the inner wrapper. Constraining the <header> itself let
-        the body's tinted background show through beside it above 1440px (#250). */}
-      <header className="border-outline-variant border-b bg-surface-container-lowest px-margin py-sm">
+        the body's tinted background show through beside it above 1440px (#250).
+
+        `sticky top-0`: the header stays reachable on every screen, including the
+        tall ones you cannot see the top of while waiting — the processing screen
+        (#392's hero sends you straight there), the result screen, /dashboard and
+        /knowledge all scroll well past a viewport (#415). `z-40` sits above page
+        content and the 使い方 FAB (z-30) but below the nav drawer and
+        ModalDialog's overlay (both z-50), so either still covers the header. The
+        background is opaque, so content scrolling underneath is hidden. */}
+      <header className="sticky top-0 z-40 border-outline-variant border-b bg-surface-container-lowest px-margin py-sm">
         <div className="mx-auto flex w-full max-w-content flex-wrap items-center justify-between gap-sm">
           <Link href="/" aria-label="TEKIJIN ホーム">
             {/* Transparent-background logo from Next's /public (aspect ≈ 2.8:1).
