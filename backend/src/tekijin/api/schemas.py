@@ -108,6 +108,12 @@ class ResumeRequest(BaseModel):
     # outcome is stale and rejected with 409 so it cannot bind to a new candidate
     # (#94). ``None`` skips the check (older clients / clarification replies).
     recommendation_id: int | None = None
+    # The responder's answer text, captured when they accept the hand-off (#274).
+    # Persisted as an ``answers`` row so it fuels reuse (self-answer / prior_answer),
+    # the asker's "回答が届きました" history, and the accumulation dashboard. Optional
+    # and only meaningful with ``outcome == "accepted"`` — a decline carries no
+    # answer, and older clients / the "direct" consult method may accept without one.
+    answer_body: str | None = None
 
     @model_validator(mode="after")
     def _exactly_one(self) -> ResumeRequest:
@@ -120,7 +126,21 @@ class ResumeRequest(BaseModel):
         # clarification reply (matches the frontend's discriminated union) (#94).
         if self.reply is not None and self.recommendation_id is not None:
             raise ValueError("'recommendation_id' is only valid with an 'outcome'")
+        # An answer body only belongs on an ACCEPTED hand-off (#274): a decline
+        # or a clarification reply never carries one, so reject the mismatch
+        # rather than silently dropping it.
+        if self.answer_body is not None and self.outcome != "accepted":
+            raise ValueError("'answer_body' is only valid with outcome 'accepted'")
         return self
+
+    @property
+    def clean_answer_body(self) -> str | None:
+        """The trimmed answer body, or ``None`` when blank (treated as no answer)."""
+
+        if self.answer_body is None:
+            return None
+        stripped = self.answer_body.strip()
+        return stripped or None
 
     @property
     def resume_value(self) -> str:

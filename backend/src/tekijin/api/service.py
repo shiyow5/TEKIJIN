@@ -69,12 +69,14 @@ from tekijin.data.feedback import record_feedback
 from tekijin.data.handoff import employee_brief, question_consult_method, responder_reuse_stats
 from tekijin.data.messages import create_message
 from tekijin.data.writes import (
+    create_answer,
     employee_exists,
     insert_shown_recommendations,
     latest_primary_recommendation,
     mark_question_resolved,
     mark_self_resolved,
     persist_question,
+    recommendation_employee_id,
     recommendation_outcome,
     record_events,
     reopen_question_for_handoff,
@@ -86,7 +88,7 @@ from tekijin.data.writes import (
     update_question_route,
     update_question_topics,
 )
-from tekijin.retrieval.embedding import Embedder
+from tekijin.retrieval.embedding import PASSAGE, Embedder
 
 logger = logging.getLogger(__name__)
 
@@ -485,6 +487,7 @@ class AgentService:
         outcome: str | None = None,
         reply: str | None = None,
         recommendation_id: int | None = None,
+        answer_body: str | None = None,
     ) -> None:
         """Queue a resume, validating it matches the pending interrupt kind.
 
@@ -496,6 +499,11 @@ class AgentService:
         stale (a reroute moved the hand-off on, or a competing tab) and is rejected
         with :class:`SessionConflict` (409) — so it never binds to a new candidate
         (#94). ``None`` skips the check for older clients / clarification replies.
+
+        ``answer_body`` (only on an ``accepted`` outcome) is the responder's answer
+        text; it is persisted as an ``answers`` row so the accumulation loop closes
+        (#274). It is captured on a best-effort basis — a failure to embed or store
+        it never blocks the hand-off from resuming.
         """
 
         with self._lock(session_id):
@@ -537,7 +545,9 @@ class AgentService:
                 # wins. We resume the graph with that effective value so the
                 # checkpoint always advances consistently with the DB — never
                 # diverging, and never left permanently paused at ``send``.
-                _status, resume_value = self._record_outcome(session_id, snapshot.values, outcome)
+                _status, resume_value = self._record_outcome(
+                    session_id, snapshot.values, outcome, answer_body=answer_body
+                )
             else:  # pragma: no cover - the graph only ever interrupts at ask/send
                 raise SessionConflict("session cannot be resumed from its current state")
 
@@ -546,7 +556,12 @@ class AgentService:
             ctx.touched_at = self._clock()
 
     def _record_outcome(
-        self, session_id: str, values: dict[str, Any], outcome: str
+        self,
+        session_id: str,
+        values: dict[str, Any],
+        outcome: str,
+        *,
+        answer_body: str | None = None,
     ) -> tuple[str, str]:
         """Record the responder outcome on the durable primary recommendation.
 
@@ -583,6 +598,14 @@ class AgentService:
             # resolution time (first-wins) for the dashboard's avg-resolution (#97).
             if outcome == "accepted" and question_id is not None:
                 mark_question_resolved(session, question_id, self._now_factory())
+                # #274: capture the responder's answer text as an ``answers`` row so
+                # the accumulation loop closes — the row fuels reuse (the retriever
+                # searches answers), lights the asker's "回答が届きました" history, and
+                # feeds the dashboard. Best-effort: an embed/store failure is logged
+                # but never blocks the hand-off from resuming.
+                body = (answer_body or "").strip()
+                if body:
+                    self._capture_answer(session, values, primary, question_id, body)
                 # Seed the chat with the asker's own request text (the hand-off
                 # draft) as its first message, so the responder opens the thread
                 # already seeing what they were asked — not an empty conversation.
@@ -598,6 +621,58 @@ class AgentService:
                         # graph's (possibly injected/frozen) clock.
                         create_message(session, primary, asker_id, draft, dt.datetime.now())
             return "recorded", outcome
+
+    def _capture_answer(
+        self,
+        session: Session,
+        values: dict[str, Any],
+        primary: int,
+        question_id: str,
+        body: str,
+    ) -> None:
+        """Persist the responder's answer text as an ``answers`` row (#274).
+
+        Attributes the answer to the recommendation's employee (authoritative DB
+        lookup, not the external ``E###`` wire form) and tags it with the question's
+        first predicted topic so ``answers_by_topic`` reuse can find it. The dense
+        embedding is best-effort: any embedder failure degrades to a NULL embedding
+        (still BM25-reusable) rather than aborting the accept.
+        """
+
+        responder_id = recommendation_employee_id(session, primary)
+        if responder_id is None:
+            logger.warning(
+                "no responder to attribute the answer to (question %s); skipping capture",
+                question_id,
+            )
+            return
+        topics = values.get("topics") or []
+        topic = topics[0] if topics else None
+        embedding = self._embed_answer(body)
+        create_answer(
+            session,
+            question_id=question_id,
+            responder_id=responder_id,
+            body=body,
+            topic=topic,
+            embedding=embedding,
+            created_at=self._now_factory(),
+        )
+
+    def _embed_answer(self, body: str) -> list[float] | None:
+        """Embed an answer body for dense reuse, or ``None`` if embedding fails.
+
+        Kept non-fatal: the first ``encode`` may load a heavy model and can raise
+        (missing ML deps, OOM). A NULL embedding still leaves the answer reusable
+        via BM25 and visible to history/metrics, so a failure must not lose the
+        answer or block the hand-off.
+        """
+
+        try:
+            return self._embedder.encode([body], kind=PASSAGE)[0]
+        except Exception:  # pragma: no cover - defensive; exercised via logging path
+            logger.exception("failed to embed captured answer; storing without embedding")
+            return None
 
     # -- /handoff : responder-facing view (product-spec 画面4) ------------- #
     def get_handoff(self, session_id: str) -> schemas.HandoffResponse:

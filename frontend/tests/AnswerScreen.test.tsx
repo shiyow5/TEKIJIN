@@ -116,6 +116,38 @@ describe("AnswerScreen", () => {
     expect(screen.queryByText(/回答をお届け/)).not.toBeInTheDocument();
   });
 
+  it("captures a typed answer body on accept (#274)", async () => {
+    getHandoffMock.mockResolvedValue(HANDOFF);
+    render(<AnswerScreen sessionId="s1" />);
+    await screen.findByText("UTM移行時の注意点について");
+
+    fireEvent.change(screen.getByLabelText("回答内容（任意）"), {
+      target: { value: "移行前にポリシーを棚卸ししてください。" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "引き受ける" }));
+
+    await waitFor(() =>
+      expect(postAnswerMock).toHaveBeenCalledWith({
+        session_id: "s1",
+        outcome: "accepted",
+        answer_body: "移行前にポリシーを棚卸ししてください。",
+      }),
+    );
+  });
+
+  it("accepts without an answer body when the field is left blank (#274)", async () => {
+    getHandoffMock.mockResolvedValue(HANDOFF);
+    render(<AnswerScreen sessionId="s1" />);
+    await screen.findByText("UTM移行時の注意点について");
+
+    // Field left empty -> no answer_body key in the payload.
+    fireEvent.click(screen.getByRole("button", { name: "引き受ける" }));
+
+    await waitFor(() =>
+      expect(postAnswerMock).toHaveBeenCalledWith({ session_id: "s1", outcome: "accepted" }),
+    );
+  });
+
   it("links back to the inbox after answering (#126: label matches destination)", async () => {
     getHandoffMock.mockResolvedValue(HANDOFF);
     render(<AnswerScreen sessionId="s1" />);

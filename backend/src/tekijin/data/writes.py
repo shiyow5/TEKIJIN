@@ -10,6 +10,8 @@ separate issue.)
 from __future__ import annotations
 
 import datetime as dt
+import uuid
+from collections.abc import Sequence
 from typing import Any
 
 from sqlalchemy import delete, func, select, update
@@ -314,6 +316,56 @@ def latest_primary_recommendation(session: Session, question_id: str) -> int | N
         .limit(1)
     ).first()
     return row[0] if row else None
+
+
+def recommendation_employee_id(session: Session, recommendation_id: int) -> int | None:
+    """The employee a recommendation points at (``None`` if the id is unknown).
+
+    The authoritative responder for an accepted hand-off: read from the DB row
+    rather than the graph state so the ``answers`` row (#274) attributes the
+    answer to a real employee id regardless of the external ``E###`` wire form.
+    """
+
+    return session.execute(
+        select(Recommendation.employee_id).where(Recommendation.id == recommendation_id)
+    ).scalar_one_or_none()
+
+
+def create_answer(
+    session: Session,
+    *,
+    question_id: str,
+    responder_id: int,
+    body: str,
+    topic: str | None,
+    embedding: Sequence[float] | None,
+    created_at: dt.datetime,
+) -> str:
+    """Persist a runtime answer and return its id (#274, accumulation loop).
+
+    The responder's answer text becomes an ``answers`` row so it (a) fuels reuse
+    — the retriever searches ``answers`` by dense embedding and BM25, so a future
+    self-answer / prior_answer path can surface it — (b) lights the asker's "回答が
+    届きました" history (``recent_questions_for_asker`` joins ``answers``), and (c)
+    feeds the accumulation dashboard. ``embedding`` may be ``None`` (the embedder
+    was unavailable): the row is still BM25-reusable and history/metrics still see
+    it; only the dense channel skips it until it is embedded.
+    """
+
+    answer_id = f"ans_{uuid.uuid4().hex}"
+    session.add(
+        Answer(
+            id=answer_id,
+            question_id=question_id,
+            responder_id=responder_id,
+            body=body,
+            topic=topic,
+            embedding=list(embedding) if embedding is not None else None,
+            created_at=created_at,
+            reuse_count=0,
+        )
+    )
+    return answer_id
 
 
 def shown_recommendation_ids(session: Session, question_id: str) -> list[int]:

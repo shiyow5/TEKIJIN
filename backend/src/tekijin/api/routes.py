@@ -141,6 +141,7 @@ def answer(
             outcome=req.outcome,
             reply=req.reply,
             recommendation_id=req.recommendation_id,
+            answer_body=req.clean_answer_body,
         )
     except SessionConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

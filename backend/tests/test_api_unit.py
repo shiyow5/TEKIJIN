@@ -103,6 +103,21 @@ def test_resume_request_exactly_one_of_outcome_or_reply() -> None:
         schemas.ResumeRequest(session_id="s", reply="x", recommendation_id=7)
 
 
+def test_resume_request_answer_body_only_with_accepted() -> None:
+    # #274: an answer body rides on an accepted hand-off; it is meaningless on a
+    # decline or a clarification reply, and blank text collapses to no answer.
+    req = schemas.ResumeRequest(session_id="s", outcome="accepted", answer_body="  本文  ")
+    assert req.clean_answer_body == "本文"  # trimmed
+    assert schemas.ResumeRequest(session_id="s", outcome="accepted").clean_answer_body is None
+    # Blank body collapses to None (treated as "accepted without an answer").
+    blank = schemas.ResumeRequest(session_id="s", outcome="accepted", answer_body="   ")
+    assert blank.clean_answer_body is None
+    with pytest.raises(ValueError):
+        schemas.ResumeRequest(session_id="s", outcome="declined", answer_body="本文")
+    with pytest.raises(ValueError):
+        schemas.ResumeRequest(session_id="s", reply="x", answer_body="本文")
+
+
 # --------------------------------------------------------------------------- #
 # node -> SSE event mapping
 # --------------------------------------------------------------------------- #

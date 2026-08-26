@@ -6,9 +6,11 @@
  * The responder receives the question already filled in with the asker's context
  * and the reasons they were chosen, plus the generated draft (下書き機能の受益者).
  * Three equal-size choices keep declining a first-class option (F-09): 引き受ける /
- * 今は難しい / 自分より適任がいる. The app records the accept/decline (not the answer
- * text), so the labels/copy say "引き受ける"/"お繋ぎします", never "回答をお届け"
- * (#176). The reuse count at the bottom is the 見返り (F-13).
+ * 今は難しい / 自分より適任がいる. Accepting connects the asker to this person, so the
+ * copy says "引き受ける"/"お繋ぎします", never "回答をお届け" (#176). On accept the
+ * responder may ALSO type an answer (optional), captured as a reusable ``answers``
+ * row so the accumulation loop closes (#274). The reuse count at the bottom is the
+ * 見返り (F-13).
  *
  * Data + actions come from {@link useHandoff}; this component is presentation and
  * wiring only. A `sessionId` is the single input (from the route param).
@@ -21,7 +23,7 @@ import { useHandoff } from "@/hooks/useHandoff";
 import type { HandoffResponse, Reason } from "@/lib/api-types";
 import { reasonLabel } from "@/lib/reasons";
 import Link from "next/link";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 
 export interface AnswerScreenProps {
   sessionId: string;
@@ -118,6 +120,9 @@ const DONE_BODY: Record<HandoffAction, string> = {
 
 export function AnswerScreen({ sessionId, showBackLink = false, onDone }: AnswerScreenProps) {
   const { phase, handoff, action, errorKind, submitError, submit } = useHandoff(sessionId);
+  // Optional answer text, captured on accept as reusable knowledge (#274). Empty
+  // is fine — accepting without it records the hand-off but no answers row.
+  const [answerBody, setAnswerBody] = useState("");
 
   // onDone fires once per completed outcome (keyed on phase/action); an
   // identity change in the caller's callback must not re-fire it.
@@ -226,6 +231,21 @@ export function AnswerScreen({ sessionId, showBackLink = false, onDone }: Answer
         </p>
       </section>
 
+      <section className="flex flex-col gap-xs">
+        <label htmlFor="answer-body" className="font-bold text-on-surface text-sm">
+          回答内容（任意）
+        </label>
+        <textarea
+          id="answer-body"
+          value={answerBody}
+          onChange={(e) => setAnswerBody(e.target.value)}
+          disabled={submitting}
+          rows={4}
+          placeholder="ここに回答を書くと、今後の似た質問に再利用できる知識として蓄積されます。空欄のまま引き受けても構いません。"
+          className="w-full resize-y rounded-xl border border-outline-variant bg-surface-container-lowest p-md text-on-surface text-sm placeholder:text-on-surface-variant disabled:cursor-not-allowed disabled:opacity-50"
+        />
+      </section>
+
       {submitError ? (
         <p role="alert" className="text-error text-sm">
           {submitError}
@@ -237,7 +257,7 @@ export function AnswerScreen({ sessionId, showBackLink = false, onDone }: Answer
           type="button"
           className={PRIMARY_BTN}
           disabled={submitting}
-          onClick={() => submit("answer")}
+          onClick={() => submit("answer", answerBody)}
         >
           引き受ける
         </button>

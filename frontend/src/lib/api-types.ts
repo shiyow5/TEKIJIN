@@ -52,7 +52,15 @@ export type ConsultMethod = "direct" | "chat";
  * makes the wrong field a compile error rather than a runtime 422.
  */
 export type ResumeRequest =
-  | { session_id: string; outcome: Outcome; recommendation_id?: number | null; reply?: never }
+  | {
+      session_id: string;
+      outcome: Outcome;
+      recommendation_id?: number | null;
+      // The responder's answer text, captured on accept (#274). Only meaningful
+      // with outcome "accepted" — the backend 422s an answer_body on a decline.
+      answer_body?: string;
+      reply?: never;
+    }
   | { session_id: string; reply: string; outcome?: never; recommendation_id?: never };
 
 /** Acknowledgement returned by /ask and /answer (the stream flows over /events). */
