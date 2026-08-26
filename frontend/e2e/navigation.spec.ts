@@ -2,10 +2,13 @@ import { type Page, expect, test } from "@playwright/test";
 import {
   API_BASE,
   DASHBOARD,
+  PERSON_ROUTE_FRAMES,
   fulfillJson,
+  fulfillSse,
   mockAuth,
   mockEmployees,
   mockRecentQuestions,
+  sseBody,
 } from "./support/mocks";
 
 /**
@@ -235,6 +238,32 @@ test.describe("navigation", () => {
         name: "受信箱",
       }),
     ).toBeVisible();
+  });
+
+  /**
+   * The header must stay reachable on EVERY screen, including the ones you sit
+   * on while waiting. The processing screen is taller than a laptop viewport,
+   * so before the header was `sticky` it scrolled away (measured: top=-312 at
+   * 1280x700) and there was no way back without scrolling up first.
+   */
+  test("the header stays on screen after scrolling a tall page (#392)", async ({ page }) => {
+    await mockChrome(page);
+    await page.route(`${API_BASE}/events/**`, (route) =>
+      fulfillSse(route, sseBody(PERSON_ROUTE_FRAMES)),
+    );
+    await page.setViewportSize({ width: 1280, height: 700 });
+
+    for (const path of ["/session/s1", "/session/s1/result", "/dashboard"]) {
+      await page.goto(path);
+      // `banner`, not `locator("header")`: the processing screen has its own
+      // <header> for the run's status line, so a bare tag locator matches two.
+      const header = page.getByRole("banner");
+      await expect(header).toBeVisible();
+      await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+      // `toBeInViewport`, not `toBeVisible`: a static header stays "visible" to
+      // the DOM after scrolling past it — it is simply above the fold.
+      await expect(header, `header scrolled away on ${path}`).toBeInViewport();
+    }
   });
 
   // Where the bell actually lands depends on real header content width, not a
