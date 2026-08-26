@@ -158,3 +158,14 @@ class Retriever(Protocol):
     def search(
         self, query: str, *, query_vector: Sequence[float] | None = None
     ) -> RetrievalResult: ...
+
+
+class EmployeeSource(Protocol):
+    """The roster lookup C6 uses when it scores everyone instead of C4's set (#87).
+
+    :class:`~tekijin.data.repository.Repository` satisfies this; tests pass a
+    lightweight fake so the node stays database-free. Only ``.id`` is read — the
+    scorer resolves the rest of each employee itself.
+    """
+
+    def list_employees(self) -> Sequence[Any]: ...

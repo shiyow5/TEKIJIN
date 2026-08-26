@@ -163,6 +163,11 @@ def main() -> None:
         action="store_true",
         help="#405 C6 に質問↔過去回答の意味一致(qsim)項を足す(routing不変)",
     )
+    ap.add_argument(
+        "--score-all-employees",
+        action="store_true",
+        help="#87 C6 の候補を C4 の集合でなく全社員にする(経路シグナルは不変)",
+    )
     ap.add_argument("--answerability", action="store_true", help="#70 棄却クリティックを配線")
     ap.add_argument(
         "--knowledge-floor",
@@ -209,6 +214,7 @@ def main() -> None:
         knowledge_answer_min_similarity=args.knowledge_floor,
         query_expansion_enabled=args.query_expansion,
         question_fit_enabled=args.question_fit,
+        score_all_employees=args.score_all_employees,
     )
     ranker = GraphRanker(graph, critique_wired=ans_model is not None)
 
@@ -218,6 +224,7 @@ def main() -> None:
     print(
         f"backend={args.backend} self_answer={args.self_answer} "
         f"query_expansion={args.query_expansion} question_fit={args.question_fit} "
+        f"score_all_employees={args.score_all_employees} "
         f"answerability={args.answerability} "
         f"knowledge_floor={args.knowledge_floor} rows={len(queries)}"
     )
@@ -233,6 +240,7 @@ def main() -> None:
             "self_answer": args.self_answer,
             "query_expansion": args.query_expansion,
             "question_fit": args.question_fit,
+            "score_all_employees": args.score_all_employees,
             "answerability": args.answerability,
             "knowledge_floor": args.knowledge_floor,
             "rows": len(queries),

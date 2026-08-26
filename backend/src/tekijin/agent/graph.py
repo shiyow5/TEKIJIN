@@ -130,6 +130,7 @@ def build_agent(
     knowledge_answer_min_similarity: float | None = None,
     query_expansion_enabled: bool = False,
     question_fit_enabled: bool = False,
+    score_all_employees: bool = False,
 ):
     """Compile and return the C1-C8 agent graph.
 
@@ -150,6 +151,10 @@ def build_agent(
             prior_answer routes first try a cited answer from the retrieved
             evidence; a grounded answer terminates at ``self_answered``, otherwise
             the run falls back to the original route (document terminal / hand-off).
+        score_all_employees: #87. ``False`` (default) scores only the people C4's
+            top chunks surfaced. ``True`` hands C6 the whole roster instead — C4's
+            narrowing drops people who hold the evidence but whose chunks did not
+            rank. The C5 route signal keeps reading C4's set either way.
         checkpointer: LangGraph checkpointer; default ``MemorySaver``.
     """
 
@@ -180,6 +185,8 @@ def build_agent(
         query_expansion_enabled=query_expansion_enabled,
         # #405: add the question↔past-answer term to C6 (False = OFF, dormant).
         question_fit_enabled=question_fit_enabled,
+        # #87: score the whole roster in C6 (False = OFF -> C4's candidate set).
+        employee_source=Repository(session) if score_all_employees else None,
     )
     # #70: the critic is wired only when a model is supplied. Off (the default) the
     # graph is byte-for-byte the pre-#70 flow — C6 -> C7 directly.

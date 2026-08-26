@@ -8,6 +8,7 @@ no network.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -343,14 +344,31 @@ class _RecordingScorer:
     def __init__(self) -> None:
         self.qsim_seen: list[Any] = []
         self.kwarg_present: list[bool] = []
+        self.candidates_seen: list[list[int]] = []
 
     def rank(self, topics, candidates, asker_id, now, *, top_k=3, **kwargs) -> dict:
         self.kwarg_present.append("question_similarity" in kwargs)
         self.qsim_seen.append(kwargs.get("question_similarity"))
+        self.candidates_seen.append(list(candidates))
         return {"recommendations": []}
 
 
-def _nodes_for_score(scorer: Any, *, question_fit_enabled: bool = False) -> AgentNodes:
+class _FakeRoster:
+    """An :class:`EmployeeSource` double — only ``.id`` is read (#87)."""
+
+    def __init__(self, ids: list[int]) -> None:
+        self._ids = ids
+
+    def list_employees(self) -> list[Any]:
+        return [SimpleNamespace(id=i) for i in self._ids]
+
+
+def _nodes_for_score(
+    scorer: Any,
+    *,
+    question_fit_enabled: bool = False,
+    employee_source: Any = None,
+) -> AgentNodes:
     stub: Any = object()
     return AgentNodes(
         intent_model=stub,
@@ -360,6 +378,7 @@ def _nodes_for_score(scorer: Any, *, question_fit_enabled: bool = False) -> Agen
         retriever=stub,
         scorer=scorer,
         question_fit_enabled=question_fit_enabled,
+        employee_source=employee_source,
     )
 
 
@@ -393,6 +412,37 @@ def test_c6_omits_question_similarity_when_disabled() -> None:
     nodes = _nodes_for_score(scorer, question_fit_enabled=False)
     nodes.c6_score(_c6_state({1: 0.8, 2: 0.2}))
     assert scorer.kwarg_present == [False]
+
+
+def test_c6_scores_the_whole_roster_when_wired() -> None:
+    # #87: C4 narrows the candidate set to "people appearing in the top chunks",
+    # which drops people who HOLD the evidence but whose chunks did not rank.
+    # Wired, C6 scores everyone — here 3 and 4 are on the roster but not in C4's
+    # set, and they still reach the scorer.
+    scorer = _RecordingScorer()
+    nodes = _nodes_for_score(scorer, employee_source=_FakeRoster([1, 2, 3, 4]))
+    nodes.c6_score(_c6_state({}))
+    assert scorer.candidates_seen == [[1, 2, 3, 4]]
+
+
+def test_c6_keeps_c4_candidates_when_not_wired() -> None:
+    # OFF (default): byte-identical to pre-#87 — only C4's set is scored.
+    scorer = _RecordingScorer()
+    nodes = _nodes_for_score(scorer)
+    nodes.c6_score(_c6_state({}))
+    assert scorer.candidates_seen == [[1, 2]]
+
+
+def test_c6_roster_still_drops_declined_and_the_asker() -> None:
+    # Widening the pool must not resurrect a candidate the responder already
+    # declined. (The asker is dropped inside the scorer, so it still reaches
+    # rank() here — that is unchanged by #87.)
+    scorer = _RecordingScorer()
+    nodes = _nodes_for_score(scorer, employee_source=_FakeRoster([1, 2, 3, 4]))
+    state = _c6_state({})
+    state["declined_ids"] = [2, 3]
+    nodes.c6_score(state)
+    assert scorer.candidates_seen == [[1, 4]]
 
 
 def test_c4_retrieve_expansion_without_topics_falls_back_to_raw() -> None:

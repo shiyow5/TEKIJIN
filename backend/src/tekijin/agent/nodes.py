@@ -18,6 +18,7 @@ from langgraph.types import interrupt
 from tekijin.agent.protocols import (
     AnswerabilityModel,
     DraftModel,
+    EmployeeSource,
     IntentModel,
     IntentResult,
     Retriever,
@@ -119,6 +120,7 @@ class AgentNodes:
         knowledge_answer_min_similarity: float | None = None,
         query_expansion_enabled: bool = False,
         question_fit_enabled: bool = False,
+        employee_source: EmployeeSource | None = None,
     ) -> None:
         self._intent = intent_model
         self._sufficiency = sufficiency_model
@@ -153,6 +155,11 @@ class AgentNodes:
         # never handed the map, so scores are develop-identical. Routing is unchanged
         # either way (C5 does not read the scorer).
         self._question_fit_enabled = question_fit_enabled
+        # #87: score the WHOLE roster in C6 instead of only the people C4's top
+        # chunks happened to surface. ``None`` (default) keeps the C4-derived pool,
+        # so develop behaviour is byte-identical. See ``c6_score`` for why the pool
+        # and the ROUTE signal must stay separate.
+        self._employee_source = employee_source
 
     # -- entry: validate input, reset per-question control fields ---------
     def reset(self, state: AgentState) -> AgentState:
@@ -358,6 +365,13 @@ class AgentNodes:
         # than letting a higher-scoring different person win.
         return {"prior_answer_note": note, "pinned_responder_id": responder_id}
 
+    def _candidate_pool(self, retrieval: Mapping[str, Any]) -> list[int]:
+        """The people C6 scores: the whole roster when wired, else C4's set (#87)."""
+
+        if self._employee_source is None:
+            return list(retrieval.get("candidate_people") or [])
+        return [e.id for e in self._employee_source.list_employees()]
+
     # -- C6: expertise scorer (deterministic) -----------------------------
     def c6_score(self, state: AgentState) -> AgentState:
         topics = state.get("topics") or []
@@ -425,7 +439,17 @@ class AgentNodes:
 
         if remaining > 0:
             filled_ids = existing_ids | {r["person_id"] for r in fresh}
-            pool = retrieval.get("candidate_people") or []
+            # #87: C4 narrows the candidate set by "who appears in the top chunks",
+            # which drops people who HAVE the evidence but whose chunks did not
+            # surface — measured as a real loss (R@3 -0.048 at top-10). At a 40-person
+            # roster the scorer is a deterministic few-ms computation, so score
+            # everyone and let C6 decide.
+            #
+            # This deliberately changes ONLY the scoring pool. ``candidate_people``
+            # is ALSO the C5 person-route signal (`route.py`: `if candidate_people:`),
+            # and the route recall it produces is at 1.000 (ADR-0007) — so the route
+            # keeps reading C4's set, untouched.
+            pool = self._candidate_pool(retrieval)
             candidates = [p for p in pool if p not in declined and p not in filled_ids]
             if candidates:
                 # All topics feed the scorer (aggregated topic_fit), not just topics[0].
