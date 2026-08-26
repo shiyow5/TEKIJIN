@@ -14,6 +14,8 @@ import type {
   ChatThreadDetail,
   ChatThreadListResponse,
   ChatThreadSummary,
+  ConsultRetrospectiveAck,
+  ConsultRetrospectiveRequest,
   DashboardResponse,
   DeclineNotification,
   DeleteQuestionResponse,
@@ -46,6 +48,7 @@ import type {
   SlackAuthorizeUrlResponse,
   SlackStatusResponse,
   SlackUnlinkResponse,
+  TopicVocabularyResponse,
 } from "@/lib/api-types";
 import { getAuthToken } from "@/lib/auth-token";
 import { getApiBaseUrl } from "@/lib/config";
@@ -409,6 +412,28 @@ export async function resolveQuestion(
     {},
     options,
   );
+}
+
+/**
+ * GET /topics — the closed topic vocabulary the C6 scorer joins on (#247).
+ * Served rather than duplicated here: a hard-coded copy would drift from
+ * `scorer/topics.py`, and a topic the scorer does not know matches no evidence.
+ */
+export async function getTopics(options: RequestOptions = {}): Promise<string[]> {
+  const body = await getJson<TopicVocabularyResponse>("/topics", options);
+  return body.topics;
+}
+
+/**
+ * POST /consult-retrospective — record the asker's write-up of a face-to-face
+ * 直接相談 (#247). Only the question's own asker may (403 otherwise, 404 for an
+ * unknown question, 422 for a topic outside the vocabulary).
+ */
+export function postConsultRetrospective(
+  request: ConsultRetrospectiveRequest,
+  options: RequestOptions = {},
+): Promise<ConsultRetrospectiveAck> {
+  return postJson<ConsultRetrospectiveAck>("/consult-retrospective", request, options);
 }
 
 /**

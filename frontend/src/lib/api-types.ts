@@ -339,6 +339,8 @@ export interface HandoffAsker {
 export interface HandoffResponse {
   session_id: string;
   question: string;
+  /** The durable question id — what the #247 retrospective is attributed to. */
+  question_id?: string | null;
   asker: HandoffAsker;
   topics: string[];
   products: string[];
@@ -612,4 +614,32 @@ export interface LoginResponse {
   access_token: string;
   token_type: "bearer";
   principal: Principal;
+}
+
+/** GET /topics — the closed topic vocabulary the C6 scorer joins on (#247). */
+export interface TopicVocabularyResponse {
+  topics: string[];
+}
+
+/** How far a 直接相談 got (#247). `unresolved` is recorded but is not evidence. */
+export type ConsultResolution = "resolved" | "partial" | "unresolved";
+
+/**
+ * POST /consult-retrospective — the asker's write-up of a face-to-face 直接相談
+ * (#247). `asker_id` is deliberately absent: the backend takes it from the token,
+ * never the body, because this row becomes expertise evidence for `responder_id`.
+ */
+export interface ConsultRetrospectiveRequest {
+  question_id: string;
+  responder_id: string;
+  topics: string[];
+  asked?: string | null;
+  answer_body: string;
+  resolution: ConsultResolution;
+}
+
+/** POST /consult-retrospective response. */
+export interface ConsultRetrospectiveAck {
+  status: string;
+  consult_id: number;
 }

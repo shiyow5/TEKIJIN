@@ -132,6 +132,10 @@ def test_unauthenticated_requests_are_401(seed_counts, engine, fake_embedder) ->
     assert client.get("/events/whatever").status_code == 401
     assert client.get("/knowledge").status_code == 401
     assert client.get("/knowledge/any").status_code == 401
+    assert client.get("/topics").status_code == 401  # #247
+    # #247: the retrospective becomes expertise evidence, so an unauthenticated
+    # POST would be a way to write it for anyone.
+    assert client.post("/consult-retrospective", json={}).status_code == 401
 
 
 def test_garbage_token_is_401(seed_counts, engine, fake_embedder) -> None:

@@ -83,6 +83,22 @@ BASE_SCORE_SKILL = 0.3
 BASE_SCORE_DAILY = 0.15
 DAILY_EVIDENCE_CAP = 5
 
+# 直接相談のふりかえり (#247): the asker's written summary of a face-to-face
+# consultation. It sits BELOW a self-declared skill (0.3) because it is HEARSAY —
+# one person paraphrasing another's words — and ABOVE a daily report (0.15)
+# because, unlike ambient activity, it records an actual consultation the asker
+# explicitly tagged with a topic and rated. Capped like daily reports so a chatty
+# pair cannot saturate topic_fit: 4 × 0.25 = 1.0, comparable to one helpful
+# answer. A retrospective marked ``unresolved`` contributes NOTHING (and never
+# subtracts — 断り≠非専門), so the cap counts only the ones that did help.
+BASE_SCORE_OFFLINE_CONSULT = 0.25
+OFFLINE_CONSULT_EVIDENCE_CAP = 4
+
+# ``resolution`` values that count as expertise evidence. ``unresolved`` is
+# deliberately absent: it is recorded (for the accumulation metrics) but is not
+# evidence either way.
+OFFLINE_CONSULT_POSITIVE_RESOLUTIONS = ("resolved", "partial")
+
 # Half-life of experience relevance: a 6-month-old project/answer counts half as
 # much toward ``recency`` (technical-spec §5: 半減期6か月の時間減衰).
 RECENCY_HALF_LIFE_DAYS = 182.5

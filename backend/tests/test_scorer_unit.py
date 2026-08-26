@@ -15,6 +15,7 @@ from tekijin.data.dto import (
     AnswerDTO,
     CertificationDTO,
     DailyReportDTO,
+    OfflineConsultDTO,
     ProjectMembershipDTO,
     SkillDTO,
 )
@@ -33,10 +34,12 @@ from tekijin.scorer.weights import (
     BASE_SCORE_CERTIFICATION,
     BASE_SCORE_DAILY,
     BASE_SCORE_HELPFUL_ANSWER,
+    BASE_SCORE_OFFLINE_CONSULT,
     BASE_SCORE_PROJECT_LEAD,
     BASE_SCORE_PROJECT_MEMBER,
     BASE_SCORE_SKILL,
     DAILY_EVIDENCE_CAP,
+    OFFLINE_CONSULT_EVIDENCE_CAP,
 )
 
 NOW = dt.datetime(2026, 8, 21, 12, 0, 0)
@@ -84,6 +87,88 @@ def _answer(helpful: bool | None, reuse: int | None, created: dt.datetime) -> An
 
 def _daily(topics: tuple[str, ...], report_date: dt.date | None = None) -> DailyReportDTO:
     return DailyReportDTO(id=1, employee_id=1, topics=topics, report_date=report_date)
+
+
+def _consult(
+    topics: tuple[str, ...],
+    resolution: str = "resolved",
+    created: dt.datetime | None = None,
+) -> OfflineConsultDTO:
+    return OfflineConsultDTO(
+        id=1,
+        responder_id=1,
+        topics=topics,
+        resolution=resolution,
+        created_at=created or dt.datetime(2026, 1, 1),
+    )
+
+
+# --------------------------------------------------------------------------- #
+# #247: offline (直接相談) retrospectives as evidence
+# --------------------------------------------------------------------------- #
+def test_collect_topic_evidence_offline_consult_default_is_empty() -> None:
+    """No offline_consults arg -> no such evidence (pre-#247 behaviour)."""
+
+    ev = collect_topic_evidence(TOPIC, [], [], [], [])
+    assert not any(e.source_type == "offline_consult" for e in ev)
+
+
+def test_collect_topic_evidence_includes_on_topic_offline_consult() -> None:
+    ev = collect_topic_evidence(
+        TOPIC, [], [], [], [], offline_consults=[_consult((TOPIC,)), _consult(("経理・決算",))]
+    )
+    consults = [e for e in ev if e.source_type == "offline_consult"]
+    assert len(consults) == 1  # off-topic retrospective excluded
+    assert consults[0].base_score == BASE_SCORE_OFFLINE_CONSULT
+
+
+def test_offline_consult_is_weaker_than_a_self_declared_skill() -> None:
+    """It is HEARSAY: the asker summarising what the responder said (#247).
+
+    A self-declared skill is at least first-hand about oneself; a retrospective is
+    one person's paraphrase of another's words. So it must sit below
+    ``BASE_SCORE_SKILL`` — and above ``BASE_SCORE_DAILY``, because unlike a daily
+    report it records an actual consultation on an explicitly tagged topic.
+    """
+
+    assert BASE_SCORE_DAILY < BASE_SCORE_OFFLINE_CONSULT < BASE_SCORE_SKILL
+
+
+def test_unresolved_offline_consult_is_not_evidence() -> None:
+    """「解決しなかった」は専門性の証拠にならない — but it is not NEGATIVE evidence.
+
+    Same rule as a decline (db-schema.md: 断り≠非専門): a consultation that did not
+    resolve simply contributes nothing. It must never subtract, or asking the wrong
+    person once would damage their standing on a topic they do know.
+    """
+
+    ev = collect_topic_evidence(
+        TOPIC, [], [], [], [], offline_consults=[_consult((TOPIC,), resolution="unresolved")]
+    )
+    assert not any(e.source_type == "offline_consult" for e in ev)
+    assert edge_weight(ev) == 0.0
+
+
+def test_partially_resolved_offline_consult_counts() -> None:
+    ev = collect_topic_evidence(
+        TOPIC, [], [], [], [], offline_consults=[_consult((TOPIC,), resolution="partial")]
+    )
+    assert sum(1 for e in ev if e.source_type == "offline_consult") == 1
+
+
+def test_collect_topic_evidence_offline_consult_capped() -> None:
+    """Volume must not saturate topic_fit — same guard as daily reports (#355)."""
+
+    consults = [_consult((TOPIC,)) for _ in range(OFFLINE_CONSULT_EVIDENCE_CAP + 4)]
+    ev = collect_topic_evidence(TOPIC, [], [], [], [], offline_consults=consults)
+    assert sum(1 for e in ev if e.source_type == "offline_consult") == OFFLINE_CONSULT_EVIDENCE_CAP
+
+
+def test_collect_topic_evidence_offline_consult_unions_topics() -> None:
+    ev = collect_topic_evidence(
+        [TOPIC, "セキュリティ"], [], [], [], [], offline_consults=[_consult(("セキュリティ",))]
+    )
+    assert sum(1 for e in ev if e.source_type == "offline_consult") == 1
 
 
 # --------------------------------------------------------------------------- #

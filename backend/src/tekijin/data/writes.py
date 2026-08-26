@@ -24,6 +24,7 @@ from tekijin.models.tables import (
     Event,
     Feedback,
     Message,
+    OfflineConsult,
     Question,
     Recommendation,
 )
@@ -458,3 +459,36 @@ def ack_decline_notifications(session: Session, asker_id: int, ids: list[int]) -
     # ``Session.execute`` is typed as returning ``Result``; a DML statement always
     # yields a ``CursorResult``, which is where ``rowcount`` lives.
     return cast("CursorResult[Any]", result).rowcount or 0
+
+
+def record_offline_consult(
+    session: Session,
+    *,
+    question_id: str,
+    responder_id: int,
+    asker_id: int | None,
+    topics: Sequence[str],
+    asked: str | None,
+    answer_body: str,
+    resolution: str,
+) -> int:
+    """Insert one 直接相談 retrospective and return its id (#247).
+
+    Written by the ASKER about the responder, so ``asker_id`` must come from the
+    authenticated principal (the route enforces that) — this row becomes expertise
+    evidence for ``responder_id``, and an unattributable one would be a way to
+    fabricate someone's standing.
+    """
+
+    row = OfflineConsult(
+        question_id=question_id,
+        responder_id=responder_id,
+        asker_id=asker_id,
+        topics=list(topics),
+        asked=asked,
+        answer_body=answer_body,
+        resolution=resolution,
+    )
+    session.add(row)
+    session.flush()  # so the caller can ack with a real id
+    return row.id

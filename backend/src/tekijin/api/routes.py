@@ -58,7 +58,13 @@ from tekijin.data.messages import (
 from tekijin.data.notifications import pending_decline_notifications_for_asker
 from tekijin.data.repository import Repository
 from tekijin.data.slack_channel_links import get_channel_link
-from tekijin.data.writes import ack_decline_notifications, delete_question, mark_self_resolved
+from tekijin.data.writes import (
+    ack_decline_notifications,
+    delete_question,
+    mark_self_resolved,
+    record_offline_consult,
+)
+from tekijin.scorer.topics import TOPIC_VOCABULARY
 from tekijin.slack.notify import relay_to_channel, schedule_pending_handoff
 
 logger = logging.getLogger(__name__)
@@ -748,6 +754,72 @@ def feedback(
                 actor_id=principal.employee_id,
             )
         return schemas.FeedbackAck(status="recorded")
+
+
+@router.get("/topics", response_model=schemas.TopicVocabularyResponse)
+def topics(principal: Principal = Depends(require_principal)) -> schemas.TopicVocabularyResponse:
+    """The closed topic vocabulary the scorer joins on (#247).
+
+    Static — it comes from ``scorer/topics.py``, not the database. Served so the
+    retrospective form can offer exactly the topics the scorer understands instead
+    of shipping a copy that drifts (#116). Behind auth like every other endpoint;
+    there is nothing sensitive here, but an unauthenticated hole is a hole.
+    """
+
+    return schemas.TopicVocabularyResponse(topics=list(TOPIC_VOCABULARY))
+
+
+@router.post("/consult-retrospective", response_model=schemas.ConsultRetrospectiveAck)
+def consult_retrospective(
+    req: schemas.ConsultRetrospectiveRequest,
+    request: Request,
+    principal: Principal = Depends(require_principal),
+) -> schemas.ConsultRetrospectiveAck:
+    """Record the asker's write-up of a face-to-face 直接相談 (#247).
+
+    A "direct" consultation (#245) produces no chat transcript, so the knowledge
+    it carried is lost and F-10 (回答を索引に追加し専門性の推定を更新) has nothing
+    to index. This endpoint is that missing record — and, unlike ``/feedback``, it
+    becomes EXPERTISE EVIDENCE for ``responder_id``, which is why the checks below
+    are stricter than "append-only, rate limited":
+
+    * ``asker_id`` is taken from the principal, never the body.
+    * Only the QUESTION'S OWN ASKER (or an admin) may write one. Without that, any
+      user could inflate — or fabricate — another employee's standing on a topic
+      by posting retrospectives about consultations that never happened.
+    * An unknown ``question_id`` is a 404 rather than a silently-dropped link (the
+      way ``/feedback`` treats it): a retrospective with no question is not a
+      weaker signal, it is an unverifiable one, so there is nothing to record.
+    * Topics are constrained to ``TOPIC_VOCABULARY`` by the request model — the
+      scorer joins on these strings, and free text would match nothing (#116).
+
+    Rate limited per actor, reusing the feedback limiter: both are asker-driven
+    append-only writes, and this one feeds scoring, so flooding it matters more.
+    """
+
+    limiter = request.app.state.feedback_rate_limiter
+    if not limiter.allow(f"consult-retrospective:{principal.employee_id}"):
+        raise HTTPException(status_code=429, detail="ふりかえりの送信が多すぎます。")
+
+    responder_id = _coerce_employee_id_or_422(req.responder_id, field="responder_id")
+
+    with _generic_500("POST /consult-retrospective"):
+        with session_scope(_service(request).session_factory) as session:
+            owner = question_asker_id(session, req.question_id)
+            if owner is None:
+                raise HTTPException(status_code=404, detail="question not found")
+            require_can_act_as(principal, owner)
+            consult_id = record_offline_consult(
+                session,
+                question_id=req.question_id,
+                responder_id=responder_id,
+                asker_id=principal.employee_id,
+                topics=req.topics,
+                asked=req.asked,
+                answer_body=req.answer_body,
+                resolution=req.resolution,
+            )
+        return schemas.ConsultRetrospectiveAck(status="recorded", consult_id=consult_id)
 
 
 @router.get("/notifications", response_model=schemas.NotificationsResponse)

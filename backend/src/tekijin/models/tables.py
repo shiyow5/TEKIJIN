@@ -158,6 +158,38 @@ class EmployeeChatHistory(Base):
     sent_at: Mapped[dt.datetime | None] = mapped_column(DateTime)
 
 
+class OfflineConsult(Base):
+    """One retrospective the ASKER wrote after a 直接相談 (#247).
+
+    A "direct" consultation (#245) happens face to face, so unlike a chat hand-off
+    it leaves no text behind and F-10 (回答を索引に追加し専門性の推定を更新) has
+    nothing to work with. This table is that missing record, written by the asker.
+
+    Deliberately HEARSAY: ``answer_body`` is the asker's paraphrase of what the
+    responder said, so the scorer weights it below a self-declared skill
+    (``BASE_SCORE_OFFLINE_CONSULT``). ``topics`` comes from ``TOPIC_VOCABULARY``,
+    validated at the API boundary, so the scorer can join on it without a runtime
+    keyword vocabulary — the same contract as ``daily_reports.topics`` (#355).
+
+    ``resolution`` is ``resolved`` / ``partial`` / ``unresolved``. ``unresolved``
+    is stored but contributes NO expertise evidence and never subtracts — the same
+    rule as a decline (db-schema.md: 断り≠非専門).
+    """
+
+    __tablename__ = "offline_consults"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    question_id: Mapped[str | None] = mapped_column(ForeignKey("questions.id"), index=True)
+    # Who answered (the person this becomes evidence for) and who is reporting it.
+    responder_id: Mapped[int] = mapped_column(ForeignKey("employees.id"), index=True)
+    asker_id: Mapped[int | None] = mapped_column(ForeignKey("employees.id"), index=True)
+    topics: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
+    asked: Mapped[str | None] = mapped_column(Text)
+    answer_body: Mapped[str | None] = mapped_column(Text)
+    resolution: Mapped[str] = mapped_column(String(16))
+    created_at: Mapped[dt.datetime | None] = mapped_column(DateTime, server_default=func.now())
+
+
 class DailyReport(Base):
     """Daily report submitted by an employee."""
 
