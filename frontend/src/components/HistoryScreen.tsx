@@ -13,21 +13,13 @@ import { useCurrentUser } from "@/components/CurrentUserProvider";
 import { PageBackLink } from "@/components/PageBackLink";
 import { QuestionDeleteButton } from "@/components/QuestionDeleteButton";
 import { QuestionResolveButton } from "@/components/QuestionResolveButton";
-import { getRecentQuestions } from "@/lib/api-client";
+import { useRecentQuestions } from "@/hooks/useRecentQuestions";
 import type { RecentQuestionItem } from "@/lib/api-types";
 import { formatDateTimeJst } from "@/lib/datetime";
 import Link from "next/link";
-import { useEffect, useState } from "react";
 
 /** The full history pulls far more than the 5-item panel; 200 is the API cap. */
 const HISTORY_LIMIT = 200;
-
-type Phase = "loading" | "ready" | "error";
-
-interface HistoryState {
-  phase: Phase;
-  items?: RecentQuestionItem[];
-}
 
 /** The resolution line: responder name, self / document self-resolve, or pending. */
 function resolutionNote(item: RecentQuestionItem): string {
@@ -95,41 +87,7 @@ function HistoryRow({
 
 export function HistoryScreen() {
   const { currentUserId } = useCurrentUser();
-  const [state, setState] = useState<HistoryState>({ phase: "loading" });
-
-  useEffect(() => {
-    if (currentUserId === null) {
-      setState({ phase: "loading" });
-      return;
-    }
-    let active = true;
-    // Revalidate on focus/visibility: returning here after finishing a run on
-    // /session/[id]/result reuses this cached subtree without remounting, so a
-    // mount-only fetch would show a stale list missing the new question (#468).
-    const load = (initial: boolean) => {
-      if (initial) setState({ phase: "loading" });
-      getRecentQuestions(currentUserId, { limit: HISTORY_LIMIT })
-        .then((items) => {
-          if (active) setState({ phase: "ready", items });
-        })
-        .catch(() => {
-          if (active) setState((prev) => (prev.phase === "ready" ? prev : { phase: "error" }));
-        });
-    };
-    const revalidate = () => {
-      if (document.visibilityState === "visible") load(false);
-    };
-    load(true);
-    window.addEventListener("focus", revalidate);
-    window.addEventListener("pageshow", revalidate);
-    document.addEventListener("visibilitychange", revalidate);
-    return () => {
-      active = false;
-      window.removeEventListener("focus", revalidate);
-      window.removeEventListener("pageshow", revalidate);
-      document.removeEventListener("visibilitychange", revalidate);
-    };
-  }, [currentUserId]);
+  const [state, setState] = useRecentQuestions(currentUserId, { limit: HISTORY_LIMIT });
 
   /** Drop a just-deleted question from the list without a full re-fetch. */
   function handleDeleted(questionId: string) {

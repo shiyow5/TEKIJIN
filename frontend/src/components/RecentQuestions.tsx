@@ -8,24 +8,16 @@
  * mock (#125). Re-fetches when the acting user changes; renders nothing but a
  * quiet placeholder while there is no user or no history.
  *
- * A question with a ``session_id`` links to ``/session/{session_id}`` so the
- * asker can re-view its result (the run replays over /events) — #150. Seeded
- * history with no session is shown non-clickable.
+ * A question with a ``session_id`` links to ``/session/{session_id}/result`` so
+ * the asker can re-view its result screen (the run replays over /events) — #150,
+ * #468. Seeded history with no session is shown non-clickable.
  */
 
 import { useCurrentUser } from "@/components/CurrentUserProvider";
 import { QuestionDeleteButton } from "@/components/QuestionDeleteButton";
-import { getRecentQuestions } from "@/lib/api-client";
+import { useRecentQuestions } from "@/hooks/useRecentQuestions";
 import type { RecentQuestionItem } from "@/lib/api-types";
 import Link from "next/link";
-import { useEffect, useState } from "react";
-
-type Phase = "loading" | "ready" | "error";
-
-interface RecentState {
-  phase: Phase;
-  items?: RecentQuestionItem[];
-}
 
 /** First character of the responder's name, for the avatar chip. */
 function avatarInitial(name: string): string {
@@ -97,43 +89,7 @@ function QuestionCard({ item, clickable }: { item: RecentQuestionItem; clickable
 
 export function RecentQuestions() {
   const { currentUserId } = useCurrentUser();
-  const [state, setState] = useState<RecentState>({ phase: "loading" });
-
-  useEffect(() => {
-    if (currentUserId === null) {
-      setState({ phase: "loading" });
-      return;
-    }
-    let active = true;
-    // Refetch when the page regains focus/visibility (revalidate-on-focus): after a
-    // run completes on /session/[id]/result and the user navigates back here, the
-    // App Router serves this cached subtree WITHOUT remounting, so a mount-only
-    // effect would keep showing a stale list that omits the just-asked question
-    // (#468). The API already returns pending questions, so a plain refetch fixes it.
-    const load = (initial: boolean) => {
-      if (initial) setState({ phase: "loading" });
-      getRecentQuestions(currentUserId)
-        .then((items) => {
-          if (active) setState({ phase: "ready", items });
-        })
-        .catch(() => {
-          if (active) setState((prev) => (prev.phase === "ready" ? prev : { phase: "error" }));
-        });
-    };
-    const revalidate = () => {
-      if (document.visibilityState === "visible") load(false);
-    };
-    load(true);
-    window.addEventListener("focus", revalidate);
-    window.addEventListener("pageshow", revalidate);
-    document.addEventListener("visibilitychange", revalidate);
-    return () => {
-      active = false;
-      window.removeEventListener("focus", revalidate);
-      window.removeEventListener("pageshow", revalidate);
-      document.removeEventListener("visibilitychange", revalidate);
-    };
-  }, [currentUserId]);
+  const [state, setState] = useRecentQuestions(currentUserId);
 
   /** Drop a just-deleted question from the list without a full re-fetch (#207). */
   function handleDeleted(questionId: string) {
