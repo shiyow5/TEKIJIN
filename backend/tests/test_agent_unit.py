@@ -345,11 +345,13 @@ class _RecordingScorer:
         self.qsim_seen: list[Any] = []
         self.kwarg_present: list[bool] = []
         self.candidates_seen: list[list[int]] = []
+        self.top_k_seen: list[int] = []
 
     def rank(self, topics, candidates, asker_id, now, *, top_k=3, **kwargs) -> dict:
         self.kwarg_present.append("question_similarity" in kwargs)
         self.qsim_seen.append(kwargs.get("question_similarity"))
         self.candidates_seen.append(list(candidates))
+        self.top_k_seen.append(top_k)
         return {"recommendations": []}
 
 
@@ -379,12 +381,23 @@ class _FakeBranches:
         }
 
 
+class _FakeRoster:
+    """An :class:`EmployeeSource` double — only ``.id`` is read (#87)."""
+
+    def __init__(self, ids: list[int]) -> None:
+        self._ids = ids
+
+    def list_employees(self) -> list[Any]:
+        return [SimpleNamespace(id=i) for i in self._ids]
+
+
 def _nodes_for_score(
     scorer: Any,
     *,
     question_fit_enabled: bool = False,
     branch_constraint_enabled: bool = False,
     employee_branches: Any = None,
+    employee_source: Any = None,
 ) -> AgentNodes:
     stub: Any = object()
     return AgentNodes(
@@ -397,6 +410,7 @@ def _nodes_for_score(
         question_fit_enabled=question_fit_enabled,
         branch_constraint_enabled=branch_constraint_enabled,
         employee_branches=employee_branches,
+        employee_source=employee_source,
     )
 
 
@@ -549,6 +563,53 @@ def test_c6_ignores_the_constraint_when_the_feature_is_off() -> None:
     state["constraint_branch"] = "福岡"
     nodes.c6_score(state)
     assert scorer.candidates_seen == [[1, 2]]
+
+
+def test_c6_scores_the_whole_roster_when_wired() -> None:
+    # #87: C4 narrows the candidate set to "people appearing in the top chunks",
+    # which drops people who HOLD the evidence but whose chunks did not rank.
+    # Wired, C6 scores everyone — here 3 and 4 are on the roster but not in C4's
+    # set, and they still reach the scorer.
+    scorer = _RecordingScorer()
+    nodes = _nodes_for_score(scorer, employee_source=_FakeRoster([1, 2, 3, 4]))
+    nodes.c6_score(_c6_state({}))
+    assert scorer.candidates_seen == [[1, 2, 3, 4]]
+
+
+def test_c6_keeps_c4_candidates_when_not_wired() -> None:
+    # OFF (default): byte-identical to pre-#87 — only C4's set is scored.
+    scorer = _RecordingScorer()
+    nodes = _nodes_for_score(scorer)
+    nodes.c6_score(_c6_state({}))
+    assert scorer.candidates_seen == [[1, 2]]
+
+
+def test_c6_roster_still_drops_declined() -> None:
+    # Widening the pool must not resurrect a candidate the responder already
+    # declined. (The asker is dropped inside the scorer, not here, so this test
+    # deliberately does not cover it — that is unchanged by #87.)
+    scorer = _RecordingScorer()
+    nodes = _nodes_for_score(scorer, employee_source=_FakeRoster([1, 2, 3, 4]))
+    state = _c6_state({})
+    state["declined_ids"] = [2, 3]
+    nodes.c6_score(state)
+    assert scorer.candidates_seen == [[1, 4]]
+
+
+def test_c6_roster_backfill_skips_already_shown_candidates() -> None:
+    # The reroute path is where a widened pool is most likely to misbehave: the
+    # survivors of a decline keep their slots, so C6 must top up only the freed
+    # ones and must never re-score someone already on screen. Here candidate 1
+    # survived and 3 was declined, so only 2 and 4 may reach the scorer — and only
+    # for the two freed slots.
+    scorer = _RecordingScorer()
+    nodes = _nodes_for_score(scorer, employee_source=_FakeRoster([1, 2, 3, 4]))
+    state = _c6_state({})
+    state["recommendations"] = [{"person_id": 1, "name": "既存", "score": 0.9, "reasons": []}]
+    state["declined_ids"] = [3]
+    nodes.c6_score(state)
+    assert scorer.candidates_seen == [[2, 4]]
+    assert scorer.top_k_seen == [2]
 
 
 def test_c4_retrieve_expansion_without_topics_falls_back_to_raw() -> None:

@@ -133,6 +133,7 @@ def build_agent(
     branch_constraint_enabled: bool = False,
     additive_self_answer_enabled: bool = False,
     additive_self_answer_floor: float = 0.20,
+    score_all_employees: bool = False,
 ):
     """Compile and return the C1-C8 agent graph.
 
@@ -153,6 +154,12 @@ def build_agent(
             prior_answer routes first try a cited answer from the retrieved
             evidence; a grounded answer terminates at ``self_answered``, otherwise
             the run falls back to the original route (document terminal / hand-off).
+        score_all_employees: #87, MEASURED AND REJECTED (ADR-0009) — kept only so the
+            measurement can be reproduced. ``False`` (default) scores only the people
+            C4's top chunks surfaced. ``True`` hands C6 the whole roster instead; the
+            C5 route signal keeps reading C4's set either way, but note that with the
+            whole roster C6 essentially always finds someone, so the ``no_candidate``
+            terminal (「適任者が見つかりませんでした」) becomes unreachable in practice.
         checkpointer: LangGraph checkpointer; default ``MemorySaver``.
     """
 
@@ -189,6 +196,8 @@ def build_agent(
         # #413: additive cited answer on the person route (False = OFF, dormant).
         additive_self_answer_enabled=additive_self_answer_enabled,
         additive_self_answer_floor=additive_self_answer_floor,
+        # #87: score the whole roster in C6 (False = OFF -> C4's candidate set).
+        employee_source=Repository(session) if score_all_employees else None,
     )
     # #70: the critic is wired only when a model is supplied. Off (the default) the
     # graph is byte-for-byte the pre-#70 flow — C6 -> C7 directly.

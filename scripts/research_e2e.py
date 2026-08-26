@@ -96,6 +96,32 @@ def build(url):
     )
 
 
+# Local mirrors of the models we run on the DGX. The deployed .env points
+# TEKIJIN_EMBEDDING_MODEL at a filesystem path, so recording it verbatim would put
+# a machine-specific path into a COMMITTED artifact — meaningless to a reader, and
+# it breaks `test_calibration_matches_the_configured_embedding_model`, which
+# compares the recorded id against `settings.embedding_model` (the HF id
+# everywhere except that host). Map the mirror back to the identity and keep the
+# path as provenance instead. An unknown basename is passed through unchanged so
+# the mismatch fails loudly rather than being silently renamed.
+_MODEL_MIRRORS = {
+    "Nemotron-3-Embed-1B-BF16": "nvidia/Nemotron-3-Embed-1B-BF16",
+    "Qwen3-Embedding-0.6B": "Qwen/Qwen3-Embedding-0.6B",
+}
+
+
+def _model_identity(configured: str) -> tuple[str, str | None]:
+    """``(model id, provenance note)`` for a configured embedding model."""
+
+    if not os.path.isabs(configured):
+        return configured, None
+    name = os.path.basename(configured.rstrip("/"))
+    known = _MODEL_MIRRORS.get(name)
+    if known is None:
+        return configured, None
+    return known, f"model from local mirror {configured}"
+
+
 def task_route(url, out):
     from tekijin.agent.route import (
         DOCUMENT_SIM,
@@ -139,9 +165,10 @@ def task_route(url, out):
     if out:
         from tekijin.config import get_settings
 
+        model_id, recorded_on = _model_identity(get_settings().embedding_model)
         payload = {
             "_meta": {
-                "embedding_model": get_settings().embedding_model,
+                "embedding_model": model_id,
                 "thresholds": {
                     "prior_answer_sim": PRIOR_ANSWER_SIM,
                     "document_sim": DOCUMENT_SIM,
@@ -149,6 +176,7 @@ def task_route(url, out):
                 },
                 "n": len(rows),
                 "source": "scripts/research_e2e.py --task route",
+                **({"recorded_on": recorded_on} if recorded_on else {}),
             },
             "rows": rows,
         }

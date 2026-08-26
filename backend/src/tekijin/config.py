@@ -180,6 +180,26 @@ class Settings(BaseSettings):
     # 0.444->0.778). Set False to restore the pre-#405 (tag-only) ranking.
     question_fit_enabled: bool = True
 
+    # #87: score the WHOLE employee roster in C6 instead of only the people C4's
+    # top chunks surfaced. C4's narrowing drops people who hold the evidence but
+    # whose chunks did not rank, and that loss was measured (層2 R@3 -0.048 at
+    # top-10, -0.020 at top-20/40 — i.e. it is the reachable SET, not the cut-off).
+    # At a 40-person roster the scorer is a deterministic few-ms computation, so
+    # there is no cost argument for narrowing. OFF by default until the full-graph
+    # E2E measurement confirms Hit@3 improves without moving person route recall
+    # (the route reads C4's set separately and must stay at 1.000 — ADR-0007).
+    # MEASURED AND NOT ADOPTED (ADR-0009): on the real graph, 3 paired replicates
+    # put Hit@3 at 0.7778 (C4 pool) vs 0.7626 (whole roster) — consistently one row
+    # worse, never better; person route recall stayed 1.000 either way. C4's set is
+    # not only a narrowing, it is the prior "this person was retrievable for this
+    # question"; widening it lets a high-generic-topic_fit person with no
+    # question-specific evidence displace the right one (and #405's qsim is 0 for
+    # anyone C4 did not surface). The flag stays so the measurement is one command
+    # away when the scorer or corpus changes.
+    # At thousands of employees the pool should come from person_topic_edges by
+    # topic rather than the whole table; that is a cost concern, not an accuracy one.
+    score_all_employees: bool = False
+
     # #83: when the asker explicitly asks for someone at a given branch ("福岡の拠点で
     # 動ける方だと助かります"), treat it as a CONDITION in C6 rather than a scoring term.
     #

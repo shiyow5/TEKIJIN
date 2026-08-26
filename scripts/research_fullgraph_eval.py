@@ -177,6 +177,11 @@ def main() -> None:
         help="#413 person経路でも引用付き回答を併記(self_answer composer 配線・routing不変)",
     )
     ap.add_argument(
+        "--score-all-employees",
+        action="store_true",
+        help="#87 C6 の候補を C4 の集合でなく全社員にする(経路シグナルは不変)",
+    )
+    ap.add_argument(
         "--branch-constraint",
         action="store_true",
         help="#83 明示された拠点を C6 で条件として扱う",
@@ -231,6 +236,7 @@ def main() -> None:
         question_fit_enabled=args.question_fit,
         branch_constraint_enabled=args.branch_constraint,
         additive_self_answer_enabled=args.additive,
+        score_all_employees=args.score_all_employees,
     )
     ranker = GraphRanker(graph, critique_wired=ans_model is not None)
 
@@ -240,6 +246,7 @@ def main() -> None:
     print(
         f"backend={args.backend} self_answer={args.self_answer} "
         f"query_expansion={args.query_expansion} question_fit={args.question_fit} "
+        f"score_all_employees={args.score_all_employees} "
         f"branch_constraint={args.branch_constraint} "
         f"answerability={args.answerability} "
         f"knowledge_floor={args.knowledge_floor} rows={len(queries)}"
@@ -261,6 +268,7 @@ def main() -> None:
             "self_answer": args.self_answer,
             "query_expansion": args.query_expansion,
             "question_fit": args.question_fit,
+            "score_all_employees": args.score_all_employees,
             "branch_constraint": args.branch_constraint,
             "answerability": args.answerability,
             "knowledge_floor": args.knowledge_floor,

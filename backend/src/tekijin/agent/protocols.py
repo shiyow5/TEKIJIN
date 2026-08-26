@@ -172,3 +172,23 @@ class BranchSource(Protocol):
     """
 
     def employees_by_ids(self, employee_ids: Sequence[int]) -> Mapping[int, Any]: ...
+
+
+class HasEmployeeId(Protocol):
+    """Anything carrying an employee ``id`` — narrows :class:`EmployeeSource`."""
+
+    @property
+    def id(self) -> int: ...
+
+
+class EmployeeSource(Protocol):
+    """The roster lookup C6 uses when it scores everyone instead of C4's set (#87).
+
+    :class:`~tekijin.data.repository.Repository` satisfies this; tests pass a
+    lightweight fake so the node stays database-free. Only ``.id`` is read — the
+    scorer resolves the rest of each employee itself. Typed via
+    :class:`HasEmployeeId` rather than ``Any`` so a source returning e.g.
+    ``.employee_id`` fails type-checking instead of at runtime.
+    """
+
+    def list_employees(self) -> Sequence[HasEmployeeId]: ...

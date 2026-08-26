@@ -77,6 +77,7 @@ def build_default_service(settings: Settings | None = None) -> AgentService:
         # confirms person recall 1.000 and citations fire). Floors the compose call.
         additive_self_answer_enabled=settings.additive_self_answer_enabled,
         additive_self_answer_floor=settings.additive_self_answer_floor,
+        score_all_employees=settings.score_all_employees,
         # #357 slice 4c: wire the knowledge-answer step ONLY when enabled; else None
         # keeps the pre-#357 graph (no knowledge_answer node). Default OFF until the
         # knowledge corpus is populated + verified (slice 4b calibrated the floor).

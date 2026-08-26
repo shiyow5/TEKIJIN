@@ -27,11 +27,12 @@ majority, 66-item basis):
 * ``PERSON_WEAK_SIM`` = 0.40 — profile match below this counts as weak, letting a
   document take over (sits inside the observed 0.053–0.454 people range).
 * ``PRIOR_ANSWER_SIM`` = 0.55 — **deliberately above the observed answer-cosine
-  max (0.543): prior_answer never fires with Nemotron.** ``answer_confidence``
-  cannot separate this route — person-gold rows reach 0.543 while prior_answer
+  max (0.542): prior_answer never fires with Nemotron.** ``answer_confidence``
+  cannot separate this route — person-gold rows reach 0.542 while prior_answer
   gold tops out at 0.410, so any firing threshold mislabels person first. Prior-
-  answer detection is therefore disabled here and moved to corpus-count routing
-  (answers.reuse_count / answer existence), tracked in #119. This is a #90
+  answer detection is therefore disabled here; corpus-count routing (#119/#327)
+  was measured as the alternative and REJECTED — no config Pareto-improves the
+  baseline (ADR-0007), so this route stays dormant. This is a #90
   stopgap, not the intended design.
 
 Routes:
@@ -56,9 +57,9 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 # Calibrated to Nemotron-3-Embed-1B (#90). See the module docstring for the
 # rationale behind each band and why prior_answer is dormant.
 #
-# Above the observed answer-cosine max (0.543): prior_answer never fires with
-# Nemotron because answer_confidence cannot separate it. Corpus-count routing is
-# the real fix (#119).
+# Above the observed answer-cosine max (0.542): prior_answer never fires with
+# Nemotron because answer_confidence cannot separate it. Corpus-count routing was
+# tried and rejected (#327 / ADR-0007); this route stays dormant.
 PRIOR_ANSWER_SIM = 0.55
 # A document must be on-topic enough to be the demotion target. Recalibrated
 # 0.30→0.28 on the 66-item basis (#191); see the module docstring.
