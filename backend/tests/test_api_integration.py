@@ -1674,16 +1674,23 @@ def test_stale_checkpoint_primary_rebinds_to_the_shown_candidate(
     }
     with session_scope(service._session_factory) as session:
         assert service._resolve_primary(session, stale_values) == new_rid
-        # A consistent checkpoint is left alone — including one whose id is NOT the
-        # newest rank-1 row, which is what `/select` produces (it promotes an
-        # already-persisted rank-2/3 row without rewriting DB ranks). Resolving by
-        # "newest rank-1" instead of by shown person would silently undo that choice.
+        # A consistent checkpoint is left alone (no rebind, no surprise).
         consistent = {
             "question_id": question_id,
             "primary_recommendation_id": old_rid,
             "recommendations": [{"person_id": 1}],
         }
         assert service._resolve_primary(session, consistent) == old_rid
+        # A shown candidate with NO persisted row resolves to None rather than to
+        # someone else's row: binding this person's answer to another employee's
+        # recommendation would mis-attribute `answers.responder_id` (#274). The
+        # caller degrades to "no_target" instead.
+        orphan = {
+            "question_id": question_id,
+            "primary_recommendation_id": old_rid,
+            "recommendations": [{"person_id": 39}],  # never recommended here
+        }
+        assert service._resolve_primary(session, orphan) is None
 
 
 def test_stale_checkpoint_outcome_lands_on_the_shown_candidate(
@@ -1729,6 +1736,57 @@ def test_stale_checkpoint_outcome_lands_on_the_shown_candidate(
     try:
         assert check.get(Recommendation, new_rid).outcome == "accepted"
         assert check.get(Recommendation, old_rid).outcome == "declined"  # untouched
+    finally:
+        check.close()
+
+
+def test_stale_checkpoint_answer_row_is_attributed_to_the_shown_responder(
+    seed_counts, engine, fake_embedder
+) -> None:
+    # #94-3 x #274: the captured answer must be attributed to the person who
+    # actually answered. Resolving through the stale id would file candidate 2's
+    # answer under candidate 1 — polluting the reuse corpus and lighting the wrong
+    # employee's "回答が届きました".
+    service = _service(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    client = _app_client(service)
+    client.post("/ask", json={"asker_id": 7, "question": GOOD_Q, "session_id": "stale4"})
+    _events(client, "stale4")
+    old_rid = client.get("/handoff/stale4").json()["recommendation_id"]
+    client.post("/answer", json={"session_id": "stale4", "outcome": "declined"})
+    _events(client, "stale4")
+
+    db = service._session_factory()
+    try:
+        service._graph(db).update_state(
+            service._config("stale4"), {"primary_recommendation_id": old_rid}
+        )
+    finally:
+        db.close()
+
+    body = "拠点間はIPsec VPNで設定し、各ルータのSAを揃えてください。"
+    assert (
+        client.post(
+            "/answer", json={"session_id": "stale4", "outcome": "accepted", "answer_body": body}
+        ).status_code
+        == 200
+    )
+
+    check = get_sessionmaker(engine)()
+    try:
+        q = (
+            check.query(Question)
+            .filter(Question.asker_id == 7, Question.body == GOOD_Q)
+            .order_by(Question.created_at.desc())
+            .first()
+        )
+        answers = check.query(Answer).filter(Answer.question_id == q.id).all()
+        assert len(answers) == 1
+        assert answers[0].responder_id == 2  # the SHOWN candidate, not the declined 1
     finally:
         check.close()
 

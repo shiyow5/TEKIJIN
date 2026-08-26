@@ -576,10 +576,15 @@ class AgentService:
         so every later submission returns ``"already"`` — a permanent 409-alike).
 
         So the SHOWN top candidate is the authority: when the stored id does not
-        point at them, re-derive their newest row from the DB. This deliberately
-        does NOT just take "the newest rank-1 row" — ``select_candidate`` promotes
-        an already-persisted rank-2/3 row without rewriting DB ranks, so a rank
-        query would silently undo an explicit user choice.
+        point at them, re-derive their newest row from the DB. Resolving by PERSON
+        rather than by rank keeps this independent of the ``rank`` column, which is
+        a projection maintained for ``GET /inbox`` (``reorder_recommendation_ranks``
+        on reselect) — the outcome must land on the person the responder saw even if
+        that projection lags, and "who was shown" is the invariant we actually mean.
+
+        Returns ``None`` when the shown candidate has NO persisted row: attributing
+        their answer to some other row would be worse than not recording it (the
+        caller logs and resumes with ``no_target``).
         """
 
         primary = values.get("primary_recommendation_id")
@@ -600,14 +605,21 @@ class AgentService:
             return primary
         rebound = latest_recommendation_for_person(session, question_id, shown_person)
         if rebound is None:
-            # The shown candidate has no persisted row at all (the INSERT itself was
-            # lost). Fall back to the stored id / newest rank-1 rather than dropping
-            # the outcome on the floor.
-            return (
-                primary
-                if primary is not None
-                else latest_primary_recommendation(session, question_id)
+            # The shown candidate has no persisted row at all (e.g. the #351
+            # document-fallback continuation reuses a PRIOR batch's ids and so never
+            # inserts one for the fallback candidate). Falling back to `primary` here
+            # would knowingly bind THIS person's answer to a row belonging to someone
+            # else — it would land in `answers.responder_id` (#274) and light the
+            # wrong employee's "回答が届きました". Recording nothing is the lesser
+            # harm: the caller logs and resumes with `no_target`.
+            logger.warning(
+                "no recommendation row for the shown candidate (question %s, person %s); "
+                "refusing to bind the outcome to %s",
+                question_id,
+                shown_person,
+                primary,
             )
+            return None
         if primary is not None and rebound != primary:
             logger.warning(
                 "stale primary_recommendation_id %s for question %s; "
