@@ -26,7 +26,9 @@ describe("DocumentViewer", () => {
 
     expect(screen.getByText("読み込み中…")).toBeInTheDocument();
     await waitFor(() => expect(getDocumentMock).toHaveBeenCalledWith("doc_001"));
-    expect(screen.getByRole("heading", { name: "社内IT手順書" })).toBeInTheDocument();
+    // `findBy` for the first assertion: the waitFor above proves only that the
+    // fetch was issued, not that its result rendered.
+    expect(await screen.findByRole("heading", { name: "社内IT手順書" })).toBeInTheDocument();
     expect(screen.getByText(/キッティング手順書/)).toBeInTheDocument();
     expect(screen.getByText("出典: 社内Wiki/IT")).toBeInTheDocument();
     expect(screen.getByText("更新: 2026-08-01")).toBeInTheDocument();

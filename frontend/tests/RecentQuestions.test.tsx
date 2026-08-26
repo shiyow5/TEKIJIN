@@ -83,7 +83,9 @@ describe("RecentQuestions", () => {
     render(<RecentQuestions />);
 
     await waitFor(() => expect(getRecentQuestionsMock).toHaveBeenCalledWith("E001"));
-    expect(screen.getByText("UTMの移行時の注意点")).toBeInTheDocument();
+    // `findBy` for the first assertion: the waitFor above proves only that the
+    // fetch was issued, not that its result rendered.
+    expect(await screen.findByText("UTMの移行時の注意点")).toBeInTheDocument();
     // Two items are resolved (person + document), so there are two 解決済 chips.
     expect(screen.getAllByText("解決済")).toHaveLength(2);
     expect(screen.getByText("高梨 健太")).toBeInTheDocument();
