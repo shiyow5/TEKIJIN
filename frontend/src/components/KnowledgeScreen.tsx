@@ -42,6 +42,7 @@
 import { PageBackLink } from "@/components/PageBackLink";
 import { getKnowledgeList } from "@/lib/api-client";
 import type { KnowledgeItem, KnowledgeSummary } from "@/lib/api-types";
+import { formatDateJst } from "@/lib/datetime";
 import Link from "next/link";
 import { type FormEvent, useEffect, useState } from "react";
 
@@ -65,10 +66,9 @@ interface Filters {
 
 const EMPTY_FILTERS: Filters = { q: "", department: "", topic: "", since: "" };
 
-/** "2026-08-20" from an ISO timestamp; "—" when unparseable/missing. */
+/** "2026-08-20" (JST) from an ISO timestamp; "—" when unparseable/missing. */
 function formatDate(iso: string | null | undefined): string {
-  if (!iso || iso.length < 10) return "—";
-  return iso.slice(0, 10);
+  return formatDateJst(iso) ?? "—";
 }
 
 /**

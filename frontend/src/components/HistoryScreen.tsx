@@ -15,6 +15,7 @@ import { QuestionDeleteButton } from "@/components/QuestionDeleteButton";
 import { QuestionResolveButton } from "@/components/QuestionResolveButton";
 import { getRecentQuestions } from "@/lib/api-client";
 import type { RecentQuestionItem } from "@/lib/api-types";
+import { formatDateTimeJst } from "@/lib/datetime";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
@@ -26,12 +27,6 @@ type Phase = "loading" | "ready" | "error";
 interface HistoryState {
   phase: Phase;
   items?: RecentQuestionItem[];
-}
-
-/** "2026-08-20 10:00" from an ISO timestamp; null when unparseable. */
-function formatDate(iso: string | null | undefined): string | null {
-  if (!iso || iso.length < 16) return null;
-  return `${iso.slice(0, 10)} ${iso.slice(11, 16)}`;
 }
 
 /** The resolution line: responder name, self / document self-resolve, or pending. */
@@ -51,7 +46,7 @@ function HistoryRow({
   onDeleted: (questionId: string) => void;
   onResolved: (questionId: string) => void;
 }) {
-  const date = formatDate(item.created_at);
+  const date = formatDateTimeJst(item.created_at);
   return (
     <li className="relative rounded-xl border border-outline-variant bg-surface-container-lowest p-md">
       <div className="flex items-start justify-between gap-sm pr-8">
