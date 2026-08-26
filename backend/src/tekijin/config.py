@@ -162,8 +162,16 @@ class Settings(BaseSettings):
     # there is no cost argument for narrowing. OFF by default until the full-graph
     # E2E measurement confirms Hit@3 improves without moving person route recall
     # (the route reads C4's set separately and must stay at 1.000 — ADR-0007).
-    # At thousands of employees this should read person_topic_edges by topic
-    # instead of the whole table; revisit before that scale.
+    # MEASURED AND NOT ADOPTED (ADR-0009): on the real graph, 3 paired replicates
+    # put Hit@3 at 0.7778 (C4 pool) vs 0.7626 (whole roster) — consistently one row
+    # worse, never better; person route recall stayed 1.000 either way. C4's set is
+    # not only a narrowing, it is the prior "this person was retrievable for this
+    # question"; widening it lets a high-generic-topic_fit person with no
+    # question-specific evidence displace the right one (and #405's qsim is 0 for
+    # anyone C4 did not surface). The flag stays so the measurement is one command
+    # away when the scorer or corpus changes.
+    # At thousands of employees the pool should come from person_topic_edges by
+    # topic rather than the whole table; that is a cost concern, not an accuracy one.
     score_all_employees: bool = False
 
     # #357: knowledge framework. When the knowledge layer is wired into retrieval,
