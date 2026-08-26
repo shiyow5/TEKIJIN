@@ -351,7 +351,7 @@ def test_dashboard_top_responders_is_a_bounded_query_param(
     client = _client(engine, fake_embedder)
 
     default = client.get("/dashboard").json()["answers_per_responder"]
-    assert len(default) <= 5  # unchanged default
+    assert len(default) == 5  # unchanged default (the seed has 40 distinct responders)
 
     wider = client.get("/dashboard", params={"top_responders": 12}).json()
     assert len(wider["answers_per_responder"]) > len(default)  # the seed has >5 responders
@@ -364,6 +364,13 @@ def test_dashboard_top_responders_is_a_bounded_query_param(
     assert client.get("/dashboard", params={"top_responders": 0}).status_code == 422
     assert client.get("/dashboard", params={"top_responders": 51}).status_code == 422
     assert client.get("/dashboard", params={"top_responders": "all"}).status_code == 422
+
+    # The load KPI must NOT move with the limit: its denominator is the total answer
+    # count, not the sum of the truncated list. (If it were the latter, widening the
+    # list would silently change a headline number.)
+    assert wider["top_responder_share"] == pytest.approx(
+        client.get("/dashboard").json()["top_responder_share"]
+    )
 
 
 def test_run_records_nonzero_monotonic_durations(seed_counts, engine, fake_embedder) -> None:
