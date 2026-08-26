@@ -113,7 +113,10 @@ class ResumeRequest(BaseModel):
     # the asker's "回答が届きました" history, and the accumulation dashboard. Optional
     # and only meaningful with ``outcome == "accepted"`` — a decline carries no
     # answer, and older clients / the "direct" consult method may accept without one.
-    answer_body: str | None = None
+    # Bounded (matches ``supplement`` / message ``body``): the text is embedded and
+    # stored in an unbounded Text column, so an unbounded body is a storage/CPU
+    # foot-gun.
+    answer_body: str | None = Field(default=None, max_length=2000)
 
     @model_validator(mode="after")
     def _exactly_one(self) -> ResumeRequest:

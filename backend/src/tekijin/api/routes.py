@@ -131,10 +131,21 @@ def answer(
 
     Object-level auth (#241): only the session's asker/responder (or admin) may
     resume it — a non-participant is 403 even with a valid token and session id.
+
+    Answer capture is further restricted (#274): an ``answer_body`` is attributed to
+    the responder and re-surfaced to others as their answer, so ONLY the responder
+    (or admin) may supply one. The asker is a valid participant (they own the
+    clarification reply), but must not be able to forge an answer in the responder's
+    name — a mismatch is 403.
     """
 
     asker_id, responder_id = _service(request).session_participants(req.session_id)
     require_session_participant(principal, asker_id, responder_id)
+    if req.clean_answer_body is not None and not principal.may_act_as(responder_id or -1):
+        raise HTTPException(
+            status_code=403,
+            detail="回答本文を登録できるのは取次ぎ先の担当者本人のみです。",
+        )
     try:
         _service(request).submit_resume(
             req.session_id,

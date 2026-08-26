@@ -116,6 +116,11 @@ def test_resume_request_answer_body_only_with_accepted() -> None:
         schemas.ResumeRequest(session_id="s", outcome="declined", answer_body="本文")
     with pytest.raises(ValueError):
         schemas.ResumeRequest(session_id="s", reply="x", answer_body="本文")
+    # Bounded to 2000 chars (matches supplement / message body) — an unbounded body
+    # is a storage/CPU foot-gun since it is embedded and stored (#274).
+    assert schemas.ResumeRequest(session_id="s", outcome="accepted", answer_body="あ" * 2000)
+    with pytest.raises(ValueError):
+        schemas.ResumeRequest(session_id="s", outcome="accepted", answer_body="あ" * 2001)
 
 
 # --------------------------------------------------------------------------- #

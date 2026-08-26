@@ -545,9 +545,16 @@ class AgentService:
                 # wins. We resume the graph with that effective value so the
                 # checkpoint always advances consistently with the DB — never
                 # diverging, and never left permanently paused at ``send``.
-                _status, resume_value = self._record_outcome(
-                    session_id, snapshot.values, outcome, answer_body=answer_body
+                status, resume_value = self._record_outcome(
+                    session_id, snapshot.values, outcome
                 )
+                # #274: capture the answer only on a FRESHLY recorded accept (not a
+                # duplicate "already"/"no_target"), in its own post-commit transaction
+                # so it cannot roll back the accept. answer_body is pre-validated to
+                # ride only on an accept, and route-level auth restricts it to the
+                # responder (or admin).
+                if status == "recorded" and outcome == "accepted" and answer_body:
+                    self._capture_answer(snapshot.values, answer_body)
             else:  # pragma: no cover - the graph only ever interrupts at ask/send
                 raise SessionConflict("session cannot be resumed from its current state")
 
@@ -556,12 +563,7 @@ class AgentService:
             ctx.touched_at = self._clock()
 
     def _record_outcome(
-        self,
-        session_id: str,
-        values: dict[str, Any],
-        outcome: str,
-        *,
-        answer_body: str | None = None,
+        self, session_id: str, values: dict[str, Any], outcome: str
     ) -> tuple[str, str]:
         """Record the responder outcome on the durable primary recommendation.
 
@@ -598,14 +600,9 @@ class AgentService:
             # resolution time (first-wins) for the dashboard's avg-resolution (#97).
             if outcome == "accepted" and question_id is not None:
                 mark_question_resolved(session, question_id, self._now_factory())
-                # #274: capture the responder's answer text as an ``answers`` row so
-                # the accumulation loop closes — the row fuels reuse (the retriever
-                # searches answers), lights the asker's "回答が届きました" history, and
-                # feeds the dashboard. Best-effort: an embed/store failure is logged
-                # but never blocks the hand-off from resuming.
-                body = (answer_body or "").strip()
-                if body:
-                    self._capture_answer(session, values, primary, question_id, body)
+                # NB: the #274 answer capture is deliberately NOT done here — it runs
+                # in its own transaction AFTER this one commits (see submit_resume /
+                # _capture_answer) so a capture failure can never roll back the accept.
                 # Seed the chat with the asker's own request text (the hand-off
                 # draft) as its first message, so the responder opens the thread
                 # already seeing what they were asked — not an empty conversation.
@@ -622,42 +619,57 @@ class AgentService:
                         create_message(session, primary, asker_id, draft, dt.datetime.now())
             return "recorded", outcome
 
-    def _capture_answer(
-        self,
-        session: Session,
-        values: dict[str, Any],
-        primary: int,
-        question_id: str,
-        body: str,
-    ) -> None:
+    def _capture_answer(self, values: dict[str, Any], body: str) -> None:
         """Persist the responder's answer text as an ``answers`` row (#274).
 
-        Attributes the answer to the recommendation's employee (authoritative DB
-        lookup, not the external ``E###`` wire form) and tags it with the question's
-        first predicted topic so ``answers_by_topic`` reuse can find it. The dense
-        embedding is best-effort: any embedder failure degrades to a NULL embedding
-        (still BM25-reusable) rather than aborting the accept.
+        Runs in its OWN transaction, AFTER the outcome has already been committed by
+        ``_record_outcome`` — so this is genuinely best-effort: any failure here (a
+        flush error, a DB hiccup, a NULL responder) is logged and swallowed, and the
+        hand-off has already resumed regardless. The answer is attributed to the
+        recommendation's employee via an authoritative DB lookup (not the external
+        ``E###`` wire form) and tagged with the question's first predicted topic so
+        ``answers_by_topic`` reuse can find it. The dense embedding is computed BEFORE
+        the transaction opens (so a slow encode does not hold DB row locks) and
+        degrades to ``None`` on failure — still BM25-reusable.
         """
 
-        responder_id = recommendation_employee_id(session, primary)
-        if responder_id is None:
-            logger.warning(
-                "no responder to attribute the answer to (question %s); skipping capture",
-                question_id,
-            )
+        body = body.strip()
+        if not body:
             return
-        topics = values.get("topics") or []
-        topic = topics[0] if topics else None
         embedding = self._embed_answer(body)
-        create_answer(
-            session,
-            question_id=question_id,
-            responder_id=responder_id,
-            body=body,
-            topic=topic,
-            embedding=embedding,
-            created_at=self._now_factory(),
-        )
+        try:
+            with session_scope(self._session_factory) as session:
+                question_id = values.get("question_id")
+                if question_id is None:
+                    return
+                primary = values.get("primary_recommendation_id")
+                if primary is None:
+                    primary = latest_primary_recommendation(session, question_id)
+                if primary is None:
+                    logger.warning(
+                        "no recommendation to attribute the captured answer (question %s)",
+                        question_id,
+                    )
+                    return
+                responder_id = recommendation_employee_id(session, primary)
+                if responder_id is None:
+                    logger.warning(
+                        "no responder to attribute the captured answer (question %s)",
+                        question_id,
+                    )
+                    return
+                topics = values.get("topics") or []
+                create_answer(
+                    session,
+                    question_id=question_id,
+                    responder_id=responder_id,
+                    body=body,
+                    topic=topics[0] if topics else None,
+                    embedding=embedding,
+                    created_at=self._now_factory(),
+                )
+        except Exception:  # pragma: no cover - defensive; exercised via logging path
+            logger.exception("failed to capture the answer; the hand-off proceeds without it")
 
     def _embed_answer(self, body: str) -> list[float] | None:
         """Embed an answer body for dense reuse, or ``None`` if embedding fails.
