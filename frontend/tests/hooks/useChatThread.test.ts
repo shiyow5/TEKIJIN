@@ -25,6 +25,7 @@ const DETAIL: ChatThreadDetail = {
       created_at: "2026-08-24T09:00:00",
     },
   ],
+  slack_channel_url: null,
 };
 
 function setVisibility(state: DocumentVisibilityState) {

@@ -82,6 +82,23 @@ migrate_schema() {
   ( cd "${DEPLOY_DIR}/backend" && env PYTHONPATH=src "$VENV_PY" -m tekijin.data.migrate )
 }
 
+embed_missing() {
+  # #433 / task3: migrate ADDs the daily-report embedding column but leaves it NULL
+  # — deploy never embedded, so daily_knowledge_enabled would be inert in prod. Fill
+  # ONLY the rows whose embedding is still NULL (embed_fixtures.py defaults to
+  # only-missing), so the first deploy after enabling embeds the daily corpus and
+  # every later deploy is a fast no-op (nothing missing). CPU-only + offline so it
+  # never contends for vLLM's GPU or hits the network. BEST-EFFORT: a failure must
+  # NOT roll back an otherwise-healthy deploy — the daily channel simply stays empty
+  # (no daily hits, never an error) until a later run fills it. Runs after migrate
+  # (the column must exist) and before the backend restart.
+  log "embed rows with a NULL embedding (only-missing; daily #433)"
+  ( cd "${DEPLOY_DIR}/backend" \
+      && env PYTHONPATH=src CUDA_VISIBLE_DEVICES="" HF_HUB_OFFLINE=1 \
+         "$VENV_PY" ../scripts/embed_fixtures.py ) \
+    || log "WARN embed step failed — daily channel stays empty until next deploy; continuing"
+}
+
 build_frontend() {
   # Build INSIDE the same image the container runs, against the bind-mounted source,
   # so `next start` picks up the fresh .next on restart. NEXT_PUBLIC_* must be baked
@@ -152,6 +169,7 @@ main() {
   fi
 
   migrate_schema
+  embed_missing
 
   log "rebuild frontend"
   build_frontend

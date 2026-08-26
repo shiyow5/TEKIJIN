@@ -17,6 +17,23 @@ Outcome = Literal["accepted", "declined"]
 # unset/legacy value is coalesced to it everywhere it is read.
 ConsultMethod = Literal["direct", "chat"]
 
+
+def normalize_consult_method(value: str | None) -> ConsultMethod:
+    """Narrow a raw ``questions.consult_method`` value onto the API contract.
+
+    The column is a bare ``VARCHAR(32)`` with no CHECK constraint, so an older
+    client, a manual fix-up, or a rolled-back future value can leave something
+    else in it. Without this, such a row 500s on GET /handoff and GET /inbox —
+    the response model rejects it — for a hand-off that is otherwise perfectly
+    serviceable. Everything downstream already reads the column as a two-way
+    branch (``COALESCE(consult_method, 'chat') != 'direct'`` in
+    :mod:`tekijin.data.messages`), so "anything that is not 直接相談 behaves as
+    チャット" is the existing semantics, not a new rule.
+    """
+
+    return "direct" if value == "direct" else "chat"
+
+
 # session_id doubles as the ``/events/{session_id}`` path segment and the graph
 # ``thread_id``; constrain it to path-safe characters (no ``/``) so a created
 # session is always reachable over GET /events.
@@ -604,6 +621,12 @@ class MessageThreadDetail(BaseModel):
     question_title: str
     counterpart: HandoffAsker
     messages: list[MessageItem] = Field(default_factory=list)
+    # Deep link to this pair's shared Slack channel (#hand-off-chat) — present
+    # only once one exists (both parties linked Slack and a "chat" hand-off
+    # between them was accepted). The channel is shared across every thread
+    # between the two, so this link is the same regardless of which of their
+    # threads it's fetched from.
+    slack_channel_url: str | None = None
 
 
 # --------------------------------------------------------------------------- #
@@ -662,6 +685,15 @@ class SourceCitation(BaseModel):
 
     source_id: str
     kind: str  # "qa" (past Q&A) | "document" (internal doc)
+
+
+class ReferenceData(BaseModel):
+    """#413: a cited answer surfaced ALONGSIDE a person hand-off ("参考: 過去の類似
+    回答"). Emitted on the person route before ``recommend`` when a grounded past
+    answer exists — additive, never a substitute for the hand-off."""
+
+    answer: str
+    citations: list[SourceCitation] = Field(default_factory=list)
 
 
 class MessageData(BaseModel):
@@ -789,3 +821,24 @@ class LoginResponse(BaseModel):
     access_token: str
     token_type: Literal["bearer"] = "bearer"
     principal: PrincipalResponse
+
+
+# --------------------------------------------------------------------------- #
+# Slack integration (chat -> Slack DM notification)
+# --------------------------------------------------------------------------- #
+class SlackAuthorizeUrlResponse(BaseModel):
+    """The "Sign in with Slack" URL for the frontend to navigate the browser to."""
+
+    url: str
+
+
+class SlackStatusResponse(BaseModel):
+    """Whether the acting employee currently has a linked Slack account."""
+
+    linked: bool
+
+
+class SlackUnlinkResponse(BaseModel):
+    """Ack for ``POST /slack/unlink``."""
+
+    ok: bool = True

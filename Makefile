@@ -2,6 +2,7 @@
         fmt fmt-backend fmt-frontend \
         fmt-check fmt-check-backend fmt-check-frontend \
         lint lint-backend lint-frontend \
+        typecheck-backend \
         test test-backend test-frontend e2e \
         run-backend run-frontend serve dev serve-prod \
         db-up db-down seed migrate embed eval \
@@ -67,10 +68,18 @@ fmt-check-frontend: ## Check frontend formatting
 # ============================================================
 # Lint
 # ============================================================
-lint: lint-backend lint-frontend ## Run all linters
+lint: lint-backend typecheck-backend lint-frontend typecheck-frontend ## Run all linters (incl. mypy / tsc)
 
 lint-backend: ## Lint Python with ruff
 	cd $(BACKEND_DIR) && $(PY) -m ruff check .
+
+typecheck-backend: ## Type-check the backend (mypy src)
+	# Part of `make lint` (and therefore `make check` / CI). ruff does not type-check,
+	# so `backend/pyproject.toml` carried a `[tool.mypy]` section that NOTHING ever
+	# ran (#427) — the README claimed mypy was "併用" while the frontend gained real
+	# enforcement in #309. Scoped to `src`: tests lean on doubles and dynamic kwargs
+	# by design, and gating on them would buy noise, not safety. ~10s.
+	cd $(BACKEND_DIR) && $(PY) -m mypy src
 
 lint-frontend: ## Lint frontend with biome
 	cd $(FRONTEND_DIR) && npm run lint
@@ -86,7 +95,11 @@ test-backend: ## Run backend tests (pytest)
 test-frontend: ## Run frontend unit tests (vitest)
 	cd $(FRONTEND_DIR) && npm test
 
-typecheck-frontend: ## Type-check the frontend (tsc)
+typecheck-frontend: ## Type-check the frontend (tsc --noEmit)
+	# Part of `make lint` (and therefore `make check` / CI). biome does not type-check
+	# and vitest transpiles without checking, so `frontend/tests/**` was covered by
+	# NOTHING; `app/` and `src/` were only caught late, by `next build` inside the E2E
+	# job's webServer (#309). ~5s warm, ~18s cold (CI is always cold — no tsc cache).
 	cd $(FRONTEND_DIR) && npm run typecheck
 
 e2e: ## Run Playwright end-to-end tests (frontend; builds + serves the app itself)

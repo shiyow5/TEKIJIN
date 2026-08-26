@@ -10,8 +10,11 @@ import {
   getHandoff,
   getInbox,
   getRecentQuestions,
+  getSlackAuthorizeUrl,
+  getSlackStatus,
   postAnswer,
   postAsk,
+  postSlackUnlink,
   regenerateHandoffDraft,
   requestDocumentFallback,
   resolveQuestion,
@@ -576,5 +579,59 @@ describe("deleteQuestion", () => {
     await expect(deleteQuestion("nope", { fetchImpl })).rejects.toMatchObject({
       status: 404,
     });
+  });
+});
+
+describe("getSlackStatus", () => {
+  it("GETs {base}/slack/status with auth headers", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ linked: true }));
+
+    const result = await getSlackStatus({ fetchImpl });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe(`${DEFAULT_API_BASE_URL}/slack/status`);
+    expect(init?.method).toBe("GET");
+    expect(result).toEqual({ linked: true });
+  });
+});
+
+describe("getSlackAuthorizeUrl", () => {
+  it("GETs {base}/slack/authorize-url and returns the URL", async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonResponse({ url: "https://slack.com/oauth/v2/authorize?x=1" }));
+
+    const result = await getSlackAuthorizeUrl({ fetchImpl });
+
+    expect(fetchImpl.mock.calls[0][0]).toBe(`${DEFAULT_API_BASE_URL}/slack/authorize-url`);
+    expect(result).toEqual({ url: "https://slack.com/oauth/v2/authorize?x=1" });
+  });
+
+  it("throws ApiError with status 503 when Slack is not configured", async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        jsonResponse({ detail: "Slack連携は現在利用できません。" }, { ok: false, status: 503 }),
+      );
+
+    await expect(getSlackAuthorizeUrl({ fetchImpl })).rejects.toMatchObject({
+      status: 503,
+    });
+    await expect(getSlackAuthorizeUrl({ fetchImpl })).rejects.toBeInstanceOf(ApiError);
+  });
+});
+
+describe("postSlackUnlink", () => {
+  it("POSTs {base}/slack/unlink with auth headers and returns the ack", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ ok: true }));
+
+    const result = await postSlackUnlink({ fetchImpl });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe(`${DEFAULT_API_BASE_URL}/slack/unlink`);
+    expect(init?.method).toBe("POST");
+    expect(result).toEqual({ ok: true });
   });
 });

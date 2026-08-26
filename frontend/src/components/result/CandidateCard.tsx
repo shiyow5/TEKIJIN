@@ -89,8 +89,16 @@ export function CandidateCard({
         <ul className="mb-md flex flex-col gap-xs">
           {candidate.reasons.map((reason) => {
             // Distance and current load are comparison signals: show their values
-            // on every card, not only the expanded top one (#204).
-            const showDetail = expanded || reason.type === "proximity" || reason.type === "load";
+            // on every card, not only the expanded top one (#204). `constraint` (#83)
+            // is not a signal at all — it is the reason the asker's explicit branch
+            // request was not met for this person, so hiding its detail on the
+            // non-expanded cards would leave a bare "拠点の希望" bullet that says
+            // nothing. The backfilled candidates are exactly the non-first ones.
+            const showDetail =
+              expanded ||
+              reason.type === "proximity" ||
+              reason.type === "load" ||
+              reason.type === "constraint";
             return (
               <li
                 key={`${reason.type}-${reason.detail}`}

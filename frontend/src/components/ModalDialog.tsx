@@ -1,8 +1,9 @@
 "use client";
 
 /**
- * Shared modal-dialog chrome: overlay, `role="dialog"` + `aria-modal`, Tab-trap,
- * Escape-to-cancel, and opener focus restore. Extracted from
+ * Shared modal-dialog chrome: overlay, `role="dialog"` + `aria-modal`, Tab-trap
+ * (via {@link useFocusTrap}, shared with `AppHeader`'s nav drawer — #391
+ * review), Escape-to-cancel, and opener focus restore. Extracted from
  * `result/ConsultMethodDialog.tsx` when `QuestionResolveButton`'s confirmation
  * became a popup too (#289) and would otherwise have carried a second copy of
  * the same a11y-sensitive logic. Anything that needs a modal should render this
@@ -31,6 +32,7 @@
  * the topmost thing in the document regardless of where it is mounted from.
  */
 
+import { useFocusTrap } from "@/hooks/useFocusTrap";
 import { type ReactNode, type RefObject, useEffect, useLayoutEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 
@@ -70,25 +72,11 @@ export function ModalDialog({
     return () => opener?.focus?.();
   }, [initialFocusRef]);
 
+  useFocusTrap(dialogRef, true);
+
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        onCancel();
-        return;
-      }
-      if (e.key !== "Tab") return;
-      const focusable = dialogRef.current?.querySelectorAll<HTMLElement>("button:not([disabled])");
-      if (!focusable || focusable.length === 0) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      const active = document.activeElement;
-      if (e.shiftKey && (active === first || !dialogRef.current?.contains(active))) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && active === last) {
-        e.preventDefault();
-        first.focus();
-      }
+      if (e.key === "Escape") onCancel();
     }
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);

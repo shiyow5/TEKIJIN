@@ -13,6 +13,7 @@
 
 import { FollowupForm } from "@/components/FollowupForm";
 import { PageBackLink } from "@/components/PageBackLink";
+import { ReferenceAnswer } from "@/components/ReferenceAnswer";
 import {
   useOptionalSessionStream,
   useOptionalSessionStreamRestart,
@@ -292,6 +293,9 @@ export function ProcessingScreen({
             </li>
           ) : null}
         </ol>
+
+        {/* #413: additive cited answer, shown alongside the person hand-off flow. */}
+        <ReferenceAnswer reference={stream.reference} sessionId={sessionId} />
 
         {showFollowup && stream.followup ? (
           <FollowupForm

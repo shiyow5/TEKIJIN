@@ -200,6 +200,7 @@ export function ResultScreen({ streamState, sessionId }: ResultScreenProps) {
           recommendations={recommendations}
           reason={stream.route?.reason}
           draft={draft}
+          reference={stream.reference}
           sessionId={effectiveSessionId}
         />
       </ResultFrame>

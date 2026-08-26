@@ -83,6 +83,56 @@ class EmployeeProfile(Base):
     updated_at: Mapped[dt.datetime | None] = mapped_column(DateTime)
 
 
+class SlackLink(Base):
+    """One employee's linked Slack account (one row per employee).
+
+    Only the Slack user/team id is stored — no per-user OAuth token. Every
+    Slack-side action (posting into a thread's channel, inviting a member)
+    goes through the app's own bot token instead, so there is nothing here to
+    refresh or revoke on Slack's side beyond the identity mapping itself.
+    """
+
+    __tablename__ = "slack_links"
+
+    employee_id: Mapped[int] = mapped_column(
+        ForeignKey("employees.id"), primary_key=True, index=True
+    )
+    slack_user_id: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    slack_team_id: Mapped[str] = mapped_column(String(32))
+    linked_at: Mapped[dt.datetime] = mapped_column(DateTime)
+
+
+class SlackChannelLink(Base):
+    """The shared private Slack channel for one PAIR of employees (#hand-off-chat).
+
+    Created once, the first time a "chat" hand-off between two Slack-linked
+    employees is accepted (a private channel containing the bot plus both of
+    them), then REUSED for every later hand-off between the same pair — one
+    channel per relationship, not one per question, so consulting the same
+    person again doesn't pile up a fresh channel every time.
+
+    ``current_thread_id`` is which TEKIJIN thread an inbound Slack message in
+    this channel is attributed to. It is stamped to the new thread whenever
+    the channel is reused for another hand-off, so it always points at the
+    pair's most recent consultation — a "most recent thread wins" heuristic:
+    if the same two people have two hand-offs open at once, a Slack reply
+    lands on whichever was accepted last, even if a human meant it for the
+    other. Naming the row by the pair (not by ``thread_id``, an earlier
+    design) is what makes channel reuse possible at all.
+    """
+
+    __tablename__ = "slack_channel_links"
+
+    # Canonicalized so the pair (A, B) and (B, A) are always the same row:
+    # employee_low_id < employee_high_id, enforced by the writer, not the DB.
+    employee_low_id: Mapped[int] = mapped_column(ForeignKey("employees.id"), primary_key=True)
+    employee_high_id: Mapped[int] = mapped_column(ForeignKey("employees.id"), primary_key=True)
+    slack_channel_id: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    slack_team_id: Mapped[str] = mapped_column(String(32))
+    current_thread_id: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime)
+
+
 class AiChatHistory(Base):
     """AI <-> employee conversation log (one row per message)."""
 
@@ -122,6 +172,11 @@ class DailyReport(Base):
     # use daily reports as topic evidence without a runtime keyword vocabulary.
     topics: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
     created_at: Mapped[dt.datetime | None] = mapped_column(DateTime)
+    # #433: dense embedding of ``issue + content`` so a daily report can be a
+    # SEARCHABLE knowledge source for System 1 (self-answer / #413 additive), not
+    # just topic-overlap evidence for the scorer. NULL until ``make embed`` fills
+    # it (fresh DBs via create_all, existing via _apply_schema_upgrades).
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM))
 
 
 class Project(Base):

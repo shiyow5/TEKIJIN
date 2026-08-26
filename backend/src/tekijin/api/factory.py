@@ -63,6 +63,9 @@ def build_default_service(settings: Settings | None = None) -> AgentService:
         prior_answer_relevance_floor=settings.prior_answer_relevance_floor,
         # #355: daily reports as C6 evidence (False = dormant, develop unchanged).
         daily_evidence=settings.daily_evidence_enabled,
+        # #433: daily reports as a System 1 knowledge source (OFF until DGX
+        # confirms grounded up + person recall unchanged; needs daily embeddings).
+        daily_knowledge_enabled=settings.daily_knowledge_enabled,
         # #371: fold C1 topics into the C4 retrieval query. DORMANT (False) and must
         # stay OFF: the #380 full-graph E2E run showed folding real C1 topics
         # (acc@1=0.750) into the query BREAKS routing (person recall 1.000->0.776);
@@ -72,6 +75,12 @@ def build_default_service(settings: Settings | None = None) -> AgentService:
         # the full-graph E2E verification (Hit@3 0.742->0.788, person route recall
         # 1.000 unchanged — C5 does not read the scorer, so routing is untouched).
         question_fit_enabled=settings.question_fit_enabled,
+        branch_constraint_enabled=settings.branch_constraint_enabled,
+        # #413: additive cited answer on the person route (OFF until DGX full-graph
+        # confirms person recall 1.000 and citations fire). Floors the compose call.
+        additive_self_answer_enabled=settings.additive_self_answer_enabled,
+        additive_self_answer_floor=settings.additive_self_answer_floor,
+        score_all_employees=settings.score_all_employees,
         # #357 slice 4c: wire the knowledge-answer step ONLY when enabled; else None
         # keeps the pre-#357 graph (no knowledge_answer node). Default OFF until the
         # knowledge corpus is populated + verified (slice 4b calibrated the floor).

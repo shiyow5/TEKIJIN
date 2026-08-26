@@ -17,14 +17,18 @@
 
 import { useCurrentUser } from "@/components/CurrentUserProvider";
 import { PageBackLink } from "@/components/PageBackLink";
+import { SlackLinkButton } from "@/components/SlackLinkButton";
 import { useChatThread } from "@/hooks/useChatThread";
 import { useChatThreads } from "@/hooks/useChatThreads";
 import type { ChatMessage, ChatThreadSummary } from "@/lib/api-types";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 export interface ChatScreenProps {
   /** Deep-link a specific thread open (`?thread=<recommendation_id>`), e.g. from AnswerScreen. */
   initialThreadId?: string;
+  /** Result of a just-completed Slack OAuth round trip (`?slack=linked|error`). */
+  initialSlackResult?: "linked" | "error";
 }
 
 /** ISO 8601 → "YYYY-MM-DD HH:mm" without locale/timezone drift (string slice). */
@@ -182,9 +186,21 @@ function ChatConversation({
         >
           ← 一覧へ戻る
         </button>
-        <h2 className="font-bold text-on-surface">
-          {detail?.counterpart.name ?? (phase === "loading" ? "読み込み中…" : "不明な相手")}
-        </h2>
+        <div className="flex items-center justify-between gap-sm">
+          <h2 className="font-bold text-on-surface">
+            {detail?.counterpart.name ?? (phase === "loading" ? "読み込み中…" : "不明な相手")}
+          </h2>
+          {detail?.slack_channel_url ? (
+            <a
+              href={detail.slack_channel_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="shrink-0 text-primary text-xs underline hover:text-on-surface"
+            >
+              Slackで開く
+            </a>
+          ) : null}
+        </div>
         {detail?.question_title ? (
           <p className="line-clamp-1 text-on-surface-variant text-xs">{detail.question_title}</p>
         ) : null}
@@ -240,12 +256,14 @@ function ChatConversation({
   );
 }
 
-export function ChatScreen({ initialThreadId }: ChatScreenProps) {
+export function ChatScreen({ initialThreadId, initialSlackResult }: ChatScreenProps) {
+  const router = useRouter();
   const { currentUserId } = useCurrentUser();
   const { phase, threads } = useChatThreads(currentUserId);
   const [selectedId, setSelectedId] = useState<number | null>(
     initialThreadId ? Number(initialThreadId) : null,
   );
+  const [slackResult, setSlackResult] = useState(initialSlackResult ?? null);
 
   // Default to the most recently active thread once the list first loads, but
   // never override a deep link or an explicit selection the user already made.
@@ -255,32 +273,71 @@ export function ChatScreen({ initialThreadId }: ChatScreenProps) {
     }
   }, [threads, selectedId]);
 
+  // Drop `?slack=linked|error` from the URL once shown, so a reload doesn't
+  // re-show the one-off OAuth-result banner (#slack-integration).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only meant to run once, on the redirect back from Slack.
+  useEffect(() => {
+    if (!initialSlackResult) return;
+    router.replace(initialThreadId ? `/chat?thread=${initialThreadId}` : "/chat");
+  }, []);
+
   // Below `md` there is no room for two panes, so they take turns: the list
   // until a thread is picked, then the conversation with a way back (#254).
   const [showConversation, setShowConversation] = useState(initialThreadId != null);
 
   return (
-    // Only the DESKTOP layout pins the height so the two panes scroll
-    // independently. At phone width the header is much taller (bell, switcher,
-    // logout, hamburger) and any fixed offset pushed the composer off-screen —
-    // so there the section grows naturally and the page scrolls instead.
-    <section className="mx-auto flex w-full max-w-5xl flex-col gap-md py-lg md:h-[calc(100dvh-9rem)] md:flex-row">
-      <ChatThreadList
-        threads={threads}
-        phase={phase}
-        selectedId={selectedId}
-        onSelect={(id) => {
-          setSelectedId(id);
-          setShowConversation(true);
-        }}
-        className={showConversation ? "hidden md:flex" : "flex"}
-      />
-      <ChatConversation
-        threadId={selectedId}
-        currentUserId={currentUserId}
-        onBack={() => setShowConversation(false)}
-        className={showConversation ? "flex" : "hidden md:flex"}
-      />
-    </section>
+    // The height that used to be pinned on <section> alone now lives here: the
+    // SlackLinkButton row (and the OAuth-result banner, when shown) sit ABOVE
+    // it and take real space, so <section> can no longer assume a fixed
+    // 100dvh-9rem for itself — it now grows to fill whatever this outer
+    // column has left (`min-h-0 flex-1` below), whatever that row's height is.
+    <div className="mx-auto flex w-full max-w-5xl flex-col gap-md py-lg md:h-[calc(100dvh-9rem)]">
+      <div className="flex items-center justify-end gap-sm">
+        <SlackLinkButton />
+      </div>
+      {slackResult ? (
+        <output
+          className={`rounded-lg px-sm py-xs text-sm ${
+            slackResult === "linked"
+              ? "bg-secondary-container text-on-secondary-container"
+              : "bg-error-container text-on-error-container"
+          }`}
+        >
+          <span>
+            {slackResult === "linked"
+              ? "Slackと連携しました。"
+              : "Slack連携に失敗しました。時間をおいて再度お試しください。"}
+          </span>
+          <button type="button" onClick={() => setSlackResult(null)} className="ml-sm underline">
+            閉じる
+          </button>
+        </output>
+      ) : null}
+      {/* Only the DESKTOP layout bounds the height so the two panes scroll
+          independently (`min-h-0` lets a flex child shrink below its content's
+          natural height, which `overflow-y-auto` further down needs to ever
+          kick in instead of just growing). At phone width the wrapping div
+          above has no fixed height either, so this grows naturally and the
+          page scrolls instead — any fixed offset there pushed the composer
+          off-screen. */}
+      <section className="flex min-h-0 flex-col gap-md md:flex-1 md:flex-row">
+        <ChatThreadList
+          threads={threads}
+          phase={phase}
+          selectedId={selectedId}
+          onSelect={(id) => {
+            setSelectedId(id);
+            setShowConversation(true);
+          }}
+          className={showConversation ? "hidden md:flex" : "flex"}
+        />
+        <ChatConversation
+          threadId={selectedId}
+          currentUserId={currentUserId}
+          onBack={() => setShowConversation(false)}
+          className={showConversation ? "flex" : "hidden md:flex"}
+        />
+      </section>
+    </div>
   );
 }

@@ -62,6 +62,11 @@ const ADMIN_READY = ctx({
   canSwitch: true,
 });
 
+function openMenu() {
+  fireEvent.click(screen.getByRole("button", { name: "メニューを開く" }));
+  return document.getElementById("nav-menu") as HTMLElement;
+}
+
 beforeEach(() => {
   pathnameMock.mockReturnValue("/");
   useAuthMock.mockReturnValue(auth(ADMIN));
@@ -142,31 +147,75 @@ describe("AppHeader", () => {
     expect(reload).toHaveBeenCalledTimes(1);
   });
 
-  it("shows the dashboard link for an admin", () => {
+  it("shows the dashboard link for an admin, and not for a regular user", () => {
     useCurrentUserMock.mockReturnValue(ADMIN_READY);
-    render(<AppHeader />);
-    const nav = screen.getByRole("navigation", { name: "メインナビゲーション" });
+    const { rerender } = render(<AppHeader />);
+    let nav = within(openMenu()).getByRole("navigation", { name: "メインナビゲーション" });
     expect(within(nav).getByRole("link", { name: "ダッシュボード" })).toHaveAttribute(
       "href",
       "/dashboard",
     );
     expect(within(nav).getByRole("link", { name: "チャット" })).toHaveAttribute("href", "/chat");
+    expect(within(nav).getByRole("link", { name: "ナレッジ" })).toHaveAttribute(
+      "href",
+      "/knowledge",
+    );
+
+    useAuthMock.mockReturnValue(auth(USER));
+    useCurrentUserMock.mockReturnValue(
+      ctx({ currentUserId: "E001", currentUser: EMPLOYEES[0], canSwitch: false }),
+    );
+    // Rerenders the same instance — the menu is already open from above.
+    rerender(<AppHeader />);
+    nav = within(document.getElementById("nav-menu") as HTMLElement).getByRole("navigation", {
+      name: "メインナビゲーション",
+    });
+    expect(within(nav).queryByRole("link", { name: "ダッシュボード" })).not.toBeInTheDocument();
+  });
+
+  it("shows a トップ link back to the hub, right after the name", () => {
+    useCurrentUserMock.mockReturnValue(ADMIN_READY);
+    pathnameMock.mockReturnValue("/inbox");
+    render(<AppHeader />);
+    const menu = openMenu();
+    const nav = within(menu).getByRole("navigation", { name: "メインナビゲーション" });
+    expect(within(nav).getByRole("link", { name: "トップ" })).toHaveAttribute("href", "/");
+
+    const labels = within(menu)
+      .getAllByRole("link")
+      .map((link) => link.textContent);
+    expect(labels[0]).toBe("トップ");
+  });
+
+  // "質問する" is folded into the top page's own question bar (#391), not the nav.
+  it("never shows a 質問する nav link", () => {
+    useCurrentUserMock.mockReturnValue(ADMIN_READY);
+    render(<AppHeader />);
+    const nav = within(openMenu()).getByRole("navigation", { name: "メインナビゲーション" });
+    expect(within(nav).queryByRole("link", { name: "質問する" })).not.toBeInTheDocument();
   });
 
   // --- regular user: no switcher, no dashboard -------------------------------- #
-  it("hides the switcher and dashboard for a regular user, showing their name", () => {
+  it("hides the switcher and dashboard for a regular user, showing their name in the menu", () => {
     useAuthMock.mockReturnValue(auth(USER));
     useCurrentUserMock.mockReturnValue(
       ctx({ currentUserId: "E001", currentUser: EMPLOYEES[0], canSwitch: false }),
     );
     render(<AppHeader />);
     expect(screen.queryByRole("combobox", { name: /利用者を切替/ })).not.toBeInTheDocument();
-    const nav = screen.getByRole("navigation", { name: "メインナビゲーション" });
+    const menu = openMenu();
+    const nav = within(menu).getByRole("navigation", { name: "メインナビゲーション" });
     expect(within(nav).queryByRole("link", { name: "ダッシュボード" })).not.toBeInTheDocument();
-    expect(within(nav).getByRole("link", { name: "質問する" })).toBeInTheDocument();
     // 質問履歴 (#208) is available to everyone, not admin-gated.
     expect(within(nav).getByRole("link", { name: "質問履歴" })).toHaveAttribute("href", "/history");
-    expect(screen.getByText("山田 太郎")).toBeInTheDocument();
+    expect(within(menu).getByText("山田 太郎")).toBeInTheDocument();
+  });
+
+  it("shows the acting admin's own name in the menu, distinct from the demo switcher", () => {
+    useCurrentUserMock.mockReturnValue(ADMIN_READY);
+    render(<AppHeader />);
+    const menu = openMenu();
+    expect(within(menu).getByText("管理者（管理者）")).toBeInTheDocument();
   });
 
   it("logs out and returns to /login when the logout button is clicked", async () => {
@@ -176,7 +225,8 @@ describe("AppHeader", () => {
       ctx({ currentUserId: "E001", currentUser: EMPLOYEES[0], canSwitch: false }),
     );
     render(<AppHeader />);
-    fireEvent.click(screen.getByRole("button", { name: "ログアウト" }));
+    const menu = openMenu();
+    fireEvent.click(within(menu).getByRole("button", { name: "ログアウト" }));
     expect(logout).toHaveBeenCalledTimes(1);
     // replace("/login") happens after the async logout resolves.
     await vi.waitFor(() => expect(replaceMock).toHaveBeenCalledWith("/login"));
@@ -187,15 +237,22 @@ describe("AppHeader", () => {
     useCurrentUserMock.mockReturnValue(ADMIN_READY);
     pathnameMock.mockReturnValue("/inbox");
     render(<AppHeader />);
-    expect(screen.getByRole("link", { name: "受信箱" })).toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("link", { name: "質問する" })).not.toHaveAttribute("aria-current");
+    const menu = openMenu();
+    expect(within(menu).getByRole("link", { name: "受信箱" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(within(menu).getByRole("link", { name: "チャット" })).not.toHaveAttribute(
+      "aria-current",
+    );
   });
 
   it("treats a nested route as active for its section", () => {
     useCurrentUserMock.mockReturnValue(ADMIN_READY);
     pathnameMock.mockReturnValue("/dashboard/detail");
     render(<AppHeader />);
-    expect(screen.getByRole("link", { name: "ダッシュボード" })).toHaveAttribute(
+    const menu = openMenu();
+    expect(within(menu).getByRole("link", { name: "ダッシュボード" })).toHaveAttribute(
       "aria-current",
       "page",
     );
@@ -222,13 +279,13 @@ describe("AppHeader", () => {
     expect(getNotificationsMock).not.toHaveBeenCalled();
   });
 
-  describe("mobile menu (#254)", () => {
+  describe("nav menu (#254, unified to a single hamburger at every width by #391)", () => {
     it("starts collapsed and opens on click, exposing the same destinations", () => {
       useCurrentUserMock.mockReturnValue(ADMIN_READY);
       render(<AppHeader />);
       const toggle = screen.getByRole("button", { name: "メニューを開く" });
       expect(toggle).toHaveAttribute("aria-expanded", "false");
-      expect(screen.queryByRole("link", { name: "ダッシュボード", hidden: false })).toBeTruthy();
+      expect(screen.queryByRole("link", { name: "ダッシュボード" })).not.toBeInTheDocument();
 
       fireEvent.click(toggle);
 
@@ -236,20 +293,20 @@ describe("AppHeader", () => {
         "aria-expanded",
         "true",
       );
-      const mobileMenu = document.getElementById("mobile-nav-menu");
-      expect(mobileMenu).not.toBeNull();
-      expect(
-        within(mobileMenu as HTMLElement).getByRole("link", { name: "受信箱" }),
-      ).toHaveAttribute("href", "/inbox");
+      const navMenu = document.getElementById("nav-menu");
+      expect(navMenu).not.toBeNull();
+      expect(within(navMenu as HTMLElement).getByRole("link", { name: "受信箱" })).toHaveAttribute(
+        "href",
+        "/inbox",
+      );
     });
 
-    it("closes when a destination in the mobile menu is clicked", () => {
+    it("closes when a destination in the menu is clicked", () => {
       useCurrentUserMock.mockReturnValue(ADMIN_READY);
       render(<AppHeader />);
-      fireEvent.click(screen.getByRole("button", { name: "メニューを開く" }));
-      const mobileMenu = document.getElementById("mobile-nav-menu") as HTMLElement;
-      fireEvent.click(within(mobileMenu).getByRole("link", { name: "質問する" }));
-      expect(document.getElementById("mobile-nav-menu")).toBeNull();
+      const navMenu = openMenu();
+      fireEvent.click(within(navMenu).getByRole("link", { name: "受信箱" }));
+      expect(document.getElementById("nav-menu")).toBeNull();
       expect(screen.getByRole("button", { name: "メニューを開く" })).toHaveAttribute(
         "aria-expanded",
         "false",
@@ -259,52 +316,47 @@ describe("AppHeader", () => {
     it("closes on Escape and returns focus to the toggle button", () => {
       useCurrentUserMock.mockReturnValue(ADMIN_READY);
       render(<AppHeader />);
-      const toggle = screen.getByRole("button", { name: "メニューを開く" });
-      fireEvent.click(toggle);
-      expect(document.getElementById("mobile-nav-menu")).not.toBeNull();
+      openMenu();
+      expect(document.getElementById("nav-menu")).not.toBeNull();
 
       fireEvent.keyDown(document, { key: "Escape" });
 
-      expect(document.getElementById("mobile-nav-menu")).toBeNull();
+      expect(document.getElementById("nav-menu")).toBeNull();
       expect(screen.getByRole("button", { name: "メニューを開く" })).toHaveFocus();
     });
 
     it("closes when clicking outside the menu", () => {
       useCurrentUserMock.mockReturnValue(ADMIN_READY);
       render(<AppHeader />);
-      fireEvent.click(screen.getByRole("button", { name: "メニューを開く" }));
-      expect(document.getElementById("mobile-nav-menu")).not.toBeNull();
+      openMenu();
+      expect(document.getElementById("nav-menu")).not.toBeNull();
 
       fireEvent.mouseDown(document.body);
 
-      expect(document.getElementById("mobile-nav-menu")).toBeNull();
+      expect(document.getElementById("nav-menu")).toBeNull();
     });
 
     it("closes when the route changes (e.g. after switching users)", () => {
       useCurrentUserMock.mockReturnValue(ADMIN_READY);
       const { rerender } = render(<AppHeader />);
-      fireEvent.click(screen.getByRole("button", { name: "メニューを開く" }));
-      expect(document.getElementById("mobile-nav-menu")).not.toBeNull();
+      openMenu();
+      expect(document.getElementById("nav-menu")).not.toBeNull();
 
       pathnameMock.mockReturnValue("/inbox");
       rerender(<AppHeader />);
 
-      expect(document.getElementById("mobile-nav-menu")).toBeNull();
+      expect(document.getElementById("nav-menu")).toBeNull();
     });
 
-    // #288 moved logout out of the header row below `md`, so on a phone the
-    // only way to reach it is through this menu. Scope the query to the menu:
-    // the header's own logout button is `hidden md:block`, which keeps it in
-    // the DOM, so an unscoped getByRole would match both and fail.
-    it("keeps logout reachable from the mobile menu (#288)", async () => {
+    it("keeps logout reachable from the menu, as the only logout control (#288, #391)", async () => {
       const logout = vi.fn().mockResolvedValue(undefined);
       useAuthMock.mockReturnValue({ ...auth(USER), logout });
       useCurrentUserMock.mockReturnValue(ADMIN_READY);
       render(<AppHeader />);
 
-      fireEvent.click(screen.getByRole("button", { name: "メニューを開く" }));
-      const mobileMenu = document.getElementById("mobile-nav-menu") as HTMLElement;
-      fireEvent.click(within(mobileMenu).getByRole("button", { name: "ログアウト" }));
+      expect(screen.queryByRole("button", { name: "ログアウト" })).not.toBeInTheDocument();
+      const navMenu = openMenu();
+      fireEvent.click(within(navMenu).getByRole("button", { name: "ログアウト" }));
 
       expect(logout).toHaveBeenCalledTimes(1);
       await waitFor(() => expect(replaceMock).toHaveBeenCalledWith("/login"));

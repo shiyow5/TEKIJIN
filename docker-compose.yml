@@ -42,8 +42,20 @@ services:
   backend:
     build:
       context: ./backend
+    # Loads every TEKIJIN_* value from the repo-root .env (Slack App
+    # credentials, an alternate LLM endpoint, etc.) — without this, only the
+    # `environment:` keys below ever reached the container, so .env.example's
+    # own instructions for those settings silently did nothing under Compose.
+    # `required: false`: .env is gitignored and optional (the app runs on
+    # defaults without one), so a fresh checkout without it must not fail here.
+    env_file:
+      - path: .env
+        required: false
     environment:
-      # Points at the `db` service by its in-network hostname (not localhost).
+      # Overrides .env: must point at the `db` service's in-network hostname
+      # (not localhost, and not whatever TEKIJIN_DATABASE_URL is set to for
+      # host-side tooling like `make migrate`). `environment:` wins over
+      # `env_file:` for the same key, so this is safe to also list in .env.
       TEKIJIN_DATABASE_URL: postgresql+psycopg://tekijin:tekijin@db:5432/tekijin
     ports:
       - "127.0.0.1:8000:8000"

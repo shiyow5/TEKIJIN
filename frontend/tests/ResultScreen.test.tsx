@@ -190,6 +190,25 @@ describe("ResultScreen — terminal-only replay (hard reload)", () => {
     const qaLink = screen.getByRole("link", { name: /ans_0042/ });
     expect(qaLink).toHaveAttribute("href", "/knowledge/ans_0042");
   });
+
+  it("renders a daily-report citation as a non-link label chip (#433)", () => {
+    // A daily report has no detail page, so its citation is a label ("日報より"),
+    // not a link — verifiability without a dead route.
+    renderResult(
+      state({
+        terminal: true,
+        message: {
+          status: "self_answered",
+          message: "過去の日報によると、バッチ間隔の短縮で解消できます。",
+          citations: [{ source_id: "daily_42", kind: "daily" }],
+        },
+      }),
+    );
+    expect(screen.getByText("出典")).toBeInTheDocument();
+    expect(screen.getByText("日報より")).toBeInTheDocument();
+    // It must NOT be a link (no detail page to route to).
+    expect(screen.queryByRole("link", { name: /日報より/ })).not.toBeInTheDocument();
+  });
 });
 
 describe("ResultScreen — stream error", () => {
@@ -234,6 +253,39 @@ describe("ResultScreen — main line (person)", () => {
     // reason labels (expanded top card shows detail)
     expect(screen.getByText("関連資格")).toBeInTheDocument();
     expect(screen.getByText("過去回答")).toBeInTheDocument();
+  });
+
+  it("shows the additive cited answer above the candidates when present (#413)", () => {
+    renderResult(
+      state({
+        route: { route: "person", reason: "同様の案件担当者がいます", confidence: 0.9 },
+        reference: {
+          answer: "契約管理は費用対効果で説明するのが有効です。",
+          citations: [{ source_id: "qa_42", kind: "qa" }],
+        },
+        recommend: { recommendations: THREE_CANDIDATES },
+        draft: { draft: "お疲れ様です。" },
+      }),
+    );
+
+    // The additive answer + its "参考" framing render alongside the hand-off...
+    expect(screen.getByText("参考: 過去の類似回答")).toBeInTheDocument();
+    expect(screen.getByText("契約管理は費用対効果で説明するのが有効です。")).toBeInTheDocument();
+    expect(screen.getByText("過去の回答 qa_42")).toBeInTheDocument();
+    // ...without replacing the person hand-off main line.
+    expect(screen.getByText("この質問は、人に聞くのが確実です")).toBeInTheDocument();
+    expect(screen.getByText("高梨（最有力）")).toBeInTheDocument();
+  });
+
+  it("omits the reference block when no additive answer arrived", () => {
+    renderResult(
+      state({
+        route: { route: "person", reason: "", confidence: 0.9 },
+        recommend: { recommendations: THREE_CANDIDATES },
+        draft: { draft: "お疲れ様です。" },
+      }),
+    );
+    expect(screen.queryByText("参考: 過去の類似回答")).not.toBeInTheDocument();
   });
 
   it("lets the user edit the draft (change reflected in the textarea)", () => {

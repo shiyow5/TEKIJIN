@@ -122,6 +122,11 @@ class DailyReportDTO:
     employee_id: int
     topics: tuple[str, ...]
     report_date: dt.date | None
+    # #433: the report text, so a daily report can be re-hydrated as a cited
+    # knowledge source for System 1 (self-answer). ``issue`` is the problem,
+    # ``content`` the activity — both carry tacit knowledge worth citing.
+    content: str | None = None
+    issue: str | None = None
 
     @classmethod
     def from_row(cls, row: DailyReport) -> DailyReportDTO:
@@ -130,6 +135,8 @@ class DailyReportDTO:
             employee_id=row.employee_id,
             topics=tuple(row.topics or ()),
             report_date=row.report_date,
+            content=row.content,
+            issue=row.issue,
         )
 
 

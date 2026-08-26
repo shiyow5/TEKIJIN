@@ -6,12 +6,25 @@ e5-large では `answer_confidence` の最小値(0.816)が `PRIOR_ANSWER_SIM`(0.
 全71件が `prior_answer` に倒れて層2 Recall@3 が 0.592 落ちていた。
 
 #90 で埋め込みを Nemotron-3-Embed-1B に替え、閾値をその実測分布に較正した。
-#191 で評価セット（全81件 / 採点66件）基準に再較正し、DOCUMENT_SIM=0.30→0.28 とした
-（DOCUMENT_SIM=0.28 / PERSON_WEAK_SIM=0.40 は分布内、経路精度 0.818 > 多数決 0.742、
-1経路への潰れ 0.94 < 0.95。0.30 のままだと潰れ 0.95 で制約を割り document recall も 4/10 に
-落ちていた）。ただし `answer_confidence` は prior_answer を分離できず
-（person gold が prior_answer gold より高い）、PRIOR_ANSWER_SIM=0.55 は観測最大 0.543 の
-直上に置いて意図的に無効化している。prior_answer の本筋復活はコーパス集計ルーティング(#119)。
+#191 で評価セット（当時 全81件 / 採点66件）基準に再較正し、DOCUMENT_SIM=0.30→0.28 とした
+（当時の実測: 経路精度 0.818 > 多数決 0.742、1経路への潰れ 0.94 < 0.95。0.30 のままだと
+潰れ 0.95 で制約を割り document recall も 4/10 に落ちていた）。
+
+**較正データは #434 で現行コーパス（全87件 / 採点72件）で取り直した**（閾値は据え置き）。
+現在の実測は下表。81件のまま置いていたときより、どの制約も余裕が広がっている。
+
+| 指標 | 81件（#191 当時） | **87件（現行）** | 制約 |
+|---|---|---|---|
+| 1経路への潰れ | 76/81 = 0.938 | **76/87 = 0.874** | < 0.95 |
+| 経路精度 | 0.818 | **0.833**（60/72） | > 多数決 |
+| 多数決 | 0.742 | **0.681** | — |
+
+経路別の内訳は person 49/49・document 11/16・prior_answer 0/7（下記のとおり意図的に無効）。
+ただし `answer_confidence` は prior_answer を分離できず
+（person gold が prior_answer gold より高い）、PRIOR_ANSWER_SIM=0.55 は観測最大 0.542 の
+直上に置いて意図的に無効化している。**prior_answer 経路の復活は打ち止め**: コーパス集計
+ルーティング(#119/#327)は実測でどの config も baseline を Pareto 改善せず、ADR-0007 で棄却された
+（#119 は close 済み）。自己回答は経路でなく知識層(#357)で実現する方針。
 
 既存の単体テストは「閾値を超えたら prior_answer を返すか」を見ている。
 ここで見るのは「**その閾値は実際のデータで超えられるのか / 常に超えてしまわないか**」。
@@ -41,9 +54,11 @@ from tekijin.agent.route import (
 from tekijin.config import get_settings
 
 # 一つの経路がここまで占めたら、実質的に分岐が死んでいる。
-# gold の多数派（routed のうち person が 0.74）に none 15件ぶんが乗るので、
-# 健全に較正しても person は 0.94 程度を占める（#191, 66件基準の DOCUMENT_SIM=0.28 で 76/81）。
-# 誤警報を避けて 0.95 に置く。マージンは薄い（document 側を弱めると即 0.95 に達する）。
+# gold の多数派（routed のうち person が 0.68）に none 15件ぶんが乗るので、健全に較正しても
+# person が最大勢力になるのは正常。現行コーパス（87件）の実測は 76/87 = 0.874（#434）。
+# 81件の較正データを使っていた間はこれが 76/81 = 0.938 で、しきい値まで 0.012 しか無かった
+# ——つまり DOCUMENT_SIM を少し動かすだけで「古い較正データの上でだけ」CI が落ちる状態だった。
+# 閾値自体は据え置き（0.95）で、余裕が 0.076 に戻っている。
 _COLLAPSE_RATIO = 0.95
 _REMEASURE = (
     "再測定: python scripts/research_e2e.py --task prepare && "
@@ -51,8 +66,9 @@ _REMEASURE = (
     "--out fixtures/synthetic/eval/route_calibration.json"
 )
 _FIXED_HINT = (
-    "コーパス集計ルーティング(#119)で prior_answer が復活したら、この xfail を削除すること"
-    "（strict=True なので xpass すると CI が落ちて気づける）"
+    "ADR-0007 で prior_answer 経路の復活は打ち止めになったので、この xfail は当面そのまま。"
+    "コーパス/埋め込みが変わって answer_confidence が person gold と分離できるようになったら "
+    "削除すること（strict=True なので xpass すると CI が落ちて気づける）"
 )
 
 
@@ -99,7 +115,7 @@ def test_calibration_matches_the_configured_embedding_model(calibration: dict) -
                 reason=(
                     "#119: prior_answer は Nemotron のコサインでは分離できない"
                     "（answer_confidence は person 側が prior_answer gold より高い）。"
-                    "PRIOR_ANSWER_SIM は観測最大(0.543)の直上に置いて意図的に無効化している。"
+                    "PRIOR_ANSWER_SIM は観測最大(0.542)の直上に置いて意図的に無効化している。"
                     f"{_FIXED_HINT}"
                 ),
                 strict=True,

@@ -67,12 +67,13 @@ from tekijin.api.events import (
 from tekijin.data.db import session_scope
 from tekijin.data.feedback import record_feedback
 from tekijin.data.handoff import employee_brief, question_consult_method, responder_reuse_stats
-from tekijin.data.messages import create_message
+from tekijin.data.messages import create_message, thread_parties
 from tekijin.data.writes import (
     create_answer,
     employee_exists,
     insert_shown_recommendations,
     latest_primary_recommendation,
+    latest_recommendation_for_person,
     mark_question_resolved,
     mark_self_resolved,
     persist_question,
@@ -89,6 +90,7 @@ from tekijin.data.writes import (
     update_question_topics,
 )
 from tekijin.retrieval.embedding import PASSAGE, Embedder
+from tekijin.slack.notify import schedule_channel_setup_and_draft
 
 logger = logging.getLogger(__name__)
 
@@ -189,9 +191,14 @@ class AgentService:
         prior_answer_reuse_min: int | None = None,
         prior_answer_relevance_floor: float = 0.15,
         daily_evidence: bool = False,
+        daily_knowledge_enabled: bool = False,
         knowledge_answer_min_similarity: float | None = None,
         query_expansion_enabled: bool = False,
         question_fit_enabled: bool = False,
+        branch_constraint_enabled: bool = False,
+        additive_self_answer_enabled: bool = False,
+        additive_self_answer_floor: float = 0.20,
+        score_all_employees: bool = False,
         max_concurrent_runs: int = 0,
         now_factory: Any = _default_now,
         clock: Any = time.monotonic,
@@ -229,10 +236,17 @@ class AgentService:
         # #355: include daily reports as C6 evidence. Passed to build_agent's default
         # scorer (None = dormant). Ignored when a scorer is injected (tests).
         self._daily_evidence = daily_evidence
+        # #433: daily reports as a System 1 knowledge source (False = OFF, dormant).
+        self._daily_knowledge_enabled = daily_knowledge_enabled
         # #371: fold C1 topics into the C4 retrieval query (False = OFF, dormant).
         self._query_expansion_enabled = query_expansion_enabled
         # #405: add the question↔past-answer term to C6 (False = OFF, dormant).
         self._question_fit_enabled = question_fit_enabled
+        self._branch_constraint_enabled = branch_constraint_enabled
+        # #413: additive cited answer on the person route (False = OFF, dormant).
+        self._additive_self_answer_enabled = additive_self_answer_enabled
+        self._additive_self_answer_floor = additive_self_answer_floor
+        self._score_all_employees = score_all_employees
         # Backpressure (#180): max graph runs executing at once before /ask sheds new
         # questions with 503. 0 (default) disables it — set from settings via the
         # factory in production. Guarded by its own lock; independent of the per-
@@ -389,6 +403,22 @@ class AgentService:
         responder_id = recs[0]["person_id"] if recs else None
         return (asker_id, responder_id)
 
+    def pending_handoff_metadata(self, session_id: str) -> dict[str, int | str | None]:
+        """Return durable identifiers needed to notify an external hand-off client."""
+        snapshot = self._snapshot(session_id)
+        values = getattr(snapshot, "values", None) or {}
+        asker_id = (values.get("asker") or {}).get("id")
+        recs = values.get("recommendations") or []
+        primary = values.get("primary_recommendation_id")
+        if primary is None and recs:
+            primary = recs[0].get("recommendation_id")
+        return {
+            "question_id": values.get("question_id"),
+            "asker_id": asker_id,
+            "responder_id": recs[0].get("person_id") if recs else None,
+            "recommendation_id": primary,
+        }
+
     def request_document_fallback(self, session_id: str) -> None:
         """Reopen a completed document route at C7 using its ranked candidate.
 
@@ -530,17 +560,10 @@ class AgentService:
                 # Stale-outcome guard (#94): if the client echoed the recommendation
                 # id it was shown and the session has since moved to a different
                 # primary (reroute / competing tab), reject so the outcome cannot
-                # bind to the new candidate. A missing/None current primary can't be
-                # validated, so we let it through (degrade to prior behavior).
-                current_primary = snapshot.values.get("primary_recommendation_id")
-                if (
-                    recommendation_id is not None
-                    and current_primary is not None
-                    and recommendation_id != current_primary
-                ):
-                    raise SessionConflict(
-                        "this hand-off has moved to a different candidate; reload and try again"
-                    )
+                # bind to the new candidate. The comparison happens inside
+                # `_record_outcome`, against the RESOLVED primary (#94-3) — a
+                # missing/unresolvable primary can't be validated, so it is let
+                # through (degrade to prior behavior).
                 # The DB is the source of truth for the outcome. ``_record_outcome``
                 # writes it first-wins and returns the EFFECTIVE (persisted) value:
                 # on a duplicate submission (e.g. a restart lost the in-memory
@@ -548,7 +571,12 @@ class AgentService:
                 # wins. We resume the graph with that effective value so the
                 # checkpoint always advances consistently with the DB — never
                 # diverging, and never left permanently paused at ``send``.
-                status, resume_value = self._record_outcome(session_id, snapshot.values, outcome)
+                status, resume_value = self._record_outcome(
+                    session_id,
+                    snapshot.values,
+                    outcome,
+                    expected_recommendation_id=recommendation_id,
+                )
                 # #274: capture the answer only on a FRESHLY recorded accept (not a
                 # duplicate "already"/"no_target"), in its own post-commit transaction
                 # so it cannot roll back the accept. answer_body is pre-validated to
@@ -563,8 +591,82 @@ class AgentService:
             ctx.pending = Command(resume=resume_value)
             ctx.touched_at = self._clock()
 
+    def _resolve_primary(self, session: Session, values: dict[str, Any]) -> int | None:
+        """The recommendation row the hand-off is CURRENTLY bound to (#94-3).
+
+        ``primary_recommendation_id`` is written back into the checkpoint only at
+        the END of a stream segment (``_persist_run_state``), while the graph
+        checkpoints ``recommendations`` per node. A client disconnect in between —
+        decline → ``reroute`` → C6 backfill → rows INSERTed → ``GeneratorExit`` —
+        leaves the two disagreeing: ``recommendations[0]`` is the NEW candidate,
+        ``primary_recommendation_id`` still points at the DECLINED row. Recording
+        the next outcome on that id would attribute the answer to the wrong person
+        and then wedge the hand-off (the declined row already carries an outcome,
+        so every later submission returns ``"already"`` — a permanent 409-alike).
+
+        So the SHOWN top candidate is the authority: when the stored id does not
+        point at them, re-derive their newest row from the DB. Resolving by PERSON
+        rather than by rank keeps this independent of the ``rank`` column, which is
+        a projection maintained for ``GET /inbox`` (``reorder_recommendation_ranks``
+        on reselect) — the outcome must land on the person the responder saw even if
+        that projection lags, and "who was shown" is the invariant we actually mean.
+
+        Returns ``None`` when the shown candidate has NO persisted row: attributing
+        their answer to some other row would be worse than not recording it (the
+        caller logs and resumes with ``no_target``).
+        """
+
+        primary = values.get("primary_recommendation_id")
+        question_id = values.get("question_id")
+        if question_id is None:
+            return primary
+        recs = values.get("recommendations") or []
+        shown_person = recs[0].get("person_id") if recs else None
+        if shown_person is None:
+            # No shown candidate to cross-check against (e.g. a terminal with no
+            # recommendations): keep the pre-existing durable fallback.
+            return (
+                primary
+                if primary is not None
+                else latest_primary_recommendation(session, question_id)
+            )
+        if primary is not None and recommendation_employee_id(session, primary) == shown_person:
+            return primary
+        rebound = latest_recommendation_for_person(session, question_id, shown_person)
+        if rebound is None:
+            # The shown candidate has no persisted row at all (e.g. the #351
+            # document-fallback continuation reuses a PRIOR batch's ids and so never
+            # inserts one for the fallback candidate). Falling back to `primary` here
+            # would knowingly bind THIS person's answer to a row belonging to someone
+            # else — it would land in `answers.responder_id` (#274) and light the
+            # wrong employee's "回答が届きました". Recording nothing is the lesser
+            # harm: the caller logs and resumes with `no_target`.
+            logger.warning(
+                "no recommendation row for the shown candidate (question %s, person %s); "
+                "refusing to bind the outcome to %s",
+                question_id,
+                shown_person,
+                primary,
+            )
+            return None
+        if primary is not None and rebound != primary:
+            logger.warning(
+                "stale primary_recommendation_id %s for question %s; "
+                "re-bound to %s (shown person %s)",
+                primary,
+                question_id,
+                rebound,
+                shown_person,
+            )
+        return rebound
+
     def _record_outcome(
-        self, session_id: str, values: dict[str, Any], outcome: str
+        self,
+        session_id: str,
+        values: dict[str, Any],
+        outcome: str,
+        *,
+        expected_recommendation_id: int | None = None,
     ) -> tuple[str, str]:
         """Record the responder outcome on the durable primary recommendation.
 
@@ -577,15 +679,25 @@ class AgentService:
           graph with it so the checkpoint stays consistent instead of diverging;
         * ``("no_target", outcome)`` — no recommendation to attach it to; resume
           with the submitted value (nothing to reconcile against).
+
+        ``expected_recommendation_id`` is the generation token the client echoed
+        (#94-2). It is compared against the RESOLVED primary, not the raw
+        checkpoint value, so a stale checkpoint (#94-3) cannot flip the guard both
+        ways — accepting the outcome for the superseded candidate and rejecting the
+        one the responder is actually looking at.
         """
 
-        primary = values.get("primary_recommendation_id")
         question_id = values.get("question_id")
         with session_scope(self._session_factory) as session:
-            if primary is None and question_id is not None:
-                # Durable fallback: re-derive the handed-off recommendation from
-                # the DB (e.g. a disconnect before update_state persisted the id).
-                primary = latest_primary_recommendation(session, question_id)
+            primary = self._resolve_primary(session, values)
+            if (
+                expected_recommendation_id is not None
+                and primary is not None
+                and expected_recommendation_id != primary
+            ):
+                raise SessionConflict(
+                    "this hand-off has moved to a different candidate; reload and try again"
+                )
             if primary is None:
                 logger.warning(
                     "no recommendation to record outcome for session %s (outcome=%s)",
@@ -618,6 +730,24 @@ class AgentService:
                         # dt.datetime.now() (routes.py) regardless of the
                         # graph's (possibly injected/frozen) clock.
                         create_message(session, primary, asker_id, draft, dt.datetime.now())
+                        # If both parties have linked Slack, this is also their
+                        # very first look at the request — set up (or reuse)
+                        # their shared Slack channel and post the SAME draft
+                        # into it (#hand-off-chat), so accepting via TEKIJIN
+                        # drops them straight into a normal-looking Slack
+                        # conversation with the draft already "sent". Fire and
+                        # forget: this method runs synchronously inside
+                        # POST /answer's request/response cycle with no
+                        # `BackgroundTasks` to defer to (see
+                        # `schedule_channel_setup_and_draft`'s docstring).
+                        parties = thread_parties(session, primary)
+                        if parties is not None:
+                            schedule_channel_setup_and_draft(
+                                self._session_factory,
+                                thread_id=primary,
+                                parties=parties,
+                                draft=draft,
+                            )
             return "recorded", outcome
 
     def _capture_answer(self, values: dict[str, Any], body: str) -> None:
@@ -643,9 +773,10 @@ class AgentService:
                 question_id = values.get("question_id")
                 if question_id is None:
                     return
-                primary = values.get("primary_recommendation_id")
-                if primary is None:
-                    primary = latest_primary_recommendation(session, question_id)
+                # Same resolution as the outcome write (#94-3): attribute the
+                # answer to the person the responder actually saw, never to a
+                # superseded row left behind by a mid-reroute disconnect.
+                primary = self._resolve_primary(session, values)
                 if primary is None:
                     logger.warning(
                         "no recommendation to attribute the captured answer (question %s)",
@@ -729,6 +860,11 @@ class AgentService:
         asker_name: str | None = None
         asker_dept: str | None = None
         with session_scope(self._session_factory) as session:
+            # The generation token the responder will echo back on /answer must be
+            # the SAME id the outcome will be recorded on — resolved, not the raw
+            # checkpoint value. Otherwise a stale checkpoint (#94-3) would hand out
+            # a superseded id and the guard would 409 the responder's own submission.
+            recommendation_id = self._resolve_primary(session, values)
             if asker_id is not None:
                 asker_name, asker_dept = employee_brief(session, asker_id)
             if primary is not None:
@@ -741,7 +877,9 @@ class AgentService:
             # SQL, not the checkpoint: the asker's method choice must also be
             # visible to the inbox / chat gating, which never read the graph
             # state, so it lives only in Question.consult_method.
-            consult_method = question_consult_method(session, values.get("question_id"))
+            consult_method = schemas.normalize_consult_method(
+                question_consult_method(session, values.get("question_id"))
+            )
 
         return schemas.HandoffResponse(
             session_id=session_id,
@@ -759,7 +897,7 @@ class AgentService:
             draft=values.get("draft") or "",
             reuse_count=reuse["reuse_count"],
             helpful_answer_count=reuse["helpful_answer_count"],
-            recommendation_id=values.get("primary_recommendation_id"),
+            recommendation_id=recommendation_id,
             consult_method=consult_method,
         )
 
@@ -922,6 +1060,12 @@ class AgentService:
                 **{**selected, "person_id": schemas.format_employee_id(selected["person_id"])}
             ),
             draft=new_draft,
+            # NOT routed through `_resolve_primary` (unlike `/handoff`): the
+            # `update_state` above just wrote `recommendations[0]` and
+            # `primary_recommendation_id` from the SAME `new_ids`, so they agree by
+            # construction here — there is no stale window to resolve away (#94-3).
+            # This id is asker-side display; the responder's generation token always
+            # comes from `/handoff`.
             recommendation_id=(new_ids[0] if new_ids else 0),
         )
 
@@ -1222,9 +1366,14 @@ class AgentService:
             prior_answer_reuse_min=self._prior_answer_reuse_min,
             prior_answer_relevance_floor=self._prior_answer_relevance_floor,
             daily_evidence=self._daily_evidence,
+            daily_knowledge_enabled=self._daily_knowledge_enabled,
             knowledge_answer_min_similarity=self._knowledge_answer_min_similarity,
             query_expansion_enabled=self._query_expansion_enabled,
             question_fit_enabled=self._question_fit_enabled,
+            branch_constraint_enabled=self._branch_constraint_enabled,
+            additive_self_answer_enabled=self._additive_self_answer_enabled,
+            additive_self_answer_floor=self._additive_self_answer_floor,
+            score_all_employees=self._score_all_employees,
         )
 
     def _run(
@@ -1365,9 +1514,10 @@ class AgentService:
                                     # derive the shown recs from the durable state so the
                                     # accepted hand-off is still persisted + surfaced —
                                     # otherwise the outcome record is silently lost.
-                                    rec_data = pending_rec_data
-                                    recommend_event = pending_recommend
-                                    if rec_data is None:
+                                    if pending_rec_data is not None:
+                                        rec_data = pending_rec_data
+                                        recommend_event = pending_recommend
+                                    else:
                                         values = graph.get_state(config).values
                                         rec_data = {
                                             "recommendations": values.get("recommendations") or []

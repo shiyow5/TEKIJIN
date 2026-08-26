@@ -39,6 +39,13 @@ class DocumentHit(TypedDict):
     score: float
 
 
+class DailyHit(TypedDict):
+    """One daily-report hit from C4 (#433). A daily report as a knowledge source."""
+
+    daily_id: int
+    score: float
+
+
 class RetrievalResult(TypedDict):
     """The C4 (HybridRetriever) output shape shared by C5/C6.
 
@@ -55,6 +62,10 @@ class RetrievalResult(TypedDict):
     answer_confidence: float
     document_confidence: float
     people_confidence: float
+    # #433: daily-report hits — a searchable knowledge source for System 1. Always
+    # present but EMPTY unless ``daily_knowledge_enabled`` (develop byte-identical
+    # when off). self-answer / #413 additive cite these alongside answers/documents.
+    daily_reports: list[DailyHit]
     # #405: per-person max cosine of the QUESTION against that person's past
     # answers (from the answer dense channel), keyed by responder_id. C6 adds it as
     # a question-fit term when ``question_fit_enabled``; absent people default to
@@ -74,6 +85,7 @@ def empty_retrieval() -> RetrievalResult:
         "document_confidence": 0.0,
         "people_confidence": 0.0,
         "person_question_similarity": {},
+        "daily_reports": [],
     }
 
 
@@ -104,6 +116,9 @@ class AgentState(TypedDict, total=False):
     question_type: str
     out_of_scope: bool
     intent_confidence: float
+    # #83: the branch the asker explicitly asked the responder to be at (None = no
+    # constraint). C6 treats it as a condition to satisfy, not a scoring term.
+    constraint_branch: str | None
 
     # -- C2 sufficiency ----------------------------------------------------
     sufficient: bool
@@ -135,6 +150,16 @@ class AgentState(TypedDict, total=False):
     self_answer_grounded: bool
     self_answer_text: str | None
     self_answer_citations: list[dict[str, str]]
+
+    # -- additive self-answer (#413) --------------------------------------
+    # Set by the additive_answer node on the PERSON route (only when
+    # ``additive_self_answer_enabled``). Unlike ``self_answer_*`` above, this NEVER
+    # terminates the run or marks it self-resolved — the human hand-off still
+    # happens. When a grounded cited answer exists it is surfaced ALONGSIDE the
+    # recommendation ("参考: 過去の類似回答") so System 1 fires on person-routed
+    # knowledge questions too, without stealing the route (person recall unchanged).
+    additive_answer_text: str | None
+    additive_citations: list[dict[str, str]]
 
     # -- C6 scoring --------------------------------------------------------
     recommendations: list[dict[str, Any]]
