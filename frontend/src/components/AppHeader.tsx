@@ -264,16 +264,16 @@ function UserSwitcher({
   // home — the very harm #231 reports. So the confirmation is explicit instead. It
   // costs mouse users one click on a demo-only control and is unambiguous on every
   // platform, with no event-order guessing.
-  const [pending, setPending] = useState<string | null>(null);
+  //
+  // The pending choice remembers WHICH acting user it was made against, so a
+  // change from elsewhere (a reload restoring the default, another tab) discards
+  // it by construction rather than through a reset effect. An effect would clear
+  // it one render late — and would show someone the app is no longer acting as in
+  // between.
+  const [pending, setPending] = useState<{ basedOn: string | null; value: string } | null>(null);
+  const live = pending && pending.basedOn === currentUserId ? pending.value : null;
 
-  // Drop a stale pending choice when the acting user changes from ELSEWHERE (a
-  // reload restoring the default, another tab). Without this the select would keep
-  // showing someone the app is no longer acting as.
-  useEffect(() => {
-    setPending(null);
-  }, [currentUserId]);
-
-  const shown = pending ?? currentUserId ?? "";
+  const shown = live ?? currentUserId ?? "";
   // Re-selecting the current user is not a switch: nothing to confirm.
   const canApply = shown !== "" && shown !== currentUserId;
 
@@ -300,7 +300,7 @@ function UserSwitcher({
         className="rounded-md border border-outline bg-surface-container-lowest px-sm py-xs text-sm disabled:text-on-surface-variant"
         value={shown}
         disabled={!ready}
-        onChange={(e) => setPending(e.target.value)}
+        onChange={(e) => setPending({ basedOn: currentUserId, value: e.target.value })}
         onKeyDown={(e) => {
           // Enter in a closed select submits the surrounding form by default; here
           // it is the natural "yes, this one" for a keyboard user, so it applies
