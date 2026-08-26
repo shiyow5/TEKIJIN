@@ -87,8 +87,10 @@ test-frontend: ## Run frontend unit tests (vitest)
 	cd $(FRONTEND_DIR) && npm test
 
 typecheck-frontend: ## Type-check the frontend (tsc --noEmit)
-	# Part of `make lint` (and therefore `make check` / CI): biome does NOT type-check,
-	# so without this a type error ships green (#309). ~5s on a warm checkout.
+	# Part of `make lint` (and therefore `make check` / CI). biome does not type-check
+	# and vitest transpiles without checking, so `frontend/tests/**` was covered by
+	# NOTHING; `app/` and `src/` were only caught late, by `next build` inside the E2E
+	# job's webServer (#309). ~5s warm, ~18s cold (CI is always cold — no tsc cache).
 	cd $(FRONTEND_DIR) && npm run typecheck
 
 e2e: ## Run Playwright end-to-end tests (frontend; builds + serves the app itself)

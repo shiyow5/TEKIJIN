@@ -29,6 +29,7 @@ jobs:
     outputs:
       backend: ${{ steps.filter.outputs.backend }}
       frontend: ${{ steps.filter.outputs.frontend }}
+      makefile: ${{ steps.filter.outputs.makefile }}
     steps:
       - uses: actions/checkout@v4
       - id: filter
@@ -43,6 +44,9 @@ jobs:
               - 'frontend/**'
               - '.github/workflows/lint.yml'
               - '.github/actions/setup-frontend/**'
+            makefile:
+              - 'Makefile'
+              - '.github/workflows/lint.yml'
 
   backend:
     name: Backend Lint
@@ -63,6 +67,24 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-frontend
       - run: make lint-frontend
-      # biome does not type-check. Without this, a type error passes every gate
-      # (lint = biome, test = vitest) and ships green (#309).
+      # biome does not type-check and vitest transpiles without checking, so a type
+      # error in `frontend/tests/**` passed EVERY gate; one in `app/`/`src/` was only
+      # caught late by `next build` inside the E2E job's webServer (#309).
       - run: make typecheck-frontend
+
+  # `Makefile` is in this workflow's `paths:` trigger but was NOT in the paths-filter
+  # above, so a Makefile-only PR started the workflow and then skipped BOTH jobs —
+  # all green. Now that `lint` is what wires in the type check, the recipe is
+  # load-bearing: dropping the `typecheck-frontend` prerequisite, or typo-ing the
+  # target, must not pass unnoticed (#309). Mirrors format.yml's Makefile Check.
+  makefile:
+    name: Makefile Lint Targets
+    needs: changes
+    if: needs.changes.outputs.makefile == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # `make -n` expands the recipes without running them: no toolchain needed, but
+      # a missing prerequisite or a renamed target fails here.
+      - run: make -n lint | grep -q "npm run typecheck"
+      - run: make -n check | grep -q "npm run typecheck"
