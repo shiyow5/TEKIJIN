@@ -282,7 +282,9 @@ C4→C5 を直接叩いて確定した。
    差し替え**前**の e5-large 時の測定。
    **閾値較正は #120（[ADR-0004](../adr/0004-c5-route-thresholds-nemotron.md)）で完了し、
    実 DB での再測定は §0 に載せた。**（`fixtures/synthetic/eval/route_calibration.json` は
-   較正前＝旧閾値で全71件 person に倒れていたときの分布。）
+   #434 で現行コーパス87件・現行閾値で取り直した。以前ここに書いていた「較正前＝旧閾値で
+   全71件 person に倒れていたときの分布」は、その時点の同ファイルの説明であって現行の中身
+   ではない。現行は person 76 / document 11。）
 
 §1 の個別値は `ablation/e2e_variants.json` / `ablation/e2e_route_confidences.json`、
 §0 の個別値は §0.6 に列挙したファイル。
