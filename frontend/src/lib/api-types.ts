@@ -208,6 +208,51 @@ export interface RecentQuestionsResponse {
 }
 
 /**
+ * One accumulated piece of knowledge: an answered question OR an internal
+ * document (GET /knowledge, schemas.py `KnowledgeItem`) — the same two kinds
+ * a self-answer's citation carries. `source_id` matches a chat citation's
+ * `SourceCitation.source_id` for the same `kind` (`Answer.id` for `"qa"`,
+ * `Document.id` for `"document"`). Unlike `RecentQuestionItem`, this is NOT
+ * scoped to the acting user. The `"document"`-only fields (`question_id`,
+ * `session_id`, responder, topics) are absent/empty for that kind.
+ */
+export interface KnowledgeItem {
+  source_id: string;
+  kind: "qa" | "document";
+  title: string;
+  summary: string;
+  topics: string[];
+  responder_name?: string | null;
+  responder_department?: string | null;
+  /** The item's own timestamp: the ANSWER's for "qa", `updated_at` for "document". */
+  resolved_at?: string | null;
+  question_id?: string | null;
+  /** Deep-link target for viewing the result (/session/{session_id}); null for seeded history. */
+  session_id?: string | null;
+}
+
+/**
+ * Side-panel aggregate stats on GET /knowledge (schemas.py `KnowledgeSummary`).
+ * Per-responder aggregates are deliberately absent — that view belongs to
+ * `/dashboard`, not a knowledge browser (PR #340 review).
+ */
+export interface KnowledgeSummary {
+  total_items: number;
+  self_resolution_rate: number;
+}
+
+/**
+ * GET /knowledge payload (schemas.py `KnowledgeListResponse`). `total_matching`
+ * is the count of items matching the current filters BEFORE the offset/limit
+ * page cut — what a search paginates its results with.
+ */
+export interface KnowledgeListResponse {
+  items: KnowledgeItem[];
+  total_matching: number;
+  summary: KnowledgeSummary;
+}
+
+/**
  * One decline event the asker hasn't acknowledged yet (GET /notifications,
  * schemas.py `DeclineNotification`). Paired with the automatic reroute
  * (#206): by the time this is shown, the system has already moved on to

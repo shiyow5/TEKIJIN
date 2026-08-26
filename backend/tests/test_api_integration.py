@@ -3492,3 +3492,209 @@ def test_feedback_with_unknown_question_id_records_without_the_link(
     assert resp.status_code == 200
     rows = _feedback_rows(engine)
     assert len(rows) == 1 and rows[0].question_id is None
+
+
+# --------------------------------------------------------------------------- #
+# #293, #301: GET /knowledge — company-wide accumulated knowledge, answers AND
+# documents (NOT scoped to one asker, and NOT admin-only, unlike /dashboard).
+# source_id/kind match a self-answer's citation (#291) for the same entity.
+# --------------------------------------------------------------------------- #
+def test_knowledge_lists_seeded_answers_and_documents(seed_counts, engine, fake_embedder) -> None:
+    client = _client(engine, fake_embedder)
+    resp = client.get("/knowledge")
+    assert resp.status_code == 200
+    body = resp.json()
+
+    # The seed's answers are 1:1 with questions (test_dashboard_route_shape_
+    # and_seed_values), so the total is global (both kinds), independent of
+    # the default response cap.
+    total = seed_counts["answers"] + seed_counts["documents"]
+    assert body["summary"]["total_items"] == total
+    assert body["summary"]["self_resolution_rate"] == 0.0  # matches the dashboard's seed baseline
+    assert "top_responders" not in body["summary"]  # de-scoped to /dashboard (PR #340 review)
+    assert len(body["items"]) <= 8  # the endpoint's default limit
+    assert len(body["items"]) > 0
+    assert body["total_matching"] == total  # unfiltered: every item matches
+    for item in body["items"]:
+        assert item["kind"] in ("qa", "document")
+        assert item["summary"]  # the item's own text, not just metadata
+
+
+def test_knowledge_default_page_mixes_both_kinds(seed_counts, engine, fake_embedder) -> None:
+    """The seed's documents are all older than its newest answers, so a plain
+    recency sort buried every document past the unsearched view's one page —
+    no document ever reached the front page without a keyword search (PR #340
+    review follow-up). Round-robin interleaving fixes that: the default
+    (unsearched, unpaginated) browse page must show at least one of each kind
+    whenever both exist."""
+    client = _client(engine, fake_embedder)
+    kinds = {i["kind"] for i in client.get("/knowledge").json()["items"]}
+    assert kinds == {"qa", "document"}
+
+
+def test_knowledge_qa_item_shape(seed_counts, engine, fake_embedder) -> None:
+    client = _client(engine, fake_embedder)
+    items = client.get("/knowledge", params={"limit": 200}).json()["items"]
+    qa = next(i for i in items if i["kind"] == "qa")
+    assert qa["responder_name"]
+    assert qa["question_id"]
+    assert qa["session_id"] is None  # seeded history has no live session
+
+
+def test_knowledge_document_item_shape(seed_counts, engine, fake_embedder) -> None:
+    client = _client(engine, fake_embedder)
+    items = client.get("/knowledge", params={"limit": 200}).json()["items"]
+    doc = next(i for i in items if i["kind"] == "document")
+    # Document-only items carry none of the QA-specific fields.
+    assert doc["responder_name"] is None
+    assert doc["responder_department"] is None
+    assert doc["question_id"] is None
+    assert doc["session_id"] is None
+    assert doc["topics"] == []
+
+
+def test_knowledge_excludes_a_question_with_no_formal_answer(
+    seed_counts, engine, fake_embedder
+) -> None:
+    """A live-chat-accepted question with no ``answers`` row has no answer TEXT
+    to show as "回答のまとめ", so it must not appear (#293, #301 review) — unlike
+    the earlier "resolved by a person" definition, which also counted an
+    accepted recommendation alone."""
+    factory = get_sessionmaker(engine)
+    with factory() as s:
+        s.add(
+            Question(
+                id="api_kn1",
+                asker_id=10,
+                body="チャットのみでやり取りして解決した質問",
+                topics=[],
+                status="open",
+                created_at=NOW,
+                session_id="sess-kn1",
+            )
+        )
+        s.flush()
+        s.add(
+            Recommendation(
+                question_id="api_kn1", employee_id=1, rank=1, score=0.9, outcome="accepted"
+            )
+        )
+        s.commit()
+
+    client = _client(engine, fake_embedder)
+    resp = client.get("/knowledge", params={"limit": 200})
+    assert resp.status_code == 200
+    ids = {i["question_id"] for i in resp.json()["items"]}
+    assert "api_kn1" not in ids
+
+
+def test_knowledge_available_to_non_admin_user(seed_counts, engine, fake_embedder) -> None:
+    # Unlike /dashboard (admin-only), every authenticated user can browse
+    # knowledge — the whole point is discovering someone ELSE'S past answer.
+    client = _client(engine, fake_embedder)
+    resp = client.get("/knowledge", headers=_user_headers(10))
+    assert resp.status_code == 200
+    total = seed_counts["answers"] + seed_counts["documents"]
+    assert resp.json()["summary"]["total_items"] == total
+
+
+def test_knowledge_respects_limit(seed_counts, engine, fake_embedder) -> None:
+    client = _client(engine, fake_embedder)
+    resp = client.get("/knowledge", params={"limit": 1})
+    body = resp.json()
+    assert len(body["items"]) == 1
+    # The summary total stays global — it does not shrink with the page limit.
+    total = seed_counts["answers"] + seed_counts["documents"]
+    assert body["summary"]["total_items"] == total
+    assert body["total_matching"] == total  # unfiltered: still every item
+
+
+def test_knowledge_offset_pages_through_results_without_overlap(
+    seed_counts, engine, fake_embedder
+) -> None:
+    client = _client(engine, fake_embedder)
+    page1 = client.get("/knowledge", params={"limit": 15, "offset": 0}).json()
+    page2 = client.get("/knowledge", params={"limit": 15, "offset": 15}).json()
+
+    assert len(page1["items"]) == 15
+    assert len(page2["items"]) == 15
+    ids1 = {i["source_id"] for i in page1["items"]}
+    ids2 = {i["source_id"] for i in page2["items"]}
+    assert ids1.isdisjoint(ids2)  # no overlap between pages
+    # total_matching is the same on both pages (the count BEFORE paging).
+    total = seed_counts["answers"] + seed_counts["documents"]
+    assert page1["total_matching"] == page2["total_matching"] == total
+
+    empty = client.get("/knowledge", params={"limit": 15, "offset": total}).json()
+    assert empty["items"] == []
+    assert empty["total_matching"] == total
+
+
+def test_knowledge_search_filters_by_keyword(seed_counts, engine, fake_embedder) -> None:
+    client = _client(engine, fake_embedder)
+    baseline = client.get("/knowledge", params={"limit": 200}).json()["items"]
+    target = baseline[0]
+    keyword = target["title"][:8]  # a substring guaranteed to be in at least one title
+
+    resp = client.get("/knowledge", params={"q": keyword, "limit": 200})
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    assert any(i["source_id"] == target["source_id"] for i in items)
+    assert all(keyword in i["title"] for i in items)
+    assert len(items) <= len(baseline)
+
+
+def test_knowledge_filters_by_topic(seed_counts, engine, fake_embedder) -> None:
+    client = _client(engine, fake_embedder)
+    baseline = client.get("/knowledge", params={"limit": 200}).json()["items"]
+    with_topic = next((i for i in baseline if i["topics"]), None)
+    assert with_topic is not None, "seed fixtures are expected to carry topics"
+    topic = with_topic["topics"][0]
+
+    resp = client.get("/knowledge", params={"topic": topic, "limit": 200})
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    assert any(i["source_id"] == with_topic["source_id"] for i in items)
+    assert all(topic in i["topics"] for i in items)
+    # topic is QA-specific: documents (which carry no topics) are excluded.
+    assert all(i["kind"] == "qa" for i in items)
+
+
+def test_knowledge_filters_by_department(seed_counts, engine, fake_embedder) -> None:
+    client = _client(engine, fake_embedder)
+    baseline = client.get("/knowledge", params={"limit": 200}).json()["items"]
+    with_dept = next((i for i in baseline if i["responder_department"]), None)
+    assert with_dept is not None, "seed fixtures are expected to carry a department"
+    dept = with_dept["responder_department"]
+
+    resp = client.get("/knowledge", params={"department": dept, "limit": 200})
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    assert any(i["source_id"] == with_dept["source_id"] for i in items)
+    assert all(i["responder_department"] == dept for i in items)
+    # department is QA-specific: documents (which carry no department) are excluded.
+    assert all(i["kind"] == "qa" for i in items)
+
+
+def test_knowledge_detail_returns_full_qa_item(seed_counts, engine, fake_embedder) -> None:
+    client = _client(engine, fake_embedder)
+    qa = next(
+        i
+        for i in client.get("/knowledge", params={"limit": 200}).json()["items"]
+        if i["kind"] == "qa"
+    )
+
+    resp = client.get(f"/knowledge/{qa['source_id']}")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["source_id"] == qa["source_id"]
+    assert body["kind"] == "qa"
+    assert body["title"] == qa["title"]
+    assert body["summary"] == qa["summary"]
+    assert body["responder_name"] == qa["responder_name"]
+
+
+def test_knowledge_detail_404_for_unknown_id(seed_counts, engine, fake_embedder) -> None:
+    client = _client(engine, fake_embedder)
+    resp = client.get("/knowledge/does-not-exist")
+    assert resp.status_code == 404

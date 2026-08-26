@@ -468,6 +468,60 @@ class RecentQuestionsResponse(BaseModel):
 
 
 # --------------------------------------------------------------------------- #
+# knowledge list (GET /knowledge) — company-wide, not scoped to one asker
+# (#293, #301)
+# --------------------------------------------------------------------------- #
+class KnowledgeItem(BaseModel):
+    """One piece of accumulated knowledge: an answered question OR an internal
+    document — the same two kinds a self-answer (#291) cites.
+
+    ``source_id`` is exactly a citation's ``SourceCitation.source_id`` for the
+    same ``kind`` (``Answer.id`` for ``"qa"``, ``Document.id`` for
+    ``"document"``), so a chat citation and a knowledge-list item can point at
+    the same stable entity. ``resolved_at`` is the item's own timestamp — the
+    ANSWER's (when it was given, not when the question was asked) for
+    ``"qa"``, the document's ``updated_at`` for ``"document"``. The
+    ``"document"``-only fields (``question_id``, ``session_id``, responder,
+    topics) are ``None``/empty for that kind.
+    """
+
+    source_id: str
+    kind: Literal["qa", "document"]
+    title: str
+    summary: str = ""
+    topics: list[str] = Field(default_factory=list)
+    responder_name: str | None = None
+    responder_department: str | None = None
+    resolved_at: str | None = None
+    question_id: str | None = None
+    session_id: str | None = None
+
+
+class KnowledgeSummary(BaseModel):
+    """Side-panel aggregate stats — reuses existing dashboard aggregates.
+
+    Per-responder aggregates are deliberately NOT included — that view belongs
+    to ``/dashboard``, not a knowledge browser (PR #340 review).
+    """
+
+    total_items: int
+    self_resolution_rate: float
+
+
+class KnowledgeListResponse(BaseModel):
+    """GET /knowledge payload: one page of (filtered) items plus a global summary.
+
+    ``total_matching`` is the count of items matching the current filters
+    BEFORE the ``offset``/``limit`` page cut — what the frontend paginates a
+    search's results with (#293, #301).
+    """
+
+    items: list[KnowledgeItem] = Field(default_factory=list)
+    total_matching: int = 0
+    summary: KnowledgeSummary
+
+
+# --------------------------------------------------------------------------- #
 # decline notifications (GET /notifications, POST /notifications/ack) (#E7)
 # --------------------------------------------------------------------------- #
 class DeclineNotification(BaseModel):
