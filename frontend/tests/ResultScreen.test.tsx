@@ -179,8 +179,9 @@ describe("ResultScreen — terminal-only replay (hard reload)", () => {
     // document 出典は文書ビューアへのリンク。
     const docLink = screen.getByRole("link", { name: /doc_003/ });
     expect(docLink).toHaveAttribute("href", expect.stringContaining("/documents/doc_003"));
-    // qa 出典は非リンクのチップ（ビューア未実装）。
-    expect(screen.getByText(/過去の回答 ans_0042/)).toBeInTheDocument();
+    // qa 出典はナレッジ詳細（/knowledge/[id]）へのリンク。
+    const qaLink = screen.getByRole("link", { name: /ans_0042/ });
+    expect(qaLink).toHaveAttribute("href", "/knowledge/ans_0042");
   });
 });
 
