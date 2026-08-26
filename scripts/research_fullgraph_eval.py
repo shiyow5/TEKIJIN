@@ -197,7 +197,7 @@ def main() -> None:
         "--additive-floor",
         type=float,
         default=None,
-        help="#413 additive の cosine フロア（未指定=config 既定 0.20）。有効化前の floor 実測用",
+        help="#413 additive の cosine フロア（未指定=config 既定）。有効化前の floor 実測用",
     )
     ap.add_argument(
         "--score-all-employees",
@@ -250,6 +250,13 @@ def main() -> None:
         self_answer=wire_self_answer,
         answerability=args.answerability,
     )
+    # Fall back to the actual production default, not a duplicated literal, so an
+    # "unspecified" eval run always matches the config the app ships with.
+    additive_floor = (
+        args.additive_floor
+        if args.additive_floor is not None
+        else settings.additive_self_answer_floor
+    )
 
     graph = build_agent(
         embedder,
@@ -264,9 +271,7 @@ def main() -> None:
         question_fit_enabled=args.question_fit,
         branch_constraint_enabled=args.branch_constraint,
         additive_self_answer_enabled=args.additive,
-        additive_self_answer_floor=(
-            args.additive_floor if args.additive_floor is not None else 0.20
-        ),
+        additive_self_answer_floor=additive_floor,
         daily_knowledge_enabled=args.daily_knowledge,
         score_all_employees=args.score_all_employees,
     )
@@ -303,9 +308,7 @@ def main() -> None:
             "query_expansion": args.query_expansion,
             "question_fit": args.question_fit,
             "additive": args.additive,
-            "additive_floor": args.additive_floor
-            if args.additive_floor is not None
-            else 0.20,
+            "additive_floor": additive_floor,
             "daily_knowledge": args.daily_knowledge,
             "score_all_employees": args.score_all_employees,
             "branch_constraint": args.branch_constraint,

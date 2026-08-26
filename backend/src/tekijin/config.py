@@ -185,10 +185,11 @@ class Settings(BaseSettings):
     # Enabled by default (#433 → task3): the DGX full-graph run (--additive
     # --daily-knowledge, floor 0.20) held person route recall at 1.000 and raised the
     # self-answer grounded rate 0.217->0.261 (+0.044) with source recall +0.010. Daily
-    # is routing-safe (C5 reads retrieval *_confidence, not the daily channel). NOTE:
-    # the deploy only runs migrate, not embed, so the daily embedding column is filled
-    # by a separate one-time embed against prod — the flag is inert (no daily hits,
-    # never an error) until then, and activates the moment those embeddings exist.
+    # is routing-safe (C5 reads retrieval *_confidence, not the daily channel). The
+    # daily embedding column starts NULL after migrate; deploy.sh's embed_missing step
+    # (best-effort, only-missing) fills it on the next deploy, so the flag is inert
+    # (no daily hits, never an error) only until that first post-enable deploy runs —
+    # if that embed is skipped/fails, the channel simply stays empty until it succeeds.
     daily_knowledge_enabled: bool = True
 
     # #405: add a question↔past-answer similarity (qsim) term to the C6 score. The
