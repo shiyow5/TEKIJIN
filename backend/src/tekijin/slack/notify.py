@@ -219,7 +219,9 @@ def schedule_pending_handoff(
                 return
             settings = get_settings()
             value_base = {"session_id": session_id, "recommendation_id": recommendation_id}
-            blocks = [
+            # Annotated: the mixed section/actions shapes otherwise infer as
+            # `list[object]`, which `post_message(blocks=...)` rejects (#441).
+            blocks: list[dict] = [
                 {"type": "section", "text": {"type": "mrkdwn", "text": _truncate(draft)}},
                 {
                     "type": "actions",

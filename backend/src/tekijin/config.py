@@ -166,6 +166,16 @@ class Settings(BaseSettings):
     # after DGX confirms a Pareto gain (primary R@3 up, alt not down).
     daily_evidence_enabled: bool = False
 
+    # #433: search daily reports as a KNOWLEDGE SOURCE for System 1 (distinct from
+    # #355 daily_evidence, which uses topic-overlap for the C6 scorer). When on, C4
+    # runs a question↔daily dense search and self-answer / #413 additive can cite a
+    # report's tacit knowledge (issue + content) alongside answers/documents. OFF by
+    # default (no daily channel, RetrievalResult byte-identical). DGX sizing
+    # (research_knowledge_source.py): person-route self-answer grounded rate
+    # 0.265->0.347 (+0.082, daily cited on 6%) — chat was noise and even hurt, so
+    # ONLY daily is wired. Requires the daily embedding column filled (make embed).
+    daily_knowledge_enabled: bool = False
+
     # #405: add a question↔past-answer similarity (qsim) term to the C6 score. The
     # scorer's topic_fit sees only the topic TAG and saturates (ADR-0006), so it
     # cannot re-rank on the specific question — and when C1 mispredicts the topic it

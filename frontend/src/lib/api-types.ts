@@ -523,8 +523,12 @@ export interface DoneData {
  */
 export interface SourceCitation {
   source_id: string;
-  /** Closed set from the backend contract (fragments.py): a past Q&A or an internal doc. */
-  kind: "qa" | "document";
+  /**
+   * Closed set from the backend contract (fragments.py): a past Q&A, an internal
+   * doc, or a daily report (#433). "daily" has no detail page, so the UI shows it
+   * as a label chip rather than a link.
+   */
+  kind: "qa" | "document" | "daily";
 }
 
 /**

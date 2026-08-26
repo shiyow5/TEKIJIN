@@ -172,6 +172,11 @@ class DailyReport(Base):
     # use daily reports as topic evidence without a runtime keyword vocabulary.
     topics: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
     created_at: Mapped[dt.datetime | None] = mapped_column(DateTime)
+    # #433: dense embedding of ``issue + content`` so a daily report can be a
+    # SEARCHABLE knowledge source for System 1 (self-answer / #413 additive), not
+    # just topic-overlap evidence for the scorer. NULL until ``make embed`` fills
+    # it (fresh DBs via create_all, existing via _apply_schema_upgrades).
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(EMBEDDING_DIM))
 
 
 class Project(Base):
