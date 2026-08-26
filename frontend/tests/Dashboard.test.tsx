@@ -1,6 +1,6 @@
 import { Dashboard } from "@/components/Dashboard";
 import type { DashboardResponse } from "@/lib/api-types";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const getDashboardMock = vi.fn();
@@ -44,6 +44,22 @@ const DATA: DashboardResponse = {
     { topic: "基幹システム", count: 18 },
   ],
   feedback_by_stage: { c1: 2, c6: 5, c7: 3, total: 10 },
+  knowledge_accumulation: {
+    this_month: 7,
+    last_month: 4,
+    captured_answers: 5,
+    consult_retrospectives: 2,
+    accepted_handoffs: 10,
+    capture_rate: 0.5,
+    monthly: [
+      { month: "2026-04", count: 0 },
+      { month: "2026-05", count: 1 },
+      { month: "2026-06", count: 3 },
+      { month: "2026-07", count: 2 },
+      { month: "2026-08", count: 4 },
+      { month: "2026-09", count: 7 },
+    ],
+  },
 };
 
 describe("Dashboard", () => {
@@ -52,6 +68,66 @@ describe("Dashboard", () => {
   });
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it("shows this month's formalized knowledge with the change from last month (#294)", async () => {
+    getDashboardMock.mockResolvedValue(DATA);
+    render(<Dashboard />);
+
+    const card = (await screen.findByText("今月の形式知化")).closest("div") as HTMLElement;
+    expect(within(card).getByText("7")).toBeInTheDocument();
+    // The delta is what makes a growing counter readable: 7 vs 4 last month.
+    expect(within(card).getByText(/前月 4/)).toBeInTheDocument();
+  });
+
+  it("shows the recovery rate of hand-offs, not just the raw count (#294)", async () => {
+    // Raw counts only ever grow; the capture rate is the one that can fall, which
+    // is what makes it worth a card.
+    getDashboardMock.mockResolvedValue(DATA);
+    render(<Dashboard />);
+
+    const card = (await screen.findByText("暗黙知の回収率")).closest("div") as HTMLElement;
+    expect(within(card).getByText("50%")).toBeInTheDocument();
+    expect(within(card).getByText(/10件/)).toBeInTheDocument();
+  });
+
+  it("breaks the month down by where the knowledge came from (#294)", async () => {
+    getDashboardMock.mockResolvedValue(DATA);
+    render(<Dashboard />);
+
+    expect(await screen.findByText(/回答の蓄積/)).toBeInTheDocument();
+    expect(screen.getByText(/直接相談のふりかえり/)).toBeInTheDocument();
+  });
+
+  it("renders the monthly trend oldest-first, including empty months (#294)", async () => {
+    getDashboardMock.mockResolvedValue(DATA);
+    render(<Dashboard />);
+
+    const trend = await screen.findByRole("list", { name: "形式知化の月次推移" });
+    const labels = within(trend)
+      .getAllByRole("listitem")
+      .map((li) => li.textContent);
+    expect(labels).toHaveLength(6);
+    expect(labels[0]).toContain("2026-04");
+    expect(labels[5]).toContain("2026-09");
+  });
+
+  it("says so plainly when nothing has been accumulated yet (#294)", async () => {
+    getDashboardMock.mockResolvedValue({
+      ...DATA,
+      knowledge_accumulation: {
+        this_month: 0,
+        last_month: 0,
+        captured_answers: 0,
+        consult_retrospectives: 0,
+        accepted_handoffs: 0,
+        capture_rate: 0,
+        monthly: [],
+      },
+    });
+    render(<Dashboard />);
+
+    expect(await screen.findByText(/まだ形式知化された知識がありません/)).toBeInTheDocument();
   });
 
   it("shows a loading state before data arrives", () => {
@@ -111,6 +187,15 @@ describe("Dashboard", () => {
       answers_per_responder: [],
       topic_distribution: [],
       feedback_by_stage: { c1: 0, c6: 0, c7: 0, total: 0 },
+      knowledge_accumulation: {
+        this_month: 0,
+        last_month: 0,
+        captured_answers: 0,
+        consult_retrospectives: 0,
+        accepted_handoffs: 0,
+        capture_rate: 0,
+        monthly: [],
+      },
     } satisfies DashboardResponse);
     render(<Dashboard />);
 

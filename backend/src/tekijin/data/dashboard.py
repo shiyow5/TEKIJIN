@@ -7,13 +7,22 @@ tiebreaker) so the output is stable.
 
 from __future__ import annotations
 
+import datetime as dt
 from typing import Any
 
 from sqlalchemy import and_, func, not_, or_, select
 from sqlalchemy.orm import Session
 
 from tekijin.data.feedback import VALID_STAGES, feedback_counts_by_stage
-from tekijin.models.tables import Answer, Employee, EvalRun, Event, Question, Recommendation
+from tekijin.models.tables import (
+    Answer,
+    Employee,
+    EvalRun,
+    Event,
+    OfflineConsult,
+    Question,
+    Recommendation,
+)
 
 # Routes that resolve a question WITHOUT contacting a live person — the numerator
 # of the self-resolution rate (product-spec 画面5). Only ``document`` qualifies in
@@ -51,6 +60,7 @@ def dashboard_summary(
     session: Session,
     *,
     top_responders: int = 5,
+    now: dt.datetime | None = None,
 ) -> dict[str, Any]:
     """Aggregate counts, load distribution, topic mix, and outcome ratios.
 
@@ -109,6 +119,138 @@ def dashboard_summary(
         "answers_per_responder": answers_per_responder,
         "topic_distribution": topic_distribution,
         "feedback_by_stage": _feedback_by_stage(session),
+        "knowledge_accumulation": _knowledge_accumulation(session, now),
+    }
+
+
+# --------------------------------------------------------------------------- #
+# #294: 蓄積メトリクス — how much tacit knowledge became explicit, and when
+# --------------------------------------------------------------------------- #
+# How many months of history the trend carries (this month plus the five before).
+_ACCUMULATION_MONTHS = 6
+
+
+def _month_key(moment: dt.datetime) -> str:
+    return f"{moment.year:04d}-{moment.month:02d}"
+
+
+def _month_start(moment: dt.datetime) -> dt.datetime:
+    return dt.datetime(moment.year, moment.month, 1)
+
+
+def _months_back(start: dt.datetime, count: int) -> dt.datetime:
+    """First day of the month ``count`` months before ``start``'s month."""
+
+    total = start.year * 12 + (start.month - 1) - count
+    return dt.datetime(total // 12, total % 12 + 1, 1)
+
+
+def _captured_answers_stmt():
+    """``answers`` rows the RUNTIME produced, not the ones the fixtures shipped.
+
+    The product seeds 150 answers, 16 of them dated in the current month, so
+    counting the table would make 「今月の形式化知識量」 read 16 on a database nobody
+    has used yet — wrong in the flattering direction, which is the worst way for a
+    headline KPI to be wrong.
+
+    Provenance is knowable without a marker column: a captured answer (#274) is
+    written when a responder ACCEPTS a hand-off, and ``seed.py`` never inserts
+    ``recommendations`` (it only TRUNCATEs them). So "has an accepted
+    recommendation for this question and this responder" separates the two
+    exactly, and keeps doing so as the fixtures change.
+    """
+
+    return (
+        select(Answer.created_at)
+        .join(
+            Recommendation,
+            and_(
+                Recommendation.question_id == Answer.question_id,
+                Recommendation.employee_id == Answer.responder_id,
+                Recommendation.outcome == "accepted",
+            ),
+        )
+        .where(Answer.created_at.isnot(None))
+    )
+
+
+def _knowledge_accumulation(session: Session, now: dt.datetime | None) -> dict[str, Any]:
+    """Newly formalized knowledge per month, and the share of hand-offs that left any.
+
+    Two sources, both runtime-only:
+
+    * **captured answers** (#274) — the responder's own text, saved when they
+      accept, which the retriever can then reuse.
+    * **consult retrospectives** (#247) — a 直接相談 leaves no transcript, so the
+      asker's write-up IS the artefact. Fixtures write none of these either.
+
+    ``capture_rate`` is the recovery rate: of the hand-offs someone accepted this
+    month, how many left knowledge behind. It answers whether the loop is closing,
+    which raw counts cannot — they only grow.
+
+    ``now`` is injected (the scorer's convention) so the month boundary is
+    testable; it defaults to the process clock.
+    """
+
+    now = now or dt.datetime.now()
+    this_start = _month_start(now)
+    last_start = _months_back(this_start, 1)
+    window_start = _months_back(this_start, _ACCUMULATION_MONTHS - 1)
+
+    def _count(stmt, column, start: dt.datetime, end: dt.datetime | None) -> int:
+        scoped = stmt.where(column >= start)
+        if end is not None:
+            scoped = scoped.where(column < end)
+        return session.scalar(select(func.count()).select_from(scoped.subquery())) or 0
+
+    answers_stmt = _captured_answers_stmt()
+    consults_stmt = select(OfflineConsult.created_at).where(OfflineConsult.created_at.isnot(None))
+
+    captured_answers = _count(answers_stmt, Answer.created_at, this_start, None)
+    retrospectives = _count(consults_stmt, OfflineConsult.created_at, this_start, None)
+    last_month = _count(answers_stmt, Answer.created_at, last_start, this_start) + _count(
+        consults_stmt, OfflineConsult.created_at, last_start, this_start
+    )
+
+    # Dense series: a month with nothing accumulated is a 0, never a missing point
+    # (a sparse series turns a gap into a slope once it is drawn).
+    buckets = {
+        _month_key(_months_back(this_start, offset)): 0
+        for offset in reversed(range(_ACCUMULATION_MONTHS))
+    }
+    for stmt, column in (
+        (answers_stmt, Answer.created_at),
+        (consults_stmt, OfflineConsult.created_at),
+    ):
+        rows = session.execute(stmt.where(column >= window_start)).all()
+        for (created,) in rows:
+            key = _month_key(created)
+            if key in buckets:
+                buckets[key] += 1
+
+    accepted_handoffs = (
+        session.scalar(
+            select(func.count())
+            .select_from(Recommendation)
+            .where(
+                Recommendation.outcome == "accepted",
+                Recommendation.created_at >= this_start,
+            )
+        )
+        or 0
+    )
+    # 0/0 reads as 0.0, not 1.0: "nothing was handed off" must never render as
+    # "everything was captured".
+    capture_rate = (captured_answers / accepted_handoffs) if accepted_handoffs else 0.0
+
+    return {
+        "this_month": captured_answers + retrospectives,
+        "last_month": last_month,
+        "captured_answers": captured_answers,
+        "consult_retrospectives": retrospectives,
+        "accepted_handoffs": accepted_handoffs,
+        "capture_rate": capture_rate,
+        "monthly": [{"month": key, "count": count} for key, count in buckets.items()],
     }
 
 

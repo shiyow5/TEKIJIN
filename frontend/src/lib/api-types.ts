@@ -457,6 +457,30 @@ export interface FeedbackByStage {
   total: number;
 }
 
+/** One point of the accumulation trend (#294): `"2026-09"` and its count. */
+export interface MonthlyCount {
+  month: string;
+  count: number;
+}
+
+/**
+ * GET /dashboard `knowledge_accumulation` (#294) — how much tacit knowledge became
+ * explicit, and whether the loop is closing.
+ *
+ * Counts only what the runtime produced (captured answers #274, 直接相談
+ * retrospectives #247), never the seeded corpus. `capture_rate` is the recovery
+ * rate: of the hand-offs accepted this month, the share that left knowledge behind.
+ */
+export interface KnowledgeAccumulation {
+  this_month: number;
+  last_month: number;
+  captured_answers: number;
+  consult_retrospectives: number;
+  accepted_handoffs: number;
+  capture_rate: number;
+  monthly: MonthlyCount[];
+}
+
 export interface DashboardResponse {
   total_employees: number;
   total_questions: number;
@@ -478,6 +502,7 @@ export interface DashboardResponse {
   topic_distribution: TopicCount[];
   /** #237: how often the asking side corrected each stage (c1/c6/c7). */
   feedback_by_stage: FeedbackByStage;
+  knowledge_accumulation: KnowledgeAccumulation;
 }
 
 // --------------------------------------------------------------------------- //

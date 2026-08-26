@@ -490,7 +490,13 @@ def dashboard(
 
     with _generic_500("GET /dashboard"):
         with _service(request).session_factory() as session:
-            data = dashboard_summary(session, top_responders=top_responders)
+            data = dashboard_summary(
+                session,
+                top_responders=top_responders,
+                # Injected so the month boundary follows the service clock the
+                # rest of the run uses, not the process clock (#294).
+                now=_service(request).now(),
+            )
         return schemas.DashboardResponse(**data)
 
 

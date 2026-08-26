@@ -2405,6 +2405,150 @@ def test_dashboard_summary_aggregates_outcomes(seed_counts, session) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# #294: 蓄積メトリクス (knowledge accumulation on the admin dashboard)
+# --------------------------------------------------------------------------- #
+ACC_NOW = dt.datetime(2026, 9, 15, 12, 0, 0)
+
+
+def _accepted_handoff(session, *, qid: str, responder_id: int, created: dt.datetime) -> None:
+    """One accepted hand-off. Fixtures write NO recommendations, so a row here is
+    unambiguously runtime — that is what makes the accumulation count meaningful."""
+
+    session.add(
+        Recommendation(
+            question_id=qid,
+            employee_id=responder_id,
+            rank=1,
+            score=0.9,
+            outcome="accepted",
+            created_at=created,
+        )
+    )
+    session.flush()
+
+
+def _captured_answer(session, *, aid: str, qid: str, responder_id: int, created: dt.datetime):
+    from tekijin.models.tables import Answer
+
+    session.add(
+        Answer(
+            id=aid,
+            question_id=qid,
+            responder_id=responder_id,
+            body="教わった内容",
+            topic="ネットワーク・VPN",
+            created_at=created,
+            reuse_count=0,
+        )
+    )
+    session.flush()
+
+
+def _consult(session, *, qid: str, responder_id: int, created: dt.datetime) -> None:
+    from tekijin.models.tables import OfflineConsult
+
+    session.add(
+        OfflineConsult(
+            question_id=qid,
+            responder_id=responder_id,
+            asker_id=33,
+            topics=["ネットワーク・VPN"],
+            answer_body="対面で聞いた内容",
+            resolution="resolved",
+            created_at=created,
+        )
+    )
+    session.flush()
+
+
+def test_accumulation_counts_only_what_the_runtime_produced(seed_counts, session) -> None:
+    """The seed ships 150 answers, 16 of them dated in the current month.
+
+    Counting every ``answers`` row would make "今月の形式化知識量" read 16 on a
+    freshly seeded database, before anyone has used the product — a headline KPI
+    that is wrong in the flattering direction. Runtime origin is knowable: a
+    captured answer has an ACCEPTED recommendation behind it, and fixtures write
+    no ``recommendations`` at all (``seed.py`` TRUNCATEs them, never inserts).
+    """
+
+    summary = dashboard_summary(session, now=ACC_NOW)
+    assert summary["knowledge_accumulation"]["this_month"] == 0
+
+
+def test_accumulation_counts_captured_answers_and_retrospectives(seed_counts, session) -> None:
+    _accepted_handoff(session, qid="q_0001", responder_id=1, created=ACC_NOW)
+    _captured_answer(session, aid="ans_acc1", qid="q_0001", responder_id=1, created=ACC_NOW)
+    # A 直接相談 write-up (#247) is the other half of the loop: no chat transcript
+    # exists, so this row IS the knowledge. Fixtures write none of these either.
+    _consult(session, qid="q_0002", responder_id=2, created=ACC_NOW)
+
+    acc = dashboard_summary(session, now=ACC_NOW)["knowledge_accumulation"]
+    assert acc["captured_answers"] == 1
+    assert acc["consult_retrospectives"] == 1
+    assert acc["this_month"] == 2
+
+
+def test_accumulation_separates_this_month_from_last(seed_counts, session) -> None:
+    last_month = dt.datetime(2026, 8, 20, 9, 0, 0)
+    _accepted_handoff(session, qid="q_0001", responder_id=1, created=last_month)
+    _captured_answer(session, aid="ans_acc_old", qid="q_0001", responder_id=1, created=last_month)
+    _accepted_handoff(session, qid="q_0002", responder_id=2, created=ACC_NOW)
+    _captured_answer(session, aid="ans_acc_new", qid="q_0002", responder_id=2, created=ACC_NOW)
+
+    acc = dashboard_summary(session, now=ACC_NOW)["knowledge_accumulation"]
+    assert acc["this_month"] == 1
+    assert acc["last_month"] == 1
+
+
+def test_accumulation_reports_the_recovery_rate_of_handoffs(seed_counts, session) -> None:
+    """暗黙知の回収率: of the hand-offs someone accepted, how many left knowledge behind.
+
+    This is the number that says whether the loop is actually closing. Two accepted
+    hand-offs, one of which produced an answer row -> 0.5.
+    """
+
+    _accepted_handoff(session, qid="q_0001", responder_id=1, created=ACC_NOW)
+    _captured_answer(session, aid="ans_rec1", qid="q_0001", responder_id=1, created=ACC_NOW)
+    _accepted_handoff(session, qid="q_0002", responder_id=2, created=ACC_NOW)
+
+    acc = dashboard_summary(session, now=ACC_NOW)["knowledge_accumulation"]
+    assert acc["accepted_handoffs"] == 2
+    assert acc["capture_rate"] == pytest.approx(0.5)
+
+
+def test_accumulation_capture_rate_is_zero_not_one_when_nothing_was_handed_off(
+    seed_counts, session
+) -> None:
+    """An empty numerator over an empty denominator must not read as "100% captured"."""
+
+    acc = dashboard_summary(session, now=ACC_NOW)["knowledge_accumulation"]
+    assert acc["accepted_handoffs"] == 0
+    assert acc["capture_rate"] == 0.0
+
+
+def test_accumulation_monthly_trend_is_dense_and_oldest_first(seed_counts, session) -> None:
+    """A month with nothing accumulated must appear as 0, not be missing.
+
+    A sparse series silently rescales the chart and turns a gap into a slope.
+    """
+
+    _accepted_handoff(session, qid="q_0001", responder_id=1, created=ACC_NOW)
+    _captured_answer(session, aid="ans_tr", qid="q_0001", responder_id=1, created=ACC_NOW)
+
+    monthly = dashboard_summary(session, now=ACC_NOW)["knowledge_accumulation"]["monthly"]
+    assert [m["month"] for m in monthly] == [
+        "2026-04",
+        "2026-05",
+        "2026-06",
+        "2026-07",
+        "2026-08",
+        "2026-09",
+    ]
+    assert monthly[-1]["count"] == 1
+    assert all(m["count"] == 0 for m in monthly[:-1])
+
+
+# --------------------------------------------------------------------------- #
 # GET /handoff : responder-facing payload for a session paused at ``send`` (#38)
 # --------------------------------------------------------------------------- #
 def test_handoff_returns_responder_payload(seed_counts, engine, fake_embedder) -> None:
