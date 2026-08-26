@@ -136,6 +136,46 @@ class SelfAnswerModel(Protocol):
     def compose(self, question: str, evidence: Sequence[CitedEvidence]) -> SelfAnswerResult: ...
 
 
+@dataclass(frozen=True, slots=True)
+class QuestionStructureResult:
+    """Structured re-draft of a raw question (#475 Screen 01).
+
+    The asker types an anxious, unstructured question ("dockerが動かないです たすけて")
+    and — ON DEMAND, only when they ask for help drafting — the model reshapes it
+    into the four fields a responder needs: 起きていること / 環境 / 試したこと /
+    詰まっている点. The asker edits these before sending, so a field the model could
+    not infer is left EMPTY rather than invented (a fabricated 環境 would mislead the
+    responder). Every field is grounded in the supplied question + C1 understanding;
+    nothing here is persisted or fed back into routing — it is a presentation aid.
+    """
+
+    summary: str = ""
+    environment: str = ""
+    tried: str = ""
+    blocker: str = ""
+
+
+class QuestionStructurer(Protocol):
+    """On-demand question re-drafter (#475): raw question -> the four hand-off fields.
+
+    Runs OUTSIDE the graph, triggered by the asker on the result screen — never on
+    the C1 critical path ([[tekijin-latency-and-streaming]]: C1 1.5s is frozen), so
+    it cannot slow the auto-flow. ``situation``/``topics`` carry C1's already-computed
+    understanding so the re-draft reflects what the system parsed, not a second guess;
+    both are derived from untrusted user input and must be fenced, never obeyed. The
+    model must ground every field in the text and leave a field it cannot fill empty
+    rather than fabricate one.
+    """
+
+    def structure(
+        self,
+        question: str,
+        *,
+        situation: str | None = None,
+        topics: list[str] | None = None,
+    ) -> QuestionStructureResult: ...
+
+
 class DraftModel(Protocol):
     """C7: compose a polite hand-off request to the chosen responder."""
 

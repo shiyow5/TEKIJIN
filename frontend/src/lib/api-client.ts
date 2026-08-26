@@ -41,6 +41,8 @@ import type {
   NotificationAckResponse,
   NotificationsResponse,
   Principal,
+  QuestionStructureRequest,
+  QuestionStructureResponse,
   RecentQuestionItem,
   RecentQuestionsResponse,
   ResolveQuestionResponse,
@@ -278,6 +280,20 @@ export function regenerateHandoffDraft(
   options: RequestOptions = {},
 ): Promise<AckResponse> {
   return postJson<AckResponse>("/handoff/redraft", request, options);
+}
+
+/**
+ * POST /handoff/structure — the asker asks the AI to tidy their raw question into
+ * the four hand-off fields (起きていること / 環境 / 試したこと / 詰まっている点, #475).
+ * On-demand and read-only: it reshapes the already-stored question OUTSIDE the
+ * graph (never on the C1 critical path) and returns the fields synchronously.
+ * Throws {@link ApiError} with 404 when the session has no question yet.
+ */
+export function structureQuestion(
+  request: QuestionStructureRequest,
+  options: RequestOptions = {},
+): Promise<QuestionStructureResponse> {
+  return postJson<QuestionStructureResponse>("/handoff/structure", request, options);
 }
 
 /**

@@ -34,6 +34,7 @@ import { ReferenceAnswer } from "@/components/ReferenceAnswer";
 import { CandidateCard } from "@/components/result/CandidateCard";
 import { ConsultMethodDialog } from "@/components/result/ConsultMethodDialog";
 import { DraftEditor } from "@/components/result/DraftEditor";
+import { QuestionStructurePanel } from "@/components/result/QuestionStructurePanel";
 import {
   correctInterpretation,
   excludeHandoffCandidate,
@@ -87,6 +88,9 @@ export function PersonRouteView({
   // Bumping this remounts the DraftEditor (keyed on it), which discards the
   // asker's local edits and re-seeds from the AI draft — the point of "作り直し".
   const [redraftNonce, setRedraftNonce] = useState(0);
+  // Bumped when the asker folds the structured question into the draft (#475), so
+  // the editor remounts and shows the combined text (same remount pattern as 作り直し).
+  const [structureNonce, setStructureNonce] = useState(0);
   const [sending, setSending] = useState(false);
   const [sentTo, setSentTo] = useState<string | null>(null);
   // Holds the draft text between pressing "この内容で依頼する" and picking a
@@ -231,6 +235,15 @@ export function PersonRouteView({
     }
   }
 
+  // #475: fold the (edited) structured question into the draft and remount the
+  // editor so the combined text shows. Appends below the polite letter rather than
+  // replacing it, so the greeting/addressee the template produced is kept.
+  function handleApplyStructure(block: string) {
+    if (!block) return;
+    setLocalDraft((prev) => (prev.trim() ? `${prev.trim()}\n\n${block}` : block));
+    setStructureNonce((n) => n + 1);
+  }
+
   function handleChooseConsultMethod(consultMethod: ConsultMethod) {
     if (pendingDraft === null) return;
     const text = pendingDraft;
@@ -311,6 +324,17 @@ export function PersonRouteView({
         </output>
       ) : null}
 
+      {/* #475 Screen 01: on-demand "質問を整理する" — reshape the raw question into
+          起きていること / 環境 / 試したこと / 詰まっている点, editable, then fold into
+          the draft. Off the C1 critical path (generated only when the asker asks). */}
+      {sessionId ? (
+        <QuestionStructurePanel
+          sessionId={sessionId}
+          disabled={sending || selecting || excluding || redrafting || correcting}
+          onApply={handleApplyStructure}
+        />
+      ) : null}
+
       {sessionId ? (
         <div className="flex justify-end">
           <button
@@ -325,7 +349,7 @@ export function PersonRouteView({
       ) : null}
 
       <DraftEditor
-        key={`${selectedPersonId}:${redraftNonce}`}
+        key={`${selectedPersonId}:${redraftNonce}:${structureNonce}`}
         initialDraft={localDraft}
         disabled={sending || selecting || excluding || redrafting || correcting}
         onSend={(text) => setPendingDraft(text)}

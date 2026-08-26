@@ -10,12 +10,22 @@ const selectHandoffCandidateMock = vi.fn();
 const excludeHandoffCandidateMock = vi.fn();
 const regenerateHandoffDraftMock = vi.fn();
 const correctInterpretationMock = vi.fn();
+const structureQuestionMock = vi.fn();
 vi.mock("@/lib/api-client", () => ({
   updateHandoffDraft: (...args: unknown[]) => updateHandoffDraftMock(...args),
   selectHandoffCandidate: (...args: unknown[]) => selectHandoffCandidateMock(...args),
   excludeHandoffCandidate: (...args: unknown[]) => excludeHandoffCandidateMock(...args),
   regenerateHandoffDraft: (...args: unknown[]) => regenerateHandoffDraftMock(...args),
   correctInterpretation: (...args: unknown[]) => correctInterpretationMock(...args),
+  // #475: PersonRouteView now mounts QuestionStructurePanel, which imports these.
+  structureQuestion: (...args: unknown[]) => structureQuestionMock(...args),
+  ApiError: class ApiError extends Error {
+    status: number;
+    constructor(status: number, message: string) {
+      super(message);
+      this.status = status;
+    }
+  },
   // #247: the terminal view mounts RetrospectiveLink, which asks whether this was
   // a 直接相談 someone accepted. Rejecting keeps the CTA hidden (its failure path),
   // so these tests keep asserting the terminal view exactly as before.
@@ -37,6 +47,14 @@ beforeEach(() => {
   regenerateHandoffDraftMock.mockResolvedValue({ session_id: "s1", status: "redraft_queued" });
   correctInterpretationMock.mockReset();
   correctInterpretationMock.mockResolvedValue({ session_id: "s1", status: "reinterpret_queued" });
+  structureQuestionMock.mockReset();
+  structureQuestionMock.mockResolvedValue({
+    session_id: "s1",
+    summary: "起きていること",
+    environment: "",
+    tried: "",
+    blocker: "詰まっている点",
+  });
   routerPushMock.mockReset();
 });
 

@@ -135,6 +135,29 @@ export interface HandoffRedraftRequest {
   session_id: string;
 }
 
+/**
+ * POST /handoff/structure body — the asker asks the AI to tidy their raw question
+ * into the four hand-off fields (#475 Screen 01). On-demand and read-only: it
+ * reshapes the already-stored question, so only the session is named.
+ */
+export interface QuestionStructureRequest {
+  session_id: string;
+}
+
+/**
+ * POST /handoff/structure response (schemas.py `QuestionStructureResponse`) — the
+ * re-drafted question: 起きていること / 環境 / 試したこと / 詰まっている点 (#475).
+ * Any field may be empty — the model leaves a field blank rather than inventing
+ * what the question never stated, and the asker fills or edits it before sending.
+ */
+export interface QuestionStructureResponse {
+  session_id: string;
+  summary: string;
+  environment: string;
+  tried: string;
+  blocker: string;
+}
+
 /** POST /handoff/select response (schemas.py `HandoffSelectResponse`). */
 export interface HandoffSelectResponse {
   session_id: string;

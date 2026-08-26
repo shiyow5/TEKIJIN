@@ -19,7 +19,12 @@ import pytest
 from fastapi.testclient import TestClient
 from langgraph.checkpoint.memory import MemorySaver
 
-from tekijin.agent.stubs import KeywordIntentModel, RuleSufficiencyModel, TemplateDraftModel
+from tekijin.agent.stubs import (
+    KeywordIntentModel,
+    RuleSufficiencyModel,
+    TemplateDraftModel,
+    TemplateQuestionStructurer,
+)
 from tekijin.api.routes import knowledge as knowledge_route
 from tekijin.api.service import (
     SESSION_TTL_SECONDS,
@@ -131,6 +136,7 @@ def _client(
     answerability_threshold=40,
     self_answer_model=None,
     knowledge_answer_min_similarity=None,
+    question_structurer=None,
 ) -> TestClient:
     return _app_client(
         _service(
@@ -143,6 +149,7 @@ def _client(
             answerability_threshold=answerability_threshold,
             self_answer_model=self_answer_model,
             knowledge_answer_min_similarity=knowledge_answer_min_similarity,
+            question_structurer=question_structurer,
         )
     )
 
@@ -158,6 +165,7 @@ def _service(
     answerability_threshold=40,
     self_answer_model=None,
     knowledge_answer_min_similarity=None,
+    question_structurer=None,
 ) -> AgentService:
     """Same wiring as :func:`_client`, but hands back the service itself.
 
@@ -172,6 +180,9 @@ def _service(
         intent_model=KeywordIntentModel(),
         sufficiency_model=RuleSufficiencyModel(),
         draft_model=TemplateDraftModel(),
+        # #475: always wire the on-demand question structurer (stub) so the
+        # /handoff/structure endpoint is exercised; a test can inject its own.
+        question_structurer=question_structurer or TemplateQuestionStructurer(),
         answerability_model=answerability_model,
         answerability_threshold=answerability_threshold,
         self_answer_model=self_answer_model,
@@ -2969,6 +2980,90 @@ def test_handoff_draft_404_after_answered(seed_counts, engine, fake_embedder) ->
     _events(client, "hd4")  # completed
     resp = client.post("/handoff/draft", json={"session_id": "hd4", "draft": "本文"})
     assert resp.status_code == 404
+
+
+# --------------------------------------------------------------------------- #
+# POST /handoff/structure : on-demand question re-draft into the four fields (#475)
+# --------------------------------------------------------------------------- #
+class _RecordingStructurer:
+    """Structurer spy: records the (question, situation, topics) it was called with."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str | None, list[str]]] = []
+
+    def structure(self, question, *, situation=None, topics=None):
+        from tekijin.agent.protocols import QuestionStructureResult
+
+        self.calls.append((question, situation, list(topics or [])))
+        return QuestionStructureResult(
+            summary="起きていること", environment="", tried="", blocker=question
+        )
+
+
+def test_handoff_structure_returns_the_four_fields(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "qs1"})
+    _events(client, "qs1")  # pause at send (a person is offered)
+
+    resp = client.post("/handoff/structure", json={"session_id": "qs1"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["session_id"] == "qs1"
+    # The stub seeds blocker from the raw question and leaves env/tried empty — the
+    # "don't invent a field the asker never gave" contract (the asker fills them in).
+    assert body["blocker"] == GOOD_Q
+    assert body["summary"]  # a one-line 起きていること
+    assert body["environment"] == ""
+    assert body["tried"] == ""
+
+
+def test_handoff_structure_reuses_c1_understanding(seed_counts, engine, fake_embedder) -> None:
+    # The endpoint must feed the STORED question + C1's topics/situation to the
+    # structurer (not re-run C1), so the re-draft reflects what was already parsed.
+    spy = _RecordingStructurer()
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1)),
+        question_structurer=spy,
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "qs2"})
+    _events(client, "qs2")
+
+    resp = client.post("/handoff/structure", json={"session_id": "qs2"})
+    assert resp.status_code == 200
+    assert len(spy.calls) == 1
+    question, _situation, topics = spy.calls[0]
+    assert question == GOOD_Q
+    assert topics == ["ネットワーク・VPN"]  # C1 (KeywordIntentModel) classification
+
+
+def test_handoff_structure_404_when_no_question(seed_counts, engine, fake_embedder) -> None:
+    client = _client(engine, fake_embedder, retriever=_FakeRetriever(), scorer=_FakeScorer([]))
+    resp = client.post("/handoff/structure", json={"session_id": "nope"})
+    assert resp.status_code == 404
+
+
+def test_handoff_structure_forbidden_for_non_participant(
+    seed_counts, engine, fake_embedder
+) -> None:
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "qs3"})
+    _events(client, "qs3")
+    # employee 11 is neither the asker (10) nor the responder (1) nor an admin -> 403.
+    resp = client.post("/handoff/structure", json={"session_id": "qs3"}, headers=_user_headers(11))
+    assert resp.status_code == 403
 
 
 def test_save_handoff_draft_rejects_blank_at_the_service(

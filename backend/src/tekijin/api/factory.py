@@ -13,7 +13,7 @@ from tekijin.api.checkpointer import make_checkpointer
 from tekijin.api.service import AgentService
 from tekijin.config import Settings, get_settings
 from tekijin.data.db import get_engine, get_sessionmaker
-from tekijin.llm.factory import make_llm_nodes
+from tekijin.llm.factory import make_llm_nodes, make_question_structurer
 from tekijin.retrieval.embedding import SentenceTransformerEmbedder
 
 
@@ -44,6 +44,10 @@ def build_default_service(settings: Settings | None = None) -> AgentService:
         intent_model=intent_model,
         sufficiency_model=sufficiency_model,
         draft_model=draft_model,
+        # #475 Screen 01: on-demand question re-drafter for the result-screen endpoint
+        # (POST /handoff/structure). Built separately from the graph nodes — it never
+        # runs on the C1 critical path. Always wired (stub or vLLM per llm_backend).
+        question_structurer=make_question_structurer(settings),
         # #70: wire the evidence-sufficiency critic ONLY when enabled; otherwise
         # pass None so the graph compiles the pre-#70 flow (no critique node).
         # Default OFF until it is verified on the DGX eval (part3).
