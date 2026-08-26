@@ -17,7 +17,7 @@
 > → [robustness.md](robustness.md) §4
 
 **構成**: `nvidia/Nemotron-3-Embed-1B-BF16`（2048次元）/ 経路閾値 0.55・**0.30**・0.40（[ADR-0004](../adr/0004-c5-route-thresholds-nemotron.md)）/
-#115 の RRF 重み。DGX 上の `pgvector/pgvector:pg16` に seed + 埋め込み370行を投入して測定。
+#115 の RRF 重み。DGX 上の `pgvector/pgvector:pg16`（測定当時の浮動タグ。#101 で以降は固定）に seed + 埋め込み370行を投入して測定。
 
 > ⚠️ **§0.3 だけが新しい。** #253 で §0.3（経路）を**現行コーパス87件・現行閾値
 > `DOCUMENT_SIM`=0.28** で測り直した。§0.1 / §0.2 / §0.4 は `ablation/e2e_variants.json` 由来で
@@ -164,7 +164,7 @@ gold トピック（0.775）との差 **0.136 が C1 の取りこぼし分**。
 
 ```bash
 docker run -d --name tekijin_pg -e POSTGRES_PASSWORD=pw -e POSTGRES_DB=tekijin \
-  -p 55432:5432 pgvector/pgvector:pg16
+  -p 55432:5432 pgvector/pgvector:0.8.6-pg16
 export DB=postgresql+psycopg://postgres:pw@host.docker.internal:55432/tekijin
 python scripts/research_e2e.py --task prepare  --db-url "$DB"
 python scripts/research_e2e.py --task route    --db-url "$DB"

@@ -47,9 +47,13 @@ jobs:
           filters: |
             backend:
               - 'backend/**'
-              # Starting the workflow is not enough: without this the backend job
+              # Starting the workflow is not enough: without these the backend job
               # is skipped and the run is green having tested nothing (#309).
+              # `Makefile` was in this workflow's `paths:` but in NEITHER filter, so
+              # a Makefile-only PR — the file that defines `test-backend` — has been
+              # doing exactly that.
               - 'docker-compose.yml'
+              - 'Makefile'
               - '.github/workflows/test.yml'
               - '.github/actions/setup-backend/**'
             frontend:
