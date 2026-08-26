@@ -119,6 +119,8 @@ class AgentNodes:
         knowledge_answer_min_similarity: float | None = None,
         query_expansion_enabled: bool = False,
         question_fit_enabled: bool = False,
+        additive_self_answer_enabled: bool = False,
+        additive_self_answer_floor: float = 0.20,
     ) -> None:
         self._intent = intent_model
         self._sufficiency = sufficiency_model
@@ -153,6 +155,11 @@ class AgentNodes:
         # never handed the map, so scores are develop-identical. Routing is unchanged
         # either way (C5 does not read the scorer).
         self._question_fit_enabled = question_fit_enabled
+        # #413: additive self-answer on the person route (shares the #291 composer +
+        # fragment source). Only active when self_answer is wired AND this is set;
+        # the floor gates the compose call so no-data person questions add no latency.
+        self._additive_self_answer_enabled = additive_self_answer_enabled
+        self._additive_self_answer_floor = additive_self_answer_floor
 
     # -- entry: validate input, reset per-question control fields ---------
     def reset(self, state: AgentState) -> AgentState:
@@ -198,6 +205,9 @@ class AgentNodes:
             "self_answer_grounded": False,
             "self_answer_text": None,
             "self_answer_citations": [],
+            # #413: clear the additive (person-route) cited answer too.
+            "additive_answer_text": None,
+            "additive_citations": [],
             "recommendations": [],
             # #70: clear the critic's per-question verdict so a second question on
             # the same thread_id never reads a prior run's stale score/reason.
@@ -587,6 +597,49 @@ class AgentNodes:
             "answer": state.get("self_answer_text") or "",
             "self_answer_citations": state.get("self_answer_citations") or [],
         }
+
+    # -- additive self-answer (#413): cite past knowledge ON the person route ---
+    def additive_answer(self, state: AgentState) -> AgentState:
+        """Compose a cited answer to surface ALONGSIDE the person hand-off.
+
+        Runs on the PERSON route (wired only when additive self-answer is enabled).
+        Unlike ``self_answer`` it never terminates and never marks the run
+        self-resolved — the hand-off always follows (person recall unchanged). A low
+        relevance FLOOR gates the compose LLM call so a person question with no
+        relevant data adds no latency; a grounded result is attached to
+        ``additive_answer_text`` / ``additive_citations`` for additive display, and
+        an ungrounded one leaves them empty (plain hand-off, as before).
+        """
+
+        assert self._self_answer is not None and self._fragment_source is not None
+        retrieval = state.get("retrieval") or empty_retrieval()
+        # Gate: only spend a compose call when at least one data channel is weakly
+        # relevant. Below the floor -> skip (no LLM, no citation), just hand off.
+        top_conf = max(
+            float(retrieval.get("answer_confidence") or 0.0),
+            float(retrieval.get("document_confidence") or 0.0),
+        )
+        if top_conf < self._additive_self_answer_floor:
+            return {}
+        evidence = collect_cited_evidence(self._fragment_source, retrieval)
+        # This is a BEST-EFFORT additive step: the hand-off MUST always follow, so a
+        # composer failure (e.g. the LLM returns unparseable structured output ->
+        # ValueError) must degrade to "no citation" rather than crash the person run
+        # and take the hand-off down with it. The whole safety premise of #413 is
+        # that person recall never regresses; swallow and proceed to c6_score.
+        try:
+            result = self._self_answer.compose(state["question"], evidence)
+        except Exception:  # noqa: BLE001 — additive best-effort, never break hand-off
+            return {}
+        if not result.grounded:
+            return {}
+        kind_by_id = {e.source_id: e.kind for e in evidence}
+        citations = [
+            {"source_id": sid, "kind": kind_by_id[sid]}
+            for sid in result.cited_source_ids
+            if sid in kind_by_id
+        ]
+        return {"additive_answer_text": result.answer, "additive_citations": citations}
 
     def document(self, state: AgentState) -> AgentState:
         docs = (state.get("retrieval") or empty_retrieval())["documents"]

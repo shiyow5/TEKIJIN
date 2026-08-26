@@ -136,6 +136,16 @@ class AgentState(TypedDict, total=False):
     self_answer_text: str | None
     self_answer_citations: list[dict[str, str]]
 
+    # -- additive self-answer (#413) --------------------------------------
+    # Set by the additive_answer node on the PERSON route (only when
+    # ``additive_self_answer_enabled``). Unlike ``self_answer_*`` above, this NEVER
+    # terminates the run or marks it self-resolved — the human hand-off still
+    # happens. When a grounded cited answer exists it is surfaced ALONGSIDE the
+    # recommendation ("参考: 過去の類似回答") so System 1 fires on person-routed
+    # knowledge questions too, without stealing the route (person recall unchanged).
+    additive_answer_text: str | None
+    additive_citations: list[dict[str, str]]
+
     # -- C6 scoring --------------------------------------------------------
     recommendations: list[dict[str, Any]]
 

@@ -85,6 +85,20 @@ def node_event(
                 confidence=update.get("route_confidence", 0.0),
             ),
         )
+    if node == "additive_answer":
+        # #413: additive cited answer on the person route. Emit a ``reference`` event
+        # ONLY when one grounded (text present); otherwise this node is silent and the
+        # run proceeds to the plain hand-off. It never replaces the recommend/hand-off.
+        text = update.get("additive_answer_text")
+        if not text:
+            return None
+        return _sse(
+            "reference",
+            schemas.ReferenceData(
+                answer=text,
+                citations=update.get("additive_citations") or [],
+            ),
+        )
     if node == "c6_score":
         # person_id crosses the boundary as the external "E###" string form
         # (model-definition §163-170), paired with the "E###" asker_id we accept.

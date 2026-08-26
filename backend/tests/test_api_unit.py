@@ -249,6 +249,31 @@ def test_node_event_self_answered_carries_citations() -> None:
     }
 
 
+def test_node_event_additive_answer_emits_reference_when_grounded() -> None:
+    # #413: the additive_answer node surfaces a "reference" event (cited past answer)
+    # to show ALONGSIDE the person hand-off — only when a grounded answer exists.
+    sse = _ev(
+        events.node_event(
+            "additive_answer",
+            {
+                "additive_answer_text": "過去の類似回答です。",
+                "additive_citations": [{"source_id": "qa_1", "kind": "qa"}],
+            },
+        )
+    )
+    assert sse.event == "reference"
+    assert _data(sse) == {
+        "answer": "過去の類似回答です。",
+        "citations": [{"source_id": "qa_1", "kind": "qa"}],
+    }
+
+
+def test_node_event_additive_answer_silent_without_text() -> None:
+    # No grounded answer (gated below floor, or ungrounded) -> no event, plain hand-off.
+    assert events.node_event("additive_answer", {}) is None
+    assert events.node_event("additive_answer", {"additive_answer_text": ""}) is None
+
+
 def test_node_event_document_carries_structured_fallback_responder() -> None:
     rec = {
         "person_id": 1,

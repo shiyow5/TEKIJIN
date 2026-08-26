@@ -192,6 +192,8 @@ class AgentService:
         knowledge_answer_min_similarity: float | None = None,
         query_expansion_enabled: bool = False,
         question_fit_enabled: bool = False,
+        additive_self_answer_enabled: bool = False,
+        additive_self_answer_floor: float = 0.20,
         max_concurrent_runs: int = 0,
         now_factory: Any = _default_now,
         clock: Any = time.monotonic,
@@ -233,6 +235,9 @@ class AgentService:
         self._query_expansion_enabled = query_expansion_enabled
         # #405: add the question↔past-answer term to C6 (False = OFF, dormant).
         self._question_fit_enabled = question_fit_enabled
+        # #413: additive cited answer on the person route (False = OFF, dormant).
+        self._additive_self_answer_enabled = additive_self_answer_enabled
+        self._additive_self_answer_floor = additive_self_answer_floor
         # Backpressure (#180): max graph runs executing at once before /ask sheds new
         # questions with 503. 0 (default) disables it — set from settings via the
         # factory in production. Guarded by its own lock; independent of the per-
@@ -1225,6 +1230,8 @@ class AgentService:
             knowledge_answer_min_similarity=self._knowledge_answer_min_similarity,
             query_expansion_enabled=self._query_expansion_enabled,
             question_fit_enabled=self._question_fit_enabled,
+            additive_self_answer_enabled=self._additive_self_answer_enabled,
+            additive_self_answer_floor=self._additive_self_answer_floor,
         )
 
     def _run(
