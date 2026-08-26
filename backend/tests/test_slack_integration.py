@@ -291,6 +291,35 @@ def test_oauth_callback_links_any_workspace_when_team_is_unset(
     assert "slack=linked" in resp.headers["location"]
 
 
+def test_a_link_stored_before_the_team_was_configured_is_ignored(
+    monkeypatch, slack_app_configured, seed_counts, engine, fake_embedder
+) -> None:
+    """Turning the setting on must also neutralise rows already in the table.
+
+    The callback only guards FUTURE links. On an existing install the table
+    already holds rows from whatever workspace linked earlier, and every reader
+    (/slack/status, ensure_pair_channel, the events + interactivity lookups)
+    would keep treating them as valid. Filtering on read fixes those without a
+    migration.
+    """
+
+    with get_sessionmaker(engine)() as session:
+        upsert_slack_link(session, 13, slack_user_id="U_STALE", slack_team_id="T_OLD", now=NOW)
+        session.commit()
+
+    monkeypatch.setenv("TEKIJIN_SLACK_TEAM_ID", "T_OURS")
+    get_settings.cache_clear()
+    client = _raw_client(engine, fake_embedder)
+
+    resp = client.get("/slack/status", headers=_user_headers(13))
+    assert resp.json()["linked"] is False, "別ワークスペースの既存行が連携済みとして扱われている"
+
+    with get_sessionmaker(engine)() as session:
+        assert get_slack_link(session, 13, expected_team_id="T_OURS") is None
+        # Still physically present — this is a read-time filter, not a delete.
+        assert get_slack_link(session, 13) is not None
+
+
 def test_oauth_callback_redirects_to_error_when_slack_account_already_linked_elsewhere(
     monkeypatch, slack_app_configured, seed_counts, engine, fake_embedder
 ) -> None:

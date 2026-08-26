@@ -66,8 +66,9 @@ def ensure_pair_channel(session: Session, *, thread_id: int, parties: dict) -> s
         existing.current_thread_id = thread_id
         return existing.slack_channel_id
 
-    asker_link = get_slack_link(session, asker_id)
-    responder_link = get_slack_link(session, responder_id)
+    team = settings.slack_team_id
+    asker_link = get_slack_link(session, asker_id, expected_team_id=team)
+    responder_link = get_slack_link(session, responder_id, expected_team_id=team)
     if asker_link is None or responder_link is None:
         return None
 

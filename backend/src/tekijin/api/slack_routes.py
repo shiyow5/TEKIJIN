@@ -181,7 +181,9 @@ def status(
         return schemas.SlackStatusResponse(linked=False)
     service = request.app.state.agent_service
     with service.session_factory() as session:
-        link = get_slack_link(session, principal.employee_id)
+        link = get_slack_link(
+            session, principal.employee_id, expected_team_id=get_settings().slack_team_id
+        )
     return schemas.SlackStatusResponse(linked=link is not None)
 
 
@@ -228,7 +230,9 @@ def _handle_message_event(session_factory: sessionmaker[Session], event: dict) -
         channel_link = get_channel_link_by_channel_id(session, channel_id)
         if channel_link is None:
             return  # not a channel TEKIJIN created — ignore
-        sender_link = get_slack_link_by_slack_user_id(session, slack_user_id)
+        sender_link = get_slack_link_by_slack_user_id(
+            session, slack_user_id, expected_team_id=get_settings().slack_team_id
+        )
         if sender_link is None:
             return
         thread_id = channel_link.current_thread_id
@@ -363,7 +367,9 @@ def _handle_interactivity_action(service: AgentService, raw: str) -> Response:
         responder_id = None
         if slack_user_id:
             with service.session_factory() as session:
-                link = get_slack_link_by_slack_user_id(session, str(slack_user_id))
+                link = get_slack_link_by_slack_user_id(
+                    session, str(slack_user_id), expected_team_id=get_settings().slack_team_id
+                )
                 responder_id = link.employee_id if link else None
         _, current_responder_id = service.session_participants(session_id)
         if responder_id is None or responder_id != current_responder_id:
