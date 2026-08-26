@@ -12,6 +12,7 @@ import {
   getRecentQuestions,
   getRetrospectiveContext,
   getSlackAuthorizeUrl,
+  getSlackLoginUrl,
   getSlackStatus,
   postAnswer,
   postAsk,
@@ -671,5 +672,30 @@ describe("postSlackUnlink", () => {
     expect(url).toBe(`${DEFAULT_API_BASE_URL}/slack/unlink`);
     expect(init?.method).toBe("POST");
     expect(result).toEqual({ ok: true });
+  });
+});
+
+describe("Slack OAuth URL requests carry cookies (#494)", () => {
+  // The nonce that binds the OAuth flow to this browser arrives as a Set-Cookie
+  // on these two responses. The API is a different ORIGIN from the app (same
+  // host, different port), so without `credentials: "include"` the browser
+  // silently drops it and every callback then fails the binding check.
+  const okJson = (body: unknown) =>
+    vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => body,
+    } as unknown as Response);
+
+  it("sends credentials when minting the link URL", async () => {
+    const fetchImpl = okJson({ url: "https://slack.com/x" });
+    await getSlackAuthorizeUrl({ fetchImpl, baseUrl: "http://api.test" });
+    expect(fetchImpl.mock.calls[0][1]).toMatchObject({ credentials: "include" });
+  });
+
+  it("sends credentials when minting the login URL", async () => {
+    const fetchImpl = okJson({ url: "https://slack.com/x" });
+    await getSlackLoginUrl({ fetchImpl, baseUrl: "http://api.test" });
+    expect(fetchImpl.mock.calls[0][1]).toMatchObject({ credentials: "include" });
   });
 });

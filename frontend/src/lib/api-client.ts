@@ -76,6 +76,14 @@ export interface RequestOptions {
   baseUrl?: string;
   /** Override the `fetch` implementation (mainly for tests). */
   fetchImpl?: typeof fetch;
+  /**
+   * Send cookies even cross-origin. Needed only by the Slack OAuth URL calls
+   * (#494): the nonce binding the flow to this browser comes back as a
+   * Set-Cookie, and the API is a different origin from the app (same host,
+   * different port), so the default `same-origin` would drop it. Left off
+   * everywhere else — this app authenticates with bearer tokens, not cookies.
+   */
+  credentials?: RequestCredentials;
   /** Optional abort signal. */
   signal?: AbortSignal;
 }
@@ -123,6 +131,7 @@ async function getJson<T>(path: string, options: RequestOptions = {}): Promise<T
     method: "GET",
     headers: { ...authHeaders() },
     signal: options.signal,
+    ...(options.credentials ? { credentials: options.credentials } : {}),
   });
 
   if (!response.ok) {
@@ -493,7 +502,11 @@ export function getSlackStatus(options: RequestOptions = {}): Promise<SlackStatu
 export function getSlackAuthorizeUrl(
   options: RequestOptions = {},
 ): Promise<SlackAuthorizeUrlResponse> {
-  return getJson<SlackAuthorizeUrlResponse>("/slack/authorize-url", options);
+  return getJson<SlackAuthorizeUrlResponse>("/slack/authorize-url", {
+    ...options,
+    // Cross-origin: without this the nonce cookie never lands (#494).
+    credentials: options?.credentials ?? "include",
+  });
 }
 
 /**
@@ -504,7 +517,11 @@ export function getSlackAuthorizeUrl(
 export async function getSlackLoginUrl(
   options?: RequestOptions,
 ): Promise<SlackAuthorizeUrlResponse> {
-  return getJson<SlackAuthorizeUrlResponse>("/slack/login-url", options);
+  return getJson<SlackAuthorizeUrlResponse>("/slack/login-url", {
+    ...options,
+    // Cross-origin: without this the nonce cookie never lands (#494).
+    credentials: options?.credentials ?? "include",
+  });
 }
 
 /** POST /slack/unlink — remove the acting employee's linked Slack account. */

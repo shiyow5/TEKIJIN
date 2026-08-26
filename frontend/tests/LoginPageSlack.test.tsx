@@ -86,7 +86,12 @@ describe("LoginPage — Slack login (#406)", () => {
 
     const button = await screen.findByRole("button", { name: /Slack/ });
     fireEvent.click(button);
-    await waitFor(() => expect(getSlackLoginUrlMock).toHaveBeenCalled());
+
+    // Assert the NAVIGATION, not that the URL was fetched: the fetch happens on
+    // mount regardless, so checking it would pass even with an empty onClick.
+    await waitFor(() =>
+      expect(assign).toHaveBeenCalledWith("https://slack.com/oauth/v2/authorize?x=1"),
+    );
     vi.unstubAllGlobals();
   });
 

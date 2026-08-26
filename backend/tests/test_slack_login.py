@@ -20,7 +20,7 @@ from tekijin.api.service import AgentService
 from tekijin.app import create_app
 from tekijin.config import get_settings
 from tekijin.data.db import get_sessionmaker
-from tekijin.data.slack_links import upsert_slack_link
+from tekijin.data.slack_links import get_slack_link, upsert_slack_link
 from tekijin.slack.client import SlackIdentity
 
 NOW = dt.datetime(2026, 9, 15, 12, 0, 0)
@@ -51,6 +51,20 @@ def slack_login_on(monkeypatch):
         yield
     finally:
         get_settings.cache_clear()
+
+
+def _user_headers(employee_id: int) -> dict[str, str]:
+    from tekijin.auth.principal import Principal
+    from tekijin.auth.tokens import create_access_token
+
+    return {
+        "Authorization": "Bearer "
+        + create_access_token(
+            Principal(employee_id=employee_id, name="社員", dept=None, is_admin=False),
+            secret=get_settings().auth_secret,
+            ttl_hours=1,
+        )
+    }
 
 
 def _login_state(client) -> str:
@@ -201,17 +215,15 @@ def test_a_link_state_cannot_be_replayed_as_a_login_state(
     obtainable by any logged-in user — would be usable to mint a token.
     """
 
-    from tekijin.api import slack_routes
-
-    link_state = slack_routes._encode_state(
-        purpose="slack_link", employee_id=7, secret=get_settings().auth_secret
-    )
-    _link(engine, 7, "U_SEVEN")
+    client = _client(engine, fake_embedder)
+    # Through the real endpoint so the browser holds the matching nonce (#494);
+    # hand-minting a state would now fail the binding check for the wrong reason.
+    url = client.get("/slack/authorize-url", headers=_user_headers(7)).json()["url"]
+    link_state = dict(p.split("=", 1) for p in url.split("?", 1)[1].split("&"))["state"]
     monkeypatch.setattr(
         "tekijin.api.slack_routes.exchange_code",
         lambda **kwargs: SlackIdentity(slack_user_id="U_SEVEN", slack_team_id=TEAM),
     )
-    client = _client(engine, fake_embedder)
 
     resp = client.get(
         "/slack/oauth/callback",
@@ -219,7 +231,12 @@ def test_a_link_state_cannot_be_replayed_as_a_login_state(
         follow_redirects=False,
     )
 
-    # It is a valid LINK, so it links — but it must not hand back a token.
+    # Two separate claims, both asserted: the link branch still WORKS (a broken
+    # one would also produce a token-free redirect, so the check below alone
+    # proves nothing), and it does not mint a session.
+    assert "slack=linked" in resp.headers["location"]
+    with get_sessionmaker(engine)() as session:
+        assert get_slack_link(session, 7).slack_user_id == "U_SEVEN"
     assert "slack_token" not in resp.headers["location"]
 
 
@@ -232,9 +249,12 @@ def test_login_is_refused_while_disabled_even_with_a_valid_state(
     monkeypatch.setenv("TEKIJIN_SLACK_TEAM_ID", TEAM)
     monkeypatch.setenv("TEKIJIN_SLACK_LOGIN_ENABLED", "true")
     get_settings.cache_clear()
-    from tekijin.api import slack_routes
-
-    state = slack_routes._encode_state(purpose="slack_login", secret=get_settings().auth_secret)
+    # Mint while the feature is ON, from the client that will complete the flow.
+    client = _client(engine, fake_embedder)
+    state = dict(
+        p.split("=", 1)
+        for p in client.get("/slack/login-url").json()["url"].split("?", 1)[1].split("&")
+    )["state"]
 
     monkeypatch.setenv("TEKIJIN_SLACK_LOGIN_ENABLED", "false")
     get_settings.cache_clear()
@@ -244,7 +264,6 @@ def test_login_is_refused_while_disabled_even_with_a_valid_state(
             "tekijin.api.slack_routes.exchange_code",
             lambda **kwargs: SlackIdentity(slack_user_id="U_EIGHT_L", slack_team_id=TEAM),
         )
-        client = _client(engine, fake_embedder)
         resp = client.get(
             "/slack/oauth/callback",
             params={"code": "c", "state": state},
