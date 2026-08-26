@@ -187,9 +187,17 @@ test.describe("asker flow", () => {
     await page.goto("/questions");
     await page.getByRole("link", { name: /「UTMの移行時の注意点」/ }).click();
 
-    await page.waitForURL(/\/session\/sess-rq1$/);
-    // The replayed result renders (candidate + draft on the processing screen).
-    await expect(page.getByText("回答者が見つかりました")).toBeVisible();
+    // #470 moved the destination from the session root to its `/result` view, and
+    // left this test asserting the old URL and the ProcessingScreen heading that
+    // lives there. Both are now the ResultScreen's: it renders the replayed
+    // candidate and draft directly, with no live pipeline in front of it.
+    await page.waitForURL(/\/session\/sess-rq1\/result$/);
+    await expect(
+      page.getByRole("heading", { name: "この質問は、人に聞くのが確実です" }),
+    ).toBeVisible();
+    // The point of the feature: the SESSION comes back, not just the screen.
+    await expect(page.getByRole("heading", { name: /高梨 健太（最有力）/ })).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "聞き方の下書き" })).toHaveValue(/高梨さんへ。/);
   });
 
   test("ホームのヒーロー質問バーから直接送信できる — /questions を経由しない (#392)", async ({
