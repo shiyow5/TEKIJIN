@@ -1308,6 +1308,39 @@ def test_direct_consultation_gets_no_seeded_message(seed_counts, engine, fake_em
 # --------------------------------------------------------------------------- #
 # consultation method: 直接相談 / チャットで相談
 # --------------------------------------------------------------------------- #
+def test_consult_method_falls_back_to_chat_for_an_unknown_stored_value(
+    seed_counts, engine, fake_embedder
+) -> None:
+    # `questions.consult_method` is a bare VARCHAR(32) with no CHECK constraint, so
+    # anything can land in it (an older client, a manual fix-up, a future value rolled
+    # back). The API schema types it as Literal["direct", "chat"], so an unknown value
+    # reaching the response model is a 500 on two live endpoints — GET /handoff and
+    # GET /inbox — for a row that is otherwise perfectly serviceable. Snap it at the
+    # DB boundary instead: "not direct" behaves as "chat", which is what every
+    # downstream branch already assumes (see data/messages.py's COALESCE ... != 'direct').
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2, 3], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2, 3)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "cm-unknown"})
+    _events(client, "cm-unknown")
+
+    with session_scope(get_sessionmaker(engine)) as session:
+        row = session.query(Question).filter(Question.session_id == "cm-unknown").one()
+        row.consult_method = "email"  # never a valid value; simulates stale/foreign data
+
+    handoff = client.get("/handoff/cm-unknown")
+    assert handoff.status_code == 200
+    assert handoff.json()["consult_method"] == "chat"
+
+    inbox = client.get("/inbox", params={"responder_id": "E001"})
+    assert inbox.status_code == 200
+    item = next(i for i in inbox.json()["items"] if i["session_id"] == "cm-unknown")
+    assert item["consult_method"] == "chat"
+
+
 def test_consult_method_defaults_to_chat_when_never_set(seed_counts, engine, fake_embedder) -> None:
     # Backward compatibility: an asker who never calls POST /handoff/draft (or a
     # client that predates this field) behaves exactly as before — "chat" everywhere.

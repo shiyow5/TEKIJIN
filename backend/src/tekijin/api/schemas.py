@@ -17,6 +17,23 @@ Outcome = Literal["accepted", "declined"]
 # unset/legacy value is coalesced to it everywhere it is read.
 ConsultMethod = Literal["direct", "chat"]
 
+
+def normalize_consult_method(value: str | None) -> ConsultMethod:
+    """Narrow a raw ``questions.consult_method`` value onto the API contract.
+
+    The column is a bare ``VARCHAR(32)`` with no CHECK constraint, so an older
+    client, a manual fix-up, or a rolled-back future value can leave something
+    else in it. Without this, such a row 500s on GET /handoff and GET /inbox —
+    the response model rejects it — for a hand-off that is otherwise perfectly
+    serviceable. Everything downstream already reads the column as a two-way
+    branch (``COALESCE(consult_method, 'chat') != 'direct'`` in
+    :mod:`tekijin.data.messages`), so "anything that is not 直接相談 behaves as
+    チャット" is the existing semantics, not a new rule.
+    """
+
+    return "direct" if value == "direct" else "chat"
+
+
 # session_id doubles as the ``/events/{session_id}`` path segment and the graph
 # ``thread_id``; constrain it to path-safe characters (no ``/``) so a created
 # session is always reachable over GET /events.
