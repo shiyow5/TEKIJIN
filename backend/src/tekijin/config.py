@@ -355,6 +355,44 @@ class Settings(BaseSettings):
             return self.strict_auth
         return self.app_env != "development"
 
+    # --- Slack integration (chat <-> Slack DM, #388) --------------------------- #
+    # "Sign in with Slack" OAuth app credentials for account linking, plus a bot
+    # token for sending DM notifications once linked. All blank by default — no
+    # real Slack App has been registered yet — which leaves the feature disabled
+    # (see ``slack_configured()``) rather than failing at import time. Set these
+    # via TEKIJIN_SLACK_* env vars once a Slack App exists.
+    slack_client_id: str = ""
+    slack_client_secret: str = ""
+    # Must exactly match a Redirect URL registered on the Slack App (points at
+    # this backend's GET /slack/oauth/callback, e.g. http://localhost:8000/slack/oauth/callback).
+    slack_redirect_uri: str = ""
+    # Bot token (xoxb-...) used only to send the DM notification itself — never
+    # the linking user's own token, so there is nothing per-user to refresh.
+    slack_bot_token: str = ""
+    # Signing Secret (Slack App -> Basic Information), used to verify that a
+    # POST /slack/events request genuinely came from Slack (#388: a reply typed
+    # in the linked Slack DM lands back in the TEKIJIN thread). Requires the
+    # backend to have a public URL Slack can reach (e.g. ngrok in local dev) —
+    # a purely local/offline setup can leave this blank and use notifications
+    # (TEKIJIN -> Slack) only.
+    slack_signing_secret: str = ""
+    # Where the OAuth callback sends the browser back to once linking finishes.
+    slack_frontend_url: str = "http://localhost:3000"
+
+    def slack_configured(self) -> bool:
+        """True once the OAuth app credentials needed to start linking exist.
+
+        ``slack_bot_token`` is checked separately (:func:`slack_notifications_enabled`)
+        since notifications and linking can be turned on independently.
+        """
+
+        return bool(self.slack_client_id and self.slack_client_secret and self.slack_redirect_uri)
+
+    def slack_notifications_enabled(self) -> bool:
+        """True once a bot token exists to actually send DM notifications."""
+
+        return bool(self.slack_bot_token)
+
 
 @lru_cache
 def get_settings() -> Settings:

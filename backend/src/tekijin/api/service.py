@@ -67,7 +67,7 @@ from tekijin.api.events import (
 from tekijin.data.db import session_scope
 from tekijin.data.feedback import record_feedback
 from tekijin.data.handoff import employee_brief, question_consult_method, responder_reuse_stats
-from tekijin.data.messages import create_message
+from tekijin.data.messages import create_message, thread_parties
 from tekijin.data.writes import (
     create_answer,
     employee_exists,
@@ -89,6 +89,7 @@ from tekijin.data.writes import (
     update_question_topics,
 )
 from tekijin.retrieval.embedding import PASSAGE, Embedder
+from tekijin.slack.notify import schedule_channel_setup_and_draft
 
 logger = logging.getLogger(__name__)
 
@@ -615,6 +616,24 @@ class AgentService:
                         # dt.datetime.now() (routes.py) regardless of the
                         # graph's (possibly injected/frozen) clock.
                         create_message(session, primary, asker_id, draft, dt.datetime.now())
+                        # If both parties have linked Slack, this is also their
+                        # very first look at the request — set up (or reuse)
+                        # their shared Slack channel and post the SAME draft
+                        # into it (#hand-off-chat), so accepting via TEKIJIN
+                        # drops them straight into a normal-looking Slack
+                        # conversation with the draft already "sent". Fire and
+                        # forget: this method runs synchronously inside
+                        # POST /answer's request/response cycle with no
+                        # `BackgroundTasks` to defer to (see
+                        # `schedule_channel_setup_and_draft`'s docstring).
+                        parties = thread_parties(session, primary)
+                        if parties is not None:
+                            schedule_channel_setup_and_draft(
+                                self._session_factory,
+                                thread_id=primary,
+                                parties=parties,
+                                draft=draft,
+                            )
             return "recorded", outcome
 
     def _capture_answer(self, values: dict[str, Any], body: str) -> None:
