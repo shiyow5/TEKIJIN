@@ -345,7 +345,11 @@ def _handle_interactivity_action(service: AgentService, raw: str) -> Response:
         recommendation_id = int(value["recommendation_id"])
         slack_user_id = (payload.get("user") or {}).get("id")
         with service.session_factory() as session:
-            link = get_slack_link_by_slack_user_id(session, slack_user_id)
+            # Only look up when Slack actually supplied a user id; narrows the
+            # `Any | None` to `str` for get_slack_link_by_slack_user_id.
+            link = (
+                get_slack_link_by_slack_user_id(session, slack_user_id) if slack_user_id else None
+            )
             responder_id = link.employee_id if link else None
         _, current_responder_id = service.session_participants(session_id)
         if responder_id is None or responder_id != current_responder_id:

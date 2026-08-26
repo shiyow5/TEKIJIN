@@ -20,6 +20,7 @@ import datetime as dt
 import json
 import logging
 import threading
+from typing import Any
 
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -219,7 +220,7 @@ def schedule_pending_handoff(
                 return
             settings = get_settings()
             value_base = {"session_id": session_id, "recommendation_id": recommendation_id}
-            blocks = [
+            blocks: list[dict[str, Any]] = [
                 {"type": "section", "text": {"type": "mrkdwn", "text": _truncate(draft)}},
                 {
                     "type": "actions",

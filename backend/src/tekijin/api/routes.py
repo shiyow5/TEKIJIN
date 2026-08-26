@@ -275,17 +275,20 @@ def handoff_draft(
         )
         if req.consult_method == "chat":
             meta = _service(request).pending_handoff_metadata(req.session_id)
-            if all(
-                meta.get(k) is not None for k in ("asker_id", "responder_id", "recommendation_id")
-            ):
+            rec_id = meta.get("recommendation_id")
+            asker = meta.get("asker_id")
+            responder = meta.get("responder_id")
+            # Explicit per-value None checks (not `all(...)`) so mypy narrows each
+            # local from `int | str | None` to `int | str` before the int() casts.
+            if rec_id is not None and asker is not None and responder is not None:
                 schedule_pending_handoff(
                     _service(request).session_factory,
                     session_id=req.session_id,
-                    recommendation_id=int(meta["recommendation_id"]),
-                    thread_id=int(meta["recommendation_id"]),
+                    recommendation_id=int(rec_id),
+                    thread_id=int(rec_id),
                     parties={
-                        "asker_id": int(meta["asker_id"]),
-                        "responder_id": int(meta["responder_id"]),
+                        "asker_id": int(asker),
+                        "responder_id": int(responder),
                     },
                     draft=req.draft,
                 )
