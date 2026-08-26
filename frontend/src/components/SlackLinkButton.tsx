@@ -52,17 +52,29 @@ export function SlackLinkButton() {
       "",
       (window.location.pathname ?? "/") + (window.location.search ?? ""),
     );
+    let active = true;
     completeSlackLink(pendingToken)
-      .then(() => setStatus("linked"))
+      .then(() => {
+        if (active) setStatus("linked");
+      })
       .catch((err) => {
+        if (!active) return;
         setStatus("unlinked");
+        const status = err instanceof ApiError ? err.status : 0;
         setError(
-          err instanceof ApiError && err.status === 409
-            ? "このSlackアカウントは既に他の社員と連携されています。"
-            : "Slack連携を完了できませんでした。もう一度お試しください。",
+          // 403 means the link was STARTED by someone else — i.e. this URL was
+          // forwarded. Say so plainly; "failed" would send them round again.
+          status === 403
+            ? "この連携はあなたが開始したものではありません。ご自身で「Slackと連携」からやり直してください。"
+            : status === 409
+              ? "このSlackアカウントは既に他の社員と連携されています。"
+              : "Slack連携を完了できませんでした。もう一度お試しください。",
         );
       });
-  }, [linkable]);
+    return () => {
+      active = false;
+    };
+  }, [linkable, pendingToken]);
 
   useEffect(() => {
     // Skipped while a pending link is being redeemed: `/slack/status` was

@@ -497,7 +497,7 @@ export function getSlackAuthorizeUrl(
 }
 
 /**
- * GET /slack/login-url — the "Sign in with Slack" URL for someone with NO
+ * POST /slack/login-url — the "Sign in with Slack" start URL for someone with NO
  * session yet (#406). Unauthenticated by design. Rejects with a 503 `ApiError`
  * when Slack login is switched off, which callers treat as "hide the button".
  */

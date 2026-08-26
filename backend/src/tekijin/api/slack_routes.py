@@ -1,15 +1,25 @@
-"""Slack account linking + events: GET /slack/authorize-url,
-GET /slack/oauth/callback, GET /slack/status, POST /slack/unlink,
-POST /slack/events.
+"""Slack account linking, login and events.
+
+Endpoints: ``GET /slack/authorize-url``, ``POST /slack/login-url``,
+``GET /slack/oauth/start``, ``GET /slack/oauth/callback``,
+``POST /slack/link/complete``, ``GET /slack/status``, ``POST /slack/unlink``,
+``POST /slack/events``, ``POST /slack/interactivity``.
 
 "Sign in with Slack" account linking, independent of whether DM notifications
 are turned on (``Settings.slack_notifications_enabled``) — an employee can link
 before a bot token exists; notifications simply stay off until one does. The
-OAuth ``state`` param is a short-lived signed JWT carrying the employee id
-(:func:`_encode_state` / :func:`_verified_state`) rather than a server-side
-session, matching this API's existing stateless-bearer-token design: the
 callback is a plain browser redirect from Slack with no ``Authorization``
-header available, so the state itself has to prove which employee is linking.
+header, so it cannot tell who is linking — and it does not try. It hands the
+frontend a short-lived pending token, redeemed with the frontend's own bearer
+token (``POST /slack/link/complete``).
+
+Both halves of a link name an identity: the ``state`` names the employee who
+STARTED it, the pending token names the Slack account that CONSENTED, and the
+bearer names who is FINISHING it. Every attack this flow has seen took one half
+from the attacker and the other from the victim — in both directions — so the
+starter and the finisher must be the same person (#494). Login is different: it
+has no session to finish with, so it is bound to the browser by a nonce cookie
+issued at ``/slack/oauth/start``, on the callback's own origin.
 
 ``POST /slack/events`` is the Slack -> TEKIJIN direction (#388, #hand-off-chat):
 Slack's Events API calls this directly (no TEKIJIN principal — it
@@ -148,7 +158,13 @@ def _require_linkable_employee(principal: Principal) -> int:
     return principal.employee_id
 
 
-def _encode_state(*, purpose: str, secret: str, nonce_digest: str | None = None) -> str:
+def _encode_state(
+    *,
+    purpose: str,
+    secret: str,
+    nonce_digest: str | None = None,
+    employee_id: int | None = None,
+) -> str:
     now = dt.datetime.now(dt.UTC)
     payload: dict[str, object] = {
         "purpose": purpose,
@@ -157,6 +173,12 @@ def _encode_state(*, purpose: str, secret: str, nonce_digest: str | None = None)
     }
     if nonce_digest is not None:
         payload["nonce"] = nonce_digest
+    if employee_id is not None:
+        # Who STARTED the link. Never used to choose a row — only compared with
+        # who finishes it (see link_complete). Every attack found on this flow has
+        # been the same shape: one half from the attacker, the other from the
+        # victim. Requiring both halves to name the same person is what closes it.
+        payload["employee_id"] = employee_id
     return jwt.encode(payload, secret, algorithm="HS256")
 
 
@@ -201,15 +223,13 @@ def authorize_url(
     button is a temporarily-unavailable feature, not a caller mistake.
     """
 
-    _require_linkable_employee(principal)
+    employee_id = _require_linkable_employee(principal)
     settings = get_settings()
     if not settings.slack_configured():
         raise HTTPException(status_code=503, detail="Slack連携は現在利用できません。")
-    # NO employee id, and no nonce cookie. Which employee a link attaches to is
-    # decided by the SESSION that completes it (POST /slack/link/complete), not
-    # by this state — so handing this URL to someone else can only ever let THEM
-    # link THEIR own Slack account to THEIR own row (#494).
-    state = _encode_state(purpose=_STATE_PURPOSE, secret=settings.auth_secret)
+    state = _encode_state(
+        purpose=_STATE_PURPOSE, employee_id=employee_id, secret=settings.auth_secret
+    )
     url = build_authorize_url(
         client_id=settings.slack_client_id,
         redirect_uri=settings.slack_redirect_uri,
@@ -354,6 +374,7 @@ def oauth_callback(
         pending = jwt.encode(
             {
                 "purpose": _PENDING_LINK_PURPOSE,
+                "employee_id": payload.get("employee_id"),
                 "slack_user_id": identity.slack_user_id,
                 "slack_team_id": identity.slack_team_id,
                 "exp": int(
@@ -369,7 +390,6 @@ def oauth_callback(
     except Exception:  # noqa: BLE001 - browser redirect boundary, never surfaces a bare 4xx/5xx
         logger.warning("Slack OAuth callback failed", exc_info=True)
         return _spent(RedirectResponse(f"{frontend_chat_url}?slack=error"))
-    return _spent(RedirectResponse(f"{frontend_chat_url}?slack=linked"))
 
 
 @router.post("/link/complete", response_model=schemas.SlackStatusResponse)
@@ -393,6 +413,19 @@ def link_complete(
         raise HTTPException(status_code=400, detail="連携の有効期限が切れました。") from exc
     if payload.get("purpose") != _PENDING_LINK_PURPOSE:
         raise HTTPException(status_code=400, detail="連携情報が正しくありません。")
+    # THE check. The pending token names the Slack account that consented and the
+    # employee who started the flow; the bearer names who is finishing it. Every
+    # attack on this flow has been "one half from each person", in both
+    # directions — so the two must name the same employee.
+    if payload.get("employee_id") != employee_id:
+        logger.warning(
+            "Slack link redeemed by employee %s but started by %s",
+            employee_id,
+            payload.get("employee_id"),
+        )
+        raise HTTPException(
+            status_code=403, detail="この連携はあなたが開始したものではありません。"
+        )
     team = str(payload.get("slack_team_id", ""))
     if settings.slack_team_id and team != settings.slack_team_id:
         raise HTTPException(status_code=400, detail="このワークスペースは利用できません。")

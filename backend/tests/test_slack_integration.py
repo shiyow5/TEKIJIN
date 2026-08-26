@@ -98,7 +98,7 @@ def test_authorize_url_503_when_not_configured(
     assert resp.status_code == 503
 
 
-def test_authorize_url_state_names_the_purpose_but_not_the_employee(
+def test_authorize_url_state_names_the_employee_who_started_the_link(
     slack_app_configured, seed_counts, engine, fake_embedder
 ) -> None:
     client = _raw_client(engine, fake_embedder)
@@ -111,9 +111,10 @@ def test_authorize_url_state_names_the_purpose_but_not_the_employee(
     state = dict(pair.split("=", 1) for pair in url.split("?", 1)[1].split("&"))["state"]
     payload = jwt.decode(state, get_settings().auth_secret, algorithms=["HS256"])
     assert payload["purpose"] == "slack_link"
-    # Deliberately absent (#494): if the state named the employee, forwarding
-    # this URL to someone else would attach THEIR Slack account to THIS caller.
-    assert "employee_id" not in payload
+    # The state names who STARTED the link. It never selects a row on its own —
+    # `link_complete` only ever compares it with who FINISHES the link (#494), so
+    # forwarding this URL cannot attach anyone's Slack account to this caller.
+    assert payload["employee_id"] == 5
 
 
 def test_authorize_url_forbidden_for_admin(

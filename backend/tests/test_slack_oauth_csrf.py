@@ -27,6 +27,9 @@ from tekijin.data.slack_links import get_slack_link
 from tekijin.slack.client import SlackIdentity
 
 ATTACKER, VICTIM = 20, 21
+# Dedicated to the initiator-binding tests: 20/21 are linked by other tests in
+# this file, so reusing them would make those assertions order-dependent.
+STARTER, OTHER = 22, 23
 TEAM = "T_OURS"
 
 
@@ -74,24 +77,23 @@ def slack_configured(monkeypatch):
         get_settings.cache_clear()
 
 
-def test_a_link_url_forwarded_to_someone_else_cannot_capture_their_slack_account(
+def test_a_link_url_forwarded_to_someone_else_links_nobody(
     monkeypatch, slack_configured, seed_counts, engine, fake_embedder
 ) -> None:
-    """The headline attack, now structurally impossible.
+    """A forwarded link URL is inert: it names a starter who is not the finisher.
 
-    The callback has no session, so it cannot attach anything on its own — it
-    hands back a pending token that must be redeemed with a bearer token. Whoever
-    redeems it is who the Slack account attaches to. So the attacker's URL, even
-    completed by the victim, can only ever link the victim to the victim.
+    Refusing is deliberate rather than "link the finisher to themselves" — a link
+    the user did not initiate should not silently happen just because they opened
+    a page.
     """
 
     attacker = _client(engine, fake_embedder)
     state = _state_from(
-        attacker.get("/slack/authorize-url", headers=_headers(ATTACKER)).json()["url"]
+        attacker.get("/slack/authorize-url", headers=_headers(STARTER)).json()["url"]
     )
     monkeypatch.setattr(
         "tekijin.api.slack_routes.exchange_code",
-        lambda **kw: SlackIdentity(slack_user_id="U_VICTIM", slack_team_id=TEAM),
+        lambda **kw: SlackIdentity(slack_user_id="U_FORWARDED", slack_team_id=TEAM),
     )
 
     victim = _client(engine, fake_embedder)
@@ -102,17 +104,16 @@ def test_a_link_url_forwarded_to_someone_else_cannot_capture_their_slack_account
     )
     pending = resp.headers["location"].split("slack_pending=", 1)[1]
 
-    # The victim's own browser redeems it — with the VICTIM's session.
     assert (
         victim.post(
-            "/slack/link/complete", json={"pending_token": pending}, headers=_headers(VICTIM)
+            "/slack/link/complete", json={"pending_token": pending}, headers=_headers(OTHER)
         ).status_code
-        == 200
+        == 403
     )
 
     with get_sessionmaker(engine)() as session:
-        assert get_slack_link(session, VICTIM).slack_user_id == "U_VICTIM"
-        assert get_slack_link(session, ATTACKER) is None, "攻撃者の行に紐づいた"
+        assert get_slack_link(session, OTHER) is None
+        assert get_slack_link(session, STARTER) is None
 
 
 def test_the_pending_token_alone_does_not_link_anyone(
@@ -274,3 +275,67 @@ def test_the_state_does_not_carry_the_nonce_itself(
 
     payload = jwt.decode(state, get_settings().auth_secret, algorithms=["HS256"])
     assert cookie_value not in str(payload), "nonce が state に平文で載っている"
+
+
+# --- the flow must be finished by whoever started it ------------------------- #
+#
+# Both halves carry an identity: the state names the employee who STARTED the
+# link, and the pending token names the Slack account that CONSENTED. Every
+# attack found so far has been the same shape — take one half from the attacker
+# and the other from the victim — so the check is that they match.
+
+
+def test_a_pending_token_cannot_be_redeemed_by_a_different_employee(
+    monkeypatch, slack_configured, seed_counts, engine, fake_embedder
+) -> None:
+    """Attacker consents as THEMSELVES, victim redeems: the victim's row would
+    otherwise end up pointing at the attacker's Slack account, handing them the
+    victim's DMs and the ability to post as them."""
+
+    client = _client(engine, fake_embedder)
+    state = _state_from(client.get("/slack/authorize-url", headers=_headers(STARTER)).json()["url"])
+    monkeypatch.setattr(
+        "tekijin.api.slack_routes.exchange_code",
+        lambda **kw: SlackIdentity(slack_user_id="U_ATTACKER_REAL", slack_team_id=TEAM),
+    )
+    resp = client.get(
+        "/slack/oauth/callback", params={"code": "c", "state": state}, follow_redirects=False
+    )
+    pending = resp.headers["location"].split("slack_pending=", 1)[1]
+
+    stolen = client.post(
+        "/slack/link/complete", json={"pending_token": pending}, headers=_headers(OTHER)
+    )
+
+    assert stolen.status_code == 403, "他人が開始した連携を引き換えられた"
+    with get_sessionmaker(engine)() as session:
+        assert get_slack_link(session, OTHER) is None
+
+
+def test_a_victims_consent_cannot_land_on_the_initiators_row(
+    monkeypatch, slack_configured, seed_counts, engine, fake_embedder
+) -> None:
+    """The mirror image: attacker starts, victim consents. Neither half alone is
+    enough, so this must fail too."""
+
+    client = _client(engine, fake_embedder)
+    state = _state_from(client.get("/slack/authorize-url", headers=_headers(STARTER)).json()["url"])
+    monkeypatch.setattr(
+        "tekijin.api.slack_routes.exchange_code",
+        lambda **kw: SlackIdentity(slack_user_id="U_OTHERS_SLACK", slack_team_id=TEAM),
+    )
+    resp = client.get(
+        "/slack/oauth/callback", params={"code": "c", "state": state}, follow_redirects=False
+    )
+    pending = resp.headers["location"].split("slack_pending=", 1)[1]
+
+    # The other person's browser auto-redeems on /chat, as their own session.
+    assert (
+        client.post(
+            "/slack/link/complete", json={"pending_token": pending}, headers=_headers(OTHER)
+        ).status_code
+        == 403
+    )
+    with get_sessionmaker(engine)() as session:
+        assert get_slack_link(session, STARTER) is None, "開始者の行に他人のSlackが載った"
+        assert get_slack_link(session, OTHER) is None
