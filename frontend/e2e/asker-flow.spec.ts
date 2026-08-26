@@ -221,9 +221,15 @@ test.describe("asker flow", () => {
 
 /**
  * #392 put the same 「何を知りたいですか？」 heading on the hub as on `/questions`.
- * The unit test asserts the WORDS match; it cannot see that the two rendered at
- * different sizes (24px vs 30px) for a while. Compare what the browser actually
- * computes, so "same heading" stays true rather than just true-looking.
+ * The unit test asserted the WORDS match; it could not see that the two rendered
+ * at different sizes (24px vs 30px) for a while. Compare what the browser
+ * actually computes, so "same heading" stays true rather than just true-looking.
+ *
+ * #421 made both screens render ONE shared `QuestionForm`, so the classes can no
+ * longer disagree and `tests/QuestionForm.test.tsx` pins that structurally. This
+ * check is kept for the part that survives the extraction: each screen still
+ * supplies its own wrapper, so INHERITED css could in principle still make the
+ * same element compute differently. That is invisible to a jsdom unit test.
  */
 test("the hub's hero heading renders identically to the one on /questions (#392)", async ({
   page,
