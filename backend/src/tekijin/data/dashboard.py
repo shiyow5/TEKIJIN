@@ -64,6 +64,9 @@ def dashboard_summary(
     recommendation_count = session.scalar(select(func.count()).select_from(Recommendation)) or 0
 
     # Load: who has answered the most (a proxy for workload distribution).
+    # A zero/negative limit would empty the list and make `_top_responder_share`
+    # read 0.0 — a headline KPI silently wrong rather than absent (#76 review).
+    assert top_responders >= 1, "top_responders must be >= 1"
     answers_per_responder = top_answerers(session, limit=top_responders)
 
     # Topic distribution over the questions' topic arrays.
@@ -229,7 +232,13 @@ def _top_responder_share(answers_per_responder: list[dict[str, Any]], total_answ
     """Concentration on the single busiest responder (画面5 負荷分散).
 
     ``answers_per_responder`` is already ordered busiest-first, so its head is the
-    max. 0.0 when there are no answers. NOTE: like 平均解決時間 this reads the
+    max. **The denominator is the total answer COUNT, not the sum of this (possibly
+    truncated) list** — so the KPI does not move when the caller changes how many
+    responders it asks for (#76 made that a query param). The one way to break that
+    is to pass ``top_responders=0``: the list comes back empty and this silently
+    reads 0.0 rather than the real concentration. The route bounds the param at
+    ``ge=1``; ``top_responders`` is asserted below so a direct caller cannot do it
+    quietly either. 0.0 when there are no answers. NOTE: like 平均解決時間 this reads the
     ``answers`` distribution (seed / historical), so it does not yet move with
     live routing (API hand-offs write ``recommendations``, not ``answers``); and
     the spec's naive-order baseline comparison (product-spec §246) is an offline
