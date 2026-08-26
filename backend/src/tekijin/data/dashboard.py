@@ -27,10 +27,11 @@ _SELF_RESOLVED_ROUTES = ("document",)
 def top_answerers(session: Session, *, limit: int = 5) -> list[dict[str, Any]]:
     """Who has answered the most (a proxy for workload distribution), busiest-first.
 
-    Shared by :func:`dashboard_summary` (画面5 負荷分散) and the knowledge list's
-    side panel (#293, #301) so the "回答者別の件数" stat is the exact same
-    aggregate in both places — no new aggregation logic is introduced for the
-    knowledge panel.
+    Extracted from :func:`dashboard_summary` (画面5 負荷分散) so it is callable
+    on its own. A per-responder "回答者別の件数" panel was tried on the
+    knowledge list (#293, #301) but removed after review — that ranking is
+    the dashboard's job, not a knowledge browser's (PR #340 review) — so this
+    is dashboard-only again in practice.
     """
 
     load_stmt = (

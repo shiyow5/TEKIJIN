@@ -48,7 +48,7 @@ from tekijin.data.documents import get_document
 from tekijin.data.feedback import record_feedback
 from tekijin.data.history import question_asker_id, recent_questions_for_asker
 from tekijin.data.inbox import pending_handoffs_for_responder
-from tekijin.data.knowledge import get_qa_detail, list_knowledge
+from tekijin.data.knowledge_library import get_qa_detail, list_knowledge
 from tekijin.data.messages import (
     create_message,
     messages_for_thread,

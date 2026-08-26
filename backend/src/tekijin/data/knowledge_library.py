@@ -13,6 +13,12 @@ else already asked this" or "there's already a document for this"
 A ``"qa"`` item needs an actual ``answers`` row (not merely an accepted
 recommendation) — that is the only place answer TEXT lives, so without it
 there is nothing to show as the item's ``summary``.
+
+Named ``knowledge_library`` (not ``knowledge``) to stay clear of
+:mod:`tekijin.models.tables.KnowledgeUnit` (#357) — a separate, still-dormant
+PoC for *structured, extracted* knowledge, not a naming clash with this
+module's raw ``answers``/``documents`` listing. If #357 lands for real, this
+module's items should point at ``KnowledgeUnit`` rows instead (PR #340 review).
 """
 
 from __future__ import annotations
