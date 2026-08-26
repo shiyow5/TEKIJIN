@@ -545,9 +545,7 @@ class AgentService:
                 # wins. We resume the graph with that effective value so the
                 # checkpoint always advances consistently with the DB — never
                 # diverging, and never left permanently paused at ``send``.
-                status, resume_value = self._record_outcome(
-                    session_id, snapshot.values, outcome
-                )
+                status, resume_value = self._record_outcome(session_id, snapshot.values, outcome)
                 # #274: capture the answer only on a FRESHLY recorded accept (not a
                 # duplicate "already"/"no_target"), in its own post-commit transaction
                 # so it cannot roll back the accept. answer_body is pre-validated to

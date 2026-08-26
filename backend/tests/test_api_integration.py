@@ -611,9 +611,7 @@ def test_accept_without_answer_body_creates_no_answer_row(
         check.close()
 
 
-def test_answer_body_rejected_on_non_accept_outcome_422(
-    seed_counts, engine, fake_embedder
-) -> None:
+def test_answer_body_rejected_on_non_accept_outcome_422(seed_counts, engine, fake_embedder) -> None:
     # An answer body only belongs on an accepted hand-off; pairing it with a
     # decline (or a clarification reply) is a 422 boundary error, not silently
     # dropped (#274).
