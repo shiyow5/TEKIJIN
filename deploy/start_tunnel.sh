@@ -44,10 +44,16 @@ if ! curl -fsS -o /dev/null --max-time 5 "${TARGET}/health"; then
 fi
 
 # Only ever kill OUR tunnel. This is a SHARED host: a bare `pkill cloudflared`
-# could take out another team's process.
-if pgrep -f "cloudflared tunnel --url ${TARGET}" >/dev/null 2>&1; then
+# could take out another team's process, so the pattern keeps ${TARGET} in it.
+#
+# `.*` between the subcommand and the flag is load-bearing: the launch below
+# passes `--no-autoupdate` first, so `cloudflared tunnel --url ${TARGET}` is NOT
+# contiguous in the real argv and a literal pattern silently never matches —
+# which stacked a second tunnel on every restart while the first stayed live.
+MATCH="cloudflared tunnel .*--url ${TARGET}"
+if pgrep -f "$MATCH" >/dev/null 2>&1; then
   log "an existing tunnel for ${TARGET} is running — stopping it first"
-  pkill -f "cloudflared tunnel --url ${TARGET}" || true
+  pkill -f "$MATCH" || true
   sleep 2
 fi
 
@@ -55,6 +61,7 @@ log "exposing ${TARGET} (log: ${LOG})"
 : >"$LOG"
 setsid env -u RUNNER_TRACKING_ID \
   "$BIN" tunnel --no-autoupdate --url "$TARGET" >"$LOG" 2>&1 </dev/null &
+CHILD=$!
 
 # The assigned hostname only appears once the tunnel has registered, so poll for
 # it rather than sleeping a fixed amount and hoping.
@@ -74,5 +81,12 @@ for _ in $(seq 1 30); do
   sleep 1
 done
 
-echo "[tunnel] no URL appeared within 30s — check ${LOG}" >&2
+# Never leave a tunnel we could not report: exiting non-zero here while
+# cloudflared kept running would tell the operator "it failed" with the backend
+# still published. `setsid` detached it, so $CHILD is the session leader, not
+# the process itself — fall back to the scoped pattern.
+echo "[tunnel] no URL appeared within 30s — tearing the tunnel back down" >&2
+kill "$CHILD" 2>/dev/null || true
+pkill -f "$MATCH" 2>/dev/null || true
+echo "[tunnel] check ${LOG}" >&2
 exit 1

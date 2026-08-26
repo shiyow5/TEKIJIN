@@ -31,6 +31,19 @@ DGX 上のバックエンド（`:18000`）は Tailscale 経由でしか到達で
 | `POST /slack/events` | Slack 署名検証（HMAC-SHA256 + ±5分のリプレイ窓） |
 | `POST /slack/interactivity` | 同上 ＋ 担当者本人チェック |
 
+さらに **FastAPI の既定で以下も無認証で公開される**（`app.py` で `docs_url` 等を無効化していないため）。
+2026-08-26 にトンネル越しに実測し、4つとも 200 が返ることを確認した。
+
+| 口 | 中身 |
+|---|---|
+| `GET /health` | バージョン・環境名 |
+| `GET /docs` / `GET /redoc` | Swagger UI / ReDoc |
+| `GET /openapi.json` | **APIスキーマ全体**（全エンドポイントと型） |
+
+データは出ないが、攻撃面の下調べには十分な情報である。気になる場合は
+`create_app()` の `FastAPI(...)` に `docs_url=None, redoc_url=None, openapi_url=None` を
+渡して塞ぐ（本番だけ塞ぐなら `app_env` で分岐する）。
+
 **実質の攻撃面は `/auth/login` だけ**である。ここが要注意で、リポジトリには
 **平文の既定パスワードが2つ**あり、どちらも実際に通ってしまう。
 
@@ -61,9 +74,23 @@ EOF
 
 `.env` 側も揃えておかないと、**再 seed したときにリポジトリ既定値へ戻る**。
 
+**`TEKIJIN_AUTH_SECRET` も併せて確認すること。** 既定値は `dev-insecure-change-me`
+（`config.py:24`）で、これは **JWT の署名鍵**である。既定のままだと誰でも管理者トークンを
+オフラインで偽造できるので、パスワードを変えても意味がない。
+
+```bash
+python3 -c 'import secrets; print("TEKIJIN_AUTH_SECRET=" + secrets.token_urlsafe(48))'
+```
+
 あわせて **`TEKIJIN_STRICT_AUTH=true`** を `.env` に入れる。DGX は別の理由で
 `app_env=development` のままなので（#108/#173）、この安全弁を明示しない限り
 **既定パスワードのまま起動できてしまう**。`config.py:384-389` がまさにこの設定を想定している。
+
+> **順序に注意**: `TEKIJIN_STRICT_AUTH=true` は `TEKIJIN_AUTH_SECRET` と
+> `TEKIJIN_ADMIN_PASSWORD` の**両方**が既定値でないことを要求する（`app.py:37-46`）。
+> どちらかが既定のまま立てると**バックエンドが起動を拒否する**。
+> 上の3つ（auth_secret / admin_password / demo password）を先に済ませてから立てること。
+> 起動しないからと言って `false` に戻すのは最悪手で、公開鍵で管理者JWTを偽造できる状態のまま公開される。
 
 ---
 
@@ -117,13 +144,55 @@ Slack App 側の3つの URL を登録し直す必要がある。期間が短く�
 
 ## 手順
 
-### 1. `cloudflared` を DGX に置く
+**順序が重要**。公開してから設定を直すのではなく、**中身を安全にしてから公開する**。
+`.env` はプロセス起動時にしか読まれないので、書き換えたら必ず再起動する。
 
-DGX の `team_a` は **sudo を持たない**ので、パッケージではなく静的バイナリを
-`~/bin` に置く。
+### 1. 認証情報を先に固める（**公開する前に**）
+
+上の「何を公開するのか」の3点を `.env`（`/home/team_a/TEKIJIN/.env`）に入れる。
+
+- `TEKIJIN_AUTH_SECRET`（JWT署名鍵。既定 `dev-insecure-change-me` は論外）
+- `TEKIJIN_ADMIN_PASSWORD`（既定 `tekijin-admin`）
+- 社員40名のパスワード（DBの `password_hash` を更新 ＋ `TEKIJIN_DEMO_USER_PASSWORD` を揃える）
+- `TEKIJIN_STRICT_AUTH=true`
+
+### 2. Slack App の認証情報も、この時点で入れておく
+
+後回しにすると、URL 登録時に Slack の `url_verification` が
+**署名検証で 401 になり、Request URL の登録自体が通らない**（`verify.py` は
+`signing_secret` が空なら必ず False を返す）。URL が決まる前でも、
+`REDIRECT_URI` 以外の4つは先に入れられる。
 
 ```bash
-ssh ootsuka
+TEKIJIN_SLACK_CLIENT_ID=...
+TEKIJIN_SLACK_CLIENT_SECRET=...
+TEKIJIN_SLACK_SIGNING_SECRET=...
+TEKIJIN_SLACK_BOT_TOKEN=xoxb-...
+TEKIJIN_SLACK_FRONTEND_URL=http://100.118.131.67:13000
+```
+
+> `docker-compose.yml` の `env_file` 設定は**このホストには効かない**。
+> DGX のバックエンドは compose ではなく `deploy/start_backend.sh` の uvicorn で動いており、
+> 設定は `config.py` の `env_file=<リポジトリルート>/.env` 経由で読まれる。
+> このファイルは `deploy/deploy.sh` の `rsync --exclude` 対象なので、**デプロイしても消えない**。
+
+### 3. 再起動して、まだ非公開のうちに効いたことを確かめる
+
+```bash
+bash deploy/deploy.sh
+# 旧既定パスワードが拒否されること（ローカルからで十分）
+curl -s -o /dev/null -w "%{http_code}\n" -X POST http://127.0.0.1:18000/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"admin@tekijin.local","password":"tekijin-admin"}'    # 401 を期待
+```
+
+**ここで 200 が返るなら、絶対に公開しないこと。**
+
+### 4. `cloudflared` を DGX に置く
+
+DGX の `team_a` は **sudo を持たない**ので、パッケージではなく静的バイナリを `~/bin` に置く。
+
+```bash
 mkdir -p ~/bin
 curl -fsSL -o ~/bin/cloudflared \
   https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64
@@ -133,7 +202,7 @@ chmod +x ~/bin/cloudflared
 
 > DGX Spark は **arm64**。`cloudflared-linux-amd64` を落とすと `Exec format error` になる。
 
-### 2. トンネルを起動する
+### 5. トンネルを起動する（＝ここで初めて公開される）
 
 `deploy/start_tunnel.sh` を使う。**`setsid` でセッションから切り離す**ので、
 ssh を抜けてもデプロイが走っても生き残る。
@@ -143,15 +212,23 @@ cd /home/team_a/TEKIJIN
 bash deploy/start_tunnel.sh
 ```
 
-起動後、割り当てられた URL をログから拾う。
+割り当てられた URL はスクリプトが表示する。後から拾い直すなら:
 
 ```bash
 grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' ~/tunnel.log | tail -1
 ```
 
-### 3. Slack App に URL を登録する
+### 6. `REDIRECT_URI` を確定して、もう一度再起動する
 
-上で得た `https://<host>` を使い、Slack App の3箇所に設定する。
+URL は起動して初めて決まるので、これだけは後追いになる。
+
+```bash
+TEKIJIN_SLACK_REDIRECT_URI=https://<host>/slack/oauth/callback
+```
+
+を `.env` に入れて `bash deploy/deploy.sh`。
+
+### 7. Slack App に URL を登録する
 
 | Slack App の設定 | 値 |
 |---|---|
@@ -159,43 +236,36 @@ grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' ~/tunnel.log | tail -1
 | Event Subscriptions → Request URL | `https://<host>/slack/events` |
 | Interactivity & Shortcuts → Request URL | `https://<host>/slack/interactivity` |
 
-### 4. `.env` に認証情報を入れる
+必要なスコープ:
 
-**`/home/team_a/TEKIJIN/.env`** に書く。このファイルは `deploy/deploy.sh` の
-`rsync --exclude` 対象なので、**デプロイしても消えない**。
+| 種別 | スコープ | 用途 |
+|---|---|---|
+| Bot | `groups:write` | ペア用プライベートチャンネルの作成・招待 |
+| Bot | `chat:write` | メッセージ投稿 |
+| Bot | `groups:history` | Slack→TEKIJIN の流入（`message.groups` の購読も要る） |
+| User | `identity.basic` | 「Sign in with Slack」で誰が連携したかを知る |
 
-```bash
-TEKIJIN_SLACK_CLIENT_ID=...
-TEKIJIN_SLACK_CLIENT_SECRET=...
-TEKIJIN_SLACK_SIGNING_SECRET=...
-TEKIJIN_SLACK_BOT_TOKEN=xoxb-...
-TEKIJIN_SLACK_REDIRECT_URI=https://<host>/slack/oauth/callback
-TEKIJIN_SLACK_FRONTEND_URL=http://100.118.131.67:13000
-```
+> Bot スコープを入れても **Event Subscriptions → Subscribe to bot events に
+> `message.groups` を追加**しないと、Slack 側の発言は流れてこない。
 
-> `docker-compose.yml` の `env_file` 設定は**このホストには効かない**。
-> DGX のバックエンドは compose ではなく `deploy/start_backend.sh` の
-> uvicorn で動いており、設定は `config.py` の
-> `env_file=<リポジトリルート>/.env` 経由で読まれる。
-
-### 5. バックエンドを再起動して反映する
-
-`.env` はプロセス起動時に読まれるので、**再起動しないと反映されない**。
+### 8. 疎通確認
 
 ```bash
-bash deploy/deploy.sh   # あるいは develop に何かマージする
-```
-
-### 6. 疎通確認
-
-```bash
-curl -fsS -o /dev/null -w "%{http_code}\n" https://<host>/health          # 200
+curl -fsS -o /dev/null -w "%{http_code}\n" https://<host>/health                 # 200
 curl -fsS -o /dev/null -w "%{http_code}\n" -X POST https://<host>/slack/events   # 401（署名なしなので正しい）
 ```
 
-`401` が返れば署名検証が効いている。`200` や `500` が返るなら設定を疑うこと。
+`401` が返れば署名検証が効いている。`404` ならバックエンドに Slack 実装が入っていない。
 
----
+**鍵が合っているかまで確かめる**なら、正しい署名を作って投げる（署名の計算は DGX 上で行い、
+Signing Secret を手元に降ろさないこと）。`url_verification` は Slack が Request URL 保存時に
+投げるものそのものなので、これが通れば登録も通る。
+
+```
+signed url_verification -> 200（challenge がそのまま返る）
+bad signature           -> 401
+10分前のタイムスタンプ  -> 401（リプレイ窓）
+```
 
 ## 撤去手順（**必ず実施**）
 
@@ -206,12 +276,20 @@ curl -fsS -o /dev/null -w "%{http_code}\n" -X POST https://<host>/slack/events  
 
 ```bash
 ssh ootsuka
-pkill -f 'cloudflared tunnel'
-pgrep -af cloudflared || echo "停止済み"
+# ★ 必ず --url まで含める。--no-autoupdate が間に入るので `.*` が要る
+pkill -f 'cloudflared tunnel .*--url http://127.0.0.1:18000'
+pgrep -af 'cloudflared tunnel' || echo "停止済み"
 ```
 
-**`pkill cloudflared` のように対象を絞らないコマンドを使わないこと。**
-このホストは共有機で、他チームのプロセスを巻き込む恐れがある。
+**`pkill -f 'cloudflared tunnel'` のように対象を絞らないコマンドを使わないこと。**
+このホストは共有機で、`-f` は全プロセスのコマンドライン全体に一致するため、
+**他チームの cloudflared まで巻き込む**。必ず `--url <TARGET>` まで含めて特定する。
+
+> `cloudflared tunnel --url ...` を**連続した文字列として**書くと、実際の argv は
+> `tunnel --no-autoupdate --url ...` なので**一致せず、何も止まらない**。
+> `pgrep`/`pkill` の `-f` は正規表現として扱われるので、間に `.*` を入れること。
+> （`pgrep` をコマンドラインに直書きして確認すると、**自分自身のシェルのargvに
+> パターン文字列が載って偽の一致になる**。スクリプト経由で確かめること。）
 
 ### 2. 外から到達できないことを確認する
 
@@ -230,10 +308,16 @@ curl -fsS --max-time 10 https://<host>/health && echo "❌ まだ生きている
 ```bash
 ssh ootsuka
 cd /home/team_a/TEKIJIN
-cp .env .env.bak.$(date +%Y%m%d)     # 念のため
+# バックアップは作業ツリーの外へ。`.gitignore` の `.env` は `.env.bak.*` を
+# 覆わないので、チェックアウト内に置くと後の `git add .` で全部の秘密が乗る
+cp .env ~/env.bak.$(date +%Y%m%d)
+chmod 600 ~/env.bak.$(date +%Y%m%d)
 sed -i '/^TEKIJIN_SLACK_/d' .env
 grep -c '^TEKIJIN_SLACK_' .env || echo "✅ 削除済み"
 ```
+
+> 消すのは `TEKIJIN_SLACK_*` だけでよい。差し替えたパスワードや `TEKIJIN_AUTH_SECRET` は
+> **戻さないこと**（既定値に戻す理由がない）。
 
 消したら**バックエンドを再起動**して、失効した値がメモリに残らないようにする。
 
