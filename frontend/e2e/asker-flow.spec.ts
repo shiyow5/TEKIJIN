@@ -233,11 +233,16 @@ test.describe("asker flow", () => {
  * at different sizes (24px vs 30px) for a while. Compare what the browser
  * actually computes, so "same heading" stays true rather than just true-looking.
  *
- * #421 made both screens render ONE shared `QuestionForm`, so the classes can no
- * longer disagree and `tests/QuestionForm.test.tsx` pins that structurally. This
- * check is kept for the part that survives the extraction: each screen still
- * supplies its own wrapper, so INHERITED css could in principle still make the
- * same element compute differently. That is invisible to a jsdom unit test.
+ * #421 made both screens render ONE shared `QuestionForm`, so the class strings
+ * can no longer disagree and `tests/QuestionForm.test.tsx` pins that structurally.
+ * This check is kept because the unit test compares class STRINGS and jsdom
+ * applies no stylesheet at all — it never computes a pixel. A wrapper can still
+ * restyle its descendants: add `[&_h1]:text-2xl` to either screen's wrapper and
+ * the shared component's classes stay byte-identical, the unit test passes, and
+ * the two headings render at 24px and 30px again — #411 exactly. (Note it is NOT
+ * inheritance: `text-3xl`/`font-bold`/`mb-margin` are all set on the element
+ * itself with absolute values, `mb-margin` being a literal 32px.) This is also
+ * the only check that Tailwind actually emits these utilities on both routes.
  */
 test("the hub's hero heading renders identically to the one on /questions (#392)", async ({
   page,

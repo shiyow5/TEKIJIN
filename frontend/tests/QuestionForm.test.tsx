@@ -1,6 +1,6 @@
 import { HeroQuestionBar } from "@/components/HeroQuestionBar";
 import { QuestionScreen } from "@/components/QuestionScreen";
-import { render } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
@@ -17,8 +17,9 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() }),
 }));
 
+const postAskMock = vi.fn();
 vi.mock("@/lib/api-client", () => ({
-  postAsk: vi.fn(),
+  postAsk: (...args: unknown[]) => postAskMock(...args),
   getRecentQuestions: () => new Promise(() => {}),
   ApiError: class ApiError extends Error {
     readonly status: number;
@@ -43,13 +44,27 @@ vi.mock("@/components/CurrentUserProvider", () => ({
   }),
 }));
 
-/** The form subtree only — each screen's own wrapper is allowed to differ. */
+/**
+ * The form subtree only — each screen's own wrapper is allowed to differ.
+ *
+ * The error paragraph is included even though it renders conditionally: #421 lists
+ * 見出し / 入力欄 / 送信ボタン / **エラー表示** as the four pieces that were
+ * duplicated, and comparing only the heading and the form would leave the fourth
+ * one free to diverge — the exact bug this test exists to prevent.
+ *
+ * Ids are stripped: React's `useId` derives values from tree position, so the two
+ * screens would produce different ids for the SAME component. Without this, adding
+ * an id (to wire a real `<label>`, say) fails the test for a reason that has
+ * nothing to do with drift, with a diff of two visually identical strings.
+ */
 function formMarkup(container: HTMLElement): string {
   const heading = container.querySelector("h1");
   const form = container.querySelector("form");
+  const alert = container.querySelector('[role="alert"]');
   expect(heading).not.toBeNull();
   expect(form).not.toBeNull();
-  return `${heading?.outerHTML}\n${form?.outerHTML}`;
+  const parts = [heading?.outerHTML, form?.outerHTML, alert?.outerHTML ?? "(no error)"];
+  return parts.join("\n").replace(/\bid="[^"]*"/g, 'id="[id]"');
 }
 
 beforeEach(() => {
@@ -66,6 +81,25 @@ describe("QuestionForm", () => {
     const screenMarkup = formMarkup(screenRender.container);
 
     expect(heroMarkup).toBe(screenMarkup);
+  });
+
+  it("compares the error display too, not just the heading and the form (#421)", async () => {
+    // 見出し / 入力欄 / 送信ボタン / エラー表示 are the four pieces #421 names. A
+    // review found that a copy diverging ONLY in the error paragraph still passed,
+    // so drive both screens into their error state and compare that as well.
+    postAskMock.mockRejectedValue(new Error("boom"));
+
+    async function erroredMarkup(ui: React.ReactElement) {
+      const view = render(ui);
+      fireEvent.change(screen.getByLabelText("質問を入力"), { target: { value: "テスト" } });
+      fireEvent.click(screen.getByRole("button", { name: "聞いてみる" }));
+      await screen.findByRole("alert");
+      const markup = formMarkup(view.container);
+      view.unmount();
+      return markup;
+    }
+
+    expect(await erroredMarkup(<HeroQuestionBar />)).toBe(await erroredMarkup(<QuestionScreen />));
   });
 
   it("keeps each screen's own wrapper — only the form is shared (#421)", () => {
