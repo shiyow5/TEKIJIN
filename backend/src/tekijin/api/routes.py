@@ -59,7 +59,7 @@ from tekijin.data.notifications import pending_decline_notifications_for_asker
 from tekijin.data.repository import Repository
 from tekijin.data.slack_channel_links import get_channel_link
 from tekijin.data.writes import ack_decline_notifications, delete_question, mark_self_resolved
-from tekijin.slack.notify import relay_to_channel
+from tekijin.slack.notify import relay_to_channel, schedule_pending_handoff
 
 logger = logging.getLogger(__name__)
 
@@ -273,6 +273,22 @@ def handoff_draft(
         _service(request).save_handoff_draft(
             req.session_id, req.draft, req.consult_method, actor_id=principal.employee_id
         )
+        if req.consult_method == "chat":
+            meta = _service(request).pending_handoff_metadata(req.session_id)
+            if all(
+                meta.get(k) is not None for k in ("asker_id", "responder_id", "recommendation_id")
+            ):
+                schedule_pending_handoff(
+                    _service(request).session_factory,
+                    session_id=req.session_id,
+                    recommendation_id=int(meta["recommendation_id"]),
+                    thread_id=int(meta["recommendation_id"]),
+                    parties={
+                        "asker_id": int(meta["asker_id"]),
+                        "responder_id": int(meta["responder_id"]),
+                    },
+                    draft=req.draft,
+                )
     except HandoffNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except SessionConflict as exc:

@@ -387,6 +387,22 @@ class AgentService:
         responder_id = recs[0]["person_id"] if recs else None
         return (asker_id, responder_id)
 
+    def pending_handoff_metadata(self, session_id: str) -> dict[str, int | str | None]:
+        """Return durable identifiers needed to notify an external hand-off client."""
+        snapshot = self._snapshot(session_id)
+        values = getattr(snapshot, "values", None) or {}
+        asker_id = (values.get("asker") or {}).get("id")
+        recs = values.get("recommendations") or []
+        primary = values.get("primary_recommendation_id")
+        if primary is None and recs:
+            primary = recs[0].get("recommendation_id")
+        return {
+            "question_id": values.get("question_id"),
+            "asker_id": asker_id,
+            "responder_id": recs[0].get("person_id") if recs else None,
+            "recommendation_id": primary,
+        }
+
     def request_document_fallback(self, session_id: str) -> None:
         """Reopen a completed document route at C7 using its ranked candidate.
 

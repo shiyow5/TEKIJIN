@@ -27,6 +27,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import logging
+from urllib.parse import parse_qs
 
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -270,3 +271,48 @@ async def events(request: Request) -> Response:
             await run_in_threadpool(_handle_message_event, service.session_factory, event)
 
     return JSONResponse({"ok": True})
+
+
+@router.post("/interactivity")
+async def interactivity(request: Request) -> Response:
+    """Handle Slack Block Kit承諾/辞退 buttons for pending hand-offs."""
+    settings = get_settings()
+    body = await request.body()
+    if not verify_signature(
+        signing_secret=settings.slack_signing_secret,
+        timestamp=request.headers.get("X-Slack-Request-Timestamp", ""),
+        signature=request.headers.get("X-Slack-Signature", ""),
+        body=body,
+    ):
+        raise HTTPException(status_code=401, detail="invalid signature")
+    raw = parse_qs(body.decode("utf-8"), keep_blank_values=True).get("payload", [""])[0]
+    try:
+        payload = json.loads(raw)
+        action = (payload.get("actions") or [])[0]
+        value = json.loads(action.get("value", "{}"))
+        session_id = value["session_id"]
+        outcome = value["outcome"]
+        recommendation_id = int(value["recommendation_id"])
+        slack_user_id = (payload.get("user") or {}).get("id")
+        service = request.app.state.agent_service
+        with service.session_factory() as session:
+            link = get_slack_link_by_slack_user_id(session, slack_user_id)
+            responder_id = link.employee_id if link else None
+        _, current_responder_id = service.session_participants(session_id)
+        if responder_id is None or responder_id != current_responder_id:
+            raise HTTPException(status_code=403, detail="not the assigned responder")
+        service.submit_resume(session_id, outcome=outcome, recommendation_id=recommendation_id)
+    except HTTPException:
+        raise
+    except Exception:
+        logger.warning("Slack interactivity handling failed", exc_info=True)
+        return JSONResponse(
+            {"text": "この依頼は処理できませんでした。TEKIJINで状態を確認してください。"}
+        )
+    return JSONResponse(
+        {
+            "text": "承諾しました。TEKIJINの依頼状態を更新しています。"
+            if outcome == "accepted"
+            else "辞退しました。依頼者へ通知します。"
+        }
+    )

@@ -132,7 +132,9 @@ def invite_to_channel(*, bot_token: str, channel_id: str, user_ids: list[str]) -
         return False
 
 
-def post_message(*, bot_token: str, channel_id: str, text: str) -> None:
+def post_message(
+    *, bot_token: str, channel_id: str, text: str, blocks: list[dict] | None = None
+) -> None:
     """Best-effort: post ``text`` into ``channel_id`` via the app's bot token.
 
     Never raises — a Slack outage must not break sending a TEKIJIN chat
@@ -142,10 +144,15 @@ def post_message(*, bot_token: str, channel_id: str, text: str) -> None:
 
     headers = {"Authorization": f"Bearer {bot_token}"}
     try:
+        data: dict[str, str] = {"channel": channel_id, "text": text}
+        if blocks is not None:
+            import json
+
+            data["blocks"] = json.dumps(blocks, ensure_ascii=False)
         resp = httpx.post(
             _POST_MESSAGE_URL,
             headers=headers,
-            data={"channel": channel_id, "text": text},
+            data=data,
             timeout=_TIMEOUT_SECONDS,
         )
         resp.raise_for_status()

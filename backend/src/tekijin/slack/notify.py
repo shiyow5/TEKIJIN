@@ -17,6 +17,7 @@ Which TEKIJIN thread an inbound Slack message is attributed to is
 from __future__ import annotations
 
 import datetime as dt
+import json
 import logging
 import threading
 
@@ -160,8 +161,12 @@ def schedule_channel_setup_and_draft(
     def _run() -> None:
         try:
             with session_scope(session_factory) as session:
+                had_channel = (
+                    get_channel_link(session, parties["asker_id"], parties["responder_id"])
+                    is not None
+                )
                 channel_id = ensure_pair_channel(session, thread_id=thread_id, parties=parties)
-            if channel_id is not None:
+            if channel_id is not None and not had_channel:
                 settings = get_settings()
                 post_message(
                     bot_token=settings.slack_bot_token,
@@ -172,3 +177,56 @@ def schedule_channel_setup_and_draft(
             logger.warning("Slack hand-off channel setup failed", exc_info=True)
 
     threading.Thread(target=_run, daemon=True, name="slack-handoff-channel-setup").start()
+
+
+def schedule_pending_handoff(
+    session_factory: sessionmaker[Session],
+    *,
+    session_id: str,
+    recommendation_id: int,
+    thread_id: int,
+    parties: dict,
+    draft: str,
+) -> None:
+    """Create the pair channel when a chat hand-off is sent and post action buttons."""
+
+    def _run() -> None:
+        try:
+            with session_scope(session_factory) as session:
+                channel_id = ensure_pair_channel(session, thread_id=thread_id, parties=parties)
+            if channel_id is None:
+                return
+            settings = get_settings()
+            value_base = {"session_id": session_id, "recommendation_id": recommendation_id}
+            blocks = [
+                {"type": "section", "text": {"type": "mrkdwn", "text": _truncate(draft)}},
+                {
+                    "type": "actions",
+                    "elements": [
+                        {
+                            "type": "button",
+                            "text": {"type": "plain_text", "text": "承諾"},
+                            "style": "primary",
+                            "action_id": "tekijin_accept",
+                            "value": json.dumps({**value_base, "outcome": "accepted"}),
+                        },
+                        {
+                            "type": "button",
+                            "text": {"type": "plain_text", "text": "辞退"},
+                            "style": "danger",
+                            "action_id": "tekijin_decline",
+                            "value": json.dumps({**value_base, "outcome": "declined"}),
+                        },
+                    ],
+                },
+            ]
+            post_message(
+                bot_token=settings.slack_bot_token,
+                channel_id=channel_id,
+                text=_truncate(draft),
+                blocks=blocks,
+            )
+        except Exception:
+            logger.warning("Slack pending hand-off setup failed", exc_info=True)
+
+    threading.Thread(target=_run, daemon=True, name="slack-pending-handoff-setup").start()
