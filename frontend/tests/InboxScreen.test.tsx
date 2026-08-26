@@ -123,11 +123,19 @@ describe("InboxScreen", () => {
     render(<InboxScreen />);
 
     await waitFor(() => expect(getInboxMock).toHaveBeenCalledWith("E001"));
+    // The `who` line comes from `useCurrentUser()`, so it is on screen from the
+    // first render. The list is what the fetch produces, so wait on THAT.
     expect(screen.getByText("高梨 健太 さん宛てに届いた質問です。")).toBeInTheDocument();
-    expect(screen.getByText("藤田 悠斗 さんからの質問")).toBeInTheDocument();
-    expect(screen.getByText(ITEM.question)).toBeInTheDocument();
-    expect(screen.getByText("ネットワーク")).toBeInTheDocument();
-    expect(screen.getByText("2026-08-23 09:30")).toBeInTheDocument();
+    const listItem = await screen.findByRole("button", { name: /藤田 悠斗 さんからの質問/ });
+
+    // Scope the rest to the list item. Since #246 this page renders the list AND
+    // the detail pane, so the question text exists TWICE — once here, once as
+    // the detail's heading — and a bare `getByText` throws "Found multiple
+    // elements". It is a race, too: whether the second one exists yet depends on
+    // when the handoff fetch lands. Same defect the e2e hit in #283/#284.
+    expect(listItem).toHaveTextContent(ITEM.question);
+    expect(listItem).toHaveTextContent("ネットワーク");
+    expect(listItem).toHaveTextContent("2026-08-23 09:30");
 
     // The detail pane (AnswerScreen) renders for the first item with no click.
     await waitFor(() => expect(getHandoffMock).toHaveBeenCalledWith("sess-42"));
