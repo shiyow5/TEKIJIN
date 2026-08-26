@@ -244,6 +244,28 @@ function UserSwitcher({
   onChange: (id: string) => void;
   className: string;
 }) {
+  // What the control SHOWS while the keyboard is still browsing. A native <select>
+  // fires `change` on every arrow key with the popup closed — it does not wait for
+  // Enter — so committing straight from `change` turned "look through the list"
+  // into one identity switch and one router.push per keypress, discarding an unsent
+  // draft the admin never chose to leave (#231).
+  const [browsing, setBrowsing] = useState<string | null>(null);
+  // Whether the pending `change` came from a key. Pointer selection has no
+  // preceding keydown, so a click still commits immediately — the fix must not slow
+  // down the ordinary path.
+  const fromKeyboard = useRef(false);
+
+  const shown = browsing ?? currentUserId ?? "";
+
+  function commit(id: string) {
+    setBrowsing(null);
+    fromKeyboard.current = false;
+    // Re-selecting the current user is not a switch: it would push home for nothing.
+    if (id && id !== currentUserId) {
+      onChange(id);
+    }
+  }
+
   return (
     <label
       className={className}
@@ -257,9 +279,40 @@ function UserSwitcher({
       <select
         aria-label="利用者を切替（管理者デモ機能）"
         className="rounded-md border border-outline bg-surface-container-lowest px-sm py-xs text-sm disabled:text-on-surface-variant"
-        value={currentUserId ?? ""}
+        value={shown}
         disabled={!ready}
-        onChange={(e) => onChange(e.target.value)}
+        onPointerDown={() => {
+          fromKeyboard.current = false;
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            // The keyboard user's explicit confirmation.
+            commit(shown);
+            return;
+          }
+          if (e.key === "Escape") {
+            // Abandon the browsing and snap back to who they actually are.
+            setBrowsing(null);
+            fromKeyboard.current = false;
+            return;
+          }
+          fromKeyboard.current = true;
+        }}
+        onChange={(e) => {
+          if (fromKeyboard.current) {
+            setBrowsing(e.target.value);
+            return;
+          }
+          commit(e.target.value);
+        }}
+        onBlur={() => {
+          // Tabbing away is a commit: the browser leaves the browsed value in the
+          // control, so dropping it here would leave the header showing one person
+          // while the app acts as another.
+          if (browsing !== null) {
+            commit(browsing);
+          }
+        }}
       >
         {ready ? (
           employees.map((employee) => (

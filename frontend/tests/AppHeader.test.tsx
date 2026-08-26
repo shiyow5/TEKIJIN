@@ -131,6 +131,104 @@ describe("AppHeader", () => {
     expect(pushMock).toHaveBeenCalledWith("/");
   });
 
+  it("does not switch or navigate while the arrow keys are still browsing (#231)", () => {
+    // A native <select> fires `change` on EVERY arrow key, closed popup included —
+    // it does not wait for Enter. Committing there meant walking the list threw the
+    // admin home on each keypress, discarding an unsent draft they never left.
+    const setCurrentUserId = vi.fn();
+    useCurrentUserMock.mockReturnValue(
+      ctx({
+        employees: EMPLOYEES,
+        currentUserId: "E001",
+        currentUser: EMPLOYEES[0],
+        setCurrentUserId,
+        canSwitch: true,
+      }),
+    );
+    pathnameMock.mockReturnValue("/answer/s1");
+    render(<AppHeader />);
+    const select = screen.getByRole("combobox", { name: /利用者を切替/ }) as HTMLSelectElement;
+
+    fireEvent.keyDown(select, { key: "ArrowDown" });
+    fireEvent.change(select, { target: { value: "E002" } });
+
+    expect(setCurrentUserId).not.toHaveBeenCalled();
+    expect(pushMock).not.toHaveBeenCalled();
+    // The browsed value is still SHOWN — the user must see what they are on.
+    expect(select.value).toBe("E002");
+  });
+
+  it("commits the browsed value when the keyboard user confirms with Enter (#231)", () => {
+    const setCurrentUserId = vi.fn();
+    useCurrentUserMock.mockReturnValue(
+      ctx({
+        employees: EMPLOYEES,
+        currentUserId: "E001",
+        currentUser: EMPLOYEES[0],
+        setCurrentUserId,
+        canSwitch: true,
+      }),
+    );
+    render(<AppHeader />);
+    const select = screen.getByRole("combobox", { name: /利用者を切替/ });
+
+    fireEvent.keyDown(select, { key: "ArrowDown" });
+    fireEvent.change(select, { target: { value: "E002" } });
+    fireEvent.keyDown(select, { key: "Enter" });
+
+    expect(setCurrentUserId).toHaveBeenCalledWith("E002");
+    expect(pushMock).toHaveBeenCalledWith("/");
+  });
+
+  it("commits the browsed value when focus leaves the select (#231)", () => {
+    // Tabbing away is a commit too: the value the browser leaves in the control is
+    // the one the user ends up on, so silently keeping the old identity would make
+    // the header disagree with itself.
+    const setCurrentUserId = vi.fn();
+    useCurrentUserMock.mockReturnValue(
+      ctx({
+        employees: EMPLOYEES,
+        currentUserId: "E001",
+        currentUser: EMPLOYEES[0],
+        setCurrentUserId,
+        canSwitch: true,
+      }),
+    );
+    render(<AppHeader />);
+    const select = screen.getByRole("combobox", { name: /利用者を切替/ });
+
+    fireEvent.keyDown(select, { key: "ArrowDown" });
+    fireEvent.change(select, { target: { value: "E002" } });
+    fireEvent.blur(select);
+
+    expect(setCurrentUserId).toHaveBeenCalledWith("E002");
+    expect(pushMock).toHaveBeenCalledWith("/");
+  });
+
+  it("does not re-commit when the browsing ends back on the current user (#231)", () => {
+    const setCurrentUserId = vi.fn();
+    useCurrentUserMock.mockReturnValue(
+      ctx({
+        employees: EMPLOYEES,
+        currentUserId: "E001",
+        currentUser: EMPLOYEES[0],
+        setCurrentUserId,
+        canSwitch: true,
+      }),
+    );
+    render(<AppHeader />);
+    const select = screen.getByRole("combobox", { name: /利用者を切替/ });
+
+    fireEvent.keyDown(select, { key: "ArrowDown" });
+    fireEvent.change(select, { target: { value: "E002" } });
+    fireEvent.keyDown(select, { key: "ArrowUp" });
+    fireEvent.change(select, { target: { value: "E001" } });
+    fireEvent.blur(select);
+
+    expect(setCurrentUserId).not.toHaveBeenCalled();
+    expect(pushMock).not.toHaveBeenCalled();
+  });
+
   it("shows a disabled placeholder while the directory is loading (admin)", () => {
     useCurrentUserMock.mockReturnValue(ctx({ loading: true, canSwitch: true }));
     render(<AppHeader />);
