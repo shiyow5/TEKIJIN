@@ -40,11 +40,17 @@ describe("fitPercents", () => {
   });
 
   it("is decoupled from the confidence label — a 低 top still reads high (#240)", () => {
-    // A strong candidate on a never-asked topic: label 低 but a high fit gauge,
-    // instead of the old label-anchored 33% cap.
+    // A strong candidate on a never-asked topic: label 低 but a fit gauge above the
+    // old label-anchored 33% cap.
     const strongLow = fitPercents([{ score: 0.74, confidence: "低" }]);
     const strongHigh = fitPercents([{ score: 0.74, confidence: "高" }]);
     expect(strongLow).toEqual(strongHigh); // label does not change the gauge
+    // NOTE (#498): under the qsim-inclusive 1.9 ceiling, 0.74 reads 39% — still
+    // above 33%, but the margin is now thin (was 82% under the 0.9 ceiling). This
+    // is the acknowledged single-ceiling trade-off; if the backend qsim/weights
+    // distribution drifts, a strong-but-qsim-less candidate could dip toward the
+    // old #240 under-read. The proper fix is backend-computed fit (#500), which
+    // removes this frontend re-derivation entirely.
     expect(strongLow[0]).toBeGreaterThan(33); // no longer capped at 33
   });
 
