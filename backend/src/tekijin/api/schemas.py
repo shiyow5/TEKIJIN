@@ -880,6 +880,34 @@ class FeedbackByStage(BaseModel):
     total: int = 0
 
 
+class MonthlyCount(BaseModel):
+    """One point of the accumulation trend (``"2026-09"``, count)."""
+
+    month: str
+    count: int
+
+
+class KnowledgeAccumulation(BaseModel):
+    """How much tacit knowledge became explicit, and whether the loop is closing (#294).
+
+    Counts only what the RUNTIME produced — captured answers (#274) and 直接相談
+    retrospectives (#247) — never the seeded corpus, so a freshly seeded database
+    reads 0 rather than flattering itself with fixture rows.
+
+    ``capture_rate`` is the recovery rate (暗黙知の回収率): of the hand-offs accepted
+    this month, the share that left knowledge behind. Raw counts only ever grow;
+    this is the one that can fall, which is what makes it worth showing.
+    """
+
+    this_month: int = 0
+    last_month: int = 0
+    captured_answers: int = 0
+    consult_retrospectives: int = 0
+    accepted_handoffs: int = 0
+    capture_rate: float = 0.0
+    monthly: list[MonthlyCount] = Field(default_factory=list)
+
+
 class DashboardResponse(BaseModel):
     """Aggregate-only view (counts / distributions / ratios).
 
@@ -903,6 +931,8 @@ class DashboardResponse(BaseModel):
     answers_per_responder: list[ResponderLoad] = Field(default_factory=list)
     topic_distribution: list[TopicCount] = Field(default_factory=list)
     feedback_by_stage: FeedbackByStage = Field(default_factory=FeedbackByStage)  # #237 段別ズレ件数
+    # #294: 蓄積メトリクス（形式知化された量と、取次ぎからの回収率）
+    knowledge_accumulation: KnowledgeAccumulation = Field(default_factory=KnowledgeAccumulation)
 
 
 # --------------------------------------------------------------------------- #

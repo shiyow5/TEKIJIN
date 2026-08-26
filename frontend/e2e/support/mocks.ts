@@ -288,4 +288,22 @@ export const DASHBOARD = {
     { topic: "セキュリティ", count: 30 },
   ],
   feedback_by_stage: { c1: 1, c6: 4, c7: 2, total: 7 },
+  // #294: 蓄積メトリクス。Runtime-only counts, so a demo fixture states them
+  // explicitly rather than letting the screen fall back to an empty section.
+  knowledge_accumulation: {
+    this_month: 3,
+    last_month: 1,
+    captured_answers: 2,
+    consult_retrospectives: 1,
+    accepted_handoffs: 4,
+    capture_rate: 0.5,
+    monthly: [
+      { month: "2026-04", count: 0 },
+      { month: "2026-05", count: 0 },
+      { month: "2026-06", count: 1 },
+      { month: "2026-07", count: 0 },
+      { month: "2026-08", count: 1 },
+      { month: "2026-09", count: 3 },
+    ],
+  },
 };
