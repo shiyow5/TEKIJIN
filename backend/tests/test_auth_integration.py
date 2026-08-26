@@ -130,6 +130,8 @@ def test_unauthenticated_requests_are_401(seed_counts, engine, fake_embedder) ->
     assert client.get("/messages/threads?employee_id=1").status_code == 401
     assert client.get("/inbox?responder_id=1").status_code == 401
     assert client.get("/events/whatever").status_code == 401
+    assert client.get("/knowledge").status_code == 401
+    assert client.get("/knowledge/any").status_code == 401
 
 
 def test_garbage_token_is_401(seed_counts, engine, fake_embedder) -> None:

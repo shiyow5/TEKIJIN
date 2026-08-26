@@ -5,8 +5,9 @@ import Link from "next/link";
  * 出典チップ列（#291 自己回答の検証性）。`self_answered` / `document` 終端が返す
  * `message.citations` を、ライブの ProcessingScreen とリロード後の ResultScreen の
  * 両方で同一に描画するための共有コンポーネント（片方だけ描画してドリフトする #382
- * レビュー指摘の再発防止）。`document` は内部文書ビューアへリンク、`qa` は専用
- * ビューア未実装のため非リンクのチップ（ナレッジ詳細 #293 part2 でリンク化予定）。
+ * レビュー指摘の再発防止）。`document` は内部文書ビューアへ、`qa` はナレッジ詳細
+ * （#293 part2, `/knowledge/[id]`）へリンク — `source_id` は自己回答の citation と
+ * 同じ実体（`Answer.id`）を指すので、それぞれの詳細ページがそのまま解決できる。
  */
 export function SourceCitations({
   citations,
@@ -35,10 +36,13 @@ export function SourceCitations({
                 {citation.source_id}
               </Link>
             ) : (
-              <span className="inline-flex min-h-[44px] items-center gap-xs rounded-full border border-outline-variant bg-surface-container-low px-md py-sm text-sm text-on-surface-variant">
+              <Link
+                href={`/knowledge/${encodeURIComponent(citation.source_id)}`}
+                className="inline-flex min-h-[44px] items-center gap-xs rounded-full border border-outline-variant bg-surface px-md py-sm text-sm font-bold text-primary transition-colors hover:bg-surface-container"
+              >
                 <span aria-hidden="true">💬</span>
                 過去の回答 {citation.source_id}
-              </span>
+              </Link>
             )}
           </li>
         ))}
