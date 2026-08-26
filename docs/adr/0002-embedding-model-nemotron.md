@@ -34,7 +34,9 @@ Nemotron-3-Embed-1B が 0.615 で 1 位、次点は Qwen3-Embedding-0.6B の 0.5
   2048 次元の格納＋総当たり cosine は pgvector 0.6.2 でも動く（実地確認済み）。
 - ローカルのテスト PG（`pgserver` 0.1.4）は pgvector **0.6.2** で `halfvec` 型が無い。
   今 `halfvec` にすると `create_all` がローカルで失敗し backend テストを検証できない。
-  CI / docker の `pgvector/pgvector:pg16` は 0.8 系で対応する。
+  CI / docker / DGX は `pgvector/pgvector:0.8.6-pg16` に固定してあり、`halfvec` に対応する
+  （#101。固定と、4箇所が同じバージョンを指していることは
+  `backend/tests/test_pgvector_image_pin.py` が検査する）。
 
 ### ライセンス（NVIDIA Open Model License）の確認
 
