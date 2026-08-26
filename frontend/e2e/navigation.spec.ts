@@ -65,7 +65,7 @@ test.describe("navigation", () => {
     ).toBeVisible();
   });
 
-  test("hub cards reach the question and inbox screens", async ({ page }) => {
+  test("hub cards reach the history and inbox screens", async ({ page }) => {
     await mockChrome(page);
     await page.goto("/");
 
@@ -76,12 +76,11 @@ test.describe("navigation", () => {
 
     await page.getByRole("link", { name: /TEKIJIN/ }).click();
     await page.waitForURL(/\/$/);
-    // 質問する was removed from the nav (#391) — it lives only on the hero CTA and
-    // hub card now (both link to /questions, hence .first() to sidestep the
-    // strict-mode ambiguity between them).
-    await page.getByRole("link", { name: "質問する" }).first().click();
-    await page.waitForURL(/\/questions$/);
-    await expect(page.getByRole("heading", { name: "何を知りたいですか？" })).toBeVisible();
+    // 質問する was removed from both the nav (#391) and the hub card (#392,
+    // replaced by 質問履歴 — the hero bar itself now covers asking directly).
+    await page.getByRole("link", { name: "質問履歴" }).click();
+    await page.waitForURL(/\/history$/);
+    await expect(page.getByRole("heading", { name: "質問履歴" })).toBeVisible();
   });
 
   test("major screens provide an explicit way back to the home hub (#332)", async ({ page }) => {
