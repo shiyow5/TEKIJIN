@@ -203,6 +203,30 @@ class HandoffDraftRequest(BaseModel):
         return trimmed
 
 
+class QuestionStructureRequest(BaseModel):
+    """Ask the AI to tidy the session's raw question into the four hand-off fields
+    (#475 Screen 01). On-demand and read-only — it reshapes the already-stored
+    question, so the client only needs to name the session."""
+
+    session_id: str = Field(pattern=_SESSION_ID_PATTERN)
+
+
+class QuestionStructureResponse(BaseModel):
+    """The re-drafted question (#475): 起きていること / 環境 / 試したこと / 詰まっている点.
+
+    Every field can be empty — the model leaves a field blank rather than inventing
+    what the question never stated (an invented 環境 would mislead the responder), and
+    the asker fills or edits it before sending. Purely presentational: nothing here is
+    persisted or fed back into routing.
+    """
+
+    session_id: str
+    summary: str
+    environment: str
+    tried: str
+    blocker: str
+
+
 class HandoffSelectRequest(BaseModel):
     """Asker picks a different (of the currently shown) candidate as the
     hand-off target, reordering it to primary and regenerating the draft for

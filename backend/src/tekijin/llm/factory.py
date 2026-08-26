@@ -12,6 +12,7 @@ from tekijin.agent.protocols import (
     AnswerabilityModel,
     DraftModel,
     IntentModel,
+    QuestionStructurer,
     SelfAnswerModel,
     SufficiencyModel,
 )
@@ -20,6 +21,7 @@ from tekijin.agent.stubs import (
     RuleAnswerabilityModel,
     RuleSufficiencyModel,
     TemplateDraftModel,
+    TemplateQuestionStructurer,
     TemplateSelfAnswerModel,
 )
 from tekijin.config import Settings, get_settings
@@ -60,3 +62,21 @@ def make_llm_nodes(
         RuleAnswerabilityModel(),
         TemplateSelfAnswerModel(),
     )
+
+
+def make_question_structurer(settings: Settings | None = None) -> QuestionStructurer:
+    """Return the on-demand question re-drafter (#475) for the configured backend.
+
+    Built SEPARATELY from :func:`make_llm_nodes` because it never runs inside the
+    graph — the result-screen endpoint calls it on demand, off the C1 critical path
+    ([[tekijin-latency-and-streaming]]). Stub by default (network-free tests); vLLM
+    when configured. The vLLM import stays function-local so the stub path never
+    pulls LangChain.
+    """
+
+    settings = settings or get_settings()
+    if settings.llm_backend == "vllm":
+        from tekijin.llm.vllm import VllmQuestionStructurer
+
+        return VllmQuestionStructurer(settings=settings)
+    return TemplateQuestionStructurer()

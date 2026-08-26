@@ -143,6 +143,33 @@ class CaseExtractionSchema(BaseModel):
         return self
 
 
+class QuestionStructureSchema(BaseModel):
+    """On-demand question re-draft structured output (#475 Screen 01).
+
+    The model reshapes a raw, anxious question into the four fields a responder needs.
+    Every field defaults to ``""`` and the prompt tells the model to LEAVE A FIELD
+    EMPTY when the question does not state it — inventing an ``environment`` the asker
+    never gave would mislead the responder and defeat the "answerer can trust this"
+    goal. The asker edits these before sending, so an empty field is a prompt to fill
+    in, not a failure. No field is a citation or an id, so no allow-list applies here;
+    the text is purely presentational (never persisted, never fed to routing).
+    """
+
+    summary: str = Field(
+        default="", description="起きていること（何が起きているかの一言要約／不明なら空）"
+    )
+    environment: str = Field(
+        default="",
+        description="環境（OS・バージョン・利用サービスなど、質問に書かれた範囲で／無ければ空）",
+    )
+    tried: str = Field(
+        default="", description="試したこと（質問に書かれた範囲で／書かれていなければ空）"
+    )
+    blocker: str = Field(
+        default="", description="詰まっている点（何が分からず止まっているか／不明なら空）"
+    )
+
+
 class SelfAnswerSchema(BaseModel):
     """Self-answer structured output (#291): a grounded, cited answer or a pass.
 
