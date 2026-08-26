@@ -353,6 +353,18 @@ class _RecordingScorer:
         return {"recommendations": []}
 
 
+class _ReturningScorer:
+    """A scorer double that returns real rows, so tests can assert on ``reasons``."""
+
+    def rank(self, topics, candidates, asker_id, now, *, top_k=3, **kwargs) -> dict:
+        return {
+            "recommendations": [
+                {"person_id": c, "name": f"E{c}", "score": 0.5, "reasons": []}
+                for c in list(candidates)[:top_k]
+            ]
+        }
+
+
 class _FakeBranches:
     """A :class:`BranchSource` double — only ``.branch`` is read (#83)."""
 
@@ -475,20 +487,57 @@ def test_c6_fills_from_other_branches_and_says_so() -> None:
     assert "福岡" in recs[1]["reasons"][-1]["detail"]
 
 
-def test_c6_ignores_a_branch_nobody_in_the_pool_is_at() -> None:
-    # Splitting on a branch with ZERO matches would demote every candidate into the
-    # "we had to go elsewhere" bucket and stamp a misleading reason on all of them,
-    # when the truth is the constraint cannot be honoured at all. Rank normally.
-    scorer = _RecordingScorer()
+def test_c6_says_so_when_nobody_is_at_the_requested_branch() -> None:
+    # Zero matches is the case the asker MOST needs to hear (福岡 has 2 employees, so
+    # an empty match is common). Rank everyone, but annotate every candidate — an
+    # earlier version stayed silent here while being loud in less important cases.
     nodes = _nodes_for_score(
-        scorer,
+        _ReturningScorer(),
         branch_constraint_enabled=True,
         employee_branches=_FakeBranches({1: "本社", 2: "大阪"}),
     )
     state = _c6_state({})
     state["constraint_branch"] = "福岡"
-    nodes.c6_score(state)
-    assert scorer.candidates_seen == [[1, 2]]
+    recs = nodes.c6_score(state)["recommendations"]
+    assert [r["person_id"] for r in recs] == [1, 2]
+    assert all(r["reasons"][-1]["type"] == "constraint" for r in recs)
+    assert all("福岡" in r["reasons"][-1]["detail"] for r in recs)
+
+
+def test_c6_does_not_annotate_a_candidate_who_is_at_the_branch() -> None:
+    # The control for the test above: the note must land on the people it is TRUE of.
+    # Without this, "annotate everything" would pass the zero-match test too.
+    nodes = _nodes_for_score(
+        _ReturningScorer(),
+        branch_constraint_enabled=True,
+        employee_branches=_FakeBranches({1: "福岡", 2: "大阪"}),
+    )
+    state = _c6_state({})
+    state["constraint_branch"] = "福岡"
+    recs = nodes.c6_score(state)["recommendations"]
+    by_id = {r["person_id"]: r for r in recs}
+    assert not any(x["type"] == "constraint" for x in by_id[1]["reasons"])  # at 福岡
+    assert by_id[2]["reasons"][-1]["type"] == "constraint"  # elsewhere
+
+
+def test_c6_annotates_the_prior_answer_pin_when_it_violates_the_branch() -> None:
+    # The pin is seated at rank 1 — who C7 drafts for and who `send` interrupts on.
+    # A pin at the wrong branch used to violate the constraint with no explanation at
+    # all, which is the worst place for the note to be missing.
+    nodes = _nodes_for_score(
+        _ReturningScorer(),
+        branch_constraint_enabled=True,
+        employee_branches=_FakeBranches({1: "福岡", 2: "大阪", 50: "大阪"}),
+    )
+    state = _c6_state({})
+    state["retrieval"]["candidate_people"] = [1, 2]
+    state["constraint_branch"] = "福岡"
+    state["route"] = PRIOR_ANSWER
+    state["pinned_responder_id"] = 50
+    recs = nodes.c6_score(state)["recommendations"]
+    assert recs[0]["person_id"] == 50  # the pin still wins rank 1 (#159)
+    assert recs[0]["reasons"][-1]["type"] == "constraint"  # …but says the branch missed
+    assert "福岡" in recs[0]["reasons"][-1]["detail"]
 
 
 def test_c6_ignores_the_constraint_when_the_feature_is_off() -> None:

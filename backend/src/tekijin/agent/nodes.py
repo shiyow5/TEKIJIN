@@ -379,26 +379,55 @@ class AgentNodes:
         # than letting a higher-scoring different person win.
         return {"prior_answer_note": note, "pinned_responder_id": responder_id}
 
+    def _requested_branch(self, state: AgentState) -> str | None:
+        """The branch C6 must honour, or ``None`` when the #83 constraint is not live."""
+
+        branch = state.get("constraint_branch")
+        if not self._branch_constraint_enabled or not branch or self._employee_branches is None:
+            return None
+        return str(branch)
+
+    def _note_unmet_branch(self, recs: list[dict[str, Any]], state: AgentState) -> None:
+        """Stamp "we could not honour 拠点" on any rec that is NOT at the branch.
+
+        Checked per-candidate rather than per-bucket, so the note lands exactly on the
+        people it is true of — the prior_answer pin included (it is seated at rank 1
+        and would otherwise violate the constraint with no explanation at all), and
+        never on someone who IS at the branch.
+        """
+
+        branch = self._requested_branch(state)
+        if branch is None or not recs:
+            return
+        assert self._employee_branches is not None  # guaranteed by _requested_branch
+        ids = [r["person_id"] for r in recs]
+        by_id = self._employee_branches.employees_by_ids(ids)
+        note = f"{branch}に該当者が足りないため、他拠点から含めています"
+        for rec in recs:
+            if getattr(by_id.get(rec["person_id"]), "branch", None) == branch:
+                continue
+            rec["reasons"] = [
+                *(rec.get("reasons") or []),
+                {"type": "constraint", "detail": note},
+            ]
+
     def _split_by_branch(
         self, candidates: list[int], state: AgentState
     ) -> tuple[list[int], list[int]]:
         """``(at the requested branch, everyone else)`` for the #83 constraint.
 
-        Returns ``(candidates, [])`` — i.e. "no constraint in play" — whenever the
-        feature is off, no branch was requested, the branch lookup is unwired, or
-        NOBODY in the pool is at that branch. That last case matters: splitting on a
-        branch with zero matches would demote every candidate into the "we had to go
-        elsewhere" bucket and stamp a misleading reason on all three, when in truth
-        the constraint simply cannot be honoured at all.
+        Returns ``(candidates, [])`` when the constraint is not live. When it IS live
+        but NOBODY in the pool is at that branch, this still returns everyone as
+        "others" so the caller ranks them normally AND annotates them — "福岡には
+        該当者がいません" is the case the asker most needs to hear, and 福岡 has only
+        2 employees, so an empty match is common rather than exotic.
         """
 
-        branch = state.get("constraint_branch")
-        if not self._branch_constraint_enabled or not branch or self._employee_branches is None:
+        branch = self._requested_branch(state)
+        if branch is None:
             return candidates, []
-        by_id = self._employee_branches.employees_by_ids(candidates)
+        by_id = self._employee_branches.employees_by_ids(candidates)  # type: ignore[union-attr]
         matching = [c for c in candidates if getattr(by_id.get(c), "branch", None) == branch]
-        if not matching:
-            return candidates, []
         return matching, [c for c in candidates if c not in set(matching)]
 
     # -- C6: expertise scorer (deterministic) -----------------------------
@@ -440,6 +469,14 @@ class AgentNodes:
         # and never if the pin IS the asker (they cannot answer their own question).
         # In either case drop the pin and rely on the general candidate pool below
         # (never dead-end on a single decline or a self-referential pin).
+        #
+        # #83: the pin is seated at rank 1, which is who C7 drafts for and who `send`
+        # interrupts on. So a pin at the WRONG branch would hand the request to Osaka
+        # after the asker explicitly asked for 福岡 — the constraint would be violated
+        # by the one candidate that matters, silently. Annotate it rather than drop it:
+        # the pin exists because that person already answered a near-duplicate question
+        # (#159), which is evidence the branch preference does not outweigh; but the
+        # asker must be told the condition was not met.
         pin_id: int | None = (
             pinned
             if (
@@ -464,6 +501,7 @@ class AgentNodes:
                 topics, [pin_id], asker_id, state["now"], top_k=1, **qsim_kw
             )
             fresh = cast("list[dict[str, Any]]", pin_result["recommendations"])
+            self._note_unmet_branch(fresh, state)
             remaining -= len(fresh)
 
         if remaining > 0:
@@ -491,21 +529,16 @@ class AgentNodes:
                 # 含めています" is visible rather than silently ignored.
                 matching, others = self._split_by_branch(candidates, state)
                 if others:
-                    # Constrained: the branch's people fill the slots first.
+                    # Constrained: the branch's people fill the slots first, then the
+                    # rest — and every rec NOT at the branch is annotated, so the asker
+                    # is never silently handed someone elsewhere. `matching` may be
+                    # empty (nobody at that branch at all), which is exactly when the
+                    # note matters most.
                     picked = rank(matching, remaining) if matching else []
                     short = remaining - len(picked)
                     if short > 0:
-                        # Not enough people at that branch — fill from elsewhere and
-                        # SAY SO, rather than silently returning a shorter list or
-                        # pretending the constraint was met.
-                        branch = state.get("constraint_branch")
-                        note = f"{branch}に該当者が足りないため、他拠点から含めています"
-                        for rec in rank(others, short):
-                            rec["reasons"] = [
-                                *(rec.get("reasons") or []),
-                                {"type": "constraint", "detail": note},
-                            ]
-                            picked.append(rec)
+                        picked = picked + rank(others, short)
+                    self._note_unmet_branch(picked, state)
                     fresh = fresh + picked
                 else:
                     fresh = fresh + rank(candidates, remaining)

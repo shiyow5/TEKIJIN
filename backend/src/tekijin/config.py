@@ -181,14 +181,23 @@ class Settings(BaseSettings):
     question_fit_enabled: bool = True
 
     # #83: when the asker explicitly asks for someone at a given branch ("福岡の拠点で
-    # 動ける方だと助かります"), treat it as a CONDITION in C6 rather than a scoring
-    # term. `Weights.proximity` (0.10) is one term in a linear sum, so a stronger
-    # candidate elsewhere simply outweighs it — measured: the 15 constrained eval
-    # rows sat at 0.667 R@3 while honouring the branch put them at 0.933 (and the
-    # whole set 0.712 -> 0.773). Raising `proximity` to 0.40 also reaches 0.900 but
-    # distorts every unconstrained question, which is why this is a filter instead.
-    # OFF by default until a full-graph E2E run confirms it holds with C1 doing the
-    # extraction (the +0.220 above assumed the constraint was already known).
+    # 動ける方だと助かります"), treat it as a CONDITION in C6 rather than a scoring term.
+    #
+    # OFF, and NOT yet enablable — the measurement that would justify enabling it is
+    # CONTAMINATED. The DGX full-graph A/B looks strong (Hit@3 0.7626 -> 0.8232 over 3
+    # paired replicates, +0.0606 every time, routing byte-identical), and C1's branch
+    # extraction measured 15/15 with 1 false fire in 72. But the C1 prompt was written
+    # AFTER reading the eval's constrained rows: its two special rules (本部->本社,
+    # 地方名->拠点) cover exactly the ids a naive extractor misses
+    # (`ablation/robustness_results.json`: 11/13/15/17/19/21/24/25), and its negative
+    # example is a verbatim lift of eval row 1. So both numbers measure a prompt fitted
+    # to the rows it is scored on — the same defect that got "C1 few-shot Hit@3 0.803"
+    # retracted (#384). Enabling needs held-out constraint phrasings authored without
+    # reference to this prompt.
+    #
+    # Also unsettled: the committed bench has 「拠点一致を加点」 and 「拠点で絞ってから
+    # 並べる」 at the SAME 0.9333/0.7727 (`robustness_results.json`), so a one-line
+    # `proximity` weight bump may buy the same thing as this new code path.
     branch_constraint_enabled: bool = False
 
     # #357: knowledge framework. When the knowledge layer is wired into retrieval,

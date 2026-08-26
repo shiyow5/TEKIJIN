@@ -19,6 +19,10 @@ export const REASON_LABELS: Record<string, string> = {
   recency: "直近の活動",
   skill: "推定スキル",
   self: "自己申告",
+  // #83: not a scoring signal — it explains that the asker's explicit branch request
+  // could NOT be met for this candidate. Without a label it renders as the raw
+  // "constraint" string.
+  constraint: "拠点の希望",
 };
 
 export function reasonLabel(type: string): string {
