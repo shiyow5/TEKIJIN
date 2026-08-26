@@ -224,9 +224,11 @@ g.add_node("c2_sufficiency", c2_sufficiency)   # LLM + interrupt()（#377: routa
 g.add_node("c4_retrieve", c4_retrieve)         # 決定的（Dense+BM25+RRF）
 g.add_node("c5_route", c5_route)               # 決定的
 g.add_node("self_answer", self_answer)         # LLM（#291・根拠のみ／出典付き・既定ON）
-g.add_node("c6_score", c6_score)               # 決定的（説明可能）
+g.add_node("additive_answer", additive_answer) # LLM（#413・person経路で引用併記・既定ON・非終端）
+g.add_node("c6_score", c6_score)               # 決定的（説明可能・#405 qsim 加点）
 g.add_node("c7_draft", c7_draft)               # LLM
 g.add_node("c8_update", c8_update)             # 決定的（グラフ更新）
+# knowledge_answer（#357・決定的知識回答）も C5 の前に配線可能だが既定 OFF。
 g.add_edge(START, "c1_understand")
 g.add_conditional_edges("c1_understand", lambda s: "end" if s["out_of_scope"] else "c2")
 g.add_conditional_edges("c2_sufficiency", lambda s: "c4" if s["sufficient"] else "c2")
@@ -235,15 +237,21 @@ g.add_conditional_edges("c5_route", route_selector)   # person / prior_answer / 
 # grounded なら self_answered 終端（出典付き）、不足なら元経路（C6 等）へフォールバック。
 g.add_conditional_edges("self_answer",
     lambda s: "self_answered" if s["grounded"] else s["fallback_route"])
+# person 経路は C6 の前に additive_answer を通す（#413・既定ON）。引用回答を reference で併記するが
+# 終端にはせず必ず c6_score へ進む（取次ぎを消さない）。best-effort（compose 失敗は握って取次ぎのみ）。
+g.add_edge("additive_answer", "c6_score")
 g.add_edge("c6_score", "c7_draft")
 g.add_edge("c7_draft", "c8_update")
 g.add_edge("c8_update", END)
 graph = g.compile(checkpointer=PostgresSaver(...))
 ```
 
-> **person 経路は不変**（C6→C7→C8）。自己回答は**データ由来経路のみ**に挟まる終端で、
-> 人物取次ぎの recall は 1.000 のまま。自己回答の既定は `self_answer_enabled=True`（#380 の
-> full-graph E2E 検証後）で、OFF にすると C7' を挟まない旧挙動に戻る。
+> **person 経路の取次ぎ recall は 1.000 のまま**だが、#413 で person 経路にも自己回答が**併記**として挟まる:
+> `additive_answer` ノードが C5 の後・C6 の前に走り（既定 ON・`additive_self_answer_enabled=True`・floor 0.20）、
+> grounded な引用回答を `reference` イベントで取次ぎと並べて出す（**取次ぎは置き換えない**・routing 不変・
+> best-effort で失敗時は取次ぎのみ）。終端の自己回答（`self_answered`）は従来どおりデータ由来経路のみ。
+> 既定は `self_answer_enabled=True` / `additive_self_answer_enabled=True` / `daily_knowledge_enabled=True` /
+> `question_fit_enabled=True`（すべて #380 以降の DGX full-graph E2E 検証を経て有効化）。
 
 > 「なぜ LangGraph を使うのか」は審査で聞かれうる。
 > **「状態・分岐・ストリーミング(→SSE)・中断再開(→逆質問)・永続化(→メモリ)を"実現できる体験"の
@@ -281,6 +289,19 @@ recommendations(id, question_id, employee_id, rank, score, reasons jsonb,
 -- 文書
 documents(id, title, body, source, updated_at, embedding vector)
 
+-- 日報（#355 topics / #433 embedding を後付け・migrate で ADD COLUMN IF NOT EXISTS）
+daily_reports(id, employee_id, report_date, content, issue, created_at,
+              topics text[],          -- #355: C6 証拠源のトピックタグ
+              embedding vector)        -- #433: 自己回答の知識源（dense チャネル・kind="daily"）
+
+-- 形式知（#357/#448・知識抽出パイプラインの出力・graph 外で upsert）
+knowledge_units(id, kind, problem, action, result, topics text[], industry,
+                source_type, source_id, confidence, review_status, embedding vector,
+                created_at)
+  -- kind ∈ {case, procedure, decision} / review_status ∈ {unreviewed, approved, rejected}
+  -- UNIQUE(source_type, source_id)（出典で冪等）/ GIN(topics)
+  -- 生データ（日報 knowledge/extract.py・チャット knowledge/chat.py）から蒸留
+
 -- 計測
 events(id, question_id, stage, started_at, ended_at, meta jsonb)
 
@@ -305,6 +326,7 @@ score(e, q) = w1·topic_fit(e,q)
             + w3·answer_quality(e)
             + w4·proximity(e, asker)
             − w5·load(e)
+            + w6·question_fit(e,q)   // #405 qsim・既定ON
 ```
 
 | 項 | 内容 | データ源 |
@@ -314,6 +336,7 @@ score(e, q) = w1·topic_fit(e,q)
 | `answer_quality` | 過去回答の有用度と再利用数 | answers |
 | `proximity` | 同支店 \> 同エリア \> 全社 | employees.branch |
 | `load` | **直近7日の推薦・回答件数。多いほど減点** | recommendations / answers |
+| `question_fit` | **質問文↔その人の過去回答本文の意味一致（最大コサイン）。#405 qsim・既定ON**。`topic_fit` はタグしか見ず飽和する（ADR-0006）ため、C1 が誤トピックでも正解専門家を救う。実 E2E Hit@3 0.742→0.788 | answers（C4 の answer dense チャネル） |
 
 ### 設計上の要点
 
