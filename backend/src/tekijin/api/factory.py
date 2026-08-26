@@ -68,6 +68,10 @@ def build_default_service(settings: Settings | None = None) -> AgentService:
         # (acc@1=0.750) into the query BREAKS routing (person recall 1.000->0.776);
         # the retrieval-harness "+0.04" was an oracle-topic artifact. See config.py.
         query_expansion_enabled=settings.query_expansion_enabled,
+        # #405: add the question↔past-answer term to C6. ENABLED by default after
+        # the full-graph E2E verification (Hit@3 0.742->0.788, person route recall
+        # 1.000 unchanged — C5 does not read the scorer, so routing is untouched).
+        question_fit_enabled=settings.question_fit_enabled,
         # #357 slice 4c: wire the knowledge-answer step ONLY when enabled; else None
         # keeps the pre-#357 graph (no knowledge_answer node). Default OFF until the
         # knowledge corpus is populated + verified (slice 4b calibrated the floor).

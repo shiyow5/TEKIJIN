@@ -13,7 +13,7 @@ are reproducible; ties break on ``person_id`` so the ranking is stable.
 from __future__ import annotations
 
 import datetime as dt
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import TypedDict
 
 from tekijin.data.dto import (
@@ -36,6 +36,7 @@ from tekijin.scorer.weights import (
     DAYS_PER_MONTH,
     DEFAULT_WEIGHTS,
     LOAD_WINDOW_DAYS,
+    QUESTION_FIT_REASON_FLOOR,
     RECENCY_SOURCE_TYPES,
     REGION_OF_BRANCH,
     Weights,
@@ -76,9 +77,10 @@ _REASON_TYPE_ORDER = {
     "answers": 3,
     "project": 4,
     "daily": 5,  # #355: weakest topic evidence, after project
-    "recency": 6,
-    "proximity": 7,
-    "load": 8,
+    "question_fit": 6,  # #405: question↔past-answer semantic match
+    "recency": 7,
+    "proximity": 8,
+    "load": 9,
 }
 
 
@@ -106,6 +108,7 @@ class ExpertiseScorer:
         now: dt.datetime,
         *,
         top_k: int = 3,
+        question_similarity: Mapping[int, float] | None = None,
     ) -> RankResult:
         """Return ``{"recommendations": [...]}`` — the top-``top_k`` candidates.
 
@@ -115,6 +118,14 @@ class ExpertiseScorer:
         ``candidate_ids`` that resolve to a real employee are scored; unknown ids
         are dropped. The asker (``asker_id``) is removed — never recommend a
         person to themselves.
+
+        ``question_similarity`` (#405) maps a candidate's ``person_id`` to the max
+        cosine of the QUESTION against that person's past answers (from C4's answer
+        dense channel). When supplied, ``weights.question_fit * qsim`` is added to
+        each candidate's score, lifting the expert whose answers actually match the
+        question even when the topic tag saturates or C1 mispredicts the topic.
+        ``None`` (the default) leaves the score byte-identical to develop — the
+        feature is gated at the graph node by ``question_fit_enabled``.
 
         ``now`` must be timezone-naive: stored ``created_at`` values are naive, so
         an aware ``now`` would raise on comparison/subtraction.
@@ -172,6 +183,11 @@ class ExpertiseScorer:
                 load_count=rec_counts.get(person_id, 0) + ans_counts.get(person_id, 0),
                 asker_branch=asker_branch,
                 now=now,
+                question_fit_score=(
+                    question_similarity.get(person_id, 0.0)
+                    if question_similarity is not None
+                    else None
+                ),
             )
             scored.append((score, person_id, record))
 
@@ -198,6 +214,7 @@ class ExpertiseScorer:
         load_count: int,
         asker_branch: str | None,
         now: dt.datetime,
+        question_fit_score: float | None = None,
     ) -> tuple[ScoredCandidate, float]:
         # Evidence is pre-fetched in a batch by ``rank`` (no per-candidate query, #58).
         evidence = collect_topic_evidence(
@@ -220,6 +237,10 @@ class ExpertiseScorer:
             + weights.proximity * proximity_score
             - weights.load * load_score
         )
+        # #405: additive question↔past-answer term. ``None`` -> dormant (develop
+        # byte-identical); a float (incl. 0.0) adds ``weights.question_fit * qsim``.
+        if question_fit_score is not None:
+            score += weights.question_fit * question_fit_score
 
         reasons = self._build_reasons(
             evidence=evidence,
@@ -234,6 +255,7 @@ class ExpertiseScorer:
             employee_branch=employee_branch,
             asker_branch=asker_branch,
             now=now,
+            question_fit_score=question_fit_score,
         )
         record: ScoredCandidate = {
             "person_id": employee_id,
@@ -263,6 +285,7 @@ class ExpertiseScorer:
         employee_branch: str | None,
         asker_branch: str | None,
         now: dt.datetime,
+        question_fit_score: float | None = None,
     ) -> list[ScoredReason]:
         weights = self._weights
         base_total = sum(e.base_score for e in evidence)
@@ -324,6 +347,17 @@ class ExpertiseScorer:
                 (
                     topic_fit_share(("daily",)),
                     {"type": "daily", "detail": f"日報で関連する活動を{daily_count}件記録"},
+                )
+            )
+
+        # #405: explain the question-fit boost. Shown only above a noise floor —
+        # below it the cosine is not a meaningful "match" so the assertive detail
+        # would mislead (the tiny continuous score nudge is still applied above).
+        if question_fit_score is not None and question_fit_score >= QUESTION_FIT_REASON_FLOOR:
+            entries.append(
+                (
+                    weights.question_fit * question_fit_score,
+                    {"type": "question_fit", "detail": "質問内容が過去の回答と一致"},
                 )
             )
 

@@ -140,6 +140,20 @@ class Settings(BaseSettings):
     # after DGX confirms a Pareto gain (primary R@3 up, alt not down).
     daily_evidence_enabled: bool = False
 
+    # #405: add a question↔past-answer similarity (qsim) term to the C6 score. The
+    # scorer's topic_fit sees only the topic TAG and saturates (ADR-0006), so it
+    # cannot re-rank on the specific question — and when C1 mispredicts the topic it
+    # scores the gold expert against the wrong tag and drops them. qsim (max cosine
+    # of the question vs the person's past answers, from C4's answer dense channel)
+    # rescues those rows. ENABLED by default after the #405 DGX full-graph E2E
+    # verification: Hit@3 0.742->0.788 (Top1/R@3/MRR up too), while RouteAcc and
+    # person route recall stayed byte-identical at 1.000 (49/49) — routing is
+    # untouched because C5 does not read the scorer, so this is safe by
+    # construction. The scorer-isolation eval (scripts/research_c6_qsim.py, 2 runs)
+    # localised the gain to the rows where C1 mispredicts the topic (Hit@3 on those
+    # 0.444->0.778). Set False to restore the pre-#405 (tag-only) ranking.
+    question_fit_enabled: bool = True
+
     # #357: knowledge framework. When the knowledge layer is wired into retrieval,
     # answer a question from structured knowledge units (problem → action → result,
     # with provenance) instead of, or before, pointing at a person. OFF by default —
