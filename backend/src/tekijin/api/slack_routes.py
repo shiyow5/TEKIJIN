@@ -27,6 +27,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import logging
+import threading
 from urllib.parse import parse_qs
 
 import jwt
@@ -36,6 +37,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse,
 from sqlalchemy.orm import Session, sessionmaker
 
 from tekijin.api import schemas
+from tekijin.api.service import AgentService
 from tekijin.auth.deps import require_principal
 from tekijin.auth.principal import Principal
 from tekijin.config import get_settings
@@ -273,9 +275,94 @@ async def events(request: Request) -> Response:
     return JSONResponse({"ok": True})
 
 
+_INTERACTIVITY_FAILURE_TEXT = "この依頼は処理できませんでした。TEKIJINで状態を確認してください。"
+
+_RESULT_TEXT_BY_ACTION_ID = {
+    "tekijin_accept": "承諾しました。TEKIJINの依頼状態を更新しています。",
+    "tekijin_decline": "辞退しました。依頼者へ通知します。",
+    "tekijin_refer": "「自分より適任がいる」として辞退しました。依頼者へ通知します。",
+}
+
+
+def _advance_after_resume(service: AgentService, session_id: str) -> None:
+    """Drain the just-queued resume so the paused run actually advances.
+
+    ``submit_resume`` only queues a ``Command`` (service.py); the frontend's
+    own button click always follows it with ``advanceSession()`` ->
+    ``GET /events/{session_id}`` to consume that queue and drive the graph
+    forward (accept -> done, decline -> reroute to the next candidate) — see
+    that function's doc comment. A Slack click has no such stream of its own,
+    so without this the hand-off would sit parked until the asker's tab
+    happens to reconnect. Runs fire-and-forget in its own thread (mirrors
+    ``notify.schedule_pending_handoff``): draining can invoke LLM calls (e.g.
+    the reroute), which routinely runs well past Slack's ~3s interactivity
+    budget.
+    """
+
+    try:
+        if service.is_streamable(session_id):
+            for _ in service.stream_events(session_id):
+                pass
+    except Exception:
+        logger.warning(
+            "Slack interactivity: failed to advance session %s", session_id, exc_info=True
+        )
+
+
+def _handle_interactivity_action(service: AgentService, raw: str) -> Response:
+    """Apply one Slack 承諾/辞退/自分より適任がいる button click.
+
+    Synchronous — does blocking DB I/O and can hold ``submit_resume``'s
+    per-session lock — so the caller runs it via ``run_in_threadpool`` rather
+    than inline on the event loop (matching ``_handle_message_event`` above).
+
+    Never lets an exception (including an auth mismatch) escape as a raw
+    non-2xx: that is exactly what makes Slack mark the message with its
+    "processing failed" warning triangle, so every failure here instead
+    resolves to a 200 with a friendly Slack-facing message.
+    """
+
+    try:
+        payload = json.loads(raw)
+        action = (payload.get("actions") or [])[0]
+        action_id = action.get("action_id")
+        value = json.loads(action.get("value", "{}"))
+        session_id = value["session_id"]
+        outcome = value["outcome"]
+        recommendation_id = int(value["recommendation_id"])
+        slack_user_id = (payload.get("user") or {}).get("id")
+        with service.session_factory() as session:
+            link = get_slack_link_by_slack_user_id(session, slack_user_id)
+            responder_id = link.employee_id if link else None
+        _, current_responder_id = service.session_participants(session_id)
+        if responder_id is None or responder_id != current_responder_id:
+            logger.info(
+                "Slack interactivity: slack_user %s is not session %s's assigned responder",
+                slack_user_id,
+                session_id,
+            )
+            return JSONResponse({"text": "この操作を行う権限がありません。"})
+        service.submit_resume(session_id, outcome=outcome, recommendation_id=recommendation_id)
+    except Exception:
+        logger.warning("Slack interactivity handling failed", exc_info=True)
+        return JSONResponse({"text": _INTERACTIVITY_FAILURE_TEXT})
+
+    threading.Thread(
+        target=_advance_after_resume,
+        args=(service, session_id),
+        daemon=True,
+        name="slack-interactivity-advance",
+    ).start()
+    text = _RESULT_TEXT_BY_ACTION_ID.get(
+        action_id,
+        "承諾しました。" if outcome == "accepted" else "辞退しました。依頼者へ通知します。",
+    )
+    return JSONResponse({"text": text})
+
+
 @router.post("/interactivity")
 async def interactivity(request: Request) -> Response:
-    """Handle Slack Block Kit承諾/辞退 buttons for pending hand-offs."""
+    """Handle Slack Block Kitの承諾・辞退・自分より適任がいるボタン for pending hand-offs."""
     settings = get_settings()
     body = await request.body()
     if not verify_signature(
@@ -286,33 +373,5 @@ async def interactivity(request: Request) -> Response:
     ):
         raise HTTPException(status_code=401, detail="invalid signature")
     raw = parse_qs(body.decode("utf-8"), keep_blank_values=True).get("payload", [""])[0]
-    try:
-        payload = json.loads(raw)
-        action = (payload.get("actions") or [])[0]
-        value = json.loads(action.get("value", "{}"))
-        session_id = value["session_id"]
-        outcome = value["outcome"]
-        recommendation_id = int(value["recommendation_id"])
-        slack_user_id = (payload.get("user") or {}).get("id")
-        service = request.app.state.agent_service
-        with service.session_factory() as session:
-            link = get_slack_link_by_slack_user_id(session, slack_user_id)
-            responder_id = link.employee_id if link else None
-        _, current_responder_id = service.session_participants(session_id)
-        if responder_id is None or responder_id != current_responder_id:
-            raise HTTPException(status_code=403, detail="not the assigned responder")
-        service.submit_resume(session_id, outcome=outcome, recommendation_id=recommendation_id)
-    except HTTPException:
-        raise
-    except Exception:
-        logger.warning("Slack interactivity handling failed", exc_info=True)
-        return JSONResponse(
-            {"text": "この依頼は処理できませんでした。TEKIJINで状態を確認してください。"}
-        )
-    return JSONResponse(
-        {
-            "text": "承諾しました。TEKIJINの依頼状態を更新しています。"
-            if outcome == "accepted"
-            else "辞退しました。依頼者へ通知します。"
-        }
-    )
+    service = request.app.state.agent_service
+    return await run_in_threadpool(_handle_interactivity_action, service, raw)

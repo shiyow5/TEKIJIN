@@ -217,6 +217,14 @@ def schedule_pending_handoff(
                             "action_id": "tekijin_decline",
                             "value": json.dumps({**value_base, "outcome": "declined"}),
                         },
+                        {
+                            "type": "button",
+                            "text": {"type": "plain_text", "text": "自分より適任がいる"},
+                            "action_id": "tekijin_refer",
+                            # Same "declined" outcome as 辞退 — the app side doesn't have a
+                            # dedicated referral outcome yet either (interim mapping, #76).
+                            "value": json.dumps({**value_base, "outcome": "declined"}),
+                        },
                     ],
                 },
             ]
