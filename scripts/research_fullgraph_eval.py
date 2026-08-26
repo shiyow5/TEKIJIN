@@ -86,7 +86,9 @@ def _build_models(backend: str, settings, *, self_answer: bool, answerability: b
     return intent, sufficiency, draft, sa, ans
 
 
-def _terminal_route(values: dict, next_nodes: tuple[str, ...], *, critique_wired: bool) -> str:
+def _terminal_route(
+    values: dict, next_nodes: tuple[str, ...], *, critique_wired: bool
+) -> str:
     """最終 state から「予測ルート/終端」を1つに定める(metrics.decision_class 互換)。
 
     self_answer が grounded なら self_answered（#291/#357 の自己回答終端）。critic が
@@ -142,9 +144,15 @@ class GraphRanker:
         # C6 writes ``recommendations`` (rank-ordered dicts); ``recommendation_ids``
         # is a service-layer persistence field, absent in the raw graph state.
         recs = values.get("recommendations") or []
-        ranked = [r["person_id"] for r in recs if isinstance(r, dict) and "person_id" in r]
+        ranked = [
+            r["person_id"] for r in recs if isinstance(r, dict) and "person_id" in r
+        ]
         citations = values.get("self_answer_citations") or []
-        cited = [c["source_id"] for c in citations if isinstance(c, dict) and c.get("source_id")]
+        cited = [
+            c["source_id"]
+            for c in citations
+            if isinstance(c, dict) and c.get("source_id")
+        ]
         # #413: additive citation firing on the person route (does NOT change route).
         if route == "person":
             self.person_rows += 1
@@ -164,8 +172,12 @@ def main() -> None:
     ap.add_argument("--db-url", required=True)
     ap.add_argument("--out", default="fullgraph_eval.json")
     ap.add_argument("--backend", choices=["stub", "vllm"], default="vllm")
-    ap.add_argument("--self-answer", action="store_true", help="#291 self_answer を配線")
-    ap.add_argument("--query-expansion", action="store_true", help="#371 クエリ拡張を ON")
+    ap.add_argument(
+        "--self-answer", action="store_true", help="#291 self_answer を配線"
+    )
+    ap.add_argument(
+        "--query-expansion", action="store_true", help="#371 クエリ拡張を ON"
+    )
     ap.add_argument(
         "--question-fit",
         action="store_true",
@@ -182,6 +194,12 @@ def main() -> None:
         help="#433 日報を System1 の知識源に(C4 に daily dense channel・routing不変)",
     )
     ap.add_argument(
+        "--additive-floor",
+        type=float,
+        default=None,
+        help="#413 additive の cosine フロア（未指定=config 既定）。有効化前の floor 実測用",
+    )
+    ap.add_argument(
         "--score-all-employees",
         action="store_true",
         help="#87 C6 の候補を C4 の集合でなく全社員にする(経路シグナルは不変)",
@@ -191,7 +209,9 @@ def main() -> None:
         action="store_true",
         help="#83 明示された拠点を C6 で条件として扱う",
     )
-    ap.add_argument("--answerability", action="store_true", help="#70 棄却クリティックを配線")
+    ap.add_argument(
+        "--answerability", action="store_true", help="#70 棄却クリティックを配線"
+    )
     ap.add_argument(
         "--knowledge-floor",
         type=float,
@@ -225,7 +245,17 @@ def main() -> None:
     # #413 additive needs the self_answer composer wired (it shares it).
     wire_self_answer = args.self_answer or args.additive
     intent, sufficiency, draft, sa_model, ans_model = _build_models(
-        args.backend, settings, self_answer=wire_self_answer, answerability=args.answerability
+        args.backend,
+        settings,
+        self_answer=wire_self_answer,
+        answerability=args.answerability,
+    )
+    # Fall back to the actual production default, not a duplicated literal, so an
+    # "unspecified" eval run always matches the config the app ships with.
+    additive_floor = (
+        args.additive_floor
+        if args.additive_floor is not None
+        else settings.additive_self_answer_floor
     )
 
     graph = build_agent(
@@ -241,6 +271,7 @@ def main() -> None:
         question_fit_enabled=args.question_fit,
         branch_constraint_enabled=args.branch_constraint,
         additive_self_answer_enabled=args.additive,
+        additive_self_answer_floor=additive_floor,
         daily_knowledge_enabled=args.daily_knowledge,
         score_all_employees=args.score_all_employees,
     )
@@ -261,7 +292,9 @@ def main() -> None:
     report = run_eval(queries, ranker)
     print(format_report(report))
     if ranker.errors:
-        print(f"  ※ invoke 失敗行: {ranker.errors}/{len(queries)}（miss/abstain として計上）")
+        print(
+            f"  ※ invoke 失敗行: {ranker.errors}/{len(queries)}（miss/abstain として計上）"
+        )
     if args.additive:
         print(
             f"  #413 additive: person経路 {ranker.person_rows}行中 "
@@ -274,12 +307,16 @@ def main() -> None:
             "self_answer": args.self_answer,
             "query_expansion": args.query_expansion,
             "question_fit": args.question_fit,
+            "additive": args.additive,
+            "additive_floor": additive_floor,
+            "daily_knowledge": args.daily_knowledge,
             "score_all_employees": args.score_all_employees,
             "branch_constraint": args.branch_constraint,
             "answerability": args.answerability,
             "knowledge_floor": args.knowledge_floor,
             "rows": len(queries),
             "errors": ranker.errors,
+            "additive_fired_person": ranker.additive_fired_person,
         },
         "metrics": report.metrics.as_dict(),
         "by_difficulty": {k: v.as_dict() for k, v in report.by_difficulty.items()},
