@@ -132,6 +132,31 @@ def invite_to_channel(*, bot_token: str, channel_id: str, user_ids: list[str]) -
         return False
 
 
+def respond_to_response_url(response_url: str, payload: dict) -> None:
+    """Best-effort: POST ``payload`` to a Slack interactivity ``response_url``.
+
+    For a Block Kit button click (``block_actions``), Slack does NOT use the
+    synchronous HTTP response body of the interactivity request for anything
+    except its status code — returning JSON there never changes what the
+    message shows. ``response_url`` (included in every interactivity payload,
+    valid for a few uses within ~30 minutes) is the documented way to still
+    update it: ``{"replace_original": True, ...}`` rewrites the original
+    message (e.g. to remove the buttons once handled), while omitting that key
+    posts a new message instead — ``{"response_type": "ephemeral", ...}`` for
+    one only the clicking user sees (e.g. an authorization rejection that must
+    not alter the message the real responder still needs to act on).
+
+    Never raises — this is cosmetic; a failure here must not affect the
+    outcome that was already recorded.
+    """
+
+    try:
+        resp = httpx.post(response_url, json=payload, timeout=_TIMEOUT_SECONDS)
+        resp.raise_for_status()
+    except Exception:
+        logger.warning("Slack response_url post failed", exc_info=True)
+
+
 def post_message(
     *, bot_token: str, channel_id: str, text: str, blocks: list[dict] | None = None
 ) -> None:

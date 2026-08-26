@@ -188,7 +188,28 @@ def schedule_pending_handoff(
     parties: dict,
     draft: str,
 ) -> None:
-    """Create the pair channel when a chat hand-off is sent and post action buttons."""
+    """Create the pair channel when a chat hand-off is sent and post the draft
+    with the action buttons into it, visible to both parties.
+
+    The pair channel has both the asker and the responder as members (so they
+    can see each other's replies natively, #388). Only the responder is
+    authorized to act on 承諾/辞退/自分より適任がいる — ``interactivity`` enforces
+    that server-side regardless of who can SEE the buttons — but two other
+    placements were tried and rejected before landing on "post it where the
+    conversation already lives":
+
+    * A ``chat.postEphemeral`` message restricted to the responder is only
+      delivered while their client currently has the channel open, and is
+      dropped entirely otherwise (or on a later reload) — unacceptable for
+      something they may not act on until later.
+    * A separate bot DM works reliably, but splits the interaction across two
+      different Slack surfaces (the shared channel history vs. a 1:1 the
+      asker cannot see at all), which is confusing on both ends.
+
+    So the buttons go out in the SAME message as the draft, in the shared
+    channel, exactly like every other message in this hand-off's
+    conversation.
+    """
 
     def _run() -> None:
         try:

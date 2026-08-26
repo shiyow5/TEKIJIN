@@ -86,26 +86,46 @@ def _run_background_thread_inline(monkeypatch):
     monkeypatch.setattr(slack_routes, "threading", _SyncThreading)
 
 
+@pytest.fixture(autouse=True)
+def _no_real_response_url_calls(monkeypatch):
+    """Default every test to a no-op ``respond_to_response_url`` — otherwise
+    ``_payload``'s default ``response_url`` would make a real outbound HTTP
+    call to hooks.slack.com from every test that doesn't care about it. Tests
+    that DO care install their own recording spy, which simply overrides this."""
+
+    monkeypatch.setattr(slack_routes, "respond_to_response_url", lambda url, payload: None)
+
+
 def _payload(
-    action_id: str, outcome: str, *, session_id="s1", recommendation_id=7, user_id="U1"
+    action_id: str,
+    outcome: str,
+    *,
+    session_id="s1",
+    recommendation_id=7,
+    user_id="U1",
+    response_url: str | None = "https://hooks.slack.com/actions/T1/1/abc",
+    message_blocks: list[dict] | None = None,
 ) -> str:
-    return json.dumps(
-        {
-            "actions": [
-                {
-                    "action_id": action_id,
-                    "value": json.dumps(
-                        {
-                            "session_id": session_id,
-                            "recommendation_id": recommendation_id,
-                            "outcome": outcome,
-                        }
-                    ),
-                }
-            ],
-            "user": {"id": user_id},
-        }
-    )
+    body: dict = {
+        "actions": [
+            {
+                "action_id": action_id,
+                "value": json.dumps(
+                    {
+                        "session_id": session_id,
+                        "recommendation_id": recommendation_id,
+                        "outcome": outcome,
+                    }
+                ),
+            }
+        ],
+        "user": {"id": user_id},
+    }
+    if response_url is not None:
+        body["response_url"] = response_url
+    if message_blocks is not None:
+        body["message"] = {"blocks": message_blocks}
+    return json.dumps(body)
 
 
 def _link_lookup(monkeypatch, employee_id: int | None) -> None:
@@ -160,6 +180,107 @@ def test_unlinked_slack_user_is_rejected_without_raising(monkeypatch) -> None:
     assert service.submitted == []
     assert response.status_code == 200
     assert "権限がありません" in json.loads(response.body)["text"]
+
+
+def test_successful_action_replaces_the_original_message_removing_the_buttons(
+    monkeypatch,
+) -> None:
+    """The synchronous 200 body is inert for a block_actions click — Slack
+    only updates the message via response_url. Without this, the buttons
+    stay clickable forever even after a legitimate accept/decline."""
+
+    _link_lookup(monkeypatch, 42)
+    calls: list[tuple[str, dict]] = []
+    monkeypatch.setattr(
+        slack_routes, "respond_to_response_url", lambda url, payload: calls.append((url, payload))
+    )
+    service = _FakeService(responder_id=42, current_responder_id=42)
+
+    _handle_interactivity_action(
+        service, _payload("tekijin_accept", "accepted", response_url="https://hooks.slack.com/x")
+    )
+
+    assert len(calls) == 1
+    url, sent = calls[0]
+    assert url == "https://hooks.slack.com/x"
+    assert sent["replace_original"] is True
+    assert "承諾しました" in sent["text"]
+
+
+def test_successful_action_keeps_the_consultation_text_and_only_drops_the_buttons(
+    monkeypatch,
+) -> None:
+    """Replacing the message must not wipe the original consultation text —
+    only the button row should go, with the outcome appended below it."""
+
+    _link_lookup(monkeypatch, 42)
+    calls: list[tuple[str, dict]] = []
+    monkeypatch.setattr(
+        slack_routes, "respond_to_response_url", lambda url, payload: calls.append((url, payload))
+    )
+    service = _FakeService(responder_id=42, current_responder_id=42)
+    original_blocks = [
+        {"type": "section", "text": {"type": "mrkdwn", "text": "相談内容の本文です"}},
+        {"type": "actions", "elements": [{"type": "button"}]},
+    ]
+
+    _handle_interactivity_action(
+        service,
+        _payload(
+            "tekijin_accept",
+            "accepted",
+            response_url="https://hooks.slack.com/x",
+            message_blocks=original_blocks,
+        ),
+    )
+
+    assert len(calls) == 1
+    _url, sent = calls[0]
+    kept_blocks = sent["blocks"]
+    assert {
+        "type": "section",
+        "text": {"type": "mrkdwn", "text": "相談内容の本文です"},
+    } in kept_blocks
+    assert not any(b.get("type") == "actions" for b in kept_blocks)
+    assert "承諾しました" in kept_blocks[-1]["text"]["text"]
+
+
+def test_rejected_action_sends_an_ephemeral_reply_without_touching_the_message(
+    monkeypatch,
+) -> None:
+    """A non-responder's click must not alter the shared message (the real
+    responder still needs its buttons) — only the clicker should see why
+    nothing happened, via an ephemeral response_url reply."""
+
+    _link_lookup(monkeypatch, 99)  # linked, but not this session's responder
+    calls: list[tuple[str, dict]] = []
+    monkeypatch.setattr(
+        slack_routes, "respond_to_response_url", lambda url, payload: calls.append((url, payload))
+    )
+    service = _FakeService(responder_id=99, current_responder_id=42)
+
+    _handle_interactivity_action(
+        service, _payload("tekijin_accept", "accepted", response_url="https://hooks.slack.com/x")
+    )
+
+    assert len(calls) == 1
+    _url, sent = calls[0]
+    assert sent.get("response_type") == "ephemeral"
+    assert "replace_original" not in sent
+    assert "権限がありません" in sent["text"]
+
+
+def test_no_response_url_call_when_the_payload_omits_one(monkeypatch) -> None:
+    _link_lookup(monkeypatch, 42)
+    calls: list[tuple[str, dict]] = []
+    monkeypatch.setattr(
+        slack_routes, "respond_to_response_url", lambda url, payload: calls.append((url, payload))
+    )
+    service = _FakeService(responder_id=42, current_responder_id=42)
+
+    _handle_interactivity_action(service, _payload("tekijin_accept", "accepted", response_url=None))
+
+    assert calls == []
 
 
 def test_malformed_payload_returns_a_friendly_200_instead_of_raising() -> None:

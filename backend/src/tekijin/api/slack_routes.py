@@ -50,7 +50,7 @@ from tekijin.data.slack_links import (
     get_slack_link_by_slack_user_id,
     upsert_slack_link,
 )
-from tekijin.slack.client import build_authorize_url, exchange_code
+from tekijin.slack.client import build_authorize_url, exchange_code, respond_to_response_url
 from tekijin.slack.verify import verify_signature
 
 logger = logging.getLogger(__name__)
@@ -320,10 +320,23 @@ def _handle_interactivity_action(service: AgentService, raw: str) -> Response:
     non-2xx: that is exactly what makes Slack mark the message with its
     "processing failed" warning triangle, so every failure here instead
     resolves to a 200 with a friendly Slack-facing message.
+
+    For a ``block_actions`` payload (a button click), that 200 JSON body is
+    otherwise inert — Slack only looks at its status code, so returning
+    ``{"text": ...}`` here does NOT update the message or remove the buttons.
+    ``response_url`` (below) is what actually changes what the message shows.
     """
 
+    response_url: str | None = None
+    original_blocks: list[dict] = []
     try:
         payload = json.loads(raw)
+        response_url = payload.get("response_url")
+        # The message this action was attached to (Slack echoes it back in the
+        # payload) — kept so a successful click can drop just the button row
+        # instead of wiping the whole message, including the consultation
+        # text, when it replaces the message below.
+        original_blocks = (payload.get("message") or {}).get("blocks") or []
         action = (payload.get("actions") or [])[0]
         action_id = action.get("action_id")
         value = json.loads(action.get("value", "{}"))
@@ -341,10 +354,21 @@ def _handle_interactivity_action(service: AgentService, raw: str) -> Response:
                 slack_user_id,
                 session_id,
             )
+            # Ephemeral (visible only to the clicker), NOT replace_original: the
+            # real responder still needs the buttons intact on this message.
+            if response_url:
+                respond_to_response_url(
+                    response_url,
+                    {"response_type": "ephemeral", "text": "この操作を行う権限がありません。"},
+                )
             return JSONResponse({"text": "この操作を行う権限がありません。"})
         service.submit_resume(session_id, outcome=outcome, recommendation_id=recommendation_id)
     except Exception:
         logger.warning("Slack interactivity handling failed", exc_info=True)
+        if response_url:
+            respond_to_response_url(
+                response_url, {"response_type": "ephemeral", "text": _INTERACTIVITY_FAILURE_TEXT}
+            )
         return JSONResponse({"text": _INTERACTIVITY_FAILURE_TEXT})
 
     threading.Thread(
@@ -357,6 +381,16 @@ def _handle_interactivity_action(service: AgentService, raw: str) -> Response:
         action_id,
         "承諾しました。" if outcome == "accepted" else "辞退しました。依頼者へ通知します。",
     )
+    # Handled -> rewrite the message dropping only the button row (so it can't
+    # be clicked, or double-clicked, again) while keeping the original
+    # consultation text intact, with the outcome appended as its own line.
+    if response_url:
+        kept_blocks = [b for b in original_blocks if b.get("type") != "actions"]
+        kept_blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f"*{text}*"}})
+        respond_to_response_url(
+            response_url,
+            {"replace_original": True, "text": text, "blocks": kept_blocks},
+        )
     return JSONResponse({"text": text})
 
 
