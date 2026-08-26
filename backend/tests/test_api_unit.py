@@ -154,7 +154,20 @@ def test_node_event_understood() -> None:
         "situation": None,
         "question_type": "技術相談",
         "confidence": 0.9,
+        # #475 Screen 01: absent in the update -> 0 (feature off / no other askers).
+        "similar_asker_count": 0,
     }
+
+
+def test_node_event_understood_carries_similar_asker_count() -> None:
+    # #475 Screen 01: when c1_intent attached the reassurance count, it rides the
+    # existing understood event (no separate SSE surface).
+    sse = events.node_event(
+        "c1_intent",
+        {"topics": ["セキュリティ"], "intent_confidence": 0.9, "similar_asker_count": 3},
+    )
+    assert sse is not None and sse.event == "understood"
+    assert _data(sse)["similar_asker_count"] == 3
 
 
 def test_node_event_route_recommend_draft_done() -> None:

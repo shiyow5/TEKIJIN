@@ -490,6 +490,12 @@ export interface UnderstoodData {
   situation?: string | null;
   question_type?: string | null;
   confidence: number;
+  /**
+   * #475 Screen 01: how many OTHER people previously asked in the same topic area
+   * (reassurance — "you are not the only one"). 0 when the feature is off or nobody
+   * else has; the UI hides the message at 0. Optional so older payloads still parse.
+   */
+  similar_asker_count?: number;
 }
 
 export interface FollowupData {
