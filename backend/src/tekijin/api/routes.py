@@ -23,6 +23,7 @@ import logging
 from collections.abc import Iterator
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
+from sqlalchemy.exc import IntegrityError
 from sse_starlette import EventSourceResponse
 
 from tekijin.api import schemas
@@ -153,10 +154,24 @@ def answer(
     (or admin) may supply one. The asker is a valid participant (they own the
     clarification reply), but must not be able to forge an answer in the responder's
     name — a mismatch is 403.
+
+    The OUTCOME itself carries the same rule, for the same reason. Accepting or
+    declining is the responder's act, and ``recommendations.outcome`` is the only
+    durable record that it happened: the dashboard's acceptance rate counts it, the
+    responder inbox is filtered by it (``outcome IS NULL``), and #247 uses it to
+    decide whom a retrospective may credit with expertise. Participant-level auth
+    alone let the ASKER post ``outcome="accepted"`` for their own question — a
+    hand-off "taken" by someone who never saw it. A ``reply`` (the clarification the
+    asker owns) is unaffected.
     """
 
     asker_id, responder_id = _service(request).session_participants(req.session_id)
     require_session_participant(principal, asker_id, responder_id)
+    if req.outcome is not None and not principal.may_act_as(responder_id or -1):
+        raise HTTPException(
+            status_code=403,
+            detail="承諾・辞退を登録できるのは取次ぎ先の担当者本人のみです。",
+        )
     if req.clean_answer_body is not None and not principal.may_act_as(responder_id or -1):
         raise HTTPException(
             status_code=403,
@@ -851,6 +866,9 @@ def consult_retrospective(
       an FK ``IntegrityError`` surfacing as a 500 (the shape #263 removed from
       ``/feedback``). ``POST /handoff/select`` sets the precedent: a person id from
       the client is checked against what the system actually offered.
+    * ``responder_id`` may not be the asker themselves (422). Unreachable while the
+      scorer excludes the asker from its own candidate pool, but stated locally so
+      the guarantee does not depend on another module's invariant.
     * At most ONE write-up per question (409 on a second): exactly one hand-off is
       ever accepted, so "the consultation" is singular, and repeating it would let
       one real conversation fill the whole evidence cap.
@@ -905,23 +923,42 @@ def consult_retrospective(
                     status_code=409,
                     detail="この依頼のふりかえりは、すでに記録されています。",
                 )
+            if responder_id == owner:
+                # Belt and braces. The check below would refuse this too — the
+                # scorer never puts the asker in its own candidate pool, so they
+                # can never be the accepting responder — but that is an invariant
+                # of a DIFFERENT module. Stated here so "you cannot credit
+                # yourself" is a local, readable rule rather than a consequence.
+                raise HTTPException(
+                    status_code=422,
+                    detail="自分自身を相談相手として記録することはできません。",
+                )
             if responder_id != accepted:
-                # Includes naming yourself: the asker is never the accepting
-                # responder, so self-attribution falls out of this same check.
                 raise HTTPException(
                     status_code=422,
                     detail="ふりかえりは、実際に相談を受けた相手についてのみ記録できます。",
                 )
-            consult_id = record_offline_consult(
-                session,
-                question_id=req.question_id,
-                responder_id=responder_id,
-                asker_id=principal.employee_id,
-                topics=req.topics,
-                asked=req.asked,
-                answer_body=req.answer_body,
-                resolution=req.resolution,
-            )
+            try:
+                consult_id = record_offline_consult(
+                    session,
+                    question_id=req.question_id,
+                    responder_id=responder_id,
+                    asker_id=principal.employee_id,
+                    topics=req.topics,
+                    asked=req.asked,
+                    answer_body=req.answer_body,
+                    resolution=req.resolution,
+                )
+            except IntegrityError as exc:
+                # Two concurrent posts both clear the check above in separate
+                # transactions; the loser hits uq_offline_consults_question. Answer
+                # it the way the check does rather than letting a constraint
+                # violation surface as a 500 (the shape #263 removed from
+                # /feedback).
+                raise HTTPException(
+                    status_code=409,
+                    detail="この依頼のふりかえりは、すでに記録されています。",
+                ) from exc
         return schemas.ConsultRetrospectiveAck(status="recorded", consult_id=consult_id)
 
 

@@ -262,8 +262,9 @@ class Settings(BaseSettings):
     # this is the one UI-reachable write that feeds C6 expertise evidence; if the
     # write-ups ever turn out to be noisy (or abused despite the accepted-hand-off
     # check), the scoring input has to be stoppable without a rollback. Read-only
-    # ``GET /consult-retrospective/{session_id}`` stays up when this is off, so a
-    # form already on screen can explain itself instead of failing blankly.
+    # ``GET /consult-retrospective/{session_id}`` stays up when this is off, so the
+    # screen still renders and the form's 503 branch can say the feature is
+    # switched off rather than "retry" something that cannot succeed.
     consult_retrospective_enabled: bool = True
 
     # #357: knowledge framework. When the knowledge layer is wired into retrieval,

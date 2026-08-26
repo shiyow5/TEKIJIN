@@ -2848,9 +2848,16 @@ def test_handoff_exclude_reroutes_to_next_candidate(seed_counts, engine, fake_em
     finally:
         check.close()
 
-    # The rerouted hand-off still completes normally.
+    # The rerouted hand-off still completes normally — accepted by E002, the person
+    # it was rerouted TO. The client is authenticated as the asker for the exclusion
+    # above, and an asker may not record an outcome in the responder's name.
     assert (
-        client.post("/answer", json={"session_id": "hx1", "outcome": "accepted"}).status_code == 200
+        client.post(
+            "/answer",
+            json={"session_id": "hx1", "outcome": "accepted"},
+            headers=_user_headers(2),
+        ).status_code
+        == 200
     )
 
 
@@ -2965,9 +2972,15 @@ def test_handoff_redraft_regenerates_draft(seed_counts, engine, fake_embedder) -
     finally:
         check.close()
 
-    # The regenerated hand-off still completes normally.
+    # The regenerated hand-off still completes normally — accepted by E001, the
+    # person it is drafted for (the client is authenticated as the asker).
     assert (
-        client.post("/answer", json={"session_id": "rd1", "outcome": "accepted"}).status_code == 200
+        client.post(
+            "/answer",
+            json={"session_id": "rd1", "outcome": "accepted"},
+            headers=_user_headers(1),
+        ).status_code
+        == 200
     )
 
 
@@ -3061,9 +3074,15 @@ def test_handoff_correct_reruns_pipeline_from_c1(seed_counts, engine, fake_embed
     finally:
         check.close()
 
-    # The re-interpreted hand-off still completes normally.
+    # The re-interpreted hand-off still completes normally — accepted by E001, the
+    # person the re-run drafted for (the client is authenticated as the asker).
     assert (
-        client.post("/answer", json={"session_id": "hc1", "outcome": "accepted"}).status_code == 200
+        client.post(
+            "/answer",
+            json={"session_id": "hc1", "outcome": "accepted"},
+            headers=_user_headers(1),
+        ).status_code
+        == 200
     )
 
 
@@ -4452,6 +4471,94 @@ def test_the_database_itself_rejects_a_second_write_up(seed_counts, engine, fake
     assert len(_consult_rows(engine)) == 1
 
 
+def test_the_asker_cannot_record_the_responders_acceptance(
+    seed_counts, engine, fake_embedder
+) -> None:
+    """An outcome is the RESPONDER's act; the asker must not be able to forge it.
+
+    The asker is a legitimate session participant (they own the clarification
+    reply), so ``require_session_participant`` alone let them POST
+    ``outcome="accepted"`` for their own question. That forges the one durable
+    record of "this person took the hand-off" — which the dashboard's acceptance
+    rate reads, the inbox is filtered by, and #247 uses to decide whom a
+    retrospective may credit.
+    """
+
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2, 3], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2, 3)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "self-accept"})
+    _events(client, "self-accept")
+    client.post(
+        "/handoff/draft",
+        json={"session_id": "self-accept", "draft": "本文", "consult_method": "direct"},
+    )
+
+    forged = client.post(
+        "/answer",
+        json={"session_id": "self-accept", "outcome": "accepted"},
+        headers=_user_headers(10),
+    )
+    assert forged.status_code == 403
+    question_id = _question_id_for_session(engine, "self-accept")
+    from sqlalchemy import select
+
+    with session_scope(get_sessionmaker(engine)) as session:
+        outcomes = (
+            session.execute(
+                select(Recommendation.outcome).where(Recommendation.question_id == question_id)
+            )
+            .scalars()
+            .all()
+        )
+    assert all(o is None for o in outcomes)
+
+    # ...and with no acceptance on record, there is nothing to write up.
+    refused = client.post(
+        "/consult-retrospective", json=_retro_body(question_id), headers=_user_headers(10)
+    )
+    assert refused.status_code == 422
+    assert "まだ受諾されていない" in refused.json()["detail"]
+    assert _consult_rows(engine) == []
+
+
+def test_the_asker_can_still_decline_nothing_and_reply_to_a_clarification(
+    seed_counts, engine, fake_embedder
+) -> None:
+    """The outcome restriction must not take the asker's own resume path with it."""
+
+    client = _client(engine, fake_embedder)
+    client.post("/ask", json={"asker_id": 10, "question": VAGUE_Q, "session_id": "asker-reply"})
+    _events(client, "asker-reply")
+    replied = client.post(
+        "/answer",
+        json={"session_id": "asker-reply", "reply": "UTMの移行です"},
+        headers=_user_headers(10),
+    )
+    assert replied.status_code == 200
+
+
+def test_deleting_a_question_takes_its_retrospective_with_it(
+    seed_counts, engine, fake_embedder
+) -> None:
+    """``offline_consults`` FKs ``questions`` with no CASCADE — the same shape that
+    made #207's delete 500 when ``feedback`` was forgotten."""
+
+    client, question_id = _direct_consultation(engine, fake_embedder, session_id="retro-del")
+    assert (
+        client.post(
+            "/consult-retrospective", json=_retro_body(question_id), headers=_user_headers(10)
+        ).status_code
+        == 200
+    )
+    deleted = client.delete(f"/questions/{question_id}", headers=_user_headers(10))
+    assert deleted.status_code == 200
+    assert _consult_rows(engine) == []
+
+
 def test_retrospective_from_a_stranger_is_403(seed_counts, engine, fake_embedder) -> None:
     # The retrospective becomes expertise evidence for the responder, so letting a
     # non-owner write one would be a way to inflate (or fabricate) someone's standing.
@@ -4487,7 +4594,7 @@ def test_retrospective_cannot_name_yourself_as_the_responder(
     )
     assert resp.status_code == 422
     # the guard that fired, not just "some 422"
-    assert "実際に相談を受けた相手" in resp.json()["detail"]
+    assert "自分自身を相談相手として" in resp.json()["detail"]
     assert _consult_rows(engine) == []
 
 

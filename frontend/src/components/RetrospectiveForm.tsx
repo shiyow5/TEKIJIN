@@ -16,7 +16,7 @@
 
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 
-import { getTopics, postConsultRetrospective } from "@/lib/api-client";
+import { ApiError, getTopics, postConsultRetrospective } from "@/lib/api-client";
 import type { ConsultResolution } from "@/lib/api-types";
 
 const RESOLUTIONS: { value: ConsultResolution; label: string }[] = [
@@ -102,11 +102,22 @@ export function RetrospectiveForm({
       });
       setRecorded(true);
       onRecorded?.();
-    } catch {
+    } catch (err) {
       // Deliberately keep every field: this is a recollection of a conversation
       // that exists nowhere else, so losing it to a transient failure is the one
       // outcome this form must never produce.
-      setError("記録できませんでした。もう一度お試しください。");
+      //
+      // Two of these are NOT transient, so telling the user to retry would send
+      // them at something that can never succeed: 503 = the feature is switched
+      // off (the kill switch), 409 = this consultation is already written up.
+      const status = err instanceof ApiError ? err.status : undefined;
+      if (status === 503) {
+        setError("ふりかえりの記録は現在停止しています。時間をおいて開き直してください。");
+      } else if (status === 409) {
+        setError("この相談のふりかえりは、すでに記録されています。");
+      } else {
+        setError("記録できませんでした。もう一度お試しください。");
+      }
     } finally {
       inFlight.current = false;
       setSubmitting(false);

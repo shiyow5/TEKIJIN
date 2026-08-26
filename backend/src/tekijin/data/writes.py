@@ -84,6 +84,11 @@ def delete_question(session: Session, question_id: str) -> None:
     recommendations are deleted. Delete grandchildren, then children, then the
     question.
 
+    ``offline_consults`` (#247) is the same shape and was added later still: the
+    asker's write-up of a 直接相談 keys off the question, so a question with one
+    could not be deleted at all. It goes with the question for the same reason as
+    ``feedback`` — the row holds the asker's own account of the conversation.
+
     ``feedback`` was missed when this function was written (#207) and only surfaces
     once the asker has corrected something: a draft edit, an excluded person or a
     re-run all write a row keyed to the question, and the delete then failed with a
@@ -105,6 +110,7 @@ def delete_question(session: Session, question_id: str) -> None:
     if recommendation_ids:
         session.execute(delete(Message).where(Message.recommendation_id.in_(recommendation_ids)))
     session.execute(delete(Feedback).where(Feedback.question_id == question_id))
+    session.execute(delete(OfflineConsult).where(OfflineConsult.question_id == question_id))
     session.execute(delete(Answer).where(Answer.question_id == question_id))
     session.execute(delete(Recommendation).where(Recommendation.question_id == question_id))
     session.execute(delete(Event).where(Event.question_id == question_id))

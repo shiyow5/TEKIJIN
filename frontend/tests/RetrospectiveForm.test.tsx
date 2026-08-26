@@ -5,7 +5,21 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const getTopicsMock = vi.fn();
 const postConsultRetrospectiveMock = vi.fn();
 
+// Hoisted with the `vi.mock` factory: the component does `err instanceof ApiError`,
+// so the class the test throws must be the very one the mocked module exports.
+const { FakeApiError } = vi.hoisted(() => ({
+  FakeApiError: class extends Error {
+    readonly status: number;
+    constructor(status: number) {
+      super(`HTTP ${status}`);
+      this.name = "ApiError";
+      this.status = status;
+    }
+  },
+}));
+
 vi.mock("@/lib/api-client", () => ({
+  ApiError: FakeApiError,
   getTopics: (...args: unknown[]) => getTopicsMock(...args),
   postConsultRetrospective: (...args: unknown[]) => postConsultRetrospectiveMock(...args),
 }));
@@ -153,6 +167,27 @@ describe("RetrospectiveForm", () => {
     await screen.findByRole("button", { name: TOPICS[0] });
     fireEvent.click(screen.getByRole("radio", { name: /解決しなかった/ }));
     expect(screen.getByText(/評価を下げることはありません/)).toBeTruthy();
+  });
+
+  it("says the feature is switched off rather than telling you to retry (503)", async () => {
+    // The kill switch cannot be waited out by the user; "もう一度お試しください" would
+    // point them at something that can never succeed.
+    postConsultRetrospectiveMock.mockRejectedValue(new FakeApiError(503));
+    renderForm();
+    await fillRequired();
+    fireEvent.click(screen.getByRole("button", { name: /記録する/ }));
+
+    expect(await screen.findByText(/現在停止しています/)).toBeTruthy();
+    expect(screen.queryByText(/もう一度お試しください/)).toBeNull();
+  });
+
+  it("says so when this consultation has already been written up (409)", async () => {
+    postConsultRetrospectiveMock.mockRejectedValue(new FakeApiError(409));
+    renderForm();
+    await fillRequired();
+    fireEvent.click(screen.getByRole("button", { name: /記録する/ }));
+
+    expect(await screen.findByText(/すでに記録されています/)).toBeTruthy();
   });
 
   it("reports a topic-list failure rather than rendering an empty picker", async () => {

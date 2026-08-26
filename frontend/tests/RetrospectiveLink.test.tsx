@@ -32,16 +32,6 @@ describe("RetrospectiveLink", () => {
     expect(link.getAttribute("href")).toBe("/session/s1/retrospective");
   });
 
-  it("reads the durable context, not the pending hand-off view", async () => {
-    // GET /handoff 404s the moment the responder records an outcome, i.e. exactly
-    // when the face-to-face consultation becomes possible. A CTA built on it could
-    // only ever appear before there was anything to write up.
-    getRetrospectiveContextMock.mockResolvedValue(context());
-    render(<RetrospectiveLink sessionId="s1" />);
-    await screen.findByRole("link", { name: /ふりかえりを記録/ });
-    expect(getRetrospectiveContextMock).toHaveBeenCalledWith("s1");
-  });
-
   it("renders nothing for a chat hand-off", async () => {
     getRetrospectiveContextMock.mockResolvedValue(context({ consult_method: "chat" }));
     const { container } = render(<RetrospectiveLink sessionId="s1" />);

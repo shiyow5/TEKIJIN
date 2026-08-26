@@ -375,7 +375,11 @@ class ConsultRetrospectiveRequest(BaseModel):
 
     question_id: str = Field(min_length=1, max_length=64)
     responder_id: str = Field(min_length=1, max_length=32)
-    topics: list[str] = Field(min_length=1, max_length=10)
+    # At most 3 of the 22-topic vocabulary. One consultation is about one thing;
+    # a wide list would spread a single conversation's evidence across most of the
+    # vocabulary, which is how the offline-consult cap gets reached without the
+    # consultations behind it.
+    topics: list[str] = Field(min_length=1, max_length=3)
     asked: str | None = Field(default=None, max_length=2000)
     answer_body: str = Field(min_length=1, max_length=4000)
     resolution: ConsultResolution

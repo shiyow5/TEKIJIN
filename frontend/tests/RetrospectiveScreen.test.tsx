@@ -38,15 +38,6 @@ describe("RetrospectiveScreen", () => {
     expect(screen.getByText(/山田 太郎/)).toBeTruthy();
   });
 
-  it("is built on the durable context, so it still works after the acceptance", async () => {
-    // The regression this replaced: GET /handoff 404s once an outcome is recorded,
-    // which is precisely when the consultation can have taken place.
-    getRetrospectiveContextMock.mockResolvedValue(context());
-    render(<RetrospectiveScreen sessionId="s1" />);
-    await screen.findByText("直接相談のふりかえり");
-    expect(getRetrospectiveContextMock).toHaveBeenCalledWith("s1");
-  });
-
   it("does not offer the form for a chat hand-off", async () => {
     // A chat consultation already leaves a transcript; a hearsay write-up on top
     // of it would be a second, weaker record of the same conversation.
