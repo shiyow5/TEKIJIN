@@ -1,7 +1,7 @@
 import type { CurrentUserContextValue } from "@/components/CurrentUserProvider";
 import { HistoryScreen } from "@/components/HistoryScreen";
 import type { RecentQuestionItem } from "@/lib/api-types";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const useCurrentUserMock = vi.fn<() => CurrentUserContextValue>();
@@ -52,6 +52,24 @@ const ITEMS: RecentQuestionItem[] = [
   },
 ];
 
+/** Six items — one more than a page (#397's page size is 5) — for pager tests. */
+function makeManyItems(count: number): RecentQuestionItem[] {
+  return Array.from({ length: count }, (_, i) => ({
+    question_id: `q${i + 1}`,
+    title: `質問${i + 1}`,
+    resolved: false,
+    resolution: "pending",
+    responder_name: null,
+    session_id: null,
+    created_at: "2026-08-19T09:30:00",
+  }));
+}
+
+/** Opens the "…" options menu for the row whose title is `title`. */
+function openOptionsMenu(title: string) {
+  fireEvent.click(screen.getByRole("button", { name: `「${title}」の操作` }));
+}
+
 beforeEach(() => {
   useCurrentUserMock.mockReset();
   getRecentQuestionsMock.mockReset();
@@ -73,7 +91,7 @@ describe("HistoryScreen", () => {
     expect(getRecentQuestionsMock).not.toHaveBeenCalled();
   });
 
-  it("fetches the full history (limit 200) and renders each row", async () => {
+  it("fetches the full history (limit 200) and renders each row as a whole-card link (#397)", async () => {
     useCurrentUserMock.mockReturnValue(asUser("E001"));
     getRecentQuestionsMock.mockResolvedValue(ITEMS);
     render(<HistoryScreen />);
@@ -85,51 +103,109 @@ describe("HistoryScreen", () => {
     // fetch was issued, not that its result rendered.
     expect(await screen.findByText("UTMの移行時の注意点")).toBeInTheDocument();
     expect(screen.getByText("社内Wi-Fiの申請方法")).toBeInTheDocument();
-    // date + resolution note + a result link for the item with a session.
     expect(screen.getByText("2026-08-20 10:00")).toBeInTheDocument();
     expect(screen.getByText("回答者: 高梨 健太")).toBeInTheDocument();
     expect(screen.getByText("取り次ぎ先を調整中")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "結果を見る" })).toHaveAttribute(
-      "href",
-      "/session/sess-q1",
-    );
+
+    // The whole card is the click target when a session is replayable — no
+    // separate "結果を見る" text link exists anymore (#397).
+    expect(screen.queryByText("結果を見る")).not.toBeInTheDocument();
+    const sessionLink = screen.getByText("UTMの移行時の注意点").closest("a");
+    // `?from=history` (#397 follow-up) lets the destination send the user back
+    // to their history list instead of the home hub.
+    expect(sessionLink).toHaveAttribute("href", "/session/sess-q1?from=history");
+
+    // A history-only row (no session_id) stays non-interactive and is marked as such.
+    expect(screen.getByText("社内Wi-Fiの申請方法").closest("a")).toBeNull();
+    expect(screen.getByText("履歴のみ")).toBeInTheDocument();
   });
 
-  it("deletes a question after confirmation and removes it from the list", async () => {
+  it("deletes a question via the options menu after confirmation and removes it from the list", async () => {
     useCurrentUserMock.mockReturnValue(asUser("E001"));
     getRecentQuestionsMock.mockResolvedValue(ITEMS);
     deleteQuestionMock.mockResolvedValue({ question_id: "q2", deleted: true });
     render(<HistoryScreen />);
 
     await waitFor(() => expect(screen.getByText("社内Wi-Fiの申請方法")).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: "「社内Wi-Fiの申請方法」を削除" }));
-    fireEvent.click(screen.getByRole("button", { name: "削除" }));
+    openOptionsMenu("社内Wi-Fiの申請方法");
+    fireEvent.click(screen.getByRole("menuitem", { name: "削除" }));
+    const dialog = screen.getByRole("dialog", { name: "削除しますか？" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "削除" }));
+
     await waitFor(() => expect(deleteQuestionMock).toHaveBeenCalledWith("q2"));
     await waitFor(() => expect(screen.queryByText("社内Wi-Fiの申請方法")).not.toBeInTheDocument());
     expect(screen.getByText("UTMの移行時の注意点")).toBeInTheDocument();
   });
 
-  it("marks a pending question self-resolved after confirmation via the popup (#289)", async () => {
+  it("shows an error and keeps the row when delete fails", async () => {
+    useCurrentUserMock.mockReturnValue(asUser("E001"));
+    getRecentQuestionsMock.mockResolvedValue(ITEMS);
+    deleteQuestionMock.mockRejectedValueOnce(new Error("boom"));
+    render(<HistoryScreen />);
+
+    await waitFor(() => expect(screen.getByText("社内Wi-Fiの申請方法")).toBeInTheDocument());
+    openOptionsMenu("社内Wi-Fiの申請方法");
+    fireEvent.click(screen.getByRole("menuitem", { name: "削除" }));
+    const dialog = screen.getByRole("dialog", { name: "削除しますか？" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "削除" }));
+
+    await waitFor(() => expect(deleteQuestionMock).toHaveBeenCalledWith("q2"));
+    await waitFor(() =>
+      expect(screen.getByText("削除に失敗しました。もう一度お試しください。")).toBeInTheDocument(),
+    );
+    expect(screen.getByText("社内Wi-Fiの申請方法")).toBeInTheDocument();
+  });
+
+  it("marks a pending question self-resolved via the options menu after confirmation (#397)", async () => {
     useCurrentUserMock.mockReturnValue(asUser("E001"));
     getRecentQuestionsMock.mockResolvedValue(ITEMS);
     render(<HistoryScreen />);
 
     await waitFor(() => expect(screen.getByText("社内Wi-Fiの申請方法")).toBeInTheDocument());
-    // The pending item offers a self-resolve control; the resolved one does not.
+    // The pending item offers a self-resolve option; the resolved one only offers 削除.
     expect(screen.getByText("取り次ぎ先を調整中")).toBeInTheDocument();
-    fireEvent.click(
-      screen.getByRole("button", { name: "「社内Wi-Fiの申請方法」を自分で解決済みにする" }),
-    );
-    // The confirmation is a popup dialog, not an inline row swap.
+    openOptionsMenu("社内Wi-Fiの申請方法");
+    expect(screen.queryByRole("menuitem", { name: "自分で解決した" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("menuitem", { name: "自分で解決した" }));
+
     const dialog = screen.getByRole("dialog", { name: "自分で解決しましたか？" });
     expect(dialog).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "解決済みにする" }));
 
     await waitFor(() => expect(resolveQuestionMock).toHaveBeenCalledWith("q2"));
-    // The dialog closes and the row updates in place to the self-resolved state (no re-fetch).
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(screen.getByText("自分で解決")).toBeInTheDocument();
     expect(screen.getByText("社内Wi-Fiの申請方法")).toBeInTheDocument();
+  });
+
+  it("does not offer 自分で解決した for an already-resolved question", async () => {
+    useCurrentUserMock.mockReturnValue(asUser("E001"));
+    getRecentQuestionsMock.mockResolvedValue(ITEMS);
+    render(<HistoryScreen />);
+
+    await waitFor(() => expect(screen.getByText("UTMの移行時の注意点")).toBeInTheDocument());
+    openOptionsMenu("UTMの移行時の注意点");
+    expect(screen.queryByRole("menuitem", { name: "自分で解決した" })).not.toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "削除" })).toBeInTheDocument();
+  });
+
+  it("returns focus to the … trigger after cancelling delete or resolve", async () => {
+    useCurrentUserMock.mockReturnValue(asUser("E001"));
+    getRecentQuestionsMock.mockResolvedValue(ITEMS);
+    render(<HistoryScreen />);
+
+    await waitFor(() => expect(screen.getByText("社内Wi-Fiの申請方法")).toBeInTheDocument());
+    const trigger = screen.getByRole("button", { name: "「社内Wi-Fiの申請方法」の操作" });
+
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole("menuitem", { name: "削除" }));
+    fireEvent.click(screen.getByRole("button", { name: "やめる" }));
+    expect(trigger).toHaveFocus();
+
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole("menuitem", { name: "自分で解決した" }));
+    fireEvent.click(screen.getByRole("button", { name: "やめる" }));
+    expect(trigger).toHaveFocus();
   });
 
   it("closes the self-resolve popup without resolving when cancelled (#289)", async () => {
@@ -138,9 +214,8 @@ describe("HistoryScreen", () => {
     render(<HistoryScreen />);
 
     await waitFor(() => expect(screen.getByText("社内Wi-Fiの申請方法")).toBeInTheDocument());
-    fireEvent.click(
-      screen.getByRole("button", { name: "「社内Wi-Fiの申請方法」を自分で解決済みにする" }),
-    );
+    openOptionsMenu("社内Wi-Fiの申請方法");
+    fireEvent.click(screen.getByRole("menuitem", { name: "自分で解決した" }));
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "やめる" }));
 
@@ -155,9 +230,8 @@ describe("HistoryScreen", () => {
     render(<HistoryScreen />);
 
     await waitFor(() => expect(screen.getByText("社内Wi-Fiの申請方法")).toBeInTheDocument());
-    fireEvent.click(
-      screen.getByRole("button", { name: "「社内Wi-Fiの申請方法」を自分で解決済みにする" }),
-    );
+    openOptionsMenu("社内Wi-Fiの申請方法");
+    fireEvent.click(screen.getByRole("menuitem", { name: "自分で解決した" }));
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     fireEvent.keyDown(document, { key: "Escape" });
 
@@ -174,9 +248,8 @@ describe("HistoryScreen", () => {
     render(<HistoryScreen />);
 
     await waitFor(() => expect(screen.getByText("社内Wi-Fiの申請方法")).toBeInTheDocument());
-    fireEvent.click(
-      screen.getByRole("button", { name: "「社内Wi-Fiの申請方法」を自分で解決済みにする" }),
-    );
+    openOptionsMenu("社内Wi-Fiの申請方法");
+    fireEvent.click(screen.getByRole("menuitem", { name: "自分で解決した" }));
     const dialog = screen.getByRole("dialog");
     fireEvent.click(dialog.parentElement as HTMLElement);
 
@@ -184,21 +257,24 @@ describe("HistoryScreen", () => {
     expect(resolveQuestionMock).not.toHaveBeenCalled();
   });
 
-  it("keeps a pending question and shows a retry when self-resolve fails (#159)", async () => {
+  it("keeps a pending question and shows an error when self-resolve fails (#159)", async () => {
     useCurrentUserMock.mockReturnValue(asUser("E001"));
     getRecentQuestionsMock.mockResolvedValue(ITEMS);
     resolveQuestionMock.mockRejectedValueOnce(new Error("boom"));
     render(<HistoryScreen />);
 
     await waitFor(() => expect(screen.getByText("社内Wi-Fiの申請方法")).toBeInTheDocument());
-    fireEvent.click(
-      screen.getByRole("button", { name: "「社内Wi-Fiの申請方法」を自分で解決済みにする" }),
-    );
+    openOptionsMenu("社内Wi-Fiの申請方法");
+    fireEvent.click(screen.getByRole("menuitem", { name: "自分で解決した" }));
     fireEvent.click(screen.getByRole("button", { name: "解決済みにする" }));
 
     await waitFor(() => expect(resolveQuestionMock).toHaveBeenCalledWith("q2"));
-    // The row stays pending and offers a retry (visible label), rather than being lost.
-    await waitFor(() => expect(screen.getByText("再試行")).toBeInTheDocument());
+    // The row stays pending and surfaces an error, rather than being lost.
+    await waitFor(() =>
+      expect(
+        screen.getByText("解決の記録に失敗しました。もう一度お試しください。"),
+      ).toBeInTheDocument(),
+    );
     expect(screen.getByText("取り次ぎ先を調整中")).toBeInTheDocument();
     expect(screen.queryByText("自分で解決")).not.toBeInTheDocument();
   });
@@ -219,5 +295,53 @@ describe("HistoryScreen", () => {
         screen.getByText("履歴を取得できませんでした。時間をおいて再度お試しください。"),
       ).toBeInTheDocument(),
     );
+  });
+
+  it("paginates the list 5 items per page and does not show a pager for a short list (#397)", async () => {
+    useCurrentUserMock.mockReturnValue(asUser("E001"));
+    getRecentQuestionsMock.mockResolvedValue(ITEMS);
+    render(<HistoryScreen />);
+
+    await waitFor(() => expect(screen.getByText("UTMの移行時の注意点")).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: "次へ" })).not.toBeInTheDocument();
+  });
+
+  it("moves between pages of 5 with 前へ/次へ, disabling at each boundary (#397)", async () => {
+    useCurrentUserMock.mockReturnValue(asUser("E001"));
+    getRecentQuestionsMock.mockResolvedValue(makeManyItems(6));
+    render(<HistoryScreen />);
+
+    await waitFor(() => expect(screen.getByText("質問1")).toBeInTheDocument());
+    expect(screen.getByText("1 / 2")).toBeInTheDocument();
+    expect(screen.getByText("質問5")).toBeInTheDocument();
+    expect(screen.queryByText("質問6")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "前へ" })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "次へ" }));
+    expect(screen.getByText("2 / 2")).toBeInTheDocument();
+    expect(screen.getByText("質問6")).toBeInTheDocument();
+    expect(screen.queryByText("質問1")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "次へ" })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "前へ" }));
+    expect(screen.getByText("1 / 2")).toBeInTheDocument();
+    expect(screen.getByText("質問1")).toBeInTheDocument();
+  });
+
+  it("resets to page 1 when the acting user changes", async () => {
+    useCurrentUserMock.mockReturnValue(asUser("E001"));
+    getRecentQuestionsMock.mockResolvedValue(makeManyItems(6));
+    const { rerender } = render(<HistoryScreen />);
+
+    await waitFor(() => expect(screen.getByText("質問1")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "次へ" }));
+    expect(screen.getByText("2 / 2")).toBeInTheDocument();
+
+    useCurrentUserMock.mockReturnValue(asUser("E002"));
+    getRecentQuestionsMock.mockResolvedValue(makeManyItems(6));
+    rerender(<HistoryScreen />);
+
+    await waitFor(() => expect(screen.getByText("1 / 2")).toBeInTheDocument());
+    expect(screen.getByText("質問1")).toBeInTheDocument();
   });
 });

@@ -20,6 +20,7 @@ import { useOptionalSessionId, useOptionalSessionStream } from "@/components/Ses
 import { SourceCitations } from "@/components/SourceCitations";
 import { PersonRouteView } from "@/components/result/PersonRouteView";
 import type { EventStreamState } from "@/hooks/useEventStream";
+import { useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
 
 export interface ResultScreenProps {
@@ -32,9 +33,15 @@ export interface ResultScreenProps {
 const EMPTY_STREAM: EventStreamState = { events: [], terminal: false };
 
 function ResultFrame({ children }: { children: ReactNode }) {
+  // `?from=history` (added by HistoryScreen/ProcessingScreen, #397 follow-up)
+  // sends the user back to their history list instead of the home hub.
+  const fromHistory = useSearchParams().get("from") === "history";
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col py-lg">
-      <PageBackLink href="/" label="ホームへ戻る" />
+      <PageBackLink
+        href={fromHistory ? "/history" : "/"}
+        label={fromHistory ? "履歴へ戻る" : "ホームへ戻る"}
+      />
       {children}
     </div>
   );

@@ -61,7 +61,7 @@ export function QuestionDeleteDialog({
           type="button"
           disabled={disabled}
           onClick={onCancel}
-          className="rounded-lg px-md py-sm text-on-surface-variant text-sm hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-lg bg-surface-container-high px-md py-sm font-medium text-on-surface text-sm transition-colors hover:bg-surface-container-highest disabled:cursor-not-allowed disabled:opacity-50"
         >
           やめる
         </button>
