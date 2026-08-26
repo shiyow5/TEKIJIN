@@ -22,6 +22,35 @@ const POLL_INTERVAL_MS = 15_000;
 const PANEL_WIDTH_PX = 320;
 const VIEWPORT_MARGIN_PX = 8;
 
+/**
+ * Bell icon in the header's own idiom (#346).
+ *
+ * This was a literal 🔔 emoji, which the platform draws in its own colour and
+ * weight — it cannot take `currentColor`, ignores `strokeWidth`, and so sat at a
+ * different tone from the stroked nav icons next to it and did not follow the
+ * dark theme. Same `viewBox` / `strokeWidth` / sizing as `AppHeader`'s icons, so
+ * hover and focus states inherit from the button rather than being restyled here.
+ */
+function IconBell({ className }: { className: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      aria-hidden="true"
+      className={className}
+    >
+      <path
+        d="M6 9a6 6 0 1112 0c0 3.5.8 5.2 1.6 6.2.4.5 0 1.3-.7 1.3H5.1c-.7 0-1.1-.8-.7-1.3C5.2 14.2 6 12.5 6 9z"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M10 20a2 2 0 004 0" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 export function NotificationBell() {
   const { currentUserId } = useCurrentUser();
   const [items, setItems] = useState<DeclineNotification[]>([]);
@@ -156,7 +185,7 @@ export function NotificationBell() {
         aria-label={items.length > 0 ? `通知（未読${items.length}件）` : "通知"}
         className="relative flex h-9 w-9 items-center justify-center rounded-full text-on-surface-variant transition-colors hover:bg-surface-container-low"
       >
-        <span aria-hidden="true">🔔</span>
+        <IconBell className="h-5 w-5 shrink-0" />
         {items.length > 0 ? (
           <span
             aria-hidden="true"
