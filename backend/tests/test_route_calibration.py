@@ -10,7 +10,7 @@ e5-large では `answer_confidence` の最小値(0.816)が `PRIOR_ANSWER_SIM`(0.
 （DOCUMENT_SIM=0.28 / PERSON_WEAK_SIM=0.40 は分布内、経路精度 0.818 > 多数決 0.742、
 1経路への潰れ 0.94 < 0.95。0.30 のままだと潰れ 0.95 で制約を割り document recall も 4/10 に
 落ちていた）。ただし `answer_confidence` は prior_answer を分離できず
-（person gold が prior_answer gold より高い）、PRIOR_ANSWER_SIM=0.55 は観測最大 0.543 の
+（person gold が prior_answer gold より高い）、PRIOR_ANSWER_SIM=0.55 は観測最大 0.542 の
 直上に置いて意図的に無効化している。**prior_answer 経路の復活は打ち止め**: コーパス集計
 ルーティング(#119/#327)は実測でどの config も baseline を Pareto 改善せず、ADR-0007 で棄却された
 （#119 は close 済み）。自己回答は経路でなく知識層(#357)で実現する方針。
@@ -102,7 +102,7 @@ def test_calibration_matches_the_configured_embedding_model(calibration: dict) -
                 reason=(
                     "#119: prior_answer は Nemotron のコサインでは分離できない"
                     "（answer_confidence は person 側が prior_answer gold より高い）。"
-                    "PRIOR_ANSWER_SIM は観測最大(0.543)の直上に置いて意図的に無効化している。"
+                    "PRIOR_ANSWER_SIM は観測最大(0.542)の直上に置いて意図的に無効化している。"
                     f"{_FIXED_HINT}"
                 ),
                 strict=True,
