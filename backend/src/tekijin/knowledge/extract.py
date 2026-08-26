@@ -33,6 +33,7 @@ from tekijin.config import Settings, get_settings
 from tekijin.data.knowledge import upsert_knowledge_unit
 from tekijin.llm.schemas import CaseExtractionSchema
 from tekijin.models.tables import DailyReport
+from tekijin.scorer.topics import TOPIC_VOCABULARY, normalize_topics
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,32 @@ _SYSTEM_PROMPT = (
     "(3) 業種(industry)は記録に明示があるときだけ入れる。"
     "(4) confidence は抽出の確からしさ(0.0-1.0)。"
 )
+
+# Chat conversations carry NO precomputed tags (unlike daily reports), so the chat
+# prompt additionally asks the model to propose ``topic_hints`` from the canonical
+# vocabulary; the caller snaps them with ``normalize_topics`` and drops anything
+# off-vocabulary, so the model can never invent a topic (#448). Raw chat is mostly
+# noise (measured: raw chat as evidence barely moved grounded rate and hurt when
+# combined with daily), so the prompt leans HARD on extractable=false: only a real
+# problem→action exchange (a question that got a substantive answer, a resolved
+# issue) is a case; status pings / chit-chat / logistics are not.
+_CHAT_SYSTEM_PROMPT = (
+    "あなたは社内チャットのやり取りから再利用可能な『ケース知識』を抽出するアナリストです。"
+    "与えられた1つの会話だけを根拠に、誰かの課題(problem)・打ち手/回答(action)・結果(result)を"
+    "日本語で簡潔に切り出してください。厳守事項: "
+    "(1) 会話に書かれていないことを創作しない。結果が明示されていなければ result は null。"
+    "(2) 明確な課題と、それに対する具体的な打ち手/回答の両方が読み取れる場合のみ extractable=true。"
+    "挨拶・連絡・雑談・単なる状況共有・課題や回答が無いものは extractable=false。"
+    "(3) 業種(industry)は会話に明示があるときだけ入れる。"
+    "(4) confidence は抽出の確からしさ(0.0-1.0)。"
+    "(5) topic_hints には、この知識が該当するトピックを次の語彙から1〜2個だけ選んで入れる: "
+    + "、".join(TOPIC_VOCABULARY)
+    + "。該当が無ければ空でよい。"
+)
+
+# System prompt per source kind; daily reports keep the tag-faithful prompt, chat
+# uses the case-from-conversation prompt above.
+_SYSTEM_PROMPTS: dict[str, str] = {"chat": _CHAT_SYSTEM_PROMPT}
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,7 +144,8 @@ class CaseExtractor:
 
     @staticmethod
     def prompt(source: ExtractionSource) -> list[tuple[str, str]]:
-        return [("system", _SYSTEM_PROMPT), ("human", source.text)]
+        system = _SYSTEM_PROMPTS.get(source.source_type, _SYSTEM_PROMPT)
+        return [("system", system), ("human", source.text)]
 
     def extract(self, source: ExtractionSource) -> CaseExtractionSchema | None:
         """Return the extracted case, or ``None`` if the record is not a case.
@@ -141,8 +169,27 @@ class CaseExtractor:
         return out
 
 
+def _resolve_topics(
+    source: ExtractionSource, extraction: CaseExtractionSchema, *, infer_from_hints: bool
+) -> list[str]:
+    """The unit's topics: the source's precomputed tags when it has them, else
+    (for tag-less sources like chat, when ``infer_from_hints``) the model's
+    ``topic_hints`` snapped onto the canonical vocabulary. Off-vocabulary hints are
+    dropped by ``normalize_topics``, so the model can never mint a new topic."""
+
+    if source.topics:
+        return list(source.topics)
+    if infer_from_hints:
+        return normalize_topics(extraction.topic_hints)
+    return []
+
+
 def extract_and_store(
-    session: Session, sources: Sequence[ExtractionSource], extractor: CaseExtractor
+    session: Session,
+    sources: Sequence[ExtractionSource],
+    extractor: CaseExtractor,
+    *,
+    infer_topics_from_hints: bool = False,
 ) -> dict[str, int]:
     """Extract each source and upsert the cases; returns ``{seen, stored, skipped, errored}``.
 
@@ -153,6 +200,12 @@ def extract_and_store(
     upserted this run. Storage is idempotent on provenance, so re-running over the
     same sources refreshes in place (and lets an earlier ``errored`` source succeed
     on a later run). The caller owns the transaction; this flushes once at the end.
+
+    ``infer_topics_from_hints`` (chat, #448): for a source with no precomputed tags,
+    take the unit's topics from the model's ``topic_hints`` via ``normalize_topics``.
+    A case that snaps to NO canonical topic is skipped (counted as ``skipped``) — an
+    untopiced unit matches no evidence and would only add retrieval noise. Daily
+    reports keep tag-faithful topics and are unaffected (default False).
     """
 
     counts = {"seen": 0, "stored": 0, "skipped": 0, "errored": 0}
@@ -163,13 +216,18 @@ def extract_and_store(
             if extraction is None:
                 counts["skipped"] += 1
                 continue
+            topics = _resolve_topics(source, extraction, infer_from_hints=infer_topics_from_hints)
+            if infer_topics_from_hints and not topics:
+                # A tag-less case that maps to no canonical topic is not routable.
+                counts["skipped"] += 1
+                continue
             upsert_knowledge_unit(
                 session,
                 kind="case",
                 problem=extraction.problem,
                 action=extraction.action,
                 result=extraction.result,
-                topics=source.topics,
+                topics=topics,
                 industry=extraction.industry,
                 source_type=source.source_type,
                 source_id=source.source_id,
