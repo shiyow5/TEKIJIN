@@ -25,8 +25,8 @@
  * The department/topic dropdown OPTIONS are derived client-side from an
  * unfiltered snapshot fetched once on mount, since there is no dedicated
  * "list departments" endpoint. Period is a single "この日以降" (`since`) date
- * — no end date — by request; the API's `until` param exists but is
- * deliberately not exposed here.
+ * — no end date — by request; the API's matching `until` param was removed in
+ * #394 rather than left as an untested knob nothing could reach.
  *
  * Results always page through `RESULT_LIMIT` at a time via `offset`, including
  * the unfiltered browse view — a library whose whole point is "someone already

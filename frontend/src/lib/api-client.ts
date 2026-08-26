@@ -346,6 +346,10 @@ export async function getRecentQuestions(
  * GET /knowledge — the company-wide list of resolved-by-a-person questions
  * (#293, #301), with optional search/filter and a side-panel summary. Unlike
  * {@link getRecentQuestions}, this is NOT scoped to one asker.
+ *
+ * The period filter is a start bound only (`since`). The endpoint's matching
+ * `until` was removed in #394: nothing sent it, nothing tested it, and it cut
+ * the end day off (see `knowledge_library.list_knowledge`).
  */
 export async function getKnowledgeList(
   options: RequestOptions & {
@@ -353,18 +357,16 @@ export async function getKnowledgeList(
     department?: string;
     topic?: string;
     since?: string;
-    until?: string;
     offset?: number;
     limit?: number;
   } = {},
 ): Promise<KnowledgeListResponse> {
-  const { q, department, topic, since, until, offset, limit, ...requestOptions } = options;
+  const { q, department, topic, since, offset, limit, ...requestOptions } = options;
   const params = new URLSearchParams();
   if (q) params.set("q", q);
   if (department) params.set("department", department);
   if (topic) params.set("topic", topic);
   if (since) params.set("since", since);
-  if (until) params.set("until", until);
   if (offset !== undefined) params.set("offset", String(offset));
   if (limit !== undefined) params.set("limit", String(limit));
   const query = params.size > 0 ? `?${params.toString()}` : "";
