@@ -1,11 +1,11 @@
-import { QuestionScreen } from "@/components/QuestionScreen";
+import { HeroQuestionBar } from "@/components/HeroQuestionBar";
 import { isValidSessionId } from "@/lib/session";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Submit-flow edge cases (session id reuse, 409 recovery, error messaging)
-// live in tests/hooks/useAskQuestion.test.ts, shared with HeroQuestionBar
-// (#392) — this file covers this screen's own rendering and wiring.
+// live in tests/hooks/useAskQuestion.test.ts, shared with QuestionScreen
+// (#392) — this file covers this bar's own rendering and wiring.
 
 const pushMock = vi.fn();
 vi.mock("next/navigation", () => ({
@@ -25,8 +25,6 @@ vi.mock("@/lib/api-client", () => ({
   },
 }));
 
-// The acting user comes from the current-user context; a fixed "E001" stands in
-// for the header switcher's selection.
 vi.mock("@/components/CurrentUserProvider", () => ({
   useCurrentUser: () => ({
     employees: [],
@@ -37,12 +35,7 @@ vi.mock("@/components/CurrentUserProvider", () => ({
   }),
 }));
 
-// RecentQuestions self-fetches; stub it so these tests stay focused on the ask flow.
-vi.mock("@/components/RecentQuestions", () => ({
-  RecentQuestions: () => <div data-testid="recent-questions" />,
-}));
-
-describe("QuestionScreen", () => {
+describe("HeroQuestionBar", () => {
   beforeEach(() => {
     pushMock.mockReset();
     postAskMock.mockReset();
@@ -53,21 +46,13 @@ describe("QuestionScreen", () => {
     vi.restoreAllMocks();
   });
 
-  it("renders the heading, input and submit button", () => {
-    render(<QuestionScreen />);
-    expect(screen.getByRole("link", { name: "ホームへ戻る" })).toHaveAttribute("href", "/");
+  it("mirrors the /questions heading", () => {
+    render(<HeroQuestionBar />);
     expect(screen.getByRole("heading", { name: "何を知りたいですか？" })).toBeInTheDocument();
-    expect(screen.getByLabelText("質問を入力")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "聞いてみる" })).toBeInTheDocument();
   });
 
-  it("renders the recent-questions panel", () => {
-    render(<QuestionScreen />);
-    expect(screen.getByTestId("recent-questions")).toBeInTheDocument();
-  });
-
-  it("disables the submit button while the input is empty or whitespace", () => {
-    render(<QuestionScreen />);
+  it("disables submit while the input is empty or whitespace", () => {
+    render(<HeroQuestionBar />);
     const submit = screen.getByRole("button", { name: "聞いてみる" });
     expect(submit).toBeDisabled();
 
@@ -78,36 +63,25 @@ describe("QuestionScreen", () => {
     expect(submit).toBeEnabled();
   });
 
-  it("submits a trimmed question with a valid session id and asker id, then navigates", async () => {
-    render(<QuestionScreen />);
+  it("submits directly (same as /questions) and navigates to /session/{id} — bypasses /questions", async () => {
+    render(<HeroQuestionBar />);
     fireEvent.change(screen.getByLabelText("質問を入力"), {
-      target: { value: "  UTMの移行時の注意点  " },
+      target: { value: "  有給の繰越ルール  " },
     });
     fireEvent.click(screen.getByRole("button", { name: "聞いてみる" }));
 
     await waitFor(() => expect(postAskMock).toHaveBeenCalledTimes(1));
     const body = postAskMock.mock.calls[0][0];
-    expect(body.question).toBe("UTMの移行時の注意点");
+    expect(body.question).toBe("有給の繰越ルール");
     expect(body.asker_id).toBe("E001");
     expect(isValidSessionId(body.session_id)).toBe(true);
 
     await waitFor(() => expect(pushMock).toHaveBeenCalledWith(`/session/${body.session_id}`));
   });
 
-  it("calls onSubmitted instead of navigating when the callback is provided", async () => {
-    const onSubmitted = vi.fn();
-    render(<QuestionScreen onSubmitted={onSubmitted} />);
-    fireEvent.change(screen.getByLabelText("質問を入力"), { target: { value: "質問です" } });
-    fireEvent.click(screen.getByRole("button", { name: "聞いてみる" }));
-
-    await waitFor(() => expect(onSubmitted).toHaveBeenCalledTimes(1));
-    expect(pushMock).not.toHaveBeenCalled();
-    expect(isValidSessionId(onSubmitted.mock.calls[0][0])).toBe(true);
-  });
-
   it("shows an error message and re-enables submit when the request fails", async () => {
     postAskMock.mockRejectedValueOnce(new Error("network"));
-    render(<QuestionScreen />);
+    render(<HeroQuestionBar />);
     fireEvent.change(screen.getByLabelText("質問を入力"), { target: { value: "質問です" } });
     fireEvent.click(screen.getByRole("button", { name: "聞いてみる" }));
 

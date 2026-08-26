@@ -29,6 +29,12 @@ export interface ModalDialogProps {
   initialFocusRef: RefObject<HTMLElement | null>;
   /** Close when the overlay outside the dialog panel is clicked. Default off. */
   dismissOnBackdrop?: boolean;
+  /**
+   * Panel width. Defaults to the confirmation-dialog width every other caller
+   * wants; override for content that needs more room (#392: 使い方's 3-column
+   * step grid reads as cramped at the default width).
+   */
+  maxWidthClassName?: string;
   children: ReactNode;
 }
 
@@ -37,6 +43,7 @@ export function ModalDialog({
   onCancel,
   initialFocusRef,
   dismissOnBackdrop = false,
+  maxWidthClassName = "max-w-sm",
   children,
 }: ModalDialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -95,7 +102,7 @@ export function ModalDialog({
         ref={dialogRef}
         aria-modal="true"
         aria-labelledby={titleId}
-        className="flex w-full max-w-sm flex-col gap-md rounded-xl border border-outline-variant bg-surface-container-lowest p-lg shadow-md"
+        className={`flex w-full ${maxWidthClassName} flex-col gap-md rounded-xl border border-outline-variant bg-surface-container-lowest p-lg shadow-md`}
       >
         {children}
       </div>

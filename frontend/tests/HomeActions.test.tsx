@@ -29,6 +29,15 @@ describe("HomeActions", () => {
     expect(list.className).toContain("sm:grid-cols-3");
   });
 
+  // 質問する moved to the hub's own hero question bar (#392) — a duplicate
+  // link here would be redundant, so 質問履歴 fills the card slot instead.
+  it("offers 質問履歴 instead of a duplicate 質問する link (#392)", () => {
+    useAuthMock.mockReturnValue(auth(ADMIN));
+    render(<HomeActions />);
+    expect(screen.queryByRole("link", { name: /質問する/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /質問履歴/ })).toHaveAttribute("href", "/history");
+  });
+
   // #368: a fixed 3-col grid left a blank column where the dashboard card used
   // to be once #347 hid it for non-admins — switch to a 2-col grid instead so
   // the remaining cards fill the row.

@@ -191,4 +191,30 @@ test.describe("asker flow", () => {
     // The replayed result renders (candidate + draft on the processing screen).
     await expect(page.getByText("回答者が見つかりました")).toBeVisible();
   });
+
+  test("ホームのヒーロー質問バーから直接送信できる — /questions を経由しない (#392)", async ({
+    page,
+  }) => {
+    await mockEmployees(page);
+    await mockAuth(page);
+    await mockRecentQuestions(page);
+    let askBody: { question?: string; asker_id?: string } | null = null;
+    await page.route(`${API_BASE}/ask`, async (route) => {
+      askBody = route.request().postDataJSON();
+      await fulfillJson(route, { session_id: "srv-session", status: "accepted" });
+    });
+    await page.route(`${API_BASE}/events/**`, (route) =>
+      fulfillSse(route, sseBody(MESSAGE_FRAMES)),
+    );
+
+    await page.goto("/");
+    await page.getByLabel("質問を入力").fill("有給の繰越ルール");
+    await page.getByRole("button", { name: "聞いてみる" }).click();
+
+    // Client-generated session id → straight to /session/<uuid>, same as
+    // submitting on /questions itself — never a /questions?q= detour.
+    await page.waitForURL(/\/session\/[^/]+$/);
+    await expect(page.getByRole("heading", { name: "回答をお届けします" })).toBeVisible();
+    expect(askBody?.question).toBe("有給の繰越ルール");
+  });
 });
