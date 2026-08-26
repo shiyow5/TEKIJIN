@@ -15,6 +15,7 @@ lazily build the real network client.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
@@ -124,17 +125,38 @@ def _is_uninformative_intent(out: IntentSchema) -> bool:
     return not out.topics and not out.products and out.situation is None and out.confidence == 0.0
 
 
-def _fence_safe(text: str) -> str:
-    """Neutralise angle brackets so fragment text cannot forge the ``<context>`` fence.
+# Line breaks and other C0 control characters. Every prompt block that embeds
+# untrusted text is a ``- `` list, so a raw newline is a structural character
+# there, not formatting (#387).
+_CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
 
-    Retrieved fragments (#69) are untrusted, cross-user corpus text; a stored
-    ``</context>`` followed by instructions would otherwise break out of the fence
-    and steer C1 for a later, unrelated query (indirect prompt injection). Mapping
-    ``<``/``>`` to their full-width forms keeps the text readable to the model
-    while making ANY tag — not just a literal ``</context>`` — inert.
+
+def _fence_safe(text: str) -> str:
+    """Make untrusted text inert inside a fenced, line-structured prompt block.
+
+    Two separate forgeries have to be prevented, because the text is untrusted in
+    two different ways:
+
+    * **The fence.** Retrieved fragments (#69) are cross-user corpus text; a stored
+      ``</context>`` followed by instructions would break out of the fence and
+      steer C1 for a later, unrelated query. Mapping ``<``/``>`` to their
+      full-width forms makes ANY tag — not just a literal ``</context>`` — inert.
+    * **The line.** Since #274 an ``answers.body`` is written by a USER at runtime,
+      not curated in a fixture. Every call site here renders it into a ``- `` list,
+      so a newline is structure: a body containing
+      ``\n- source_id=doc_999 (document): …`` renders as an extra evidence row that
+      reads exactly like a real retrieved source. The citation allow-list would
+      drop the invented id, but the fabricated CONTENT has already been quoted to
+      the composer as fact — which is the injection. Flattening control characters
+      to spaces removes the structural meaning while leaving the words readable.
+
+    Sanitising HERE rather than at ingest is deliberate: this is the boundary where
+    the text stops being data and becomes part of a prompt, and it covers every
+    call site at once — including corpus rows written before any ingest filter
+    existed.
     """
 
-    return text.replace("<", "＜").replace(">", "＞")
+    return _CONTROL_CHARS.sub(" ", text).replace("<", "＜").replace(">", "＞")
 
 
 def _thinking_extra_body(settings: Settings) -> dict[str, Any]:

@@ -22,6 +22,47 @@ const POLL_INTERVAL_MS = 15_000;
 const PANEL_WIDTH_PX = 320;
 const VIEWPORT_MARGIN_PX = 8;
 
+/**
+ * Bell icon in the header's own idiom (#346).
+ *
+ * This was a literal 🔔 emoji. Colour-emoji fonts draw from their own colour
+ * tables, so the glyph ignores `color` and has no stroke to weight — it could not
+ * be made to match the stroked nav icons at any value. Now the same `viewBox` /
+ * `fill` / `stroke` / `strokeWidth` as `AppHeader`'s icons.
+ *
+ * Two things this deliberately does NOT claim, because neither is true today:
+ * there is no dark theme in this app (no `darkMode` in the Tailwind config, no
+ * `prefers-color-scheme`, one light palette in `design-tokens.ts`), and the
+ * button has no `hover:text-*`, so its hover is a background change and always
+ * was. What `currentColor` buys is that the icon now tracks
+ * `text-on-surface-variant` — and will track a theme if one is ever added, and
+ * adapts under forced-colors, which an emoji glyph cannot.
+ *
+ * Sized `h-5 w-5` to match the nav icons in the drawer. Note the icon actually
+ * ADJACENT to it in the header row is the hamburger, which is `h-6 w-6` in an
+ * identically sized button — so the pair a user sees together is 20px next to
+ * 24px. That is a deliberate match to the icon SET, not to the neighbour.
+ */
+function IconBell({ className }: { className: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      aria-hidden="true"
+      className={className}
+    >
+      <path
+        d="M6 9a6 6 0 1112 0c0 3.5.8 5.2 1.6 6.2.4.5 0 1.3-.7 1.3H5.1c-.7 0-1.1-.8-.7-1.3C5.2 14.2 6 12.5 6 9z"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M10 20a2 2 0 004 0" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 export function NotificationBell() {
   const { currentUserId } = useCurrentUser();
   const [items, setItems] = useState<DeclineNotification[]>([]);
@@ -156,7 +197,7 @@ export function NotificationBell() {
         aria-label={items.length > 0 ? `通知（未読${items.length}件）` : "通知"}
         className="relative flex h-9 w-9 items-center justify-center rounded-full text-on-surface-variant transition-colors hover:bg-surface-container-low"
       >
-        <span aria-hidden="true">🔔</span>
+        <IconBell className="h-5 w-5 shrink-0" />
         {items.length > 0 ? (
           <span
             aria-hidden="true"

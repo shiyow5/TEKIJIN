@@ -10,3 +10,8 @@ httpx>=0.27,<1.0
 # without Docker. CI ignores it: it sets TEKIJIN_DATABASE_URL to its own
 # pgvector service. Linux/macOS wheels only.
 pgserver>=0.1,<1.0 ; sys_platform != "win32"
+
+# Read by `tests/test_pgvector_image_pin.py` to check the Test workflow's own
+# trigger wiring (#101). It resolves transitively via langchain today; declared
+# here so an unrelated dependency change cannot take that test with it.
+PyYAML>=6.0,<7.0
