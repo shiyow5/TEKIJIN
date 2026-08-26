@@ -135,19 +135,23 @@ def oauth_callback(
             redirect_uri=settings.slack_redirect_uri,
             code=code,
         )
+        service = request.app.state.agent_service
+        with session_scope(service.session_factory) as session:
+            # Also covers the DB write: `slack_user_id` is unique, so a Slack
+            # account already linked to a DIFFERENT employee raises an
+            # IntegrityError here — that must redirect to ?slack=error like any
+            # other OAuth failure, not surface as a bare 500 (the docstring
+            # above promises this callback ALWAYS redirects).
+            upsert_slack_link(
+                session,
+                employee_id,
+                slack_user_id=identity.slack_user_id,
+                slack_team_id=identity.slack_team_id,
+                now=dt.datetime.now(),  # noqa: DTZ005 - naive is intentional, matches created_at elsewhere
+            )
     except Exception:  # noqa: BLE001 - browser redirect boundary, never surfaces a bare 4xx/5xx
         logger.warning("Slack OAuth callback failed", exc_info=True)
         return RedirectResponse(f"{frontend_chat_url}?slack=error")
-
-    service = request.app.state.agent_service
-    with session_scope(service.session_factory) as session:
-        upsert_slack_link(
-            session,
-            employee_id,
-            slack_user_id=identity.slack_user_id,
-            slack_team_id=identity.slack_team_id,
-            now=dt.datetime.now(),  # noqa: DTZ005 - naive is intentional, matches created_at elsewhere
-        )
     return RedirectResponse(f"{frontend_chat_url}?slack=linked")
 
 

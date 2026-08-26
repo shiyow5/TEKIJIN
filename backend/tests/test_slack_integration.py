@@ -202,3 +202,41 @@ def test_oauth_callback_success_links_and_redirects(
         link = get_slack_link(session, 8)
         assert link is not None
         assert link.slack_user_id == "U_EIGHT"
+
+
+def test_oauth_callback_redirects_to_error_when_slack_account_already_linked_elsewhere(
+    monkeypatch, slack_app_configured, seed_counts, engine, fake_embedder
+) -> None:
+    """slack_user_id is unique — completing OAuth for a Slack account already
+    linked to a DIFFERENT employee must still redirect (never a bare 500)."""
+
+    # 30/31: distinct from every employee id another test in this module links,
+    # so this test's "never linked" assertion below can't be polluted by
+    # another test's row (`engine` is a session-scoped fixture — the DB
+    # persists across every test in the run, not just this file).
+    with get_sessionmaker(engine)() as session:
+        upsert_slack_link(session, 31, slack_user_id="U_SHARED", slack_team_id="T1", now=NOW)
+        session.commit()
+
+    monkeypatch.setattr(
+        "tekijin.api.slack_routes.exchange_code",
+        lambda **kwargs: SlackIdentity(slack_user_id="U_SHARED", slack_team_id="T1"),
+    )
+    client = _raw_client(engine, fake_embedder)
+
+    authorize_resp = client.get("/slack/authorize-url", headers=_user_headers(30))
+    state = dict(
+        pair.split("=", 1) for pair in authorize_resp.json()["url"].split("?", 1)[1].split("&")
+    )["state"]
+
+    resp = client.get(
+        "/slack/oauth/callback",
+        params={"code": "a-real-looking-code", "state": state},
+        follow_redirects=False,
+    )
+    assert resp.status_code in (302, 307)
+    assert "slack=error" in resp.headers["location"]
+
+    with get_sessionmaker(engine)() as session:
+        assert get_slack_link(session, 31).slack_user_id == "U_SHARED"  # unchanged
+        assert get_slack_link(session, 30) is None  # never linked

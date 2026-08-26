@@ -274,7 +274,12 @@ export function ChatScreen({ initialThreadId, initialSlackResult }: ChatScreenPr
   const [showConversation, setShowConversation] = useState(initialThreadId != null);
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-md py-lg">
+    // The height that used to be pinned on <section> alone now lives here: the
+    // SlackLinkButton row (and the OAuth-result banner, when shown) sit ABOVE
+    // it and take real space, so <section> can no longer assume a fixed
+    // 100dvh-9rem for itself — it now grows to fill whatever this outer
+    // column has left (`min-h-0 flex-1` below), whatever that row's height is.
+    <div className="mx-auto flex w-full max-w-5xl flex-col gap-md py-lg md:h-[calc(100dvh-9rem)]">
       <div className="flex items-center justify-end gap-sm">
         <SlackLinkButton />
       </div>
@@ -296,11 +301,14 @@ export function ChatScreen({ initialThreadId, initialSlackResult }: ChatScreenPr
           </button>
         </output>
       ) : null}
-      {/* Only the DESKTOP layout pins the height so the two panes scroll
-          independently. At phone width the header is much taller (bell, switcher,
-          logout, hamburger) and any fixed offset pushed the composer off-screen —
-          so there the section grows naturally and the page scrolls instead. */}
-      <section className="flex flex-col gap-md md:h-[calc(100dvh-9rem)] md:flex-row">
+      {/* Only the DESKTOP layout bounds the height so the two panes scroll
+          independently (`min-h-0` lets a flex child shrink below its content's
+          natural height, which `overflow-y-auto` further down needs to ever
+          kick in instead of just growing). At phone width the wrapping div
+          above has no fixed height either, so this grows naturally and the
+          page scrolls instead — any fixed offset there pushed the composer
+          off-screen. */}
+      <section className="flex min-h-0 flex-col gap-md md:flex-1 md:flex-row">
         <ChatThreadList
           threads={threads}
           phase={phase}
