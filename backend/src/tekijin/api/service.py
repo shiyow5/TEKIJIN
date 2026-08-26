@@ -1011,6 +1011,12 @@ class AgentService:
                 **{**selected, "person_id": schemas.format_employee_id(selected["person_id"])}
             ),
             draft=new_draft,
+            # NOT routed through `_resolve_primary` (unlike `/handoff`): the
+            # `update_state` above just wrote `recommendations[0]` and
+            # `primary_recommendation_id` from the SAME `new_ids`, so they agree by
+            # construction here — there is no stale window to resolve away (#94-3).
+            # This id is asker-side display; the responder's generation token always
+            # comes from `/handoff`.
             recommendation_id=(new_ids[0] if new_ids else 0),
         )
 
