@@ -65,6 +65,26 @@ describe("NotificationBell", () => {
     expect(await screen.findByRole("button", { name: "通知（未読1件）" })).toBeInTheDocument();
   });
 
+  it("uses the same stroked icon idiom as the other header icons (#346)", async () => {
+    // It used to be a literal 🔔 emoji, drawn from a colour-emoji font: it ignores
+    // `color` and has no stroke to weight, so it could not match the nav icons at
+    // any value. This pins the IDIOM, not the drawing — a square with the same
+    // attributes would pass, and asserting the path data would be brittle and
+    // worthless. The bell shape is a visual review's job.
+    useCurrentUserMock.mockReturnValue(asUser("E010"));
+    getNotificationsMock.mockResolvedValue([]);
+    const { container } = render(<NotificationBell />);
+    await screen.findByRole("button", { name: "通知" });
+
+    const icon = container.querySelector("svg");
+    expect(icon).not.toBeNull();
+    expect(icon).toHaveAttribute("stroke", "currentColor");
+    expect(icon).toHaveAttribute("stroke-width", "1.8");
+    expect(icon).toHaveAttribute("viewBox", "0 0 24 24");
+    expect(icon?.getAttribute("class")).toContain("h-5 w-5");
+    expect(container.textContent).not.toContain("🔔");
+  });
+
   it("shows no badge and a plain label when there are no notifications", async () => {
     useCurrentUserMock.mockReturnValue(asUser("E010"));
     getNotificationsMock.mockResolvedValue([]);
