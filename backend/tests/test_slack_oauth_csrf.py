@@ -23,7 +23,7 @@ from tekijin.auth.principal import Principal
 from tekijin.auth.tokens import create_access_token
 from tekijin.config import get_settings
 from tekijin.data.db import get_sessionmaker
-from tekijin.data.slack_links import get_slack_link, get_slack_link_by_slack_user_id
+from tekijin.data.slack_links import get_slack_link
 from tekijin.slack.client import SlackIdentity
 
 ATTACKER, VICTIM = 20, 21
@@ -74,40 +74,70 @@ def slack_configured(monkeypatch):
         get_settings.cache_clear()
 
 
-def test_a_state_minted_by_someone_else_cannot_capture_my_slack_account(
+def test_a_link_url_forwarded_to_someone_else_cannot_capture_their_slack_account(
     monkeypatch, slack_configured, seed_counts, engine, fake_embedder
 ) -> None:
-    """The headline attack: the victim's browser never held the attacker's nonce."""
+    """The headline attack, now structurally impossible.
+
+    The callback has no session, so it cannot attach anything on its own — it
+    hands back a pending token that must be redeemed with a bearer token. Whoever
+    redeems it is who the Slack account attaches to. So the attacker's URL, even
+    completed by the victim, can only ever link the victim to the victim.
+    """
 
     attacker = _client(engine, fake_embedder)
     state = _state_from(
         attacker.get("/slack/authorize-url", headers=_headers(ATTACKER)).json()["url"]
     )
-
     monkeypatch.setattr(
         "tekijin.api.slack_routes.exchange_code",
         lambda **kw: SlackIdentity(slack_user_id="U_VICTIM", slack_team_id=TEAM),
     )
-    # A DIFFERENT browser: no cookies carried over from the attacker's client.
+
     victim = _client(engine, fake_embedder)
     resp = victim.get(
         "/slack/oauth/callback",
         params={"code": "victims-code", "state": state},
         follow_redirects=False,
     )
+    pending = resp.headers["location"].split("slack_pending=", 1)[1]
 
-    assert "slack=error" in resp.headers["location"]
+    # The victim's own browser redeems it — with the VICTIM's session.
+    assert (
+        victim.post(
+            "/slack/link/complete", json={"pending_token": pending}, headers=_headers(VICTIM)
+        ).status_code
+        == 200
+    )
+
     with get_sessionmaker(engine)() as session:
-        assert get_slack_link_by_slack_user_id(session, "U_VICTIM") is None, (
-            "被害者のSlack IDが誰かの社員レコードに紐づいた"
-        )
-        assert get_slack_link(session, ATTACKER) is None
+        assert get_slack_link(session, VICTIM).slack_user_id == "U_VICTIM"
+        assert get_slack_link(session, ATTACKER) is None, "攻撃者の行に紐づいた"
 
 
-def test_the_same_browser_still_links_normally(
+def test_the_pending_token_alone_does_not_link_anyone(
     monkeypatch, slack_configured, seed_counts, engine, fake_embedder
 ) -> None:
-    # The fix must not break the real flow: one client, cookie jar intact.
+    # No bearer token -> no employee -> nothing to attach to.
+    client = _client(engine, fake_embedder)
+    state = _state_from(
+        client.get("/slack/authorize-url", headers=_headers(ATTACKER)).json()["url"]
+    )
+    monkeypatch.setattr(
+        "tekijin.api.slack_routes.exchange_code",
+        lambda **kw: SlackIdentity(slack_user_id="U_X", slack_team_id=TEAM),
+    )
+    resp = client.get(
+        "/slack/oauth/callback", params={"code": "c", "state": state}, follow_redirects=False
+    )
+    pending = resp.headers["location"].split("slack_pending=", 1)[1]
+
+    assert client.post("/slack/link/complete", json={"pending_token": pending}).status_code == 401
+
+
+def test_the_normal_link_flow_still_works(
+    monkeypatch, slack_configured, seed_counts, engine, fake_embedder
+) -> None:
     client = _client(engine, fake_embedder)
     state = _state_from(
         client.get("/slack/authorize-url", headers=_headers(ATTACKER)).json()["url"]
@@ -116,14 +146,17 @@ def test_the_same_browser_still_links_normally(
         "tekijin.api.slack_routes.exchange_code",
         lambda **kw: SlackIdentity(slack_user_id="U_SELF", slack_team_id=TEAM),
     )
-
     resp = client.get(
-        "/slack/oauth/callback",
-        params={"code": "c", "state": state},
-        follow_redirects=False,
+        "/slack/oauth/callback", params={"code": "c", "state": state}, follow_redirects=False
     )
+    pending = resp.headers["location"].split("slack_pending=", 1)[1]
 
-    assert "slack=linked" in resp.headers["location"]
+    assert (
+        client.post(
+            "/slack/link/complete", json={"pending_token": pending}, headers=_headers(ATTACKER)
+        ).status_code
+        == 200
+    )
     with get_sessionmaker(engine)() as session:
         assert get_slack_link(session, ATTACKER).slack_user_id == "U_SELF"
 
@@ -131,20 +164,25 @@ def test_the_same_browser_still_links_normally(
 def test_login_from_a_browser_that_did_not_start_the_flow_gets_no_token(
     monkeypatch, slack_configured, seed_counts, engine, fake_embedder
 ) -> None:
-    """Login CSRF: the attacker's code+state, replayed into the victim's browser."""
+    """Login CSRF: the attacker's code+state, replayed into the victim's browser.
+
+    Login is the one flow that mints a session out of nothing, so it is the one
+    that needs the nonce cookie.
+    """
+
+    import datetime as dt
+
+    from tekijin.data.slack_links import upsert_slack_link
 
     with get_sessionmaker(engine)() as session:
-        from tekijin.data.slack_links import upsert_slack_link
-
-        import datetime as dt
-
         upsert_slack_link(
             session, ATTACKER, slack_user_id="U_ATTACKER", slack_team_id=TEAM, now=dt.datetime.now()
         )
         session.commit()
 
     attacker = _client(engine, fake_embedder)
-    state = _state_from(attacker.get("/slack/login-url").json()["url"])
+    hop = attacker.get("/slack/oauth/start", follow_redirects=False)
+    state = _state_from(hop.headers["location"])
     monkeypatch.setattr(
         "tekijin.api.slack_routes.exchange_code",
         lambda **kw: SlackIdentity(slack_user_id="U_ATTACKER", slack_team_id=TEAM),
@@ -152,9 +190,7 @@ def test_login_from_a_browser_that_did_not_start_the_flow_gets_no_token(
 
     victim = _client(engine, fake_embedder)
     resp = victim.get(
-        "/slack/oauth/callback",
-        params={"code": "c", "state": state},
-        follow_redirects=False,
+        "/slack/oauth/callback", params={"code": "c", "state": state}, follow_redirects=False
     )
 
     assert "slack_token" not in resp.headers["location"], (
@@ -162,14 +198,59 @@ def test_login_from_a_browser_that_did_not_start_the_flow_gets_no_token(
     )
 
 
-def test_the_nonce_cookie_is_not_readable_by_scripts_and_is_short_lived(
+def test_a_present_but_wrong_nonce_is_rejected(
+    monkeypatch, slack_configured, seed_counts, engine, fake_embedder
+) -> None:
+    """Not just "no cookie" — a cookie that exists but does not match must fail.
+
+    Without this, an implementation that only checked for the cookie's PRESENCE
+    would pass every other test here.
+    """
+
+    import datetime as dt
+
+    from tekijin.data.slack_links import upsert_slack_link
+
+    with get_sessionmaker(engine)() as session:
+        upsert_slack_link(
+            session, ATTACKER, slack_user_id="U_ATTACKER", slack_team_id=TEAM, now=dt.datetime.now()
+        )
+        session.commit()
+
+    attacker = _client(engine, fake_embedder)
+    state = _state_from(
+        attacker.get("/slack/oauth/start", follow_redirects=False).headers["location"]
+    )
+
+    victim = _client(engine, fake_embedder)
+    # A *different* live nonce, from the victim's own start — present, but wrong.
+    victim.get("/slack/oauth/start", follow_redirects=False)
+    assert victim.cookies.get("tekijin_oauth_state"), "前提: 被害者にもCookieがある"
+
+    monkeypatch.setattr(
+        "tekijin.api.slack_routes.exchange_code",
+        lambda **kw: SlackIdentity(slack_user_id="U_ATTACKER", slack_team_id=TEAM),
+    )
+    resp = victim.get(
+        "/slack/oauth/callback", params={"code": "c", "state": state}, follow_redirects=False
+    )
+
+    assert "slack_token" not in resp.headers["location"]
+
+
+def test_the_nonce_cookie_is_issued_by_the_callback_origin(
     slack_configured, seed_counts, engine, fake_embedder
 ) -> None:
-    client = _client(engine, fake_embedder)
-    resp = client.get("/slack/authorize-url", headers=_headers(ATTACKER))
+    """Issued at /slack/oauth/start, which lives on the SAME host as the callback.
 
-    # Cookie attributes are case-insensitive (RFC 6265), so compare lowercased —
-    # asserting the exact casing tests Starlette's formatting, not our intent.
+    Issuing it from the API origin instead was the bug: the app calls the API on
+    a different host from the tunnel Slack returns to, so the browser would never
+    send it back and every login would fail the binding check (#494).
+    """
+
+    client = _client(engine, fake_embedder)
+    resp = client.get("/slack/oauth/start", follow_redirects=False)
+
     header = resp.headers.get("set-cookie", "").lower()
     assert "httponly" in header, f"HttpOnly が無い: {header}"
     assert "samesite=lax" in header, (
@@ -187,8 +268,8 @@ def test_the_state_does_not_carry_the_nonce_itself(
     import jwt
 
     client = _client(engine, fake_embedder)
-    resp = client.get("/slack/authorize-url", headers=_headers(ATTACKER))
-    state = _state_from(resp.json()["url"])
+    resp = client.get("/slack/oauth/start", follow_redirects=False)
+    state = _state_from(resp.headers["location"])
     cookie_value = resp.headers["set-cookie"].split("=", 1)[1].split(";", 1)[0]
 
     payload = jwt.decode(state, get_settings().auth_secret, algorithms=["HS256"])

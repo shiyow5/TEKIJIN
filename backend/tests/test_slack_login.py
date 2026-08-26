@@ -67,8 +67,19 @@ def _user_headers(employee_id: int) -> dict[str, str]:
     }
 
 
-def _login_state(client) -> str:
-    query = client.get("/slack/login-url").json()["url"].split("?", 1)[1]
+def _start_login(client) -> str:
+    """Walk the real entry point and return the state Slack would echo back.
+
+    `login-url` hands back OUR start URL, and it is `/slack/oauth/start` that
+    issues the nonce cookie and bounces to Slack — the cookie has to come from
+    the callback's own origin (#494), so the test must travel the same path.
+    """
+
+    start = client.post("/slack/login-url").json()["url"]
+    assert start.endswith("/slack/oauth/start"), start
+    hop = client.get("/slack/oauth/start", follow_redirects=False)
+    assert hop.status_code in (302, 307), hop.status_code
+    query = hop.headers["location"].split("?", 1)[1]
     return dict(pair.split("=", 1) for pair in query.split("&"))["state"]
 
 
@@ -108,17 +119,19 @@ def test_login_url_is_unavailable_while_disabled(monkeypatch, seed_counts, engin
     monkeypatch.delenv("TEKIJIN_SLACK_LOGIN_ENABLED", raising=False)
     get_settings.cache_clear()
     try:
-        assert _client(engine, fake_embedder).get("/slack/login-url").status_code == 503
+        assert _client(engine, fake_embedder).post("/slack/login-url").status_code == 503
     finally:
         get_settings.cache_clear()
 
 
 def test_login_url_needs_no_authentication(slack_login_on, seed_counts, engine, fake_embedder):
     # The whole point: the caller has no token yet.
-    resp = _client(engine, fake_embedder).get("/slack/login-url")
+    resp = _client(engine, fake_embedder).post("/slack/login-url")
 
     assert resp.status_code == 200
-    assert resp.json()["url"].startswith("https://slack.com/oauth/v2/authorize")
+    # Our own start endpoint, not Slack directly: the browser must touch the
+    # callback's origin first so the nonce cookie lands there (#494).
+    assert resp.json()["url"].endswith("/slack/oauth/start")
 
 
 # --- GET /slack/oauth/callback (login) --------------------------------------- #
@@ -143,7 +156,7 @@ def test_login_hands_back_a_working_token_in_the_url_FRAGMENT(
 
     resp = client.get(
         "/slack/oauth/callback",
-        params={"code": "c", "state": _login_state(client)},
+        params={"code": "c", "state": _start_login(client)},
         follow_redirects=False,
     )
 
@@ -171,7 +184,7 @@ def test_login_rejects_an_unlinked_slack_user(
 
     resp = client.get(
         "/slack/oauth/callback",
-        params={"code": "c", "state": _login_state(client)},
+        params={"code": "c", "state": _start_login(client)},
         follow_redirects=False,
     )
 
@@ -199,7 +212,7 @@ def test_login_rejects_a_foreign_workspace_even_when_that_slack_id_is_linked(
 
     resp = client.get(
         "/slack/oauth/callback",
-        params={"code": "c", "state": _login_state(client)},
+        params={"code": "c", "state": _start_login(client)},
         follow_redirects=False,
     )
 
@@ -218,7 +231,10 @@ def test_a_link_state_cannot_be_replayed_as_a_login_state(
     client = _client(engine, fake_embedder)
     # Through the real endpoint so the browser holds the matching nonce (#494);
     # hand-minting a state would now fail the binding check for the wrong reason.
-    url = client.get("/slack/authorize-url", headers=_user_headers(7)).json()["url"]
+    # 14, not 7: `test_status_false_for_an_unlinked_employee` asserts employee 7
+    # is UNLINKED, and linking it here makes that test depend on file ordering
+    # (alphabetically it runs first today — luck, not isolation).
+    url = client.get("/slack/authorize-url", headers=_user_headers(14)).json()["url"]
     link_state = dict(p.split("=", 1) for p in url.split("?", 1)[1].split("&"))["state"]
     monkeypatch.setattr(
         "tekijin.api.slack_routes.exchange_code",
@@ -231,13 +247,21 @@ def test_a_link_state_cannot_be_replayed_as_a_login_state(
         follow_redirects=False,
     )
 
-    # Two separate claims, both asserted: the link branch still WORKS (a broken
-    # one would also produce a token-free redirect, so the check below alone
-    # proves nothing), and it does not mint a session.
-    assert "slack=linked" in resp.headers["location"]
+    # Two separate claims, both asserted: the link branch still WORKS end to end
+    # (a broken one would also produce a token-free redirect, so the last check
+    # alone proves nothing), and it does not mint a session.
+    location = resp.headers["location"]
+    assert "slack_pending=" in location
+    pending = location.split("slack_pending=", 1)[1]
+    done = client.post(
+        "/slack/link/complete",
+        json={"pending_token": pending},
+        headers=_user_headers(14),
+    )
+    assert done.status_code == 200
     with get_sessionmaker(engine)() as session:
-        assert get_slack_link(session, 7).slack_user_id == "U_SEVEN"
-    assert "slack_token" not in resp.headers["location"]
+        assert get_slack_link(session, 14).slack_user_id == "U_SEVEN"
+    assert "slack_token" not in location
 
 
 def test_login_is_refused_while_disabled_even_with_a_valid_state(
@@ -251,10 +275,7 @@ def test_login_is_refused_while_disabled_even_with_a_valid_state(
     get_settings.cache_clear()
     # Mint while the feature is ON, from the client that will complete the flow.
     client = _client(engine, fake_embedder)
-    state = dict(
-        p.split("=", 1)
-        for p in client.get("/slack/login-url").json()["url"].split("?", 1)[1].split("&")
-    )["state"]
+    state = _start_login(client)
 
     monkeypatch.setenv("TEKIJIN_SLACK_LOGIN_ENABLED", "false")
     get_settings.cache_clear()

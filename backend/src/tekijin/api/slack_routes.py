@@ -31,12 +31,13 @@ import json
 import logging
 import secrets
 import threading
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlparse
 
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse, Response
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from tekijin.api import schemas
@@ -72,6 +73,10 @@ _STATE_PURPOSE = "slack_link"
 # any signed-in user can mint from /slack/authorize-url — would be replayable at
 # the callback to obtain a bearer token (#406).
 _LOGIN_STATE_PURPOSE = "slack_login"
+# Handed to the frontend after a LINK callback, exchanged in-session for the
+# actual link. Short-lived and single-purpose.
+_PENDING_LINK_PURPOSE = "slack_link_pending"
+_PENDING_TTL_MINUTES = 5.0
 _STATE_TTL_MINUTES = 10.0
 
 # Binds the OAuth flow to the browser that started it (#494). A signed, unexpired
@@ -89,6 +94,20 @@ _STATE_TTL_MINUTES = 10.0
 _STATE_COOKIE = "tekijin_oauth_state"
 
 
+def _public_origin(settings: Settings) -> str:
+    """The origin Slack sends the browser back to.
+
+    The nonce cookie MUST be issued by this origin: cookies are scoped by host,
+    and the app calls the API on a different host entirely (Tailscale IP vs the
+    public tunnel), so a cookie set on the API origin is never sent to the
+    callback. Deriving it from ``slack_redirect_uri`` keeps the two in step by
+    construction.
+    """
+
+    parsed = urlparse(settings.slack_redirect_uri)
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
 def _new_nonce() -> tuple[str, str]:
     """A fresh nonce and the digest to embed in the state."""
 
@@ -103,8 +122,9 @@ def _set_nonce_cookie(response: Response, nonce: str, *, settings: Settings) -> 
         max_age=int(_STATE_TTL_MINUTES * 60),
         httponly=True,
         samesite="lax",
-        # Only over TLS when the callback itself is TLS; a Secure cookie would
-        # simply never be stored on a plain-HTTP local setup.
+        # Judged by the origin that ISSUES the cookie, which is now the same
+        # origin as the callback (see _public_origin). A Secure cookie is simply
+        # dropped by the browser over plain HTTP, so a local setup must not get one.
         secure=settings.slack_redirect_uri.startswith("https://"),
         path="/slack",
     )
@@ -128,20 +148,15 @@ def _require_linkable_employee(principal: Principal) -> int:
     return principal.employee_id
 
 
-def _encode_state(
-    *, purpose: str, secret: str, nonce_digest: str, employee_id: int | None = None
-) -> str:
+def _encode_state(*, purpose: str, secret: str, nonce_digest: str | None = None) -> str:
     now = dt.datetime.now(dt.UTC)
     payload: dict[str, object] = {
         "purpose": purpose,
-        "nonce": nonce_digest,
         "iat": int(now.timestamp()),
         "exp": int((now + dt.timedelta(minutes=_STATE_TTL_MINUTES)).timestamp()),
     }
-    if employee_id is not None:
-        # Login states carry no employee: WHO is signing in is decided by the
-        # Slack identity the callback resolves, never by the state.
-        payload["employee_id"] = employee_id
+    if nonce_digest is not None:
+        payload["nonce"] = nonce_digest
     return jwt.encode(payload, secret, algorithm="HS256")
 
 
@@ -164,16 +179,19 @@ def _verified_state(state: str, *, request: Request, secret: str) -> dict:
         payload = jwt.decode(state, secret, algorithms=["HS256"])
     except jwt.PyJWTError as exc:
         raise HTTPException(status_code=400, detail="invalid or expired state") from exc
-    if payload.get("purpose") not in (_STATE_PURPOSE, _LOGIN_STATE_PURPOSE):
+    purpose = payload.get("purpose")
+    if purpose not in (_STATE_PURPOSE, _LOGIN_STATE_PURPOSE):
         raise HTTPException(status_code=400, detail="invalid state")
-    if not _nonce_matches(request, payload.get("nonce")):
+    # Only LOGIN mints a session out of thin air, so only LOGIN needs to prove
+    # the browser started the flow. LINK is protected structurally instead: the
+    # callback cannot attach anything on its own — completion is authenticated.
+    if purpose == _LOGIN_STATE_PURPOSE and not _nonce_matches(request, payload.get("nonce")):
         raise HTTPException(status_code=400, detail="state was not started by this browser")
     return payload
 
 
 @router.get("/authorize-url", response_model=schemas.SlackAuthorizeUrlResponse)
 def authorize_url(
-    response: Response,
     principal: Principal = Depends(require_principal),
 ) -> schemas.SlackAuthorizeUrlResponse:
     """The "Sign in with Slack" URL for the frontend to navigate to.
@@ -183,18 +201,15 @@ def authorize_url(
     button is a temporarily-unavailable feature, not a caller mistake.
     """
 
-    employee_id = _require_linkable_employee(principal)
+    _require_linkable_employee(principal)
     settings = get_settings()
     if not settings.slack_configured():
         raise HTTPException(status_code=503, detail="Slack連携は現在利用できません。")
-    nonce, digest = _new_nonce()
-    _set_nonce_cookie(response, nonce, settings=settings)
-    state = _encode_state(
-        purpose=_STATE_PURPOSE,
-        employee_id=employee_id,
-        nonce_digest=digest,
-        secret=settings.auth_secret,
-    )
+    # NO employee id, and no nonce cookie. Which employee a link attaches to is
+    # decided by the SESSION that completes it (POST /slack/link/complete), not
+    # by this state — so handing this URL to someone else can only ever let THEM
+    # link THEIR own Slack account to THEIR own row (#494).
+    state = _encode_state(purpose=_STATE_PURPOSE, secret=settings.auth_secret)
     url = build_authorize_url(
         client_id=settings.slack_client_id,
         redirect_uri=settings.slack_redirect_uri,
@@ -203,23 +218,44 @@ def authorize_url(
     return schemas.SlackAuthorizeUrlResponse(url=url)
 
 
-@router.get("/login-url", response_model=schemas.SlackAuthorizeUrlResponse)
-def login_url(response: Response) -> schemas.SlackAuthorizeUrlResponse:
+@router.post("/login-url", response_model=schemas.SlackAuthorizeUrlResponse)
+def login_url() -> schemas.SlackAuthorizeUrlResponse:
     """ "Sign in with Slack" for someone who has NO session yet (#406 案A).
 
-    Deliberately unauthenticated — that is the whole point — so it carries no
-    employee id and reveals nothing: the state says only "this is a login
-    attempt", and which employee that becomes is decided by the Slack identity
+    Deliberately unauthenticated — that is the whole point — and it reveals
+    nothing: which employee the login becomes is decided by the Slack identity
     the callback resolves.
+
+    POST rather than GET so a third-party page cannot trigger it with
+    ``<img src>``; a cross-site POST needs a preflight this origin allowlist
+    refuses.
+    """
+
+    settings = get_settings()
+    if not settings.slack_login_enabled or not settings.slack_configured():
+        raise HTTPException(status_code=503, detail="Slackログインは現在利用できません。")
+    # Points at OUR start endpoint, not at Slack. The browser has to visit the
+    # callback's own origin first so the nonce cookie is issued there; issuing it
+    # from this response would put it on the API origin, which the callback host
+    # never sees (#494).
+    return schemas.SlackAuthorizeUrlResponse(url=f"{_public_origin(settings)}/slack/oauth/start")
+
+
+@router.get("/oauth/start")
+def oauth_start(response: Response) -> RedirectResponse:
+    """Begin a Slack LOGIN: issue the nonce, then bounce to Slack.
+
+    A plain top-level navigation, so there is no CORS and no third-party cookie
+    involved — the cookie is first-party to this origin, and Slack's callback
+    returns to the same one.
     """
 
     settings = get_settings()
     if not settings.slack_login_enabled or not settings.slack_configured():
         raise HTTPException(status_code=503, detail="Slackログインは現在利用できません。")
     nonce, digest = _new_nonce()
-    _set_nonce_cookie(response, nonce, settings=settings)
-    return schemas.SlackAuthorizeUrlResponse(
-        url=build_authorize_url(
+    redirect = RedirectResponse(
+        build_authorize_url(
             client_id=settings.slack_client_id,
             redirect_uri=settings.slack_redirect_uri,
             state=_encode_state(
@@ -227,6 +263,8 @@ def login_url(response: Response) -> schemas.SlackAuthorizeUrlResponse:
             ),
         )
     )
+    _set_nonce_cookie(redirect, nonce, settings=settings)
+    return redirect
 
 
 def _login_redirect(settings: Settings, identity: SlackIdentity, session: Session) -> str:
@@ -308,24 +346,74 @@ def oauth_callback(
         if purpose == _LOGIN_STATE_PURPOSE:
             with service.session_factory() as session:
                 return _spent(RedirectResponse(_login_redirect(settings, identity, session)))
-        employee_id = int(payload["employee_id"])
-        with session_scope(service.session_factory) as session:
-            # Also covers the DB write: `slack_user_id` is unique, so a Slack
-            # account already linked to a DIFFERENT employee raises an
-            # IntegrityError here — that must redirect to ?slack=error like any
-            # other OAuth failure, not surface as a bare 500 (the docstring
-            # above promises this callback ALWAYS redirects).
-            upsert_slack_link(
-                session,
-                employee_id,
-                slack_user_id=identity.slack_user_id,
-                slack_team_id=identity.slack_team_id,
-                now=dt.datetime.now(),  # noqa: DTZ005 - naive is intentional, matches created_at elsewhere
-            )
+        # The callback CANNOT attach the identity by itself: it has no session, so
+        # it does not know who is linking. It hands the frontend a short-lived
+        # pending token, which the frontend redeems with its own bearer token
+        # (POST /slack/link/complete). That is what makes a link URL harmless to
+        # forward to someone else (#494).
+        pending = jwt.encode(
+            {
+                "purpose": _PENDING_LINK_PURPOSE,
+                "slack_user_id": identity.slack_user_id,
+                "slack_team_id": identity.slack_team_id,
+                "exp": int(
+                    (
+                        dt.datetime.now(dt.UTC) + dt.timedelta(minutes=_PENDING_TTL_MINUTES)
+                    ).timestamp()
+                ),
+            },
+            settings.auth_secret,
+            algorithm="HS256",
+        )
+        return _spent(RedirectResponse(f"{frontend_chat_url}#slack_pending={pending}"))
     except Exception:  # noqa: BLE001 - browser redirect boundary, never surfaces a bare 4xx/5xx
         logger.warning("Slack OAuth callback failed", exc_info=True)
         return _spent(RedirectResponse(f"{frontend_chat_url}?slack=error"))
     return _spent(RedirectResponse(f"{frontend_chat_url}?slack=linked"))
+
+
+@router.post("/link/complete", response_model=schemas.SlackStatusResponse)
+def link_complete(
+    request: Request,
+    body: schemas.SlackLinkCompleteRequest,
+    principal: Principal = Depends(require_principal),
+) -> schemas.SlackStatusResponse:
+    """Redeem a pending Slack link against the CALLER's own session (#494).
+
+    The employee comes from the bearer token, never from anything that travelled
+    through the browser — so a link URL forwarded to someone else can only ever
+    attach that person's Slack account to their own row.
+    """
+
+    employee_id = _require_linkable_employee(principal)
+    settings = get_settings()
+    try:
+        payload = jwt.decode(body.pending_token, settings.auth_secret, algorithms=["HS256"])
+    except jwt.PyJWTError as exc:
+        raise HTTPException(status_code=400, detail="連携の有効期限が切れました。") from exc
+    if payload.get("purpose") != _PENDING_LINK_PURPOSE:
+        raise HTTPException(status_code=400, detail="連携情報が正しくありません。")
+    team = str(payload.get("slack_team_id", ""))
+    if settings.slack_team_id and team != settings.slack_team_id:
+        raise HTTPException(status_code=400, detail="このワークスペースは利用できません。")
+
+    service = request.app.state.agent_service
+    try:
+        with session_scope(service.session_factory) as session:
+            upsert_slack_link(
+                session,
+                employee_id,
+                slack_user_id=str(payload["slack_user_id"]),
+                slack_team_id=team,
+                now=dt.datetime.now(),  # noqa: DTZ005 - naive is intentional, matches created_at
+            )
+    except IntegrityError as exc:
+        # `slack_user_id` is unique: that Slack account already belongs to a
+        # different employee. Say so — "error" leaves the user with no next step.
+        raise HTTPException(
+            status_code=409, detail="このSlackアカウントは既に他の社員と連携されています。"
+        ) from exc
+    return schemas.SlackStatusResponse(linked=True)
 
 
 @router.get("/status", response_model=schemas.SlackStatusResponse)

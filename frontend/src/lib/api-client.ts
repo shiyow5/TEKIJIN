@@ -76,14 +76,6 @@ export interface RequestOptions {
   baseUrl?: string;
   /** Override the `fetch` implementation (mainly for tests). */
   fetchImpl?: typeof fetch;
-  /**
-   * Send cookies even cross-origin. Needed only by the Slack OAuth URL calls
-   * (#494): the nonce binding the flow to this browser comes back as a
-   * Set-Cookie, and the API is a different origin from the app (same host,
-   * different port), so the default `same-origin` would drop it. Left off
-   * everywhere else — this app authenticates with bearer tokens, not cookies.
-   */
-  credentials?: RequestCredentials;
   /** Optional abort signal. */
   signal?: AbortSignal;
 }
@@ -131,7 +123,6 @@ async function getJson<T>(path: string, options: RequestOptions = {}): Promise<T
     method: "GET",
     headers: { ...authHeaders() },
     signal: options.signal,
-    ...(options.credentials ? { credentials: options.credentials } : {}),
   });
 
   if (!response.ok) {
@@ -502,11 +493,7 @@ export function getSlackStatus(options: RequestOptions = {}): Promise<SlackStatu
 export function getSlackAuthorizeUrl(
   options: RequestOptions = {},
 ): Promise<SlackAuthorizeUrlResponse> {
-  return getJson<SlackAuthorizeUrlResponse>("/slack/authorize-url", {
-    ...options,
-    // Cross-origin: without this the nonce cookie never lands (#494).
-    credentials: options?.credentials ?? "include",
-  });
+  return getJson<SlackAuthorizeUrlResponse>("/slack/authorize-url", options);
 }
 
 /**
@@ -517,11 +504,26 @@ export function getSlackAuthorizeUrl(
 export async function getSlackLoginUrl(
   options?: RequestOptions,
 ): Promise<SlackAuthorizeUrlResponse> {
-  return getJson<SlackAuthorizeUrlResponse>("/slack/login-url", {
-    ...options,
-    // Cross-origin: without this the nonce cookie never lands (#494).
-    credentials: options?.credentials ?? "include",
-  });
+  // POST so a third-party page cannot trigger it with `<img src>` (#494).
+  return postJson<SlackAuthorizeUrlResponse>("/slack/login-url", undefined, options);
+}
+
+/**
+ * POST /slack/link/complete — redeem the pending token the OAuth callback left
+ * in the URL fragment, attaching that Slack account to the CALLER (#494).
+ *
+ * The callback cannot do this itself: it has no session, so it does not know who
+ * is linking. Rejects with 409 when the Slack account already belongs to someone.
+ */
+export async function completeSlackLink(
+  pendingToken: string,
+  options?: RequestOptions,
+): Promise<SlackStatusResponse> {
+  return postJson<SlackStatusResponse>(
+    "/slack/link/complete",
+    { pending_token: pendingToken },
+    options,
+  );
 }
 
 /** POST /slack/unlink — remove the acting employee's linked Slack account. */

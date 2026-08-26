@@ -9,13 +9,22 @@
  * The admin account is not a real employee and never receives chat messages,
  * so it renders nothing (mirrors `HomeActions`'s `adminOnly` gating).
  *
- * Linking is "Sign in with Slack": clicking navigates the WHOLE page to
- * Slack's authorize URL (an external OAuth flow, not a fetch) and back to
- * `/chat?slack=linked|error` once `GET /slack/oauth/callback` finishes.
+ * Linking is "Sign in with Slack": clicking navigates the WHOLE page to Slack's
+ * authorize URL (an external OAuth flow, not a fetch). The callback cannot
+ * finish the link on its own — it has no session, so it does not know who is
+ * linking — so it returns to `/chat#slack_pending=<token>` and this component
+ * redeems that token with the bearer token it already holds (#494). That is what
+ * makes a link URL harmless to forward: whoever redeems it is who gets linked.
  */
 
 import { useAuth } from "@/components/AuthProvider";
-import { ApiError, getSlackAuthorizeUrl, getSlackStatus, postSlackUnlink } from "@/lib/api-client";
+import {
+  ApiError,
+  completeSlackLink,
+  getSlackAuthorizeUrl,
+  getSlackStatus,
+  postSlackUnlink,
+} from "@/lib/api-client";
 import { useEffect, useState } from "react";
 
 type Status = "loading" | "unavailable" | "linked" | "unlinked";
@@ -24,10 +33,42 @@ export function SlackLinkButton() {
   const { principal } = useAuth();
   const [status, setStatus] = useState<Status>("loading");
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const linkable = principal != null && !principal.is_admin;
+  // Read once, on first render: the effect below strips it from the URL, so
+  // re-reading `location.hash` later would see nothing.
+  const [pendingToken] = useState<string | null>(() =>
+    typeof window === "undefined"
+      ? null
+      : new URLSearchParams((window.location.hash ?? "").replace(/^#/, "")).get("slack_pending"),
+  );
+
+  // Redeem a pending link left in the fragment by the OAuth callback (#494).
+  useEffect(() => {
+    if (!linkable || pendingToken === null) return;
+    // Clear it first: it is a one-shot credential and stays in history otherwise.
+    window.history.replaceState(
+      {},
+      "",
+      (window.location.pathname ?? "/") + (window.location.search ?? ""),
+    );
+    completeSlackLink(pendingToken)
+      .then(() => setStatus("linked"))
+      .catch((err) => {
+        setStatus("unlinked");
+        setError(
+          err instanceof ApiError && err.status === 409
+            ? "このSlackアカウントは既に他の社員と連携されています。"
+            : "Slack連携を完了できませんでした。もう一度お試しください。",
+        );
+      });
+  }, [linkable]);
 
   useEffect(() => {
-    if (!linkable) return;
+    // Skipped while a pending link is being redeemed: `/slack/status` was
+    // answered before the link existed, so letting it land would overwrite the
+    // redemption result and show "not linked" right after linking.
+    if (!linkable || pendingToken !== null) return;
     let active = true;
     getSlackStatus()
       .then((res) => {
@@ -39,7 +80,7 @@ export function SlackLinkButton() {
     return () => {
       active = false;
     };
-  }, [linkable]);
+  }, [linkable, pendingToken]);
 
   if (!linkable || status === "loading") return null;
 
@@ -90,13 +131,20 @@ export function SlackLinkButton() {
   }
 
   return (
-    <button
-      type="button"
-      onClick={handleConnect}
-      disabled={busy}
-      className="inline-flex items-center gap-xs rounded-full border border-outline-variant bg-surface-container-lowest px-sm py-1 font-bold text-on-surface text-xs shadow-sm transition-colors hover:bg-surface-container-low disabled:opacity-50"
-    >
-      Slackと連携
-    </button>
+    <div className="flex flex-col items-end gap-xs">
+      <button
+        type="button"
+        onClick={handleConnect}
+        disabled={busy}
+        className="inline-flex items-center gap-xs rounded-full border border-outline-variant bg-surface-container-lowest px-sm py-1 font-bold text-on-surface text-xs shadow-sm transition-colors hover:bg-surface-container-low disabled:opacity-50"
+      >
+        Slackと連携
+      </button>
+      {error ? (
+        <p role="alert" className="max-w-xs text-right text-error text-xs">
+          {error}
+        </p>
+      ) : null}
+    </div>
   );
 }

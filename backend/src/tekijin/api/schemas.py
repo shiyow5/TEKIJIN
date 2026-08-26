@@ -980,6 +980,12 @@ class SlackAuthorizeUrlResponse(BaseModel):
     url: str
 
 
+class SlackLinkCompleteRequest(BaseModel):
+    """The short-lived token the OAuth callback handed to the frontend (#494)."""
+
+    pending_token: str = Field(min_length=1, max_length=4096)
+
+
 class SlackStatusResponse(BaseModel):
     """Whether the acting employee currently has a linked Slack account."""
 
