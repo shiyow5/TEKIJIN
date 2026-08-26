@@ -11,7 +11,9 @@ e5-large では `answer_confidence` の最小値(0.816)が `PRIOR_ANSWER_SIM`(0.
 1経路への潰れ 0.94 < 0.95。0.30 のままだと潰れ 0.95 で制約を割り document recall も 4/10 に
 落ちていた）。ただし `answer_confidence` は prior_answer を分離できず
 （person gold が prior_answer gold より高い）、PRIOR_ANSWER_SIM=0.55 は観測最大 0.543 の
-直上に置いて意図的に無効化している。prior_answer の本筋復活はコーパス集計ルーティング(#119)。
+直上に置いて意図的に無効化している。**prior_answer 経路の復活は打ち止め**: コーパス集計
+ルーティング(#119/#327)は実測でどの config も baseline を Pareto 改善せず、ADR-0007 で棄却された
+（#119 は close 済み）。自己回答は経路でなく知識層(#357)で実現する方針。
 
 既存の単体テストは「閾値を超えたら prior_answer を返すか」を見ている。
 ここで見るのは「**その閾値は実際のデータで超えられるのか / 常に超えてしまわないか**」。
@@ -51,8 +53,9 @@ _REMEASURE = (
     "--out fixtures/synthetic/eval/route_calibration.json"
 )
 _FIXED_HINT = (
-    "コーパス集計ルーティング(#119)で prior_answer が復活したら、この xfail を削除すること"
-    "（strict=True なので xpass すると CI が落ちて気づける）"
+    "ADR-0007 で prior_answer 経路の復活は打ち止めになったので、この xfail は当面そのまま。"
+    "コーパス/埋め込みが変わって answer_confidence が person gold と分離できるようになったら "
+    "削除すること（strict=True なので xpass すると CI が落ちて気づける）"
 )
 
 
