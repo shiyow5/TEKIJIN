@@ -22,6 +22,7 @@ import { SourceCitations } from "@/components/SourceCitations";
 import { type EventStreamState, useEventStream } from "@/hooks/useEventStream";
 import { ApiError, postAnswer, requestDocumentFallback } from "@/lib/api-client";
 import { formatConfidence } from "@/lib/format";
+import { REVEAL_CLASS, revealStyle } from "@/lib/motion";
 import { routeLabel } from "@/lib/routes";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -240,10 +241,11 @@ export function ProcessingScreen({
         className="flex flex-col gap-md"
       >
         <ol className="flex flex-col gap-sm">
-          {steps.map((step) => (
+          {steps.map((step, index) => (
             <li
               key={step.id}
-              className="flex items-start gap-sm rounded-xl border border-outline-variant bg-surface-container-lowest p-md"
+              style={revealStyle(index)}
+              className={`flex items-start gap-sm rounded-xl border border-outline-variant bg-surface-container-lowest p-md ${REVEAL_CLASS}`}
             >
               <span
                 aria-label="完了"
@@ -272,7 +274,7 @@ export function ProcessingScreen({
           {showActiveStep ? (
             <li
               data-testid="active-step"
-              className="flex items-center gap-sm rounded-xl border border-primary-fixed bg-surface-container-low p-md"
+              className={`flex items-center gap-sm rounded-xl border border-primary-fixed bg-surface-container-low p-md ${REVEAL_CLASS}`}
             >
               <span
                 aria-label="進行中"

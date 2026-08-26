@@ -457,6 +457,30 @@ export interface FeedbackByStage {
   total: number;
 }
 
+/** One point of the accumulation trend (#294): `"2026-09"` and its count. */
+export interface MonthlyCount {
+  month: string;
+  count: number;
+}
+
+/**
+ * GET /dashboard `knowledge_accumulation` (#294) — how much tacit knowledge became
+ * explicit, and whether the loop is closing.
+ *
+ * Counts only what the runtime produced (captured answers #274, 直接相談
+ * retrospectives #247), never the seeded corpus. `capture_rate` is the recovery
+ * rate: of the hand-offs accepted this month, the share that left knowledge behind.
+ */
+export interface KnowledgeAccumulation {
+  this_month: number;
+  last_month: number;
+  captured_answers: number;
+  consult_retrospectives: number;
+  accepted_handoffs: number;
+  capture_rate: number;
+  monthly: MonthlyCount[];
+}
+
 export interface DashboardResponse {
   total_employees: number;
   total_questions: number;
@@ -478,6 +502,7 @@ export interface DashboardResponse {
   topic_distribution: TopicCount[];
   /** #237: how often the asking side corrected each stage (c1/c6/c7). */
   feedback_by_stage: FeedbackByStage;
+  knowledge_accumulation: KnowledgeAccumulation;
 }
 
 // --------------------------------------------------------------------------- //
@@ -519,18 +544,23 @@ export interface DoneData {
 }
 
 /**
- * One source a self-answer (#291) cited, shown in chat as a link (schemas.py
- * `SourceCitation`). `kind` is "document" (internal doc → GET /documents/{id})
- * or "qa" (a past Q&A).
+ * One source a self-answer (#291) cited, shown in chat as a link or a label chip
+ * (schemas.py `SourceCitation`).
  */
 export interface SourceCitation {
   source_id: string;
   /**
    * Closed set from the backend contract (fragments.py): a past Q&A, an internal
-   * doc, or a daily report (#433). "daily" has no detail page, so the UI shows it
-   * as a label chip rather than a link.
+   * doc, a daily report (#433), or a structured knowledge unit (#357). "daily" and
+   * "knowledge" have no detail page yet, so the UI shows them as label chips
+   * rather than links.
+   *
+   * Adding "knowledge" here is the enablement gate for #357 (#366): the renderer's
+   * final branch is a catch-all that reads 「過去の回答」, so a `ku_*` citation would
+   * be mislabelled as a past answer the moment `knowledge_retrieval_enabled` went
+   * true.
    */
-  kind: "qa" | "document" | "daily";
+  kind: "qa" | "document" | "daily" | "knowledge";
 }
 
 /**

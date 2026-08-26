@@ -8,24 +8,16 @@
  * mock (#125). Re-fetches when the acting user changes; renders nothing but a
  * quiet placeholder while there is no user or no history.
  *
- * A question with a ``session_id`` links to ``/session/{session_id}`` so the
- * asker can re-view its result (the run replays over /events) — #150. Seeded
- * history with no session is shown non-clickable.
+ * A question with a ``session_id`` links to ``/session/{session_id}/result`` so
+ * the asker can re-view its result screen (the run replays over /events) — #150,
+ * #468. Seeded history with no session is shown non-clickable.
  */
 
 import { useCurrentUser } from "@/components/CurrentUserProvider";
 import { QuestionDeleteButton } from "@/components/QuestionDeleteButton";
-import { getRecentQuestions } from "@/lib/api-client";
+import { useRecentQuestions } from "@/hooks/useRecentQuestions";
 import type { RecentQuestionItem } from "@/lib/api-types";
 import Link from "next/link";
-import { useEffect, useState } from "react";
-
-type Phase = "loading" | "ready" | "error";
-
-interface RecentState {
-  phase: Phase;
-  items?: RecentQuestionItem[];
-}
 
 /** First character of the responder's name, for the avatar chip. */
 function avatarInitial(name: string): string {
@@ -97,26 +89,7 @@ function QuestionCard({ item, clickable }: { item: RecentQuestionItem; clickable
 
 export function RecentQuestions() {
   const { currentUserId } = useCurrentUser();
-  const [state, setState] = useState<RecentState>({ phase: "loading" });
-
-  useEffect(() => {
-    if (currentUserId === null) {
-      setState({ phase: "loading" });
-      return;
-    }
-    let active = true;
-    setState({ phase: "loading" });
-    getRecentQuestions(currentUserId)
-      .then((items) => {
-        if (active) setState({ phase: "ready", items });
-      })
-      .catch(() => {
-        if (active) setState({ phase: "error" });
-      });
-    return () => {
-      active = false;
-    };
-  }, [currentUserId]);
+  const [state, setState] = useRecentQuestions(currentUserId);
 
   /** Drop a just-deleted question from the list without a full re-fetch (#207). */
   function handleDeleted(questionId: string) {
@@ -143,7 +116,7 @@ export function RecentQuestions() {
             <li key={item.question_id} className="relative">
               {item.session_id ? (
                 <Link
-                  href={`/session/${encodeURIComponent(item.session_id)}`}
+                  href={`/session/${encodeURIComponent(item.session_id)}/result`}
                   aria-label={`「${item.title}」（${item.resolved ? "解決済" : "対応中"}）の結果をもう一度見る`}
                   className="block h-full rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 >

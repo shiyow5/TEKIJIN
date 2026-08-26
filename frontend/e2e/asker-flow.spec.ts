@@ -187,9 +187,17 @@ test.describe("asker flow", () => {
     await page.goto("/questions");
     await page.getByRole("link", { name: /「UTMの移行時の注意点」/ }).click();
 
-    await page.waitForURL(/\/session\/sess-rq1$/);
-    // The replayed result renders (candidate + draft on the processing screen).
-    await expect(page.getByText("回答者が見つかりました")).toBeVisible();
+    // #470 moved the destination from the session root to its `/result` view, and
+    // left this test asserting the old URL and the ProcessingScreen heading that
+    // lives there. Both are now the ResultScreen's: it renders the replayed
+    // candidate and draft directly, with no live pipeline in front of it.
+    await page.waitForURL(/\/session\/sess-rq1\/result$/);
+    await expect(
+      page.getByRole("heading", { name: "この質問は、人に聞くのが確実です" }),
+    ).toBeVisible();
+    // The point of the feature: the SESSION comes back, not just the screen.
+    await expect(page.getByRole("heading", { name: /高梨 健太（最有力）/ })).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "聞き方の下書き" })).toHaveValue(/高梨さんへ。/);
   });
 
   test("ホームのヒーロー質問バーから直接送信できる — /questions を経由しない (#392)", async ({
@@ -221,9 +229,20 @@ test.describe("asker flow", () => {
 
 /**
  * #392 put the same 「何を知りたいですか？」 heading on the hub as on `/questions`.
- * The unit test asserts the WORDS match; it cannot see that the two rendered at
- * different sizes (24px vs 30px) for a while. Compare what the browser actually
- * computes, so "same heading" stays true rather than just true-looking.
+ * The unit test asserted the WORDS match; it could not see that the two rendered
+ * at different sizes (24px vs 30px) for a while. Compare what the browser
+ * actually computes, so "same heading" stays true rather than just true-looking.
+ *
+ * #421 made both screens render ONE shared `QuestionForm`, so the class strings
+ * can no longer disagree and `tests/QuestionForm.test.tsx` pins that structurally.
+ * This check is kept because the unit test compares class STRINGS and jsdom
+ * applies no stylesheet at all — it never computes a pixel. A wrapper can still
+ * restyle its descendants: add `[&_h1]:text-2xl` to either screen's wrapper and
+ * the shared component's classes stay byte-identical, the unit test passes, and
+ * the two headings render at 24px and 30px again — #411 exactly. (Note it is NOT
+ * inheritance: `text-3xl`/`font-bold`/`mb-margin` are all set on the element
+ * itself with absolute values, `mb-margin` being a literal 32px.) This is also
+ * the only check that Tailwind actually emits these utilities on both routes.
  */
 test("the hub's hero heading renders identically to the one on /questions (#392)", async ({
   page,
