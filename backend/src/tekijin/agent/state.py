@@ -104,6 +104,9 @@ class AgentState(TypedDict, total=False):
     question_type: str
     out_of_scope: bool
     intent_confidence: float
+    # #83: the branch the asker explicitly asked the responder to be at (None = no
+    # constraint). C6 treats it as a condition to satisfy, not a scoring term.
+    constraint_branch: str | None
 
     # -- C2 sufficiency ----------------------------------------------------
     sufficient: bool
