@@ -361,6 +361,13 @@ class ConsultRetrospectiveRequest(BaseModel):
     so an attributable author is what stops it being a way to fabricate someone's
     standing.
 
+    ``responder_id`` IS accepted from the body, but it is not trusted: the route
+    requires it to equal the employee who ACCEPTED this question's hand-off. It is
+    a confirmation of what the client was shown, not a choice — an author-only
+    check ("who may write") would still have left "whom may they write about" open,
+    which is a way to grant anyone up to ``OFFLINE_CONSULT_EVIDENCE_CAP`` × the
+    offline-consult base score on any topic.
+
     ``topics`` is validated against ``TOPIC_VOCABULARY`` because the scorer JOINS
     on these strings — a free-text topic would match no evidence and silently do
     nothing (#116). ``asked`` is optional (#247 の項目2); the rest are required.
@@ -389,6 +396,34 @@ class ConsultRetrospectiveRequest(BaseModel):
         if not stripped:
             raise ValueError("得られた回答は必須です")
         return stripped
+
+
+class ConsultResponder(BaseModel):
+    """The person a retrospective may be written about (#247)."""
+
+    person_id: str
+    name: str
+
+
+class ConsultRetrospectiveContext(BaseModel):
+    """What GET /consult-retrospective/{session_id} tells the write-up form (#247).
+
+    Deliberately NOT ``HandoffResponse``: that payload is the pending hand-off view
+    and 404s as soon as the responder records an outcome — i.e. it stops existing
+    exactly when the face-to-face consultation becomes possible. This one is read
+    from SQL and stays valid afterwards.
+
+    ``responder`` is ``None`` until someone accepts, ``already_recorded`` flips once
+    a write-up exists; between them the client can tell "not yet consulted", "ready
+    to write" and "already written" apart without guessing from error codes.
+    """
+
+    session_id: str
+    question_id: str
+    question: str
+    consult_method: ConsultMethod
+    responder: ConsultResponder | None = None
+    already_recorded: bool = False
 
 
 class ConsultRetrospectiveAck(BaseModel):

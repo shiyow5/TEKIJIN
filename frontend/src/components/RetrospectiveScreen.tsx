@@ -3,21 +3,27 @@
 /**
  * 直接相談のふりかえり画面 (#247).
  *
- * Loads the session's hand-off so the write-up can be attributed to the right
- * question and the right responder, then renders {@link RetrospectiveForm}.
+ * Loads `GET /consult-retrospective/{session_id}` so the write-up can be
+ * attributed to the right question and the right responder, then renders
+ * {@link RetrospectiveForm}.
  *
- * Deliberately refuses in three cases rather than rendering a form that cannot
- * produce a valid record: a chat hand-off (the transcript already exists — a
- * hearsay summary on top of it would be a second, weaker copy), a hand-off with
- * no responder, and one with no question id.
+ * That endpoint — rather than `GET /handoff` — is what makes the screen reachable
+ * at all: the hand-off view is the PENDING view and 404s as soon as the responder
+ * records an outcome, which is the moment the face-to-face consultation becomes
+ * possible in the first place.
+ *
+ * Deliberately refuses rather than rendering a form that cannot produce a valid
+ * record: a chat hand-off (the transcript already exists — a hearsay summary on
+ * top of it would be a second, weaker copy), a hand-off nobody has accepted yet
+ * (nothing was consulted), and one that has already been written up.
  */
 
 import { useEffect, useState } from "react";
 
 import { PageBackLink } from "@/components/PageBackLink";
 import { RetrospectiveForm } from "@/components/RetrospectiveForm";
-import { getHandoff } from "@/lib/api-client";
-import type { HandoffResponse } from "@/lib/api-types";
+import { getRetrospectiveContext } from "@/lib/api-client";
+import type { ConsultRetrospectiveContext } from "@/lib/api-types";
 
 export interface RetrospectiveScreenProps {
   sessionId: string;
@@ -32,15 +38,15 @@ function Notice({ children }: { children: React.ReactNode }) {
 }
 
 export function RetrospectiveScreen({ sessionId }: RetrospectiveScreenProps) {
-  const [handoff, setHandoff] = useState<HandoffResponse | null>(null);
+  const [context, setContext] = useState<ConsultRetrospectiveContext | null>(null);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    getHandoff(sessionId)
+    getRetrospectiveContext(sessionId)
       .then((data) => {
         if (!cancelled) {
-          setHandoff(data);
+          setContext(data);
         }
       })
       .catch(() => {
@@ -59,24 +65,27 @@ export function RetrospectiveScreen({ sessionId }: RetrospectiveScreenProps) {
       <h1 className="font-bold text-2xl text-on-surface">相談のふりかえり</h1>
       {failed ? (
         <Notice>この依頼を読み込めませんでした。時間をおいて開き直してください。</Notice>
-      ) : handoff === null ? (
+      ) : context === null ? (
         <p className="text-on-surface-variant">読み込み中...</p>
-      ) : handoff.consult_method !== "direct" ? (
+      ) : context.consult_method !== "direct" ? (
         <Notice>
           この依頼はチャットで相談しているため、ふりかえりの入力は不要です。
           チャットのやり取りが残っているので、そちらがそのままナレッジになります。
         </Notice>
-      ) : handoff.responder == null ? (
-        <Notice>この依頼には対応者が記録されていないため、ふりかえりを残せません。</Notice>
-      ) : handoff.question_id == null ? (
-        <Notice>この依頼には質問が紐づいていないため、ふりかえりを残せません。</Notice>
+      ) : context.responder === null ? (
+        <Notice>
+          この依頼はまだ受諾されていないため、ふりかえりを残せません。
+          相談が済んでから、もう一度開いてください。
+        </Notice>
+      ) : context.already_recorded ? (
+        <Notice>この相談のふりかえりは、すでに記録されています。</Notice>
       ) : (
         <>
-          <p className="whitespace-pre-wrap text-on-surface-variant">{handoff.question}</p>
+          <p className="whitespace-pre-wrap text-on-surface-variant">{context.question}</p>
           <RetrospectiveForm
-            questionId={handoff.question_id}
-            responderId={handoff.responder.person_id}
-            responderName={handoff.responder.name}
+            questionId={context.question_id}
+            responderId={context.responder.person_id}
+            responderName={context.responder.name}
           />
         </>
       )}

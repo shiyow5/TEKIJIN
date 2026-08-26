@@ -624,6 +624,33 @@ export interface TopicVocabularyResponse {
 /** How far a 直接相談 got (#247). `unresolved` is recorded but is not evidence. */
 export type ConsultResolution = "resolved" | "partial" | "unresolved";
 
+/** The person a retrospective may be written about (#247). */
+export interface ConsultResponder {
+  person_id: string;
+  name: string;
+}
+
+/**
+ * GET /consult-retrospective/{session_id} — what the write-up form is built from
+ * (#247).
+ *
+ * NOT `HandoffResponse`: that is the pending hand-off view and 404s the moment the
+ * responder records an outcome, which is exactly when the face-to-face
+ * consultation can finally have taken place. This one is read from the database
+ * and stays valid afterwards.
+ *
+ * `responder` is null until someone accepts; `already_recorded` flips once a
+ * write-up exists.
+ */
+export interface ConsultRetrospectiveContext {
+  session_id: string;
+  question_id: string;
+  question: string;
+  consult_method: ConsultMethod;
+  responder: ConsultResponder | null;
+  already_recorded: boolean;
+}
+
 /**
  * POST /consult-retrospective — the asker's write-up of a face-to-face 直接相談
  * (#247). `asker_id` is deliberately absent: the backend takes it from the token,

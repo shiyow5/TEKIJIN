@@ -42,10 +42,17 @@ from tekijin.auth.deps import (
     require_session_participant,
 )
 from tekijin.auth.principal import Principal
+from tekijin.config import get_settings
+from tekijin.data.consult import (
+    accepted_responder_id,
+    has_retrospective,
+    retrospective_context,
+)
 from tekijin.data.dashboard import dashboard_summary
 from tekijin.data.db import session_scope
 from tekijin.data.documents import get_document
 from tekijin.data.feedback import record_feedback
+from tekijin.data.handoff import question_consult_method
 from tekijin.data.history import question_asker_id, recent_questions_for_asker
 from tekijin.data.inbox import pending_handoffs_for_responder
 from tekijin.data.knowledge_library import get_qa_detail, list_knowledge
@@ -769,6 +776,54 @@ def topics(principal: Principal = Depends(require_principal)) -> schemas.TopicVo
     return schemas.TopicVocabularyResponse(topics=list(TOPIC_VOCABULARY))
 
 
+@router.get(
+    "/consult-retrospective/{session_id}",
+    response_model=schemas.ConsultRetrospectiveContext,
+)
+def consult_retrospective_context(
+    session_id: str,
+    request: Request,
+    principal: Principal = Depends(require_principal),
+) -> schemas.ConsultRetrospectiveContext:
+    """What the 直接相談 write-up form is built from (#247).
+
+    Read from SQL rather than reusing ``GET /handoff``: that endpoint serves the
+    PENDING hand-off out of the checkpoint and 404s the moment the responder
+    records an outcome — which is precisely when a face-to-face consultation can
+    finally have happened. Building the form on it made the feature reachable only
+    in the window before the thing it documents took place.
+
+    404 for a session with no question; object-level auth mirrors the write side —
+    only the question's own asker (or an admin) may read it, since it names who
+    they consulted.
+    """
+
+    with (
+        _generic_500("GET /consult-retrospective"),
+        session_scope(_service(request).session_factory) as session,
+    ):
+        ctx = retrospective_context(session, session_id)
+        if ctx is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        require_can_act_as(principal, ctx["asker_id"])
+        responder = (
+            schemas.ConsultResponder(
+                person_id=schemas.format_employee_id(ctx["responder_id"]),
+                name=ctx["responder_name"] or "",
+            )
+            if ctx["responder_id"] is not None
+            else None
+        )
+        return schemas.ConsultRetrospectiveContext(
+            session_id=session_id,
+            question_id=ctx["question_id"],
+            question=ctx["question"],
+            consult_method=schemas.normalize_consult_method(ctx["consult_method"]),
+            responder=responder,
+            already_recorded=ctx["already_recorded"],
+        )
+
+
 @router.post("/consult-retrospective", response_model=schemas.ConsultRetrospectiveAck)
 def consult_retrospective(
     req: schemas.ConsultRetrospectiveRequest,
@@ -784,18 +839,37 @@ def consult_retrospective(
     are stricter than "append-only, rate limited":
 
     * ``asker_id`` is taken from the principal, never the body.
-    * Only the QUESTION'S OWN ASKER (or an admin) may write one. Without that, any
-      user could inflate — or fabricate — another employee's standing on a topic
-      by posting retrospectives about consultations that never happened.
+    * Only the QUESTION'S OWN ASKER (or an admin) may write one — that settles WHO
+      may write.
+    * ``responder_id`` must equal the employee who ACCEPTED this question's
+      hand-off — that settles WHOM they may write about, which is the half that
+      actually guards the score. Authorising the author alone still let anyone
+      create a question and then credit any colleague (or themselves) with up to
+      ``OFFLINE_CONSULT_EVIDENCE_CAP`` consultations' worth of evidence on any
+      topic. Checking against the ACCEPTED row (not merely a shown recommendation)
+      also means the id is a real employee, so a bogus one is a 422 here instead of
+      an FK ``IntegrityError`` surfacing as a 500 (the shape #263 removed from
+      ``/feedback``). ``POST /handoff/select`` sets the precedent: a person id from
+      the client is checked against what the system actually offered.
+    * At most ONE write-up per question (409 on a second): exactly one hand-off is
+      ever accepted, so "the consultation" is singular, and repeating it would let
+      one real conversation fill the whole evidence cap.
+    * The question must have been handed off as ``direct``. A chat consultation
+      already has a transcript; a remembered summary layered on top of it is a
+      second, weaker copy of the same exchange.
     * An unknown ``question_id`` is a 404 rather than a silently-dropped link (the
       way ``/feedback`` treats it): a retrospective with no question is not a
       weaker signal, it is an unverifiable one, so there is nothing to record.
     * Topics are constrained to ``TOPIC_VOCABULARY`` by the request model — the
       scorer joins on these strings, and free text would match nothing (#116).
 
-    Rate limited per actor, reusing the feedback limiter: both are asker-driven
-    append-only writes, and this one feeds scoring, so flooding it matters more.
+    Rate limited per actor with the feedback limiter's budget (60/60s), under a
+    SEPARATE key: both are asker-driven append-only writes at human speed, and one
+    write per finished consultation is far below that ceiling.
     """
+
+    if not get_settings().consult_retrospective_enabled:
+        raise HTTPException(status_code=503, detail="ふりかえりの記録は現在無効です。")
 
     limiter = request.app.state.feedback_rate_limiter
     if not limiter.allow(f"consult-retrospective:{principal.employee_id}"):
@@ -809,6 +883,35 @@ def consult_retrospective(
             if owner is None:
                 raise HTTPException(status_code=404, detail="question not found")
             require_can_act_as(principal, owner)
+            if (
+                schemas.normalize_consult_method(question_consult_method(session, req.question_id))
+                != "direct"
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail="この依頼は直接相談ではないため、ふりかえりは記録できません。",
+                )
+            accepted = accepted_responder_id(session, req.question_id)
+            if accepted is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail="この依頼はまだ受諾されていないため、ふりかえりは記録できません。",
+                )
+            if has_retrospective(session, req.question_id):
+                # One accepted hand-off per question means one consultation; without
+                # this, the same real conversation could be written up
+                # ``OFFLINE_CONSULT_EVIDENCE_CAP`` times to reach the full cap.
+                raise HTTPException(
+                    status_code=409,
+                    detail="この依頼のふりかえりは、すでに記録されています。",
+                )
+            if responder_id != accepted:
+                # Includes naming yourself: the asker is never the accepting
+                # responder, so self-attribution falls out of this same check.
+                raise HTTPException(
+                    status_code=422,
+                    detail="ふりかえりは、実際に相談を受けた相手についてのみ記録できます。",
+                )
             consult_id = record_offline_consult(
                 session,
                 question_id=req.question_id,

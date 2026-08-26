@@ -1,62 +1,81 @@
 import { RetrospectiveLink } from "@/components/RetrospectiveLink";
-import type { HandoffResponse } from "@/lib/api-types";
+import type { ConsultRetrospectiveContext } from "@/lib/api-types";
 import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const getHandoffMock = vi.fn();
+const getRetrospectiveContextMock = vi.fn();
 vi.mock("@/lib/api-client", () => ({
-  getHandoff: (...args: unknown[]) => getHandoffMock(...args),
+  getRetrospectiveContext: (...args: unknown[]) => getRetrospectiveContextMock(...args),
 }));
 
-function handoff(over: Partial<HandoffResponse> = {}): HandoffResponse {
+function context(over: Partial<ConsultRetrospectiveContext> = {}): ConsultRetrospectiveContext {
   return {
     session_id: "s1",
-    question: "q",
     question_id: "q_0001",
-    asker: { id: "E010", name: "相談者" },
-    topics: [],
-    products: [],
-    missing: [],
-    responder: { person_id: "E001", name: "山田 太郎", score: 0.8, reasons: [] },
-    draft: "",
-    reuse_count: 0,
-    helpful_answer_count: 0,
+    question: "拠点間VPNが不安定です",
     consult_method: "direct",
+    responder: { person_id: "E001", name: "山田 太郎" },
+    already_recorded: false,
     ...over,
-  } as HandoffResponse;
+  };
 }
 
 beforeEach(() => {
-  getHandoffMock.mockReset();
+  getRetrospectiveContextMock.mockReset();
 });
 
 describe("RetrospectiveLink", () => {
-  it("links to the retrospective for a direct consultation", async () => {
-    getHandoffMock.mockResolvedValue(handoff());
+  it("links to the retrospective for an accepted direct consultation", async () => {
+    getRetrospectiveContextMock.mockResolvedValue(context());
     render(<RetrospectiveLink sessionId="s1" />);
     const link = await screen.findByRole("link", { name: /ふりかえりを記録/ });
     expect(link.getAttribute("href")).toBe("/session/s1/retrospective");
   });
 
+  it("reads the durable context, not the pending hand-off view", async () => {
+    // GET /handoff 404s the moment the responder records an outcome, i.e. exactly
+    // when the face-to-face consultation becomes possible. A CTA built on it could
+    // only ever appear before there was anything to write up.
+    getRetrospectiveContextMock.mockResolvedValue(context());
+    render(<RetrospectiveLink sessionId="s1" />);
+    await screen.findByRole("link", { name: /ふりかえりを記録/ });
+    expect(getRetrospectiveContextMock).toHaveBeenCalledWith("s1");
+  });
+
   it("renders nothing for a chat hand-off", async () => {
-    getHandoffMock.mockResolvedValue(handoff({ consult_method: "chat" }));
+    getRetrospectiveContextMock.mockResolvedValue(context({ consult_method: "chat" }));
     const { container } = render(<RetrospectiveLink sessionId="s1" />);
-    await waitFor(() => expect(getHandoffMock).toHaveBeenCalled());
+    await waitFor(() => expect(getRetrospectiveContextMock).toHaveBeenCalled());
     expect(container.textContent).toBe("");
   });
 
-  it("renders nothing when the hand-off cannot be read", async () => {
+  it("renders nothing before anyone has accepted the hand-off", async () => {
+    // Nothing has been consulted yet, so there is nothing to write up.
+    getRetrospectiveContextMock.mockResolvedValue(context({ responder: null }));
+    const { container } = render(<RetrospectiveLink sessionId="s1" />);
+    await waitFor(() => expect(getRetrospectiveContextMock).toHaveBeenCalled());
+    expect(container.textContent).toBe("");
+  });
+
+  it("renders nothing once a write-up already exists", async () => {
+    getRetrospectiveContextMock.mockResolvedValue(context({ already_recorded: true }));
+    const { container } = render(<RetrospectiveLink sessionId="s1" />);
+    await waitFor(() => expect(getRetrospectiveContextMock).toHaveBeenCalled());
+    expect(container.textContent).toBe("");
+  });
+
+  it("renders nothing when the context cannot be read", async () => {
     // The CTA is an extra: a failed lookup must stay silent rather than push an
     // error onto a screen that is otherwise fine.
-    getHandoffMock.mockRejectedValue(new Error("boom"));
+    getRetrospectiveContextMock.mockRejectedValue(new Error("boom"));
     const { container } = render(<RetrospectiveLink sessionId="s1" />);
-    await waitFor(() => expect(getHandoffMock).toHaveBeenCalled());
+    await waitFor(() => expect(getRetrospectiveContextMock).toHaveBeenCalled());
     expect(container.textContent).toBe("");
   });
 
   it("renders nothing without a session id", () => {
     const { container } = render(<RetrospectiveLink />);
-    expect(getHandoffMock).not.toHaveBeenCalled();
+    expect(getRetrospectiveContextMock).not.toHaveBeenCalled();
     expect(container.textContent).toBe("");
   });
 });

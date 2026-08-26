@@ -1,72 +1,77 @@
 import { RetrospectiveScreen } from "@/components/RetrospectiveScreen";
-import type { HandoffResponse } from "@/lib/api-types";
+import type { ConsultRetrospectiveContext } from "@/lib/api-types";
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const getHandoffMock = vi.fn();
+const getRetrospectiveContextMock = vi.fn();
 const getTopicsMock = vi.fn();
 
 vi.mock("@/lib/api-client", () => ({
-  getHandoff: (...args: unknown[]) => getHandoffMock(...args),
+  getRetrospectiveContext: (...args: unknown[]) => getRetrospectiveContextMock(...args),
   getTopics: (...args: unknown[]) => getTopicsMock(...args),
   postConsultRetrospective: vi.fn(),
 }));
 
-function handoff(over: Partial<HandoffResponse> = {}): HandoffResponse {
+function context(over: Partial<ConsultRetrospectiveContext> = {}): ConsultRetrospectiveContext {
   return {
     session_id: "s1",
-    question: "拠点間VPNが不安定です",
     question_id: "q_0001",
-    asker: { id: "E010", name: "相談者", dept: "営業部" },
-    topics: [],
-    products: [],
-    missing: [],
-    responder: { person_id: "E001", name: "山田 太郎", score: 0.8, reasons: [] },
-    draft: "",
-    reuse_count: 0,
-    helpful_answer_count: 0,
+    question: "拠点間VPNが不安定です",
     consult_method: "direct",
+    responder: { person_id: "E001", name: "山田 太郎" },
+    already_recorded: false,
     ...over,
-  } as HandoffResponse;
+  };
 }
 
 beforeEach(() => {
-  getHandoffMock.mockReset();
+  getRetrospectiveContextMock.mockReset();
   getTopicsMock.mockReset();
   getTopicsMock.mockResolvedValue(["ネットワーク・VPN"]);
 });
 
 describe("RetrospectiveScreen", () => {
-  it("renders the form for a direct consultation", async () => {
-    getHandoffMock.mockResolvedValue(handoff());
+  it("renders the form for an accepted direct consultation", async () => {
+    getRetrospectiveContextMock.mockResolvedValue(context());
     render(<RetrospectiveScreen sessionId="s1" />);
     expect(await screen.findByText("直接相談のふりかえり")).toBeTruthy();
     expect(screen.getByText(/山田 太郎/)).toBeTruthy();
   });
 
+  it("is built on the durable context, so it still works after the acceptance", async () => {
+    // The regression this replaced: GET /handoff 404s once an outcome is recorded,
+    // which is precisely when the consultation can have taken place.
+    getRetrospectiveContextMock.mockResolvedValue(context());
+    render(<RetrospectiveScreen sessionId="s1" />);
+    await screen.findByText("直接相談のふりかえり");
+    expect(getRetrospectiveContextMock).toHaveBeenCalledWith("s1");
+  });
+
   it("does not offer the form for a chat hand-off", async () => {
     // A chat consultation already leaves a transcript; a hearsay write-up on top
     // of it would be a second, weaker record of the same conversation.
-    getHandoffMock.mockResolvedValue(handoff({ consult_method: "chat" }));
+    getRetrospectiveContextMock.mockResolvedValue(context({ consult_method: "chat" }));
     render(<RetrospectiveScreen sessionId="s1" />);
     expect(await screen.findByText(/チャットのやり取りが残って/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /記録する/ })).toBeNull();
   });
 
-  it("explains rather than crashing when the hand-off has no responder", async () => {
-    getHandoffMock.mockResolvedValue(handoff({ responder: null }));
+  it("explains rather than offering a form nobody has accepted yet", async () => {
+    getRetrospectiveContextMock.mockResolvedValue(context({ responder: null }));
     render(<RetrospectiveScreen sessionId="s1" />);
-    expect(await screen.findByRole("alert")).toBeTruthy();
+    expect(await screen.findByText(/まだ受諾されていない/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /記録する/ })).toBeNull();
   });
 
-  it("explains rather than crashing when the question id is missing", async () => {
-    getHandoffMock.mockResolvedValue(handoff({ question_id: null }));
+  it("says so when the write-up has already been recorded", async () => {
+    getRetrospectiveContextMock.mockResolvedValue(context({ already_recorded: true }));
     render(<RetrospectiveScreen sessionId="s1" />);
-    expect(await screen.findByRole("alert")).toBeTruthy();
+    expect(await screen.findByText(/すでに記録されています/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /記録する/ })).toBeNull();
   });
 
   it("surfaces a load failure", async () => {
-    getHandoffMock.mockRejectedValue(new Error("boom"));
+    getRetrospectiveContextMock.mockRejectedValue(new Error("boom"));
     render(<RetrospectiveScreen sessionId="s1" />);
     expect(await screen.findByRole("alert")).toBeTruthy();
   });

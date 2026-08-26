@@ -1,5 +1,5 @@
 import { RetrospectiveForm } from "@/components/RetrospectiveForm";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const getTopicsMock = vi.fn();
@@ -88,6 +88,34 @@ describe("RetrospectiveForm", () => {
     const body = postConsultRetrospectiveMock.mock.calls[0][0];
     expect(body.topics).toEqual(["ネットワーク・VPN", "セキュリティ"]);
     expect(body.resolution).toBe("resolved");
+  });
+
+  it("marks the selected topics as pressed", async () => {
+    renderForm();
+    const chip = await screen.findByRole("button", { name: "ネットワーク・VPN" });
+    expect(chip.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(chip);
+    expect(chip.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(chip);
+    expect(chip.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("posts once even when two clicks land before a re-render", async () => {
+    // `submitting` only disables the button on the NEXT render, so two clicks in
+    // the same batch both pass `canSubmit`. Both dispatches go inside one `act` on
+    // purpose — `fireEvent` flushes between calls and would hide the race. The API
+    // answers the second POST 409, so the visible symptom would be a failure
+    // message for a write-up that was actually recorded.
+    renderForm();
+    await fillRequired();
+    const submit = screen.getByRole("button", { name: /記録する/ });
+
+    await act(async () => {
+      submit.click();
+      submit.click();
+    });
+
+    expect(postConsultRetrospectiveMock).toHaveBeenCalledTimes(1);
   });
 
   it("deselects a topic when it is clicked again", async () => {

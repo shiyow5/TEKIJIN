@@ -33,6 +33,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
@@ -174,12 +175,22 @@ class OfflineConsult(Base):
     ``resolution`` is ``resolved`` / ``partial`` / ``unresolved``. ``unresolved``
     is stored but contributes NO expertise evidence and never subtracts — the same
     rule as a decline (db-schema.md: 断り≠非専門).
+
+    ONE row per question, enforced by a unique constraint: exactly one hand-off per
+    question is ever accepted, so "the consultation" is singular. Without it the
+    asker could write the same consultation up ``OFFLINE_CONSULT_EVIDENCE_CAP``
+    times and reach the full cap from a single real conversation.
     """
 
     __tablename__ = "offline_consults"
+    __table_args__ = (UniqueConstraint("question_id", name="uq_offline_consults_question"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    question_id: Mapped[str | None] = mapped_column(ForeignKey("questions.id"), index=True)
+    # NOT NULL: a write-up with no question is not weaker evidence, it is
+    # unverifiable evidence, so there is nothing to record (the route answers 404).
+    # It also makes the unique constraint above bite — Postgres allows any number
+    # of NULLs in a unique column.
+    question_id: Mapped[str] = mapped_column(ForeignKey("questions.id"), index=True)
     # Who answered (the person this becomes evidence for) and who is reporting it.
     responder_id: Mapped[int] = mapped_column(ForeignKey("employees.id"), index=True)
     asker_id: Mapped[int | None] = mapped_column(ForeignKey("employees.id"), index=True)

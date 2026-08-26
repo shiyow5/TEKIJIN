@@ -14,7 +14,7 @@
  * produce evidence that matches nothing (#116).
  */
 
-import { type FormEvent, useCallback, useEffect, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 
 import { getTopics, postConsultRetrospective } from "@/lib/api-client";
 import type { ConsultResolution } from "@/lib/api-types";
@@ -48,6 +48,11 @@ export function RetrospectiveForm({
   const [submitting, setSubmitting] = useState(false);
   const [recorded, setRecorded] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Guards a double submit within one tick: `submitting` only disables the button
+  // on the NEXT render, so two clicks in the same batch both pass `canSubmit`. The
+  // API answers the second one 409 (one write-up per question), so without this the
+  // user would see a failure message for a write that actually succeeded.
+  const inFlight = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -78,9 +83,10 @@ export function RetrospectiveForm({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!canSubmit) {
+    if (!canSubmit || inFlight.current) {
       return;
     }
+    inFlight.current = true;
     setSubmitting(true);
     setError(null);
     try {
@@ -102,6 +108,7 @@ export function RetrospectiveForm({
       // outcome this form must never produce.
       setError("記録できませんでした。もう一度お試しください。");
     } finally {
+      inFlight.current = false;
       setSubmitting(false);
     }
   }

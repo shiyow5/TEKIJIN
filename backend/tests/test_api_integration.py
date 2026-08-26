@@ -4242,9 +4242,53 @@ def _consult_rows(engine):
         return session.query(OfflineConsult).order_by(OfflineConsult.id).all()
 
 
-def _retro_body(**over):
+def _question_id_for_session(engine, session_id: str) -> str:
+    from sqlalchemy import select
+
+    with session_scope(get_sessionmaker(engine)) as session:
+        return session.execute(
+            select(Question.id).where(Question.session_id == session_id)
+        ).scalar_one()
+
+
+def _direct_consultation(
+    engine,
+    fake_embedder,
+    *,
+    session_id: str,
+    asker_id: int = 10,
+    consult_method: str = "direct",
+    accept: bool = True,
+) -> tuple[TestClient, str]:
+    """Drive a REAL hand-off up to the point a 直接相談 could have happened.
+
+    The retrospective is only writable about the person who actually accepted, so
+    every test here has to produce a genuine ``recommendations`` row — the seeded
+    fixtures carry none (that is exactly why the first version of this endpoint
+    could be pointed at any employee at all).
+    """
+
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2, 3], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2, 3)),
+    )
+    client.post("/ask", json={"asker_id": asker_id, "question": GOOD_Q, "session_id": session_id})
+    _events(client, session_id)
+    client.post(
+        "/handoff/draft",
+        json={"session_id": session_id, "draft": "本文", "consult_method": consult_method},
+    )
+    if accept:
+        client.post("/answer", json={"session_id": session_id, "outcome": "accepted"})
+        _events(client, session_id)
+    return client, _question_id_for_session(engine, session_id)
+
+
+def _retro_body(question_id: str, **over):
     body = {
-        "question_id": "q_0001",
+        "question_id": question_id,
         "responder_id": "E001",
         "topics": ["ネットワーク・VPN"],
         "asked": "拠点間VPNが不安定な件",
@@ -4266,30 +4310,155 @@ def test_topics_endpoint_serves_the_scorer_vocabulary(seed_counts, engine, fake_
     assert resp.json()["topics"] == list(TOPIC_VOCABULARY)
 
 
+# --- the read side: what the form is built from ----------------------------- #
+def test_retrospective_context_survives_the_acceptance(seed_counts, engine, fake_embedder) -> None:
+    """The write-up happens AFTER the consultation, so the read must outlive it.
+
+    The first version of #247 built the form from ``GET /handoff``, which 404s the
+    moment the responder records an outcome — i.e. it was readable only during the
+    window where the consultation had not happened yet.
+    """
+
+    client, question_id = _direct_consultation(engine, fake_embedder, session_id="retro-ctx1")
+
+    # The regression this endpoint exists for: the pending-hand-off view is gone.
+    assert client.get("/handoff/retro-ctx1", headers=_user_headers(10)).status_code == 404
+
+    resp = client.get("/consult-retrospective/retro-ctx1", headers=_user_headers(10))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["question_id"] == question_id
+    assert body["consult_method"] == "direct"
+    assert body["question"] == GOOD_Q
+    assert body["responder"]["person_id"] == "E001"
+    assert body["responder"]["name"]
+    assert body["already_recorded"] is False
+
+
+def test_retrospective_context_reports_a_chat_handoff_as_chat(
+    seed_counts, engine, fake_embedder
+) -> None:
+    """A chat consultation already leaves a transcript; the form must not appear."""
+
+    client, _ = _direct_consultation(
+        engine, fake_embedder, session_id="retro-ctx2", consult_method="chat"
+    )
+    body = client.get("/consult-retrospective/retro-ctx2", headers=_user_headers(10)).json()
+    assert body["consult_method"] == "chat"
+
+
+def test_retrospective_context_reports_an_already_written_write_up(
+    seed_counts, engine, fake_embedder
+) -> None:
+    client, question_id = _direct_consultation(engine, fake_embedder, session_id="retro-ctx3")
+    client.post("/consult-retrospective", json=_retro_body(question_id), headers=_user_headers(10))
+    body = client.get("/consult-retrospective/retro-ctx3", headers=_user_headers(10)).json()
+    assert body["already_recorded"] is True
+
+
+def test_retrospective_context_from_a_stranger_is_403(seed_counts, engine, fake_embedder) -> None:
+    client, _ = _direct_consultation(engine, fake_embedder, session_id="retro-ctx4")
+    assert (
+        client.get("/consult-retrospective/retro-ctx4", headers=_user_headers(44)).status_code
+        == 403
+    )
+
+
+def test_retrospective_context_for_an_unknown_session_is_404(
+    seed_counts, engine, fake_embedder
+) -> None:
+    client = _client(engine, fake_embedder)
+    assert client.get("/consult-retrospective/nope", headers=_user_headers(33)).status_code == 404
+
+
+# --- the write side --------------------------------------------------------- #
 def test_retrospective_is_recorded_for_the_questions_own_asker(
     seed_counts, engine, fake_embedder
 ) -> None:
-    # q_0001 is owned by asker_id 33 (fixtures).
-    client = _client(engine, fake_embedder)
-    resp = client.post("/consult-retrospective", json=_retro_body(), headers=_user_headers(33))
+    client, question_id = _direct_consultation(engine, fake_embedder, session_id="retro-w1")
+    resp = client.post(
+        "/consult-retrospective", json=_retro_body(question_id), headers=_user_headers(10)
+    )
     assert resp.status_code == 200 and resp.json()["status"] == "recorded"
 
     rows = _consult_rows(engine)
     assert len(rows) == 1
     row = rows[0]
-    assert row.question_id == "q_0001"
+    assert row.question_id == question_id
     assert row.responder_id == 1
     assert row.topics == ["ネットワーク・VPN"]
     assert row.resolution == "resolved"
     # asker_id comes from the TOKEN, never the body — the same rule as /feedback.
-    assert row.asker_id == 33
+    assert row.asker_id == 10
+
+
+def test_a_second_retrospective_for_the_same_question_is_409(
+    seed_counts, engine, fake_embedder
+) -> None:
+    """One accepted hand-off = one consultation = one write-up.
+
+    Without this the asker could write the SAME real conversation up
+    ``OFFLINE_CONSULT_EVIDENCE_CAP`` times and reach the full 1.0 of evidence from
+    it — the accepted-responder check alone does not bound how OFTEN they write.
+    """
+
+    client, question_id = _direct_consultation(engine, fake_embedder, session_id="retro-w14")
+    first = client.post(
+        "/consult-retrospective", json=_retro_body(question_id), headers=_user_headers(10)
+    )
+    assert first.status_code == 200
+    second = client.post(
+        "/consult-retrospective",
+        json=_retro_body(question_id, answer_body="別の書き方でもう一度"),
+        headers=_user_headers(10),
+    )
+    assert second.status_code == 409
+    assert "すでに記録" in second.json()["detail"]
+    assert len(_consult_rows(engine)) == 1
+
+
+def test_the_database_itself_rejects_a_second_write_up(seed_counts, engine, fake_embedder) -> None:
+    """The 409 above is the polite answer; this is the constraint behind it.
+
+    Written against the table rather than the route so a future caller that skips
+    the API check still cannot double-count one consultation.
+    """
+
+    from sqlalchemy.exc import IntegrityError
+
+    from tekijin.models.tables import OfflineConsult
+
+    client, question_id = _direct_consultation(engine, fake_embedder, session_id="retro-w15")
+    assert (
+        client.post(
+            "/consult-retrospective", json=_retro_body(question_id), headers=_user_headers(10)
+        ).status_code
+        == 200
+    )
+
+    with pytest.raises(IntegrityError), session_scope(get_sessionmaker(engine)) as session:
+        session.add(
+            OfflineConsult(
+                question_id=question_id,
+                responder_id=1,
+                asker_id=10,
+                topics=["ネットワーク・VPN"],
+                asked=None,
+                answer_body="直接 INSERT した2件目",
+                resolution="resolved",
+            )
+        )
+        session.flush()
+    assert len(_consult_rows(engine)) == 1
 
 
 def test_retrospective_from_a_stranger_is_403(seed_counts, engine, fake_embedder) -> None:
     # The retrospective becomes expertise evidence for the responder, so letting a
-    # non-owner write one would be a way to inflate (or fabricate) someone's標.
-    client = _client(engine, fake_embedder)
-    resp = client.post("/consult-retrospective", json=_retro_body(), headers=_user_headers(10))
+    # non-owner write one would be a way to inflate (or fabricate) someone's standing.
+    client, question_id = _direct_consultation(engine, fake_embedder, session_id="retro-w2")
+    resp = client.post(
+        "/consult-retrospective", json=_retro_body(question_id), headers=_user_headers(44)
+    )
     assert resp.status_code == 403
     assert _consult_rows(engine) == []
 
@@ -4298,11 +4467,137 @@ def test_retrospective_for_an_unknown_question_is_404(seed_counts, engine, fake_
     client = _client(engine, fake_embedder)
     resp = client.post(
         "/consult-retrospective",
-        json=_retro_body(question_id="q_does_not_exist"),
+        json=_retro_body("q_does_not_exist"),
         headers=_user_headers(33),
     )
     assert resp.status_code == 404
     assert _consult_rows(engine) == []
+
+
+def test_retrospective_cannot_name_yourself_as_the_responder(
+    seed_counts, engine, fake_embedder
+) -> None:
+    """Self-attribution: the whole point of the row is that SOMEONE ELSE helped."""
+
+    client, question_id = _direct_consultation(engine, fake_embedder, session_id="retro-w3")
+    resp = client.post(
+        "/consult-retrospective",
+        json=_retro_body(question_id, responder_id="E010"),
+        headers=_user_headers(10),
+    )
+    assert resp.status_code == 422
+    # the guard that fired, not just "some 422"
+    assert "実際に相談を受けた相手" in resp.json()["detail"]
+    assert _consult_rows(engine) == []
+
+
+def test_retrospective_cannot_name_someone_never_recommended_for_the_question(
+    seed_counts, engine, fake_embedder
+) -> None:
+    """Fabrication: naming an arbitrary colleague must not become their evidence."""
+
+    client, question_id = _direct_consultation(engine, fake_embedder, session_id="retro-w4")
+    resp = client.post(
+        "/consult-retrospective",
+        json=_retro_body(question_id, responder_id="E033"),
+        headers=_user_headers(10),
+    )
+    assert resp.status_code == 422
+    # the guard that fired, not just "some 422"
+    assert "実際に相談を受けた相手" in resp.json()["detail"]
+    assert _consult_rows(engine) == []
+
+
+def test_retrospective_cannot_name_a_shown_but_unaccepted_candidate(
+    seed_counts, engine, fake_embedder
+) -> None:
+    """Even a recommended person is not evidence unless they took the hand-off.
+
+    Employees 1/2/3 are all shown for this question; only 1 accepted. Allowing any
+    of the three would hand the asker a free choice of whom to credit.
+    """
+
+    client, question_id = _direct_consultation(engine, fake_embedder, session_id="retro-w5")
+    resp = client.post(
+        "/consult-retrospective",
+        json=_retro_body(question_id, responder_id="E002"),
+        headers=_user_headers(10),
+    )
+    assert resp.status_code == 422
+    # the guard that fired, not just "some 422"
+    assert "実際に相談を受けた相手" in resp.json()["detail"]
+    assert _consult_rows(engine) == []
+
+
+def test_retrospective_for_a_nonexistent_employee_is_422_not_500(
+    seed_counts, engine, fake_embedder
+) -> None:
+    """A bad id must not reach the FK constraint and surface as a 500 (cf. #263)."""
+
+    client, question_id = _direct_consultation(engine, fake_embedder, session_id="retro-w6")
+    resp = client.post(
+        "/consult-retrospective",
+        json=_retro_body(question_id, responder_id="E999999"),
+        headers=_user_headers(10),
+    )
+    assert resp.status_code == 422
+    # the guard that fired, not just "some 422"
+    assert "実際に相談を受けた相手" in resp.json()["detail"]
+    assert _consult_rows(engine) == []
+
+
+def test_retrospective_before_the_handoff_was_accepted_is_422(
+    seed_counts, engine, fake_embedder
+) -> None:
+    """Nothing was consulted yet, so there is nothing to write up."""
+
+    client, question_id = _direct_consultation(
+        engine, fake_embedder, session_id="retro-w7", accept=False
+    )
+    resp = client.post(
+        "/consult-retrospective", json=_retro_body(question_id), headers=_user_headers(10)
+    )
+    assert resp.status_code == 422
+    # the guard that fired, not just "some 422"
+    assert "まだ受諾されていない" in resp.json()["detail"]
+    assert _consult_rows(engine) == []
+
+
+def test_retrospective_on_a_chat_consultation_is_422(seed_counts, engine, fake_embedder) -> None:
+    """The transcript already exists; a hearsay summary on top of it is a weaker copy."""
+
+    client, question_id = _direct_consultation(
+        engine, fake_embedder, session_id="retro-w8", consult_method="chat"
+    )
+    resp = client.post(
+        "/consult-retrospective", json=_retro_body(question_id), headers=_user_headers(10)
+    )
+    assert resp.status_code == 422
+    # the guard that fired, not just "some 422"
+    assert "直接相談ではない" in resp.json()["detail"]
+    assert _consult_rows(engine) == []
+
+
+def test_retrospective_can_be_switched_off(seed_counts, engine, fake_embedder, monkeypatch) -> None:
+    """Kill switch (#247): the only write path that mutates expertise from the UI."""
+
+    client, question_id = _direct_consultation(engine, fake_embedder, session_id="retro-w9")
+    monkeypatch.setenv("TEKIJIN_CONSULT_RETROSPECTIVE_ENABLED", "false")
+    get_settings.cache_clear()
+    try:
+        resp = client.post(
+            "/consult-retrospective", json=_retro_body(question_id), headers=_user_headers(10)
+        )
+        assert resp.status_code == 503
+        assert _consult_rows(engine) == []
+        # The read side stays up: an in-flight form must be able to explain itself.
+        assert (
+            client.get("/consult-retrospective/retro-w9", headers=_user_headers(10)).status_code
+            == 200
+        )
+    finally:
+        monkeypatch.delenv("TEKIJIN_CONSULT_RETROSPECTIVE_ENABLED", raising=False)
+        get_settings.cache_clear()
 
 
 def test_retrospective_rejects_a_topic_outside_the_vocabulary(
@@ -4310,11 +4605,11 @@ def test_retrospective_rejects_a_topic_outside_the_vocabulary(
 ) -> None:
     # The scorer joins on these strings; a free-text topic matches NO evidence and
     # would silently do nothing (#116). Reject at the boundary instead.
-    client = _client(engine, fake_embedder)
+    client, question_id = _direct_consultation(engine, fake_embedder, session_id="retro-w10")
     resp = client.post(
         "/consult-retrospective",
-        json=_retro_body(topics=["まったく新しいトピック"]),
-        headers=_user_headers(33),
+        json=_retro_body(question_id, topics=["まったく新しいトピック"]),
+        headers=_user_headers(10),
     )
     assert resp.status_code == 422
     assert _consult_rows(engine) == []
@@ -4323,17 +4618,33 @@ def test_retrospective_rejects_a_topic_outside_the_vocabulary(
 def test_retrospective_requires_topics_answer_and_resolution(
     seed_counts, engine, fake_embedder
 ) -> None:
-    client = _client(engine, fake_embedder)
+    client, question_id = _direct_consultation(engine, fake_embedder, session_id="retro-w11")
     for over in ({"topics": []}, {"answer_body": "  "}, {"resolution": "まあまあ"}):
         resp = client.post(
-            "/consult-retrospective", json=_retro_body(**over), headers=_user_headers(33)
+            "/consult-retrospective",
+            json=_retro_body(question_id, **over),
+            headers=_user_headers(10),
         )
         assert resp.status_code == 422, over
     # `asked` is optional (#247 の項目2は任意).
     ok = client.post(
-        "/consult-retrospective", json=_retro_body(asked=None), headers=_user_headers(33)
+        "/consult-retrospective",
+        json=_retro_body(question_id, asked=None),
+        headers=_user_headers(10),
     )
     assert ok.status_code == 200
+
+
+def _topic_score(engine, person_id: int, topic: str) -> float:
+    from tekijin.data.repository import Repository
+    from tekijin.scorer.scorer import ExpertiseScorer
+
+    with session_scope(get_sessionmaker(engine)) as session:
+        scorer = ExpertiseScorer(Repository(session))
+        result = scorer.rank(
+            topic, [person_id], asker_id=None, now=dt.datetime(2026, 8, 26), top_k=1
+        )
+        return result["recommendations"][0]["score"]
 
 
 def test_retrospective_becomes_expertise_evidence_for_the_responder(
@@ -4341,23 +4652,11 @@ def test_retrospective_becomes_expertise_evidence_for_the_responder(
 ) -> None:
     """The point of #247: the record must actually reach C6, not just sit in a table."""
 
-    from tekijin.data.repository import Repository
-    from tekijin.scorer.scorer import ExpertiseScorer
-
     topic = "ネットワーク・VPN"
-    client = _client(engine, fake_embedder)
-
-    def _score(person_id: int) -> float:
-        with session_scope(get_sessionmaker(engine)) as session:
-            scorer = ExpertiseScorer(Repository(session))
-            result = scorer.rank(
-                topic, [person_id], asker_id=None, now=dt.datetime(2026, 8, 26), top_k=1
-            )
-            return result["recommendations"][0]["score"]
-
-    before = _score(1)
-    client.post("/consult-retrospective", json=_retro_body(), headers=_user_headers(33))
-    assert _score(1) > before
+    client, question_id = _direct_consultation(engine, fake_embedder, session_id="retro-w12")
+    before = _topic_score(engine, 1, topic)
+    client.post("/consult-retrospective", json=_retro_body(question_id), headers=_user_headers(10))
+    assert _topic_score(engine, 1, topic) > before
 
 
 def test_unresolved_retrospective_is_stored_but_is_not_evidence(
@@ -4365,29 +4664,17 @@ def test_unresolved_retrospective_is_stored_but_is_not_evidence(
 ) -> None:
     """断り≠非専門 applied to consultations: recorded, but neither adds nor subtracts."""
 
-    from tekijin.data.repository import Repository
-    from tekijin.scorer.scorer import ExpertiseScorer
-
     topic = "ネットワーク・VPN"
-    client = _client(engine, fake_embedder)
-
-    def _score(person_id: int) -> float:
-        with session_scope(get_sessionmaker(engine)) as session:
-            scorer = ExpertiseScorer(Repository(session))
-            result = scorer.rank(
-                topic, [person_id], asker_id=None, now=dt.datetime(2026, 8, 26), top_k=1
-            )
-            return result["recommendations"][0]["score"]
-
-    before = _score(1)
+    client, question_id = _direct_consultation(engine, fake_embedder, session_id="retro-w13")
+    before = _topic_score(engine, 1, topic)
     resp = client.post(
         "/consult-retrospective",
-        json=_retro_body(resolution="unresolved"),
-        headers=_user_headers(33),
+        json=_retro_body(question_id, resolution="unresolved"),
+        headers=_user_headers(10),
     )
     assert resp.status_code == 200
     assert len(_consult_rows(engine)) == 1  # stored
-    assert _score(1) == before  # but not evidence, in EITHER direction
+    assert _topic_score(engine, 1, topic) == before  # but not evidence, in EITHER direction
 
 
 def test_feedback_endpoint_records_with_actor_from_principal(
