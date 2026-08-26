@@ -127,3 +127,9 @@ REGION_OF_BRANCH: dict[str, str] = {
     "大阪": "関西",
     "福岡": "九州",
 }
+
+# The closed branch vocabulary C1 must choose from when the asker names a location
+# (#83). Derived from the region map so the two can never disagree: a branch C1
+# emits that the scorer does not know would silently match nobody. Ordered for a
+# stable JSON Schema enum (guided decoding), like TOPIC_VOCABULARY (#64).
+BRANCH_VOCABULARY: tuple[str, ...] = tuple(sorted(REGION_OF_BRANCH))

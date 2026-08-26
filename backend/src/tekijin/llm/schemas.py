@@ -10,6 +10,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field, model_validator
 
 from tekijin.scorer.topics import TOPIC_VOCABULARY
+from tekijin.scorer.weights import BRANCH_VOCABULARY
 
 # The closed topic list, injected into the JSON Schema C1 is generated against so
 # guided decoding can only emit these strings (#64). Free-text topics drift from
@@ -18,6 +19,13 @@ from tekijin.scorer.topics import TOPIC_VOCABULARY
 _TOPIC_ENUM_SCHEMA: dict[str, object] = {
     "type": "string",
     "enum": list(TOPIC_VOCABULARY),
+}
+
+# The closed branch list for the #83 location constraint. Nullable: most questions
+# name no location, and inventing one would wrongly narrow the candidates. Same
+# constrain-generation / forgive-parsing split as the topic enum above.
+_BRANCH_ENUM_SCHEMA: dict[str, object] = {
+    "anyOf": [{"type": "string", "enum": list(BRANCH_VOCABULARY)}, {"type": "null"}],
 }
 
 
@@ -43,6 +51,14 @@ class IntentSchema(BaseModel):
     )
     out_of_scope: bool = Field(default=False, description="業務外・悪意ある入力なら true")
     confidence: float = Field(default=0.0, ge=0.0, le=1.0, description="意図理解の確信度")
+    # #83: an explicitly requested location is a CONDITION to satisfy, not a
+    # preference to add points for — C6 treats it as a filter. So it must be
+    # extracted only when the asker actually asked for it; see the prompt.
+    constraint_branch: str | None = Field(
+        default=None,
+        description="相談者が明示的に希望した対応者の拠点。希望が無ければ null",
+        json_schema_extra=_BRANCH_ENUM_SCHEMA,
+    )
 
 
 class SufficiencySchema(BaseModel):

@@ -176,6 +176,11 @@ def main() -> None:
         action="store_true",
         help="#413 person経路でも引用付き回答を併記(self_answer composer 配線・routing不変)",
     )
+    ap.add_argument(
+        "--branch-constraint",
+        action="store_true",
+        help="#83 明示された拠点を C6 で条件として扱う",
+    )
     ap.add_argument("--answerability", action="store_true", help="#70 棄却クリティックを配線")
     ap.add_argument(
         "--knowledge-floor",
@@ -224,6 +229,7 @@ def main() -> None:
         knowledge_answer_min_similarity=args.knowledge_floor,
         query_expansion_enabled=args.query_expansion,
         question_fit_enabled=args.question_fit,
+        branch_constraint_enabled=args.branch_constraint,
         additive_self_answer_enabled=args.additive,
     )
     ranker = GraphRanker(graph, critique_wired=ans_model is not None)
@@ -234,6 +240,7 @@ def main() -> None:
     print(
         f"backend={args.backend} self_answer={args.self_answer} "
         f"query_expansion={args.query_expansion} question_fit={args.question_fit} "
+        f"branch_constraint={args.branch_constraint} "
         f"answerability={args.answerability} "
         f"knowledge_floor={args.knowledge_floor} rows={len(queries)}"
     )
@@ -254,6 +261,7 @@ def main() -> None:
             "self_answer": args.self_answer,
             "query_expansion": args.query_expansion,
             "question_fit": args.question_fit,
+            "branch_constraint": args.branch_constraint,
             "answerability": args.answerability,
             "knowledge_floor": args.knowledge_floor,
             "rows": len(queries),

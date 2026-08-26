@@ -180,6 +180,17 @@ class Settings(BaseSettings):
     # 0.444->0.778). Set False to restore the pre-#405 (tag-only) ranking.
     question_fit_enabled: bool = True
 
+    # #83: when the asker explicitly asks for someone at a given branch ("福岡の拠点で
+    # 動ける方だと助かります"), treat it as a CONDITION in C6 rather than a scoring
+    # term. `Weights.proximity` (0.10) is one term in a linear sum, so a stronger
+    # candidate elsewhere simply outweighs it — measured: the 15 constrained eval
+    # rows sat at 0.667 R@3 while honouring the branch put them at 0.933 (and the
+    # whole set 0.712 -> 0.773). Raising `proximity` to 0.40 also reaches 0.900 but
+    # distorts every unconstrained question, which is why this is a filter instead.
+    # OFF by default until a full-graph E2E run confirms it holds with C1 doing the
+    # extraction (the +0.220 above assumed the constraint was already known).
+    branch_constraint_enabled: bool = False
+
     # #357: knowledge framework. When the knowledge layer is wired into retrieval,
     # answer a question from structured knowledge units (problem → action → result,
     # with provenance) instead of, or before, pointing at a person. OFF by default —

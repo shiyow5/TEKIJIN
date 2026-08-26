@@ -17,6 +17,7 @@ from langgraph.types import interrupt
 
 from tekijin.agent.protocols import (
     AnswerabilityModel,
+    BranchSource,
     DraftModel,
     IntentModel,
     IntentResult,
@@ -121,6 +122,8 @@ class AgentNodes:
         question_fit_enabled: bool = False,
         additive_self_answer_enabled: bool = False,
         additive_self_answer_floor: float = 0.20,
+        branch_constraint_enabled: bool = False,
+        employee_branches: BranchSource | None = None,
     ) -> None:
         self._intent = intent_model
         self._sufficiency = sufficiency_model
@@ -155,6 +158,12 @@ class AgentNodes:
         # never handed the map, so scores are develop-identical. Routing is unchanged
         # either way (C5 does not read the scorer).
         self._question_fit_enabled = question_fit_enabled
+        # #83: honour an explicitly requested branch as a CONDITION in C6 rather than
+        # a scoring term. False (default) ignores `constraint_branch` entirely, so
+        # ranking is develop-identical. `employee_branches` resolves candidate ->
+        # branch; without it the feature stays inert even when the flag is on.
+        self._branch_constraint_enabled = branch_constraint_enabled
+        self._employee_branches = employee_branches
         # #413: additive self-answer on the person route (shares the #291 composer +
         # fragment source). Only active when self_answer is wired AND this is set;
         # the floor gates the compose call so no-data person questions add no latency.
@@ -241,6 +250,7 @@ class AgentNodes:
                 "question_type": _QUESTION_TYPE_DEFAULT,
                 "out_of_scope": True,
                 "intent_confidence": 0.0,
+                "constraint_branch": None,
             }
         result = self._intent.analyze(state["question"], state.get("asker"))
         return {
@@ -250,6 +260,7 @@ class AgentNodes:
             "question_type": result.question_type,
             "out_of_scope": result.out_of_scope,
             "intent_confidence": result.confidence,
+            "constraint_branch": result.constraint_branch,
         }
 
     # -- C2: sufficiency check (LLM stub) ---------------------------------
@@ -368,6 +379,28 @@ class AgentNodes:
         # than letting a higher-scoring different person win.
         return {"prior_answer_note": note, "pinned_responder_id": responder_id}
 
+    def _split_by_branch(
+        self, candidates: list[int], state: AgentState
+    ) -> tuple[list[int], list[int]]:
+        """``(at the requested branch, everyone else)`` for the #83 constraint.
+
+        Returns ``(candidates, [])`` — i.e. "no constraint in play" — whenever the
+        feature is off, no branch was requested, the branch lookup is unwired, or
+        NOBODY in the pool is at that branch. That last case matters: splitting on a
+        branch with zero matches would demote every candidate into the "we had to go
+        elsewhere" bucket and stamp a misleading reason on all three, when in truth
+        the constraint simply cannot be honoured at all.
+        """
+
+        branch = state.get("constraint_branch")
+        if not self._branch_constraint_enabled or not branch or self._employee_branches is None:
+            return candidates, []
+        by_id = self._employee_branches.employees_by_ids(candidates)
+        matching = [c for c in candidates if getattr(by_id.get(c), "branch", None) == branch]
+        if not matching:
+            return candidates, []
+        return matching, [c for c in candidates if c not in set(matching)]
+
     # -- C6: expertise scorer (deterministic) -----------------------------
     def c6_score(self, state: AgentState) -> AgentState:
         topics = state.get("topics") or []
@@ -438,20 +471,44 @@ class AgentNodes:
             pool = retrieval.get("candidate_people") or []
             candidates = [p for p in pool if p not in declined and p not in filled_ids]
             if candidates:
-                # All topics feed the scorer (aggregated topic_fit), not just topics[0].
-                result = self._scorer.rank(
-                    topics,
-                    candidates,
-                    asker_id,
-                    state["now"],
-                    top_k=remaining,
-                    **qsim_kw,
-                )
-                # The scorer returns typed ScoredCandidate rows; AgentState keeps the
-                # looser list[dict[str, Any]] (also written as plain dicts elsewhere),
-                # so narrow the TypedDict-invariance gap with a cast — identical at
-                # runtime.
-                fresh = fresh + cast("list[dict[str, Any]]", result["recommendations"])
+
+                def rank(ids: list[int], top_k: int) -> list[dict[str, Any]]:
+                    # All topics feed the scorer (aggregated topic_fit), not just topics[0].
+                    # The scorer returns typed ScoredCandidate rows; AgentState keeps the
+                    # looser list[dict[str, Any]] (also written as plain dicts elsewhere),
+                    # so narrow the TypedDict-invariance gap with a cast — identical at
+                    # runtime.
+                    result = self._scorer.rank(
+                        topics, ids, asker_id, state["now"], top_k=top_k, **qsim_kw
+                    )
+                    return cast("list[dict[str, Any]]", result["recommendations"])
+
+                # #83: an explicitly requested branch is a CONDITION, not a bonus.
+                # `Weights.proximity` adds one term to a linear sum, so a strong
+                # candidate elsewhere simply outweighs it. Rank the branch's people
+                # FIRST and only fall back to the rest to fill the remaining slots —
+                # and say so in the reasons, so "福岡には該当者がいないため大阪の人を
+                # 含めています" is visible rather than silently ignored.
+                matching, others = self._split_by_branch(candidates, state)
+                if others:
+                    # Constrained: the branch's people fill the slots first.
+                    picked = rank(matching, remaining) if matching else []
+                    short = remaining - len(picked)
+                    if short > 0:
+                        # Not enough people at that branch — fill from elsewhere and
+                        # SAY SO, rather than silently returning a shorter list or
+                        # pretending the constraint was met.
+                        branch = state.get("constraint_branch")
+                        note = f"{branch}に該当者が足りないため、他拠点から含めています"
+                        for rec in rank(others, short):
+                            rec["reasons"] = [
+                                *(rec.get("reasons") or []),
+                                {"type": "constraint", "detail": note},
+                            ]
+                            picked.append(rec)
+                    fresh = fresh + picked
+                else:
+                    fresh = fresh + rank(candidates, remaining)
 
         if not fresh:
             return {"recommendations": existing}
