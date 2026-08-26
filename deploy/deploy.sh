@@ -110,8 +110,15 @@ restart_backend() {
   sleep 2
   (
     cd "$DEPLOY_DIR"
+    # TZ=UTC (#456): this host is Asia/Tokyo, but the code writes naive timestamps
+    # from BOTH `datetime.now()` (host TZ) and Postgres `now()` (UTC) depending on
+    # the table — so without this, `questions.created_at` is JST while
+    # `messages.created_at` is UTC, in the same database. Containers never hit this
+    # because their TZ is already UTC; only this bare-metal deploy diverged.
+    # Pinning it here makes "naive means UTC" true everywhere, which is what the
+    # frontend formatting in #419 relies on.
     setsid env -u RUNNER_TRACKING_ID \
-      TEKIJIN_PORT="$PORT" TEKIJIN_VENV_PY="$VENV_PY" CUDA_VISIBLE_DEVICES="" \
+      TEKIJIN_PORT="$PORT" TEKIJIN_VENV_PY="$VENV_PY" CUDA_VISIBLE_DEVICES="" TZ=UTC \
       bash -c 'exec deploy/start_backend.sh' >"${HOME}/backend.log" 2>&1 </dev/null &
   )
 }
