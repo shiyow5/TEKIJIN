@@ -115,12 +115,21 @@ def node_event(
             schemas.DoneData(status="sent", answer=update.get("answer"), latency_ms=latency_ms),
         )
     if node in _TERMINAL_STATUS:
-        fallback = update.get("fallback_responder")
-        if fallback is not None:
-            fallback = {
-                **fallback,
-                "person_id": schemas.format_employee_id(fallback["person_id"]),
-            }
+        raw_fallback = update.get("fallback_responder")
+        # Build the model here rather than handing MessageData a bare dict: the id
+        # still has to be formatted, and constructing it eagerly means a malformed
+        # fallback fails at the same place either way — but now with a type the
+        # checker can follow (mirrors how service.py builds `responder`).
+        fallback = (
+            schemas.Recommendation(
+                **{
+                    **raw_fallback,
+                    "person_id": schemas.format_employee_id(raw_fallback["person_id"]),
+                }
+            )
+            if raw_fallback is not None
+            else None
+        )
         return _sse(
             "message",
             schemas.MessageData(

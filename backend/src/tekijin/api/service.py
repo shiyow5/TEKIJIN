@@ -874,7 +874,9 @@ class AgentService:
             # SQL, not the checkpoint: the asker's method choice must also be
             # visible to the inbox / chat gating, which never read the graph
             # state, so it lives only in Question.consult_method.
-            consult_method = question_consult_method(session, values.get("question_id"))
+            consult_method = schemas.normalize_consult_method(
+                question_consult_method(session, values.get("question_id"))
+            )
 
         return schemas.HandoffResponse(
             session_id=session_id,
@@ -1508,9 +1510,10 @@ class AgentService:
                                     # derive the shown recs from the durable state so the
                                     # accepted hand-off is still persisted + surfaced —
                                     # otherwise the outcome record is silently lost.
-                                    rec_data = pending_rec_data
-                                    recommend_event = pending_recommend
-                                    if rec_data is None:
+                                    if pending_rec_data is not None:
+                                        rec_data = pending_rec_data
+                                        recommend_event = pending_recommend
+                                    else:
                                         values = graph.get_state(config).values
                                         rec_data = {
                                             "recommendations": values.get("recommendations") or []

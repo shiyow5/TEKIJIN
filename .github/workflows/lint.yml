@@ -57,6 +57,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/setup-backend
       - run: make lint-backend
+      # ruff does not type-check, so `[tool.mypy]` in backend/pyproject.toml sat
+      # there unrun while the frontend gained real enforcement in #309 — the README
+      # claimed parity that did not exist (#427).
+      - run: make typecheck-backend
 
   frontend:
     name: Frontend Lint
@@ -88,3 +92,5 @@ jobs:
       # a missing prerequisite or a renamed target fails here.
       - run: make -n lint | grep -q "npm run typecheck"
       - run: make -n check | grep -q "npm run typecheck"
+      - run: make -n lint | grep -q "mypy src"
+      - run: make -n check | grep -q "mypy src"

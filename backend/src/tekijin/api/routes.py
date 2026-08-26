@@ -523,7 +523,7 @@ def inbox(
                         name=row["asker_name"],
                         dept=row["asker_dept"],
                     ),
-                    consult_method=row["consult_method"],
+                    consult_method=schemas.normalize_consult_method(row["consult_method"]),
                     created_at=row["created_at"],
                 )
                 for row in rows

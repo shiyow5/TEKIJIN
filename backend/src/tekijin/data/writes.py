@@ -12,9 +12,9 @@ from __future__ import annotations
 import datetime as dt
 import uuid
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, cast
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import CursorResult, delete, func, select, update
 from sqlalchemy.orm import Session
 
 from tekijin.models.tables import (
@@ -455,4 +455,6 @@ def ack_decline_notifications(session: Session, asker_id: int, ids: list[int]) -
         )
         .values(declined_seen_at=func.now())
     )
-    return result.rowcount or 0
+    # ``Session.execute`` is typed as returning ``Result``; a DML statement always
+    # yields a ``CursorResult``, which is where ``rowcount`` lives.
+    return cast("CursorResult[Any]", result).rowcount or 0

@@ -8,6 +8,7 @@ The vLLM adapters convert an instance of these back into the protocol dataclasse
 from __future__ import annotations
 
 from pydantic import BaseModel, Field, model_validator
+from pydantic.json_schema import JsonDict
 
 from tekijin.scorer.topics import TOPIC_VOCABULARY
 from tekijin.scorer.weights import BRANCH_VOCABULARY
@@ -16,7 +17,7 @@ from tekijin.scorer.weights import BRANCH_VOCABULARY
 # guided decoding can only emit these strings (#64). Free-text topics drift from
 # the vocabulary the scorer joins on, and an un-joinable topic matches NO evidence
 # — the recommendation then goes random (#116).
-_TOPIC_ENUM_SCHEMA: dict[str, object] = {
+_TOPIC_ENUM_SCHEMA: JsonDict = {
     "type": "string",
     "enum": list(TOPIC_VOCABULARY),
 }
@@ -24,7 +25,7 @@ _TOPIC_ENUM_SCHEMA: dict[str, object] = {
 # The closed branch list for the #83 location constraint. Nullable: most questions
 # name no location, and inventing one would wrongly narrow the candidates. Same
 # constrain-generation / forgive-parsing split as the topic enum above.
-_BRANCH_ENUM_SCHEMA: dict[str, object] = {
+_BRANCH_ENUM_SCHEMA: JsonDict = {
     "anyOf": [{"type": "string", "enum": list(BRANCH_VOCABULARY)}, {"type": "null"}],
 }
 
