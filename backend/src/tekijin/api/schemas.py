@@ -750,6 +750,9 @@ class SlackStatusResponse(BaseModel):
     """Whether the acting employee currently has a linked Slack account."""
 
     linked: bool
+    # "Open my Slack DM with the bot" deep link — present only when linked AND
+    # TEKIJIN_SLACK_APP_ID is configured (#hand-off-chat).
+    open_url: str | None = None
 
 
 class SlackUnlinkResponse(BaseModel):

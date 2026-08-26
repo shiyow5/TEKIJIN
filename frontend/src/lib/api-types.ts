@@ -248,6 +248,8 @@ export interface SlackAuthorizeUrlResponse {
 /** GET /slack/status response (schemas.py `SlackStatusResponse`). */
 export interface SlackStatusResponse {
   linked: boolean;
+  /** "Open my Slack DM with the bot" deep link, or null if unavailable. */
+  open_url: string | null;
 }
 
 /** POST /slack/unlink response (schemas.py `SlackUnlinkResponse`). */

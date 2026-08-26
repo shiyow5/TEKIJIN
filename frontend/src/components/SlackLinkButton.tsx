@@ -21,6 +21,7 @@ type Status = "loading" | "unavailable" | "linked" | "unlinked";
 export function SlackLinkButton() {
   const { principal } = useAuth();
   const [status, setStatus] = useState<Status>("loading");
+  const [openUrl, setOpenUrl] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const linkable = principal != null && !principal.is_admin;
 
@@ -29,7 +30,9 @@ export function SlackLinkButton() {
     let active = true;
     getSlackStatus()
       .then((res) => {
-        if (active) setStatus(res.linked ? "linked" : "unlinked");
+        if (!active) return;
+        setStatus(res.linked ? "linked" : "unlinked");
+        setOpenUrl(res.open_url);
       })
       .catch(() => {
         if (active) setStatus("unlinked");
@@ -57,6 +60,7 @@ export function SlackLinkButton() {
     try {
       await postSlackUnlink();
       setStatus("unlinked");
+      setOpenUrl(null);
     } finally {
       setBusy(false);
     }
@@ -72,6 +76,16 @@ export function SlackLinkButton() {
         <span className="rounded-full bg-secondary-container px-sm py-1 font-bold text-on-secondary-container">
           Slack連携済み
         </span>
+        {openUrl ? (
+          <a
+            href={openUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-primary underline transition-colors hover:text-on-surface"
+          >
+            Slackで開く
+          </a>
+        ) : null}
         <button
           type="button"
           onClick={handleUnlink}

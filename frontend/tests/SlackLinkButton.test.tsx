@@ -70,10 +70,23 @@ describe("SlackLinkButton", () => {
 
   it("shows a linked badge and an unlink control when already linked", async () => {
     useAuthMock.mockReturnValue(auth(USER));
-    getSlackStatusMock.mockResolvedValue({ linked: true });
+    getSlackStatusMock.mockResolvedValue({ linked: true, open_url: null });
     render(<SlackLinkButton />);
     expect(await screen.findByText("Slack連携済み")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "解除" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Slackで開く" })).not.toBeInTheDocument();
+  });
+
+  it("shows a link to open the linked employee's own Slack DM with the bot", async () => {
+    useAuthMock.mockReturnValue(auth(USER));
+    getSlackStatusMock.mockResolvedValue({
+      linked: true,
+      open_url: "https://slack.com/app_redirect?app=A1&team=T1",
+    });
+    render(<SlackLinkButton />);
+    const link = await screen.findByRole("link", { name: "Slackで開く" });
+    expect(link).toHaveAttribute("href", "https://slack.com/app_redirect?app=A1&team=T1");
+    expect(link).toHaveAttribute("target", "_blank");
   });
 
   it("navigates the browser to the authorize URL when clicking connect", async () => {
@@ -106,7 +119,7 @@ describe("SlackLinkButton", () => {
 
   it("unlinks and falls back to the connect button", async () => {
     useAuthMock.mockReturnValue(auth(USER));
-    getSlackStatusMock.mockResolvedValue({ linked: true });
+    getSlackStatusMock.mockResolvedValue({ linked: true, open_url: null });
     postSlackUnlinkMock.mockResolvedValue({ ok: true });
 
     render(<SlackLinkButton />);

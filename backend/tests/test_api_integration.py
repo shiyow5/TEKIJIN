@@ -1223,6 +1223,88 @@ def test_accepted_thread_is_seeded_with_the_asker_draft_as_first_message(
     assert listing["last_message"] == draft
 
 
+def test_accepting_a_chat_handoff_delivers_the_draft_to_a_linked_responder_via_slack(
+    monkeypatch, seed_counts, engine, fake_embedder
+) -> None:
+    """#hand-off-chat: accepting drops the responder straight into a Slack DM
+    with the draft already "sent" — no separate POST /messages needed."""
+
+    with get_sessionmaker(engine)() as session:
+        upsert_slack_link(session, 1, slack_user_id="U_RESPONDER", slack_team_id="T1", now=NOW)
+        session.commit()
+
+    sent: list[dict] = []
+    monkeypatch.setattr("tekijin.slack.notify.send_dm", lambda **kwargs: sent.append(kwargs))
+    monkeypatch.setenv("TEKIJIN_SLACK_BOT_TOKEN", "xoxb-test")
+    get_settings.cache_clear()
+    try:
+        client = _client(
+            engine,
+            fake_embedder,
+            retriever=_FakeRetriever(people=[1, 2, 3], people_confidence=0.2),
+            scorer=_FakeScorer(_recs(1, 2, 3)),
+        )
+        client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "msg-seed2"})
+        _events(client, "msg-seed2")
+        draft = client.get("/handoff/msg-seed2").json()["draft"]
+        assert draft
+
+        client.post("/answer", json={"session_id": "msg-seed2", "outcome": "accepted"})
+        _events(client, "msg-seed2")
+        thread_id = client.get("/messages/threads", params={"employee_id": "E010"}).json()["items"][
+            0
+        ]["thread_id"]
+    finally:
+        get_settings.cache_clear()
+
+    assert len(sent) == 1
+    assert sent[0]["slack_user_id"] == "U_RESPONDER"
+    assert sent[0]["bot_token"] == "xoxb-test"
+    assert draft in sent[0]["text"]
+
+    with get_sessionmaker(engine)() as session:
+        assert get_slack_link(session, 1).last_notified_thread_id == thread_id
+
+
+def test_accepting_a_direct_handoff_never_notifies_slack(
+    monkeypatch, seed_counts, engine, fake_embedder
+) -> None:
+    """ "直接相談" never gets a chat thread at all (existing behaviour) — the new
+    accept-time Slack hook must not fire for it either."""
+
+    with get_sessionmaker(engine)() as session:
+        upsert_slack_link(session, 1, slack_user_id="U_RESPONDER", slack_team_id="T1", now=NOW)
+        session.commit()
+
+    sent: list[dict] = []
+    monkeypatch.setattr("tekijin.slack.notify.send_dm", lambda **kwargs: sent.append(kwargs))
+    monkeypatch.setenv("TEKIJIN_SLACK_BOT_TOKEN", "xoxb-test")
+    get_settings.cache_clear()
+    try:
+        client = _client(
+            engine,
+            fake_embedder,
+            retriever=_FakeRetriever(people=[1, 2, 3], people_confidence=0.2),
+            scorer=_FakeScorer(_recs(1, 2, 3)),
+        )
+        client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "msg-seed3"})
+        _events(client, "msg-seed3")
+        client.post(
+            "/handoff/draft",
+            json={
+                "session_id": "msg-seed3",
+                "draft": "直接会って話します",
+                "consult_method": "direct",
+            },
+        )
+        client.post("/answer", json={"session_id": "msg-seed3", "outcome": "accepted"})
+        _events(client, "msg-seed3")
+    finally:
+        get_settings.cache_clear()
+
+    assert sent == []
+
+
 def test_direct_consultation_gets_no_seeded_message(seed_counts, engine, fake_embedder) -> None:
     # No chat thread exists at all for "direct", so there is nothing to seed —
     # covered here as a guard against the seeding write itself erroring out.
@@ -1422,6 +1504,9 @@ def test_send_message_notifies_the_other_party_via_slack_when_linked(
         thread_id = client.get("/messages/threads", params={"employee_id": "E010"}).json()["items"][
             0
         ]["thread_id"]
+        # Accepting already sent one notification for the auto-seeded draft
+        # (#hand-off-chat) — clear it so `sent` below is only this POST /messages.
+        sent.clear()
 
         resp = client.post(
             "/messages",

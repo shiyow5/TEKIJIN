@@ -129,23 +129,44 @@ def test_status_and_unlink_roundtrip(seed_counts, engine, fake_embedder) -> None
         session.commit()
 
     client = _raw_client(engine, fake_embedder)
-    assert client.get("/slack/status", headers=_user_headers(6)).json() == {"linked": True}
+    status = client.get("/slack/status", headers=_user_headers(6)).json()
+    assert status["linked"] is True
+    assert status["open_url"] is None  # TEKIJIN_SLACK_APP_ID unset
 
     unlink_resp = client.post("/slack/unlink", headers=_user_headers(6))
     assert unlink_resp.status_code == 200
     assert unlink_resp.json()["ok"] is True
 
-    assert client.get("/slack/status", headers=_user_headers(6)).json() == {"linked": False}
+    assert client.get("/slack/status", headers=_user_headers(6)).json()["linked"] is False
+
+
+def test_status_open_url_present_when_linked_and_app_id_configured(
+    monkeypatch, seed_counts, engine, fake_embedder
+) -> None:
+    with get_sessionmaker(engine)() as session:
+        upsert_slack_link(session, 6, slack_user_id="U_SIX", slack_team_id="T_ACME", now=NOW)
+        session.commit()
+
+    monkeypatch.setenv("TEKIJIN_SLACK_APP_ID", "A123456")
+    get_settings.cache_clear()
+    try:
+        client = _raw_client(engine, fake_embedder)
+        status = client.get("/slack/status", headers=_user_headers(6)).json()
+    finally:
+        get_settings.cache_clear()
+
+    assert status["linked"] is True
+    assert status["open_url"] == "https://slack.com/app_redirect?app=A123456&team=T_ACME"
 
 
 def test_status_false_for_an_unlinked_employee(seed_counts, engine, fake_embedder) -> None:
     client = _raw_client(engine, fake_embedder)
-    assert client.get("/slack/status", headers=_user_headers(7)).json() == {"linked": False}
+    assert client.get("/slack/status", headers=_user_headers(7)).json()["linked"] is False
 
 
 def test_status_always_false_for_admin(seed_counts, engine, fake_embedder) -> None:
     client = _raw_client(engine, fake_embedder)
-    assert client.get("/slack/status", headers=_admin_headers()).json() == {"linked": False}
+    assert client.get("/slack/status", headers=_admin_headers()).json()["linked"] is False
 
 
 def test_unlink_forbidden_for_admin(seed_counts, engine, fake_embedder) -> None:

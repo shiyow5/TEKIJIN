@@ -67,7 +67,7 @@ from tekijin.api.events import (
 from tekijin.data.db import session_scope
 from tekijin.data.feedback import record_feedback
 from tekijin.data.handoff import employee_brief, question_consult_method, responder_reuse_stats
-from tekijin.data.messages import create_message
+from tekijin.data.messages import create_message, thread_parties
 from tekijin.data.writes import (
     create_answer,
     employee_exists,
@@ -89,6 +89,7 @@ from tekijin.data.writes import (
     update_question_topics,
 )
 from tekijin.retrieval.embedding import PASSAGE, Embedder
+from tekijin.slack.notify import notify_via_slack_now
 
 logger = logging.getLogger(__name__)
 
@@ -615,6 +616,24 @@ class AgentService:
                         # dt.datetime.now() (routes.py) regardless of the
                         # graph's (possibly injected/frozen) clock.
                         create_message(session, primary, asker_id, draft, dt.datetime.now())
+                        # If the responder has linked Slack, this is also their
+                        # very first look at the request — deliver the SAME
+                        # draft as a Slack DM (#hand-off-chat) so accepting via
+                        # TEKIJIN drops them straight into a normal-looking
+                        # Slack conversation with the draft already "sent".
+                        # Synchronous: this method runs outside any single
+                        # FastAPI request (see `notify_via_slack_now`'s
+                        # docstring), so there is no `BackgroundTasks` to defer
+                        # to here the way `POST /messages` does.
+                        parties = thread_parties(session, primary)
+                        if parties is not None:
+                            notify_via_slack_now(
+                                session,
+                                parties=parties,
+                                sender_id=asker_id,
+                                body=draft,
+                                thread_id=primary,
+                            )
             return "recorded", outcome
 
     def _capture_answer(self, values: dict[str, Any], body: str) -> None:

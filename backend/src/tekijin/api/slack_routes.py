@@ -165,7 +165,15 @@ def status(
     service = request.app.state.agent_service
     with service.session_factory() as session:
         link = get_slack_link(session, principal.employee_id)
-    return schemas.SlackStatusResponse(linked=link is not None)
+    if link is None:
+        return schemas.SlackStatusResponse(linked=False)
+    settings = get_settings()
+    open_url = (
+        f"https://slack.com/app_redirect?app={settings.slack_app_id}&team={link.slack_team_id}"
+        if settings.slack_app_id
+        else None
+    )
+    return schemas.SlackStatusResponse(linked=True, open_url=open_url)
 
 
 @router.post("/unlink", response_model=schemas.SlackUnlinkResponse)
