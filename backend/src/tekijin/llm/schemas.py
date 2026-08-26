@@ -101,10 +101,13 @@ class CaseExtractionSchema(BaseModel):
     holds a reusable *case*, distils it into ``問題(状況) → 打ち手 → 結果``. Not every
     record is a case — a status note with no problem/action is not — so
     ``extractable`` lets the model pass (the caller then stores nothing, keeping a
-    non-case out of the knowledge base). ``topics`` are NOT emitted here: they come
-    from the source record's precomputed tags so the knowledge vocabulary can never
-    drift from the eval gold's. The model must ground every field in the supplied
-    text and never invent a ``result`` that is not stated (leave it null).
+    non-case out of the knowledge base). For a source that CARRIES precomputed tags
+    (daily reports) ``topics`` come from those tags, never the model, so the
+    knowledge vocabulary can never drift from the eval gold's. For a source with NO
+    tags (chat, #448) the model instead proposes ``topic_hints`` and the caller snaps
+    them onto the canonical vocabulary (``normalize_topics``) — same drift exposure
+    as C1 routing, and anything off-vocabulary is dropped. The model must ground
+    every field in the supplied text and never invent a ``result`` (leave it null).
     """
 
     extractable: bool = Field(
@@ -119,6 +122,13 @@ class CaseExtractionSchema(BaseModel):
         default=None, description="顧客の業種（記録に明示があれば）。無ければ null"
     )
     confidence: float = Field(default=0.0, ge=0.0, le=1.0, description="抽出の確信度")
+    topic_hints: list[str] = Field(
+        default_factory=list,
+        description=(
+            "この知識が属するトピック候補（タグの無いチャット等の抽出でのみ使用）。"
+            "決められた語彙から選ぶ。タグを持つ日報では空のままでよい。"
+        ),
+    )
 
     @model_validator(mode="after")
     def _extractable_requires_problem_and_action(self) -> CaseExtractionSchema:
