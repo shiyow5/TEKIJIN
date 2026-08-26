@@ -50,7 +50,7 @@ def test_group_rows_groups_within_gap_and_labels_speakers() -> None:
     assert len(out) == 1
     src = out[0]
     assert src.source_type == "chat"
-    assert src.source_id == "chat_IT問い合わせ_1"  # keyed on channel + first id
+    assert src.source_id == "chat_IT問い合わせ_1_2"  # keyed on channel + first/last id
     assert src.topics == ()  # chat has no precomputed tags
     # Transcript labels each turn by sender so the LLM sees question -> answer.
     assert src.text == "社員5: VPNに繋がらない\n社員9: クライアント設定を見直して"
@@ -64,7 +64,7 @@ def test_group_rows_splits_on_time_gap() -> None:
         _row(4, "営業部-連絡", 205),
     ]
     out = group_rows(rows, gap_minutes=30, min_messages=2)
-    assert [s.source_id for s in out] == ["chat_営業部-連絡_1", "chat_営業部-連絡_3"]
+    assert [s.source_id for s in out] == ["chat_営業部-連絡_1_2", "chat_営業部-連絡_3_4"]
 
 
 def test_group_rows_splits_on_channel_change() -> None:
@@ -75,7 +75,7 @@ def test_group_rows_splits_on_channel_change() -> None:
         _row(4, "開発部-連絡", 6),
     ]
     out = group_rows(rows, gap_minutes=30, min_messages=2)
-    assert [s.source_id for s in out] == ["chat_経理・総務_1", "chat_開発部-連絡_3"]
+    assert [s.source_id for s in out] == ["chat_経理・総務_1_2", "chat_開発部-連絡_3_4"]
 
 
 def test_group_rows_drops_runs_below_min_messages() -> None:
@@ -100,9 +100,9 @@ def test_group_rows_caps_long_runs_at_max_messages() -> None:
     out = group_rows(rows, gap_minutes=30, min_messages=1, max_messages=2)
     # 5 messages capped at 2 -> chunks of [1,2], [3,4], [5]
     assert [s.source_id for s in out] == [
-        "chat_IT問い合わせ_1",
-        "chat_IT問い合わせ_3",
-        "chat_IT問い合わせ_5",
+        "chat_IT問い合わせ_1_2",
+        "chat_IT問い合わせ_3_4",
+        "chat_IT問い合わせ_5_5",
     ]
 
 
@@ -129,6 +129,23 @@ def test_group_rows_respects_limit() -> None:
     ]
     out = group_rows(rows, gap_minutes=30, min_messages=2, limit=2)
     assert len(out) == 2
+    # limit=0 yields nothing (guarded before any source is appended).
+    assert group_rows(rows, gap_minutes=30, min_messages=2, limit=0) == []
+
+
+def test_group_rows_source_id_encodes_first_and_last_id() -> None:
+    # The key spans the whole conversation (first_last), so a differently-bounded
+    # regrouping produces a NEW id rather than overwriting an existing unit (#448).
+    rows = [_row(10, "IT問い合わせ", 0), _row(11, "IT問い合わせ", 2), _row(12, "IT問い合わせ", 4)]
+    out = group_rows(rows, gap_minutes=30, min_messages=2)
+    assert out[0].source_id == "chat_IT問い合わせ_10_12"
+    # A tighter gap splits the same run and yields different, non-overlapping ids.
+    tight = group_rows(
+        [_row(10, "IT問い合わせ", 0), _row(11, "IT問い合わせ", 5)],
+        gap_minutes=3,
+        min_messages=1,
+    )
+    assert [s.source_id for s in tight] == ["chat_IT問い合わせ_10_10", "chat_IT問い合わせ_11_11"]
 
 
 def test_chat_conversation_sources_reads_seeded_history(seed_counts, session) -> None:

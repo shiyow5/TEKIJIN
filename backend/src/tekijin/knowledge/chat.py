@@ -22,7 +22,7 @@ the seeded fixtures deterministically.
 from __future__ import annotations
 
 import datetime as dt
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -61,17 +61,23 @@ def _flush(
 
     if len(rows) < min_messages:
         return None
-    first_id = rows[0].id
+    # Key on BOTH the first and last message id, not just the first: the conversation
+    # boundary is derived from the grouping params (gap/min/max) and the rows present,
+    # so a re-run with different params — or a backdated row landing inside an already
+    # extracted window — would otherwise reuse the same source_id for a DIFFERENT
+    # transcript and silently overwrite an already-reviewed unit's content (#448
+    # review). Including last_id makes a differently-bounded regrouping a NEW unit.
+    first_id, last_id = rows[0].id, rows[-1].id
     return ExtractionSource(
         source_type="chat",
-        source_id=f"chat_{channel}_{first_id}",
+        source_id=f"chat_{channel}_{first_id}_{last_id}",
         text=_transcript(rows),
         topics=(),  # chat has no precomputed tags; inferred at extraction time
     )
 
 
 def group_rows(
-    rows: Sequence[EmployeeChatHistory],
+    rows: Iterable[EmployeeChatHistory],
     *,
     gap_minutes: int = _DEFAULT_GAP_MINUTES,
     min_messages: int = _DEFAULT_MIN_MESSAGES,
@@ -81,15 +87,19 @@ def group_rows(
 ) -> list[ExtractionSource]:
     """Group pre-sorted chat rows into conversation sources (pure; no DB).
 
-    ``rows`` MUST already be ordered by ``(channel, sent_at, id)``. A conversation
-    is a maximal run of consecutive rows in the SAME channel whose successive
-    timestamps are within ``gap_minutes`` (a longer silence starts a new one) and
-    which is at most ``max_messages`` long (a channel that never goes quiet is
-    chunked so one transcript does not balloon). Runs shorter than ``min_messages``
-    are dropped — a lone broadcast is not an exchange. Rows with no text or no
-    timestamp are skipped, and ``exclude_channels`` are filtered out. ``limit``
-    bounds the number of conversations returned (PoC / cost control).
+    ``rows`` MUST already be ordered by ``(channel, sent_at, id)``. Iterated once and
+    lazily, so a streaming cursor can be passed straight through. A conversation is a
+    maximal run of consecutive rows in the SAME channel whose successive timestamps
+    are within ``gap_minutes`` (a longer silence starts a new one) and which is at
+    most ``max_messages`` long (a channel that never goes quiet is chunked so one
+    transcript does not balloon). Runs shorter than ``min_messages`` are dropped — a
+    lone broadcast is not an exchange. Rows with no text or no timestamp are skipped,
+    and ``exclude_channels`` are filtered out. ``limit`` bounds the number of
+    conversations returned (PoC / cost control); ``limit=0`` yields none.
     """
+
+    if limit is not None and limit <= 0:
+        return []
 
     gap = dt.timedelta(minutes=gap_minutes)
     sources: list[ExtractionSource] = []
@@ -150,9 +160,14 @@ def chat_conversation_sources(
             EmployeeChatHistory.sent_at,
             EmployeeChatHistory.id,
         )
+        # Stream in batches instead of materializing the whole table: group_rows
+        # iterates once in order, and with ``limit`` set the unread tail is never
+        # fetched. Bounds client memory; the DB still sorts server-side (an index on
+        # (channel, sent_at, id) makes that an index scan — tracked as follow-up).
+        .execution_options(yield_per=500)
     )
     return group_rows(
-        list(session.scalars(stmt)),
+        session.scalars(stmt),
         gap_minutes=gap_minutes,
         min_messages=min_messages,
         max_messages=max_messages,
