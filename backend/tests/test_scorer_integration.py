@@ -373,6 +373,68 @@ def test_asker_only_candidate_yields_empty(seed_counts, session) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# #405: question↔past-answer similarity (qsim) re-ranks and is dormant when None
+# --------------------------------------------------------------------------- #
+def test_question_similarity_reranks_and_adds_reason(seed_counts, session) -> None:
+    """A candidate whose past answers match the QUESTION text is lifted, even when
+    both candidates carry identical topic evidence (saturated topic_fit ties). The
+    boost is ``weights.question_fit * qsim`` and is surfaced as a reason."""
+    from tekijin.scorer.weights import DEFAULT_WEIGHTS
+
+    for emp in (1, 2):
+        _add_skill(session, f"sk_qsim_{emp}", emp)  # identical topic evidence
+
+    scorer = ExpertiseScorer(Repository(session))
+    # Baseline: identical evidence -> tie broken by ascending person_id (1 leads).
+    base = _scores_by_person(scorer.rank(TOPIC, [1, 2], asker_id=None, now=NOW, top_k=3))
+    assert base[1] == base[2]
+
+    # qsim favours #2: it must now outrank #1 and gain a question_fit reason.
+    res = scorer.rank(
+        TOPIC, [1, 2], asker_id=None, now=NOW, top_k=3, question_similarity={2: 0.8, 1: 0.0}
+    )
+    scores = _scores_by_person(res)
+    assert scores[2] > scores[1]
+    assert scores[2] == round(base[2] + DEFAULT_WEIGHTS.question_fit * 0.8, 4)
+    assert scores[1] == base[1]  # qsim 0.0 -> unchanged
+    two = next(r for r in res["recommendations"] if r["person_id"] == 2)
+    qfit = [r for r in two["reasons"] if r["type"] == "question_fit"]
+    assert qfit  # the boost is explained, not silent
+
+
+def test_question_similarity_below_floor_scores_without_reason(seed_counts, session) -> None:
+    """A noise-level qsim still nudges the score (continuous signal, as measured)
+    but must NOT show the assertive "一致" reason — the reason is floored (#405)."""
+    from tekijin.scorer.weights import DEFAULT_WEIGHTS, QUESTION_FIT_REASON_FLOOR
+
+    _add_skill(session, "sk_qsim_floor", 4)
+    scorer = ExpertiseScorer(Repository(session))
+    base = _scores_by_person(scorer.rank(TOPIC, [4], asker_id=None, now=NOW, top_k=3))
+
+    tiny = QUESTION_FIT_REASON_FLOOR / 2  # below the reason floor
+    res = scorer.rank(TOPIC, [4], asker_id=None, now=NOW, top_k=3, question_similarity={4: tiny})
+    rec = res["recommendations"][0]
+    # Score is nudged by the continuous term...
+    assert rec["score"] == round(base[4] + DEFAULT_WEIGHTS.question_fit * tiny, 4)
+    # ...but the misleading "matches" reason is suppressed below the floor.
+    assert all(r["type"] != "question_fit" for r in rec["reasons"])
+
+
+def test_question_similarity_absent_is_byte_identical(seed_counts, session) -> None:
+    """Omitting ``question_similarity`` keeps develop behaviour byte-identical:
+    no score change, no question_fit reason (dormant by default)."""
+    _add_skill(session, "sk_qsim_off", 3)
+    scorer = ExpertiseScorer(Repository(session))
+
+    without = scorer.rank(TOPIC, [3], asker_id=None, now=NOW, top_k=3)
+    empty = scorer.rank(TOPIC, [3], asker_id=None, now=NOW, top_k=3, question_similarity=None)
+
+    assert _scores_by_person(without) == _scores_by_person(empty)
+    rec = without["recommendations"][0]
+    assert all(r["type"] != "question_fit" for r in rec["reasons"])
+
+
+# --------------------------------------------------------------------------- #
 # fix 5: an answer tagged for a DIFFERENT subtopic is not counted
 # --------------------------------------------------------------------------- #
 def test_answer_tagged_other_subtopic_is_not_evidence(seed_counts, session) -> None:

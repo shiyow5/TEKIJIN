@@ -13,11 +13,12 @@
 
 import { FollowupForm } from "@/components/FollowupForm";
 import { PageBackLink } from "@/components/PageBackLink";
-import { SourceCitations } from "@/components/SourceCitations";
+import { ReferenceAnswer } from "@/components/ReferenceAnswer";
 import {
   useOptionalSessionStream,
   useOptionalSessionStreamRestart,
 } from "@/components/SessionStreamProvider";
+import { SourceCitations } from "@/components/SourceCitations";
 import { type EventStreamState, useEventStream } from "@/hooks/useEventStream";
 import { ApiError, postAnswer, requestDocumentFallback } from "@/lib/api-client";
 import { formatConfidence } from "@/lib/format";
@@ -215,7 +216,7 @@ export function ProcessingScreen({
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-lg py-lg">
-      <PageBackLink href="/questions" label="質問一覧へ戻る" className="-mb-sm" />
+      <PageBackLink href="/" label="ホームへ戻る" className="-mb-sm" />
       <header className="text-center">
         <h1 className="flex items-center justify-center gap-sm font-bold text-2xl text-primary">
           {showActiveStep ? (
@@ -283,6 +284,9 @@ export function ProcessingScreen({
             </li>
           ) : null}
         </ol>
+
+        {/* #413: additive cited answer, shown alongside the person hand-off flow. */}
+        <ReferenceAnswer reference={stream.reference} sessionId={sessionId} />
 
         {showFollowup && stream.followup ? (
           <FollowupForm

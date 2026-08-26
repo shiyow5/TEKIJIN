@@ -249,6 +249,31 @@ def test_node_event_self_answered_carries_citations() -> None:
     }
 
 
+def test_node_event_additive_answer_emits_reference_when_grounded() -> None:
+    # #413: the additive_answer node surfaces a "reference" event (cited past answer)
+    # to show ALONGSIDE the person hand-off — only when a grounded answer exists.
+    sse = _ev(
+        events.node_event(
+            "additive_answer",
+            {
+                "additive_answer_text": "過去の類似回答です。",
+                "additive_citations": [{"source_id": "qa_1", "kind": "qa"}],
+            },
+        )
+    )
+    assert sse.event == "reference"
+    assert _data(sse) == {
+        "answer": "過去の類似回答です。",
+        "citations": [{"source_id": "qa_1", "kind": "qa"}],
+    }
+
+
+def test_node_event_additive_answer_silent_without_text() -> None:
+    # No grounded answer (gated below floor, or ungrounded) -> no event, plain hand-off.
+    assert events.node_event("additive_answer", {}) is None
+    assert events.node_event("additive_answer", {"additive_answer_text": ""}) is None
+
+
 def test_node_event_document_carries_structured_fallback_responder() -> None:
     rec = {
         "person_id": 1,
@@ -494,6 +519,34 @@ def test_vllm_intent_adapter_converts_schema() -> None:
     assert any(
         "UTM移行の相談" in msg for _role, msg in VllmIntentModel.prompt("UTM移行の相談", None)
     )
+
+
+def test_intent_schema_constrains_topics_to_the_vocabulary_enum() -> None:
+    # #64: the JSON Schema handed to the model must pin `topics` to the 22-topic
+    # vocabulary, so guided decoding CANNOT emit a free-text topic. Asserting on the
+    # OpenAI tool form (not just model_json_schema) is the point: that is the payload
+    # `with_structured_output` actually sends, and it is what vLLM builds the grammar
+    # from. A topic outside the vocabulary joins no evidence and randomises the
+    # recommendation (#116).
+    from langchain_core.utils.function_calling import convert_to_openai_tool
+
+    from tekijin.scorer.topics import TOPIC_VOCABULARY
+
+    tool = convert_to_openai_tool(IntentSchema)
+    items = tool["function"]["parameters"]["properties"]["topics"]["items"]
+    assert items["enum"] == list(TOPIC_VOCABULARY)
+    assert items["type"] == "string"
+
+
+def test_intent_schema_still_parses_an_off_vocabulary_topic() -> None:
+    # Deliberately lenient the other way (#64): the enum constrains GENERATION, but a
+    # backend without guided decoding must not blow up the whole C1 call with a
+    # ValidationError — `analyze` snaps the value onto the vocabulary instead.
+    assert IntentSchema(topics=["ネットワーク"]).topics == ["ネットワーク"]
+    result = VllmIntentModel(model=_FakeStructured(IntentSchema(topics=["ネットワーク"]))).analyze(
+        "VPNが切れる", None
+    )
+    assert result.topics == ["ネットワーク・VPN"]
 
 
 def test_vllm_intent_prompt_fences_context_fragments() -> None:
@@ -835,7 +888,7 @@ class _FakeRetriever:
 
 
 class _FakeScorer:
-    def rank(self, topics, candidates, asker_id, now, *, top_k=3):
+    def rank(self, topics, candidates, asker_id, now, *, top_k=3, question_similarity=None):
         return {"recommendations": []}
 
 

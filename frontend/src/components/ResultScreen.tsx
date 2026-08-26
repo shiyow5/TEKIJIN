@@ -15,8 +15,8 @@
  * placeholder is shown.
  */
 
-import { useOptionalSessionId, useOptionalSessionStream } from "@/components/SessionStreamProvider";
 import { PageBackLink } from "@/components/PageBackLink";
+import { useOptionalSessionId, useOptionalSessionStream } from "@/components/SessionStreamProvider";
 import { SourceCitations } from "@/components/SourceCitations";
 import { PersonRouteView } from "@/components/result/PersonRouteView";
 import type { EventStreamState } from "@/hooks/useEventStream";
@@ -34,7 +34,7 @@ const EMPTY_STREAM: EventStreamState = { events: [], terminal: false };
 function ResultFrame({ children }: { children: ReactNode }) {
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col py-lg">
-      <PageBackLink href="/questions" label="質問一覧へ戻る" />
+      <PageBackLink href="/" label="ホームへ戻る" />
       {children}
     </div>
   );
@@ -193,6 +193,7 @@ export function ResultScreen({ streamState, sessionId }: ResultScreenProps) {
           recommendations={recommendations}
           reason={stream.route?.reason}
           draft={draft}
+          reference={stream.reference}
           sessionId={effectiveSessionId}
         />
       </ResultFrame>

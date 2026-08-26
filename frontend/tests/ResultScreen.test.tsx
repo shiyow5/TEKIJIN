@@ -73,10 +73,7 @@ const THREE_CANDIDATES: Recommendation[] = [
 describe("ResultScreen — pending", () => {
   it("shows a preparing placeholder when no data has arrived", () => {
     renderResult(state({}));
-    expect(screen.getByRole("link", { name: "質問一覧へ戻る" })).toHaveAttribute(
-      "href",
-      "/questions",
-    );
+    expect(screen.getByRole("link", { name: "ホームへ戻る" })).toHaveAttribute("href", "/");
     expect(screen.getByText("結果を準備中…")).toBeInTheDocument();
   });
 });
@@ -227,6 +224,39 @@ describe("ResultScreen — main line (person)", () => {
     // reason labels (expanded top card shows detail)
     expect(screen.getByText("関連資格")).toBeInTheDocument();
     expect(screen.getByText("過去回答")).toBeInTheDocument();
+  });
+
+  it("shows the additive cited answer above the candidates when present (#413)", () => {
+    renderResult(
+      state({
+        route: { route: "person", reason: "同様の案件担当者がいます", confidence: 0.9 },
+        reference: {
+          answer: "契約管理は費用対効果で説明するのが有効です。",
+          citations: [{ source_id: "qa_42", kind: "qa" }],
+        },
+        recommend: { recommendations: THREE_CANDIDATES },
+        draft: { draft: "お疲れ様です。" },
+      }),
+    );
+
+    // The additive answer + its "参考" framing render alongside the hand-off...
+    expect(screen.getByText("参考: 過去の類似回答")).toBeInTheDocument();
+    expect(screen.getByText("契約管理は費用対効果で説明するのが有効です。")).toBeInTheDocument();
+    expect(screen.getByText("過去の回答 qa_42")).toBeInTheDocument();
+    // ...without replacing the person hand-off main line.
+    expect(screen.getByText("この質問は、人に聞くのが確実です")).toBeInTheDocument();
+    expect(screen.getByText("高梨（最有力）")).toBeInTheDocument();
+  });
+
+  it("omits the reference block when no additive answer arrived", () => {
+    renderResult(
+      state({
+        route: { route: "person", reason: "", confidence: 0.9 },
+        recommend: { recommendations: THREE_CANDIDATES },
+        draft: { draft: "お疲れ様です。" },
+      }),
+    );
+    expect(screen.queryByText("参考: 過去の類似回答")).not.toBeInTheDocument();
   });
 
   it("lets the user edit the draft (change reflected in the textarea)", () => {

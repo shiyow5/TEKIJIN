@@ -118,6 +118,23 @@ def topic_vocabulary():
     )
 
 
+def _without_topic_enum(body, vocab):
+    """tool 定義から `topics` の enum を外す（#64 以降のベースライン復元）。
+
+    #64 で `IntentSchema` 自身が語彙の enum を持つようになったため、何もしない
+    `product` 変種は「自由記述のベースライン」ではなくなり、`enum` / `both` と
+    同じ拘束を受けてしまう（＝この ablation が「enum に効果なし」という誤った
+    結論を出す）。ここで明示的に剥がして、比較の土台を元に戻す。
+
+    なお `_INTENT_SYSTEM` は #116 以降つねに語彙一覧を含むので、`product` は
+    「スキーマで縛らない」という意味であって「語彙を一切渡さない」ではない。
+    """
+
+    params = body["tools"][0]["function"]["parameters"]
+    params["properties"]["topics"]["items"] = {"type": "string"}
+    return body
+
+
 def _with_topic_enum(body, vocab):
     """tool 定義の `topics` を語彙の enum に差し替える（案2: guided decoding で縛る）。"""
     params = body["tools"][0]["function"]["parameters"]
@@ -138,8 +155,9 @@ def _with_topic_list_in_prompt(body, vocab):
 
 
 C1_VARIANTS = {
-    # 製品のまま。語彙を渡さないので自由記述になる
-    "product": lambda body, vocab: body,
+    # スキーマでは縛らない（自由記述）ベースライン。#64 でスキーマ側に enum が
+    # 入ったので、明示的に剥がさないと他の変種と同じ拘束になってしまう。
+    "product": _without_topic_enum,
     # 案1: system プロンプトに語彙を並べるだけ
     "prompt": _with_topic_list_in_prompt,
     # 案2: スキーマの enum にして guided decoding で語彙外を出せなくする

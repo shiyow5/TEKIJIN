@@ -670,6 +670,15 @@ class SourceCitation(BaseModel):
     kind: str  # "qa" (past Q&A) | "document" (internal doc)
 
 
+class ReferenceData(BaseModel):
+    """#413: a cited answer surfaced ALONGSIDE a person hand-off ("参考: 過去の類似
+    回答"). Emitted on the person route before ``recommend`` when a grounded past
+    answer exists — additive, never a substitute for the hand-off."""
+
+    answer: str
+    citations: list[SourceCitation] = Field(default_factory=list)
+
+
 class MessageData(BaseModel):
     status: str
     message: str

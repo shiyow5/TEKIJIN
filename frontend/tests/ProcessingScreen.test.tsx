@@ -50,10 +50,7 @@ describe("ProcessingScreen", () => {
 
   it("shows an in-progress step while no events have arrived yet", () => {
     renderScreen(state({}));
-    expect(screen.getByRole("link", { name: "質問一覧へ戻る" })).toHaveAttribute(
-      "href",
-      "/questions",
-    );
+    expect(screen.getByRole("link", { name: "ホームへ戻る" })).toHaveAttribute("href", "/");
     expect(screen.getByText("最適な回答者を探しています…")).toBeInTheDocument();
     expect(screen.getByTestId("active-step")).toBeInTheDocument();
   });
@@ -101,6 +98,26 @@ describe("ProcessingScreen", () => {
     expect(screen.getByText("候補を2名見つけました")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "結果を見る" }));
     expect(pushMock).toHaveBeenCalledWith("/session/abc-123/result");
+  });
+
+  it("renders the additive cited answer alongside the live flow (#413)", () => {
+    renderScreen(
+      state({
+        route: { route: "person", reason: "詳しい人がいます", confidence: 0.8 },
+        reference: {
+          answer: "過去の類似回答です。",
+          citations: [{ source_id: "qa_7", kind: "qa" }],
+        },
+      }),
+    );
+    expect(screen.getByText("参考: 過去の類似回答")).toBeInTheDocument();
+    expect(screen.getByText("過去の類似回答です。")).toBeInTheDocument();
+    expect(screen.getByText("過去の回答 qa_7")).toBeInTheDocument();
+  });
+
+  it("omits the reference block when no additive answer arrived (#413)", () => {
+    renderScreen(state({ route: { route: "person", reason: "", confidence: 0.8 } }));
+    expect(screen.queryByText("参考: 過去の類似回答")).not.toBeInTheDocument();
   });
 
   it("stops the active-step spinner once a result is ready (person route pauses, #148)", () => {

@@ -122,6 +122,32 @@ class Settings(BaseSettings):
     # low-hallucination). Safe by construction: it never intercepts a person query.
     self_answer_enabled: bool = True
 
+    # #413: additive self-answer on the PERSON route. self_answer (#291) fires ONLY
+    # on the data-derived routes (document/prior_answer) after C5 — so a knowledge
+    # question that routes to a person (an expert exists) never shows a past-answer
+    # citation, even when one grounds it. This makes System 1 also fire on the
+    # person route: before the hand-off, if a low-relevance FLOOR is cleared, try a
+    # grounded cited answer and surface it ALONGSIDE the recommendation. It NEVER
+    # replaces the hand-off (person recall unchanged) and never marks the run
+    # self-resolved. Requires self_answer to be wired (shares the composer).
+    # DGX sizing (research_selfanswer_person.py): person-route compose grounded rate
+    # 0.237 (avg 3.78 citations) — ~24% of person questions would gain a citation
+    # that today shows none. OFF by default until the full-graph E2E confirms person
+    # recall stays 1.000 and citations fire; the floor gates the compose LLM call so
+    # no-data person questions add no latency.
+    #
+    # Before enabling (security review #413):
+    # * The floor (0.20) is BELOW the data-route thresholds (DOCUMENT_SIM 0.28), so
+    #   it composes on weak-relevance evidence a data route would not pick — re-check
+    #   the false-positive rate on the DGX eval when tuning it.
+    # * The corpus has no per-row ACL, so a past answer is treated as readable by any
+    #   asker. Enabling surfaces past-answer summaries on the person route too, so
+    #   confirm with the product owner that past answers are org-wide readable.
+    # The compose call is best-effort: a failure degrades to a plain hand-off (the
+    # additive_answer node swallows it), so person recall never regresses.
+    additive_self_answer_enabled: bool = False
+    additive_self_answer_floor: float = 0.20
+
     # #327: corpus-count routing for prior_answer. Nemotron's answer cosine cannot
     # separate this route (PRIOR_ANSWER_SIM sits above the observed max — see
     # route.py / #119), so route on whether the top retrieved past answer is a
@@ -139,6 +165,60 @@ class Settings(BaseSettings):
     # asymmetry. OFF by default (develop behaviour byte-identical); enable only
     # after DGX confirms a Pareto gain (primary R@3 up, alt not down).
     daily_evidence_enabled: bool = False
+
+    # #405: add a question↔past-answer similarity (qsim) term to the C6 score. The
+    # scorer's topic_fit sees only the topic TAG and saturates (ADR-0006), so it
+    # cannot re-rank on the specific question — and when C1 mispredicts the topic it
+    # scores the gold expert against the wrong tag and drops them. qsim (max cosine
+    # of the question vs the person's past answers, from C4's answer dense channel)
+    # rescues those rows. ENABLED by default after the #405 DGX full-graph E2E
+    # verification: Hit@3 0.742->0.788 (Top1/R@3/MRR up too), while RouteAcc and
+    # person route recall stayed byte-identical at 1.000 (49/49) — routing is
+    # untouched because C5 does not read the scorer, so this is safe by
+    # construction. The scorer-isolation eval (scripts/research_c6_qsim.py, 2 runs)
+    # localised the gain to the rows where C1 mispredicts the topic (Hit@3 on those
+    # 0.444->0.778). Set False to restore the pre-#405 (tag-only) ranking.
+    question_fit_enabled: bool = True
+
+    # #87: score the WHOLE employee roster in C6 instead of only the people C4's
+    # top chunks surfaced. C4's narrowing drops people who hold the evidence but
+    # whose chunks did not rank, and that loss was measured (層2 R@3 -0.048 at
+    # top-10, -0.020 at top-20/40 — i.e. it is the reachable SET, not the cut-off).
+    # At a 40-person roster the scorer is a deterministic few-ms computation, so
+    # there is no cost argument for narrowing. OFF by default until the full-graph
+    # E2E measurement confirms Hit@3 improves without moving person route recall
+    # (the route reads C4's set separately and must stay at 1.000 — ADR-0007).
+    # MEASURED AND NOT ADOPTED (ADR-0009): on the real graph, 3 paired replicates
+    # put Hit@3 at 0.7778 (C4 pool) vs 0.7626 (whole roster) — consistently one row
+    # worse, never better; person route recall stayed 1.000 either way. C4's set is
+    # not only a narrowing, it is the prior "this person was retrievable for this
+    # question"; widening it lets a high-generic-topic_fit person with no
+    # question-specific evidence displace the right one (and #405's qsim is 0 for
+    # anyone C4 did not surface). The flag stays so the measurement is one command
+    # away when the scorer or corpus changes.
+    # At thousands of employees the pool should come from person_topic_edges by
+    # topic rather than the whole table; that is a cost concern, not an accuracy one.
+    score_all_employees: bool = False
+
+    # #83: when the asker explicitly asks for someone at a given branch ("福岡の拠点で
+    # 動ける方だと助かります"), treat it as a CONDITION in C6 rather than a scoring term.
+    #
+    # OFF, and NOT yet enablable — the measurement that would justify enabling it is
+    # CONTAMINATED. The DGX full-graph A/B looks strong (Hit@3 0.7626 -> 0.8232 over 3
+    # paired replicates, +0.0606 every time, routing byte-identical), and C1's branch
+    # extraction measured 15/15 with 1 false fire in 72. But the C1 prompt was written
+    # AFTER reading the eval's constrained rows: its two special rules (本部->本社,
+    # 地方名->拠点) cover exactly the ids a naive extractor misses
+    # (`ablation/robustness_results.json`: 11/13/15/17/19/21/24/25), and its negative
+    # example is a verbatim lift of eval row 1. So both numbers measure a prompt fitted
+    # to the rows it is scored on — the same defect that got "C1 few-shot Hit@3 0.803"
+    # retracted (#384). Enabling needs held-out constraint phrasings authored without
+    # reference to this prompt.
+    #
+    # Also unsettled: the committed bench has 「拠点一致を加点」 and 「拠点で絞ってから
+    # 並べる」 at the SAME 0.9333/0.7727 (`robustness_results.json`), so a one-line
+    # `proximity` weight bump may buy the same thing as this new code path.
+    branch_constraint_enabled: bool = False
 
     # #357: knowledge framework. When the knowledge layer is wired into retrieval,
     # answer a question from structured knowledge units (problem → action → result,

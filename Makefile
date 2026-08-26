@@ -67,7 +67,7 @@ fmt-check-frontend: ## Check frontend formatting
 # ============================================================
 # Lint
 # ============================================================
-lint: lint-backend lint-frontend ## Run all linters
+lint: lint-backend lint-frontend typecheck-frontend ## Run all linters (incl. tsc)
 
 lint-backend: ## Lint Python with ruff
 	cd $(BACKEND_DIR) && $(PY) -m ruff check .
@@ -86,7 +86,11 @@ test-backend: ## Run backend tests (pytest)
 test-frontend: ## Run frontend unit tests (vitest)
 	cd $(FRONTEND_DIR) && npm test
 
-typecheck-frontend: ## Type-check the frontend (tsc)
+typecheck-frontend: ## Type-check the frontend (tsc --noEmit)
+	# Part of `make lint` (and therefore `make check` / CI). biome does not type-check
+	# and vitest transpiles without checking, so `frontend/tests/**` was covered by
+	# NOTHING; `app/` and `src/` were only caught late, by `next build` inside the E2E
+	# job's webServer (#309). ~5s warm, ~18s cold (CI is always cold — no tsc cache).
 	cd $(FRONTEND_DIR) && npm run typecheck
 
 e2e: ## Run Playwright end-to-end tests (frontend; builds + serves the app itself)

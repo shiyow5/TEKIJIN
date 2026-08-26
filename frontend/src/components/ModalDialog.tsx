@@ -1,8 +1,9 @@
 "use client";
 
 /**
- * Shared modal-dialog chrome: overlay, `role="dialog"` + `aria-modal`, Tab-trap,
- * Escape-to-cancel, and opener focus restore. Extracted from
+ * Shared modal-dialog chrome: overlay, `role="dialog"` + `aria-modal`, Tab-trap
+ * (via {@link useFocusTrap}, shared with `AppHeader`'s nav drawer — #391
+ * review), Escape-to-cancel, and opener focus restore. Extracted from
  * `result/ConsultMethodDialog.tsx` when `QuestionResolveButton`'s confirmation
  * became a popup too (#289) and would otherwise have carried a second copy of
  * the same a11y-sensitive logic. Anything that needs a modal should render this
@@ -21,6 +22,7 @@
  * be restored to it on close.
  */
 
+import { useFocusTrap } from "@/hooks/useFocusTrap";
 import { type ReactNode, type RefObject, useEffect, useRef } from "react";
 
 export interface ModalDialogProps {
@@ -29,6 +31,12 @@ export interface ModalDialogProps {
   initialFocusRef: RefObject<HTMLElement | null>;
   /** Close when the overlay outside the dialog panel is clicked. Default off. */
   dismissOnBackdrop?: boolean;
+  /**
+   * Panel width. Defaults to the confirmation-dialog width every other caller
+   * wants; override for content that needs more room (#392: 使い方's 3-column
+   * step grid reads as cramped at the default width).
+   */
+  maxWidthClassName?: string;
   children: ReactNode;
 }
 
@@ -37,6 +45,7 @@ export function ModalDialog({
   onCancel,
   initialFocusRef,
   dismissOnBackdrop = false,
+  maxWidthClassName = "max-w-sm",
   children,
 }: ModalDialogProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -47,25 +56,11 @@ export function ModalDialog({
     return () => opener?.focus?.();
   }, [initialFocusRef]);
 
+  useFocusTrap(dialogRef, true);
+
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        onCancel();
-        return;
-      }
-      if (e.key !== "Tab") return;
-      const focusable = dialogRef.current?.querySelectorAll<HTMLElement>("button:not([disabled])");
-      if (!focusable || focusable.length === 0) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      const active = document.activeElement;
-      if (e.shiftKey && (active === first || !dialogRef.current?.contains(active))) {
-        e.preventDefault();
-        last.focus();
-      } else if (!e.shiftKey && active === last) {
-        e.preventDefault();
-        first.focus();
-      }
+      if (e.key === "Escape") onCancel();
     }
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
@@ -95,7 +90,7 @@ export function ModalDialog({
         ref={dialogRef}
         aria-modal="true"
         aria-labelledby={titleId}
-        className="flex w-full max-w-sm flex-col gap-md rounded-xl border border-outline-variant bg-surface-container-lowest p-lg shadow-md"
+        className={`flex w-full ${maxWidthClassName} flex-col gap-md rounded-xl border border-outline-variant bg-surface-container-lowest p-lg shadow-md`}
       >
         {children}
       </div>

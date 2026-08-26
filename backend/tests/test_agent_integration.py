@@ -424,6 +424,143 @@ def test_self_answer_not_consulted_on_person_route(seed_counts, session, fake_em
     assert _is_paused(agent, cfg)  # reached the send hand-off
 
 
+# --------------------------------------------------------------------------- #
+# additive self-answer (#413): cite past knowledge ALONGSIDE the person hand-off
+# --------------------------------------------------------------------------- #
+def _person_retriever_with_data(doc_conf: float) -> _FakeRetriever:
+    # Strong person signal (people_conf >= PERSON_WEAK_SIM) + a document below the
+    # DOCUMENT_SIM demotion bar -> PERSON route, with ``doc_conf`` controlling the
+    # additive floor gate.
+    return _FakeRetriever(
+        documents=[{"doc_id": "doc_001", "score": 0.05}],
+        document_confidence=doc_conf,
+        people_confidence=0.5,
+        people=[1, 2, 3],
+    )
+
+
+def test_additive_answer_cites_on_person_route_and_still_hands_off(
+    seed_counts, session, fake_embedder
+) -> None:
+    for emp in (1, 2, 3):
+        _seed_skill(session, f"sk_add_ok_{emp}", emp)
+    composer = _FixedSelfAnswer(grounded=True, answer="過去の類似回答です。", cites=["doc_001"])
+    agent = build_agent(
+        fake_embedder,
+        session,
+        retriever=_person_retriever_with_data(0.25),  # >= floor 0.20, < DOCUMENT_SIM
+        self_answer_model=composer,
+        additive_self_answer_enabled=True,
+    )
+    cfg = _cfg("add_ok")
+    state = agent.invoke(_init(), cfg)
+
+    assert state["route"] == PERSON  # still a person route
+    assert composer.calls  # additive compose ran (floor cleared)
+    # The cited answer is attached ADDITIVELY, without terminating or self-resolving.
+    assert state["additive_answer_text"] == "過去の類似回答です。"
+    assert state["additive_citations"] == [{"source_id": "doc_001", "kind": "document"}]
+    assert state.get("self_answer_grounded") is False  # NOT marked self-resolved
+    assert _is_paused(agent, cfg)  # the hand-off still happens (person recall intact)
+
+
+def test_additive_answer_gated_below_floor_skips_compose(
+    seed_counts, session, fake_embedder
+) -> None:
+    for emp in (1, 2, 3):
+        _seed_skill(session, f"sk_add_lo_{emp}", emp)
+    composer = _FixedSelfAnswer(grounded=True, cites=["doc_001"])
+    agent = build_agent(
+        fake_embedder,
+        session,
+        retriever=_person_retriever_with_data(0.10),  # below floor 0.20
+        self_answer_model=composer,
+        additive_self_answer_enabled=True,
+    )
+    cfg = _cfg("add_lo")
+    state = agent.invoke(_init(), cfg)
+
+    assert state["route"] == PERSON
+    assert composer.calls == []  # gated: no compose LLM call, no latency
+    assert not state.get("additive_answer_text")
+    assert _is_paused(agent, cfg)  # plain hand-off
+
+
+def test_additive_answer_ungrounded_leaves_no_reference(
+    seed_counts, session, fake_embedder
+) -> None:
+    for emp in (1, 2, 3):
+        _seed_skill(session, f"sk_add_ng_{emp}", emp)
+    composer = _FixedSelfAnswer(grounded=False)
+    agent = build_agent(
+        fake_embedder,
+        session,
+        retriever=_person_retriever_with_data(0.25),
+        self_answer_model=composer,
+        additive_self_answer_enabled=True,
+    )
+    cfg = _cfg("add_ng")
+    state = agent.invoke(_init(), cfg)
+
+    assert state["route"] == PERSON
+    assert composer.calls  # consulted, but not grounded
+    assert not state.get("additive_answer_text")  # no citation surfaced
+    assert _is_paused(agent, cfg)
+
+
+def test_additive_answer_compose_failure_still_hands_off(
+    seed_counts, session, fake_embedder
+) -> None:
+    # #413 safety premise: a composer error on the additive path must degrade to a
+    # plain hand-off, NEVER crash the person run (person recall must not regress).
+    class _RaisingComposer:
+        calls: list = []
+
+        def compose(self, question, evidence):
+            self.calls.append((question, list(evidence)))
+            raise ValueError("unparseable structured output")
+
+    for emp in (1, 2, 3):
+        _seed_skill(session, f"sk_add_err_{emp}", emp)
+    composer = _RaisingComposer()
+    agent = build_agent(
+        fake_embedder,
+        session,
+        retriever=_person_retriever_with_data(0.25),
+        self_answer_model=composer,
+        additive_self_answer_enabled=True,
+    )
+    cfg = _cfg("add_err")
+    state = agent.invoke(_init(), cfg)
+
+    assert state["route"] == PERSON
+    assert composer.calls  # it was consulted and raised...
+    assert not state.get("additive_answer_text")  # ...but the run absorbed it
+    assert _is_paused(agent, cfg)  # and the hand-off still happens
+
+
+def test_additive_answer_off_by_default_person_route_unchanged(
+    seed_counts, session, fake_embedder
+) -> None:
+    for emp in (1, 2, 3):
+        _seed_skill(session, f"sk_add_off_{emp}", emp)
+    composer = _FixedSelfAnswer(grounded=True, cites=["doc_001"])
+    agent = build_agent(
+        fake_embedder,
+        session,
+        retriever=_person_retriever_with_data(0.25),
+        self_answer_model=composer,
+        # additive_self_answer_enabled defaults False
+    )
+    cfg = _cfg("add_off")
+    state = agent.invoke(_init(), cfg)
+
+    assert state["route"] == PERSON
+    assert composer.calls == []  # additive_answer node not even wired
+    assert "additive_answer" not in agent.get_graph().nodes
+    assert _is_paused(agent, cfg)
+
+
 def test_self_answer_unwired_leaves_document_route_unchanged(
     seed_counts, session, fake_embedder
 ) -> None:

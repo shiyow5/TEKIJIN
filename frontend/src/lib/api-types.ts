@@ -527,6 +527,17 @@ export interface SourceCitation {
   kind: "qa" | "document";
 }
 
+/**
+ * #413: a cited answer surfaced ALONGSIDE a person hand-off ("参考: 過去の類似
+ * 回答"). Emitted as a `reference` event on the person route before `recommend`
+ * when a grounded past answer exists — additive, never a substitute for the
+ * hand-off (schemas.py `ReferenceData`).
+ */
+export interface ReferenceData {
+  answer: string;
+  citations: SourceCitation[];
+}
+
 export interface MessageData {
   status: string;
   message: string;
@@ -564,6 +575,7 @@ export interface SseEventDataMap {
   understood: UnderstoodData;
   followup: FollowupData;
   route: RouteData;
+  reference: ReferenceData;
   recommend: RecommendData;
   draft: DraftData;
   done: DoneData;

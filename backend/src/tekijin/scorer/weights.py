@@ -15,12 +15,14 @@ from dataclasses import dataclass
 @dataclass(frozen=True, slots=True)
 class Weights:
     """Linear weights for ``score = w1·topic_fit + w2·recency + w3·answer_quality
-    + w4·proximity − w5·load``.
+    + w4·proximity − w5·load (+ w6·question_fit when a qsim map is supplied)``.
 
     Defaults: topic_fit dominates (it is the "who actually knows this" signal);
     answer_quality is the next strongest (proven, helpful answers); recency and
     proximity are supporting nudges; load is a middling penalty — strong enough
-    to spread work (risk ②, 負荷集中) yet never enough to bury a true expert.
+    to spread work (risk ②, 負荷集中) yet never enough to bury a true expert. The
+    ``question_fit`` term (#405) is dormant unless the scorer is handed a
+    ``question_similarity`` map, so the default score is unchanged.
     """
 
     topic_fit: float = 0.45
@@ -28,9 +30,38 @@ class Weights:
     answer_quality: float = 0.20
     proximity: float = 0.10
     load: float = 0.20
+    # #405: additive weight for the question↔past-answer similarity term (qsim).
+    # NOTE: 1.0 is an EMPIRICAL coefficient, not a theoretical co-equal bound — on
+    # the eval corpus a matching answer's qsim lands in the same range as a strong
+    # topic_fit contribution (~0.45), which is why the two behave co-equally there.
+    # It is NOT normalised: qsim's theoretical max is 1.0 (> topic_fit's 0.45 cap),
+    # so if the embedding model is swapped and qsim's distribution shifts upward the
+    # term could quietly dominate — re-calibrate on the eval when changing the
+    # embedder (scripts/research_c6_qsim.py sweeps this weight).
+    # topic_fit sees only the topic TAG and saturates at 2-3 evidence pieces
+    # (ADR-0006), so it cannot re-rank on the specific QUESTION — and when C1
+    # predicts the wrong topic it scores the gold expert against the wrong tag and
+    # drops them. qsim is the max cosine of the question against the person's past
+    # answers; adding it lifts the expert whose answers actually match the question
+    # regardless of the (possibly wrong) topic label. It is applied ONLY when the
+    # scorer is given a ``question_similarity`` map (feature-gated by
+    # ``question_fit_enabled``); the default path never adds it, so develop stays
+    # byte-identical. Calibrated on scripts/research_c6_qsim.py: at 1.0 the qsim
+    # term is co-equal with topic_fit and lifts real-C1 Hit@3 0.742->0.807, with
+    # the gain concentrated on the rows where C1 mispredicts the topic (Hit@3 on
+    # those rows 0.444->0.778). C5 does not read the scorer, so this never changes
+    # routing (person recall is preserved by construction).
+    question_fit: float = 1.0
 
 
 DEFAULT_WEIGHTS = Weights()
+
+# #405: minimum qsim for the question-fit REASON to be shown. The score always adds
+# ``question_fit * qsim`` continuously (that continuous signal is what the eval
+# measured), but the assertive reason "質問内容が過去の回答と一致" must not appear for a
+# noise-level cosine — mirroring the noise floors elsewhere (prior_answer 0.15,
+# knowledge 0.20). Below this, the tiny score nudge is unexplained but immaterial.
+QUESTION_FIT_REASON_FLOOR = 0.15
 
 # Evidence base_scores (doc15 / db-schema.md): helpful answer 1.0 > project lead
 # 0.8 > past answer 0.7 > certification 0.6 > project member 0.5 > self-declared
@@ -96,3 +127,9 @@ REGION_OF_BRANCH: dict[str, str] = {
     "大阪": "関西",
     "福岡": "九州",
 }
+
+# The closed branch vocabulary C1 must choose from when the asker names a location
+# (#83). Derived from the region map so the two can never disagree: a branch C1
+# emits that the scorer does not know would silently match nobody. Ordered for a
+# stable JSON Schema enum (guided decoding), like TOPIC_VOCABULARY (#64).
+BRANCH_VOCABULARY: tuple[str, ...] = tuple(sorted(REGION_OF_BRANCH))

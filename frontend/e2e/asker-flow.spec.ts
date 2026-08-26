@@ -191,4 +191,64 @@ test.describe("asker flow", () => {
     // The replayed result renders (candidate + draft on the processing screen).
     await expect(page.getByText("回答者が見つかりました")).toBeVisible();
   });
+
+  test("ホームのヒーロー質問バーから直接送信できる — /questions を経由しない (#392)", async ({
+    page,
+  }) => {
+    await mockEmployees(page);
+    await mockAuth(page);
+    await mockRecentQuestions(page);
+    let askBody: { question?: string; asker_id?: string } | null = null;
+    await page.route(`${API_BASE}/ask`, async (route) => {
+      askBody = route.request().postDataJSON();
+      await fulfillJson(route, { session_id: "srv-session", status: "accepted" });
+    });
+    await page.route(`${API_BASE}/events/**`, (route) =>
+      fulfillSse(route, sseBody(MESSAGE_FRAMES)),
+    );
+
+    await page.goto("/");
+    await page.getByLabel("質問を入力").fill("有給の繰越ルール");
+    await page.getByRole("button", { name: "聞いてみる" }).click();
+
+    // Client-generated session id → straight to /session/<uuid>, same as
+    // submitting on /questions itself — never a /questions?q= detour.
+    await page.waitForURL(/\/session\/[^/]+$/);
+    await expect(page.getByRole("heading", { name: "回答をお届けします" })).toBeVisible();
+    expect(askBody?.question).toBe("有給の繰越ルール");
+  });
+});
+
+/**
+ * #392 put the same 「何を知りたいですか？」 heading on the hub as on `/questions`.
+ * The unit test asserts the WORDS match; it cannot see that the two rendered at
+ * different sizes (24px vs 30px) for a while. Compare what the browser actually
+ * computes, so "same heading" stays true rather than just true-looking.
+ */
+test("the hub's hero heading renders identically to the one on /questions (#392)", async ({
+  page,
+}) => {
+  await mockEmployees(page);
+  await mockAuth(page);
+  await page.route(`${API_BASE}/notifications*`, (route) => fulfillJson(route, { items: [] }));
+  await page.route(`${API_BASE}/questions/recent*`, (route) => fulfillJson(route, []));
+
+  const heading = () => page.getByRole("heading", { name: "何を知りたいですか？" });
+  const typography = () =>
+    heading().evaluate((el) => {
+      const s = getComputedStyle(el);
+      return {
+        fontSize: s.fontSize,
+        fontWeight: s.fontWeight,
+        lineHeight: s.lineHeight,
+        marginBottom: s.marginBottom,
+      };
+    });
+
+  await page.goto("/");
+  const hub = await typography();
+  await page.goto("/questions");
+  const questions = await typography();
+
+  expect(hub).toEqual(questions);
 });

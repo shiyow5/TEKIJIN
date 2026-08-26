@@ -191,6 +191,7 @@ def test_hybrid_retriever_end_to_end(seed_counts, session, fake_embedder) -> Non
         "answer_confidence",
         "document_confidence",
         "people_confidence",
+        "person_question_similarity",
     }
     # Confidences are absolute cosine similarities in [0, 1].
     for key in ("answer_confidence", "document_confidence", "people_confidence"):
@@ -218,6 +219,14 @@ def test_hybrid_retriever_end_to_end(seed_counts, session, fake_embedder) -> Non
     assert people[0] == top["responder_id"]
     assert len(people) == len(set(people))  # de-duplicated
     assert len(people) <= 5
+
+    # #405: per-person question↔past-answer similarity, keyed by responder_id.
+    # The exact-body query matches the target answer at cosine ~1.0, so its
+    # responder's max question similarity is ~1.0 and all values are in [0, 1].
+    qsim = result["person_question_similarity"]
+    assert isinstance(qsim, dict)
+    assert all(isinstance(k, int) and 0.0 <= v <= 1.0 for k, v in qsim.items())
+    assert qsim.get(top["responder_id"]) == pytest.approx(1.0, abs=1e-6)
 
 
 def test_hybrid_retriever_document_channel(seed_counts, session, fake_embedder) -> None:

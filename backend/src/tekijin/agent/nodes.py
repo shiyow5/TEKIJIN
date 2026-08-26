@@ -17,7 +17,9 @@ from langgraph.types import interrupt
 
 from tekijin.agent.protocols import (
     AnswerabilityModel,
+    BranchSource,
     DraftModel,
+    EmployeeSource,
     IntentModel,
     IntentResult,
     Retriever,
@@ -118,6 +120,12 @@ class AgentNodes:
         knowledge_session: Any | None = None,
         knowledge_answer_min_similarity: float | None = None,
         query_expansion_enabled: bool = False,
+        question_fit_enabled: bool = False,
+        additive_self_answer_enabled: bool = False,
+        additive_self_answer_floor: float = 0.20,
+        branch_constraint_enabled: bool = False,
+        employee_branches: BranchSource | None = None,
+        employee_source: EmployeeSource | None = None,
     ) -> None:
         self._intent = intent_model
         self._sufficiency = sufficiency_model
@@ -147,6 +155,27 @@ class AgentNodes:
         # c4_retrieve byte-for-byte the pre-#371 behaviour (raw query + reused C3
         # vector). See c4_retrieve for the multi-facet rationale.
         self._query_expansion_enabled = query_expansion_enabled
+        # #405: pass C4's per-person question↔past-answer similarity to the C6
+        # scorer as an additive question-fit term. False (default) -> the scorer is
+        # never handed the map, so scores are develop-identical. Routing is unchanged
+        # either way (C5 does not read the scorer).
+        self._question_fit_enabled = question_fit_enabled
+        # #83: honour an explicitly requested branch as a CONDITION in C6 rather than
+        # a scoring term. False (default) ignores `constraint_branch` entirely, so
+        # ranking is develop-identical. `employee_branches` resolves candidate ->
+        # branch; without it the feature stays inert even when the flag is on.
+        self._branch_constraint_enabled = branch_constraint_enabled
+        self._employee_branches = employee_branches
+        # #413: additive self-answer on the person route (shares the #291 composer +
+        # fragment source). Only active when self_answer is wired AND this is set;
+        # the floor gates the compose call so no-data person questions add no latency.
+        self._additive_self_answer_enabled = additive_self_answer_enabled
+        self._additive_self_answer_floor = additive_self_answer_floor
+        # #87: score the WHOLE roster in C6 instead of only the people C4's top
+        # chunks happened to surface. ``None`` (default) keeps the C4-derived pool,
+        # so develop behaviour is byte-identical. See ``c6_score`` for why the pool
+        # and the ROUTE signal must stay separate.
+        self._employee_source = employee_source
 
     # -- entry: validate input, reset per-question control fields ---------
     def reset(self, state: AgentState) -> AgentState:
@@ -192,6 +221,9 @@ class AgentNodes:
             "self_answer_grounded": False,
             "self_answer_text": None,
             "self_answer_citations": [],
+            # #413: clear the additive (person-route) cited answer too.
+            "additive_answer_text": None,
+            "additive_citations": [],
             "recommendations": [],
             # #70: clear the critic's per-question verdict so a second question on
             # the same thread_id never reads a prior run's stale score/reason.
@@ -225,6 +257,7 @@ class AgentNodes:
                 "question_type": _QUESTION_TYPE_DEFAULT,
                 "out_of_scope": True,
                 "intent_confidence": 0.0,
+                "constraint_branch": None,
             }
         result = self._intent.analyze(state["question"], state.get("asker"))
         return {
@@ -234,6 +267,7 @@ class AgentNodes:
             "question_type": result.question_type,
             "out_of_scope": result.out_of_scope,
             "intent_confidence": result.confidence,
+            "constraint_branch": result.constraint_branch,
         }
 
     # -- C2: sufficiency check (LLM stub) ---------------------------------
@@ -352,6 +386,64 @@ class AgentNodes:
         # than letting a higher-scoring different person win.
         return {"prior_answer_note": note, "pinned_responder_id": responder_id}
 
+    def _candidate_pool(self, retrieval: Mapping[str, Any]) -> list[int]:
+        """The people C6 scores: the whole roster when wired, else C4's set (#87)."""
+
+        if self._employee_source is None:
+            return list(retrieval.get("candidate_people") or [])
+        return [e.id for e in self._employee_source.list_employees()]
+
+    def _requested_branch(self, state: AgentState) -> str | None:
+        """The branch C6 must honour, or ``None`` when the #83 constraint is not live."""
+
+        branch = state.get("constraint_branch")
+        if not self._branch_constraint_enabled or not branch or self._employee_branches is None:
+            return None
+        return str(branch)
+
+    def _note_unmet_branch(self, recs: list[dict[str, Any]], state: AgentState) -> None:
+        """Stamp "we could not honour 拠点" on any rec that is NOT at the branch.
+
+        Checked per-candidate rather than per-bucket, so the note lands exactly on the
+        people it is true of — the prior_answer pin included (it is seated at rank 1
+        and would otherwise violate the constraint with no explanation at all), and
+        never on someone who IS at the branch.
+        """
+
+        branch = self._requested_branch(state)
+        if branch is None or not recs:
+            return
+        assert self._employee_branches is not None  # guaranteed by _requested_branch
+        ids = [r["person_id"] for r in recs]
+        by_id = self._employee_branches.employees_by_ids(ids)
+        note = f"{branch}に該当者が足りないため、他拠点から含めています"
+        for rec in recs:
+            if getattr(by_id.get(rec["person_id"]), "branch", None) == branch:
+                continue
+            rec["reasons"] = [
+                *(rec.get("reasons") or []),
+                {"type": "constraint", "detail": note},
+            ]
+
+    def _split_by_branch(
+        self, candidates: list[int], state: AgentState
+    ) -> tuple[list[int], list[int]]:
+        """``(at the requested branch, everyone else)`` for the #83 constraint.
+
+        Returns ``(candidates, [])`` when the constraint is not live. When it IS live
+        but NOBODY in the pool is at that branch, this still returns everyone as
+        "others" so the caller ranks them normally AND annotates them — "福岡には
+        該当者がいません" is the case the asker most needs to hear, and 福岡 has only
+        2 employees, so an empty match is common rather than exotic.
+        """
+
+        branch = self._requested_branch(state)
+        if branch is None:
+            return candidates, []
+        by_id = self._employee_branches.employees_by_ids(candidates)  # type: ignore[union-attr]
+        matching = [c for c in candidates if getattr(by_id.get(c), "branch", None) == branch]
+        return matching, [c for c in candidates if c not in set(matching)]
+
     # -- C6: expertise scorer (deterministic) -----------------------------
     def c6_score(self, state: AgentState) -> AgentState:
         topics = state.get("topics") or []
@@ -374,10 +466,31 @@ class AgentNodes:
             # than 3), or [] on a genuinely fresh run with no topics at all.
             return {"recommendations": existing}
 
+        # #405: hand the scorer C4's question↔past-answer similarity so it can add a
+        # question-fit term. When the feature is off, the kwarg is omitted entirely,
+        # so rank() is called exactly as before (develop byte-identical, and any
+        # scorer double that predates #405 keeps working).
+        # ``or {}`` so an enabled feature never silently degrades to dormant on a
+        # malformed retrieval missing the key: an empty map -> every qsim is 0.0
+        # (no boost) but the feature is genuinely ON, not accidentally None-disabled.
+        qsim_kw: dict[str, Any] = (
+            {"question_similarity": retrieval.get("person_question_similarity") or {}}
+            if self._question_fit_enabled
+            else {}
+        )
+
         # prior_answer hands off to the pinned past responder — UNTIL they decline,
         # and never if the pin IS the asker (they cannot answer their own question).
         # In either case drop the pin and rely on the general candidate pool below
         # (never dead-end on a single decline or a self-referential pin).
+        #
+        # #83: the pin is seated at rank 1, which is who C7 drafts for and who `send`
+        # interrupts on. So a pin at the WRONG branch would hand the request to Osaka
+        # after the asker explicitly asked for 福岡 — the constraint would be violated
+        # by the one candidate that matters, silently. Annotate it rather than drop it:
+        # the pin exists because that person already answered a near-duplicate question
+        # (#159), which is evidence the branch preference does not outweigh; but the
+        # asker must be told the condition was not met.
         pin_id: int | None = (
             pinned
             if (
@@ -398,24 +511,62 @@ class AgentNodes:
             # cannot fully capture (#159 "fix G"). The remaining slots below are
             # then filled from the general pool so the asker still sees up to 3
             # candidates (#307) instead of dead-ending on this one person.
-            pin_result = self._scorer.rank(topics, [pin_id], asker_id, state["now"], top_k=1)
+            pin_result = self._scorer.rank(
+                topics, [pin_id], asker_id, state["now"], top_k=1, **qsim_kw
+            )
             fresh = cast("list[dict[str, Any]]", pin_result["recommendations"])
+            self._note_unmet_branch(fresh, state)
             remaining -= len(fresh)
 
         if remaining > 0:
             filled_ids = existing_ids | {r["person_id"] for r in fresh}
-            pool = retrieval.get("candidate_people") or []
+            # #87 proposed scoring the WHOLE roster here, on the theory that C4's
+            # "who appears in the top chunks" narrowing drops people who HAVE the
+            # evidence. MEASURED AND REJECTED (ADR-0009): on the real graph it is
+            # consistently one row WORSE (Hit@3 0.7778 -> 0.7626 over 3 paired
+            # replicates). `employee_source` keeps the lever so the measurement is one
+            # command away, but it is OFF and should stay off absent new evidence.
+            #
+            # This deliberately changes ONLY the scoring pool. ``candidate_people``
+            # is ALSO the C5 person-route signal (`route.py`: `if candidate_people:`),
+            # and the route recall it produces is at 1.000 (ADR-0007) — so the route
+            # keeps reading C4's set, untouched.
+            pool = self._candidate_pool(retrieval)
             candidates = [p for p in pool if p not in declined and p not in filled_ids]
             if candidates:
-                # All topics feed the scorer (aggregated topic_fit), not just topics[0].
-                result = self._scorer.rank(
-                    topics, candidates, asker_id, state["now"], top_k=remaining
-                )
-                # The scorer returns typed ScoredCandidate rows; AgentState keeps the
-                # looser list[dict[str, Any]] (also written as plain dicts elsewhere),
-                # so narrow the TypedDict-invariance gap with a cast — identical at
-                # runtime.
-                fresh = fresh + cast("list[dict[str, Any]]", result["recommendations"])
+
+                def rank(ids: list[int], top_k: int) -> list[dict[str, Any]]:
+                    # All topics feed the scorer (aggregated topic_fit), not just topics[0].
+                    # The scorer returns typed ScoredCandidate rows; AgentState keeps the
+                    # looser list[dict[str, Any]] (also written as plain dicts elsewhere),
+                    # so narrow the TypedDict-invariance gap with a cast — identical at
+                    # runtime.
+                    result = self._scorer.rank(
+                        topics, ids, asker_id, state["now"], top_k=top_k, **qsim_kw
+                    )
+                    return cast("list[dict[str, Any]]", result["recommendations"])
+
+                # #83: an explicitly requested branch is a CONDITION, not a bonus.
+                # `Weights.proximity` adds one term to a linear sum, so a strong
+                # candidate elsewhere simply outweighs it. Rank the branch's people
+                # FIRST and only fall back to the rest to fill the remaining slots —
+                # and say so in the reasons, so "福岡には該当者がいないため大阪の人を
+                # 含めています" is visible rather than silently ignored.
+                matching, others = self._split_by_branch(candidates, state)
+                if others:
+                    # Constrained: the branch's people fill the slots first, then the
+                    # rest — and every rec NOT at the branch is annotated, so the asker
+                    # is never silently handed someone elsewhere. `matching` may be
+                    # empty (nobody at that branch at all), which is exactly when the
+                    # note matters most.
+                    picked = rank(matching, remaining) if matching else []
+                    short = remaining - len(picked)
+                    if short > 0:
+                        picked = picked + rank(others, short)
+                    self._note_unmet_branch(picked, state)
+                    fresh = fresh + picked
+                else:
+                    fresh = fresh + rank(candidates, remaining)
 
         if not fresh:
             return {"recommendations": existing}
@@ -561,6 +712,49 @@ class AgentNodes:
             "answer": state.get("self_answer_text") or "",
             "self_answer_citations": state.get("self_answer_citations") or [],
         }
+
+    # -- additive self-answer (#413): cite past knowledge ON the person route ---
+    def additive_answer(self, state: AgentState) -> AgentState:
+        """Compose a cited answer to surface ALONGSIDE the person hand-off.
+
+        Runs on the PERSON route (wired only when additive self-answer is enabled).
+        Unlike ``self_answer`` it never terminates and never marks the run
+        self-resolved — the hand-off always follows (person recall unchanged). A low
+        relevance FLOOR gates the compose LLM call so a person question with no
+        relevant data adds no latency; a grounded result is attached to
+        ``additive_answer_text`` / ``additive_citations`` for additive display, and
+        an ungrounded one leaves them empty (plain hand-off, as before).
+        """
+
+        assert self._self_answer is not None and self._fragment_source is not None
+        retrieval = state.get("retrieval") or empty_retrieval()
+        # Gate: only spend a compose call when at least one data channel is weakly
+        # relevant. Below the floor -> skip (no LLM, no citation), just hand off.
+        top_conf = max(
+            float(retrieval.get("answer_confidence") or 0.0),
+            float(retrieval.get("document_confidence") or 0.0),
+        )
+        if top_conf < self._additive_self_answer_floor:
+            return {}
+        evidence = collect_cited_evidence(self._fragment_source, retrieval)
+        # This is a BEST-EFFORT additive step: the hand-off MUST always follow, so a
+        # composer failure (e.g. the LLM returns unparseable structured output ->
+        # ValueError) must degrade to "no citation" rather than crash the person run
+        # and take the hand-off down with it. The whole safety premise of #413 is
+        # that person recall never regresses; swallow and proceed to c6_score.
+        try:
+            result = self._self_answer.compose(state["question"], evidence)
+        except Exception:  # noqa: BLE001 — additive best-effort, never break hand-off
+            return {}
+        if not result.grounded:
+            return {}
+        kind_by_id = {e.source_id: e.kind for e in evidence}
+        citations = [
+            {"source_id": sid, "kind": kind_by_id[sid]}
+            for sid in result.cited_source_ids
+            if sid in kind_by_id
+        ]
+        return {"additive_answer_text": result.answer, "additive_citations": citations}
 
     def document(self, state: AgentState) -> AgentState:
         docs = (state.get("retrieval") or empty_retrieval())["documents"]
