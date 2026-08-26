@@ -24,8 +24,11 @@ export function HeroQuestionBar() {
   }
 
   return (
-    <div className="mt-md flex w-full max-w-3xl flex-col items-center">
-      <h1 className="mb-md font-bold text-2xl text-on-surface tracking-tight">
+    <div className="mt-md flex w-full max-w-3xl flex-col items-center text-center">
+      {/* Same heading typography as `/questions` — the hero is meant to read as
+          the same thing in a different place, so the size and the gap below it
+          have to match, not just the words (they drifted at 2xl/mb-md). */}
+      <h1 className="mb-margin font-bold text-3xl text-on-surface tracking-tight">
         何を知りたいですか？
       </h1>
       <form onSubmit={handleSubmit} className="w-full">
