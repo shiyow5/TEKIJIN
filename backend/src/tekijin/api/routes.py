@@ -418,16 +418,25 @@ def handoff_correct(
     response_model=schemas.DashboardResponse,
     dependencies=[Depends(require_admin)],
 )
-def dashboard(request: Request) -> schemas.DashboardResponse:
+def dashboard(
+    request: Request,
+    top_responders: int = Query(default=5, ge=1, le=50),
+) -> schemas.DashboardResponse:
     """Aggregate load / topic mix / recent activity for the dashboard.
 
     Admin-only (#241): the dashboard aggregates everyone's activity, so it is
     gated behind ``require_admin``.
+
+    ``top_responders`` sizes the load-distribution list (#76). Bounded at 50: this
+    endpoint is aggregate-only by design (product-spec §241-251), and an unbounded
+    limit would turn the load list into a full per-employee roster — an audit view
+    the dashboard deliberately is not. It also keeps one query from scanning the
+    whole answers table on a large corpus.
     """
 
     with _generic_500("GET /dashboard"):
         with _service(request).session_factory() as session:
-            data = dashboard_summary(session)
+            data = dashboard_summary(session, top_responders=top_responders)
         return schemas.DashboardResponse(**data)
 
 
