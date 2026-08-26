@@ -11,22 +11,27 @@
  * exactly what a self-answer's citation (#291) carries for the same entity,
  * so a chat citation and a knowledge-list card point at the same stable
  * thing — a `"qa"` card links to `/knowledge/{source_id}` (this app's own
- * detail viewer, new here), a `"document"` card links to the existing
+ * detail viewer), a `"document"` card links to the existing
  * `/documents/{source_id}` viewer (#143).
  *
  * A `"qa"` item needs an actual `answers` row (not merely an accepted
  * recommendation) — that is the only place answer TEXT lives, so without it
  * there is nothing to show as its `summary`.
  *
- * The search box forwards straight to GET /knowledge as the `q` query param
- * (server-side filtering). The department/topic/period filters GET /knowledge
- * also supports are deliberately not exposed here — keyword search only, kept
- * simple by request.
+ * Filters (#293 DoD: keyword / department / topic / period) all forward
+ * straight to GET /knowledge as query params (server-side). `department` and
+ * `topic` are QA-specific (documents carry neither, so either filter excludes
+ * them — the backend's own behavior, not something this screen re-decides).
+ * The department/topic dropdown OPTIONS are derived client-side from an
+ * unfiltered snapshot fetched once on mount, since there is no dedicated
+ * "list departments" endpoint. Period is a single "この日以降" (`since`) date
+ * — no end date — by request; the API's `until` param exists but is
+ * deliberately not exposed here.
  *
  * The unsearched (browse) view is a single unpaginated page of the latest
- * `RESULT_LIMIT` items; once a search is active, results page through
- * `RESULT_LIMIT` at a time via `offset` (by request — pagination matters once
- * a keyword search can match more than one page's worth).
+ * `RESULT_LIMIT` items; once any filter is active, results page through
+ * `RESULT_LIMIT` at a time via `offset` (pagination matters once a filter can
+ * match more than one page's worth).
  *
  * The side panel's stats reuse the dashboard's existing self-resolution rate
  * (via `summary` on the same response) rather than introducing a new
@@ -34,6 +39,7 @@
  * view belongs to `/dashboard`, not a knowledge browser (PR #340 review).
  */
 
+import { PageBackLink } from "@/components/PageBackLink";
 import { getKnowledgeList } from "@/lib/api-client";
 import type { KnowledgeItem, KnowledgeSummary } from "@/lib/api-types";
 import Link from "next/link";
@@ -49,6 +55,15 @@ interface KnowledgeState {
   totalMatching?: number;
   summary?: KnowledgeSummary;
 }
+
+interface Filters {
+  q: string;
+  department: string;
+  topic: string;
+  since: string;
+}
+
+const EMPTY_FILTERS: Filters = { q: "", department: "", topic: "", since: "" };
 
 /** "2026-08-20" from an ISO timestamp; "—" when unparseable/missing. */
 function formatDate(iso: string | null | undefined): string {
@@ -120,9 +135,34 @@ function SummaryPanel({ summary }: { summary: KnowledgeSummary | undefined }) {
 
 export function KnowledgeScreen() {
   const [state, setState] = useState<KnowledgeState>({ phase: "loading" });
-  const [q, setQ] = useState("");
-  const [pendingQ, setPendingQ] = useState("");
+  const [options, setOptions] = useState<{ departments: string[]; topics: string[] }>({
+    departments: [],
+    topics: [],
+  });
+  const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
+  const [pending, setPending] = useState<Filters>(EMPTY_FILTERS);
   const [page, setPage] = useState(0);
+
+  // Unfiltered snapshot, once, purely to populate the department/topic dropdown
+  // options (there is no dedicated "list departments" endpoint).
+  useEffect(() => {
+    let active = true;
+    getKnowledgeList({ limit: 200 })
+      .then(({ items }) => {
+        if (!active) return;
+        const departments = [
+          ...new Set(items.map((i) => i.responder_department).filter((d): d is string => !!d)),
+        ].sort();
+        const topics = [...new Set(items.flatMap((i) => i.topics))].sort();
+        setOptions({ departments, topics });
+      })
+      .catch(() => {
+        // Options are a convenience; a failed snapshot just leaves the dropdowns empty.
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -132,7 +172,14 @@ export function KnowledgeScreen() {
       totalMatching: prev.totalMatching,
       summary: prev.summary,
     }));
-    getKnowledgeList({ q: q || undefined, offset: page * RESULT_LIMIT, limit: RESULT_LIMIT })
+    getKnowledgeList({
+      q: filters.q || undefined,
+      department: filters.department || undefined,
+      topic: filters.topic || undefined,
+      since: filters.since || undefined,
+      offset: page * RESULT_LIMIT,
+      limit: RESULT_LIMIT,
+    })
       .then(({ items, total_matching, summary }) => {
         if (active) setState({ phase: "ready", items, totalMatching: total_matching, summary });
       })
@@ -142,43 +189,86 @@ export function KnowledgeScreen() {
     return () => {
       active = false;
     };
-  }, [q, page]);
+  }, [filters, page]);
 
-  function submitSearch(event: FormEvent<HTMLFormElement>) {
+  function submitFilters(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setPage(0);
-    setQ(pendingQ);
+    setFilters(pending);
   }
 
-  function clearSearch() {
-    setPendingQ("");
+  function clearFilters() {
+    setPending(EMPTY_FILTERS);
     setPage(0);
-    setQ("");
+    setFilters(EMPTY_FILTERS);
   }
 
+  const hasActiveFilters = Object.values(filters).some((v) => v !== "");
   const pageCount = state.totalMatching ? Math.ceil(state.totalMatching / RESULT_LIMIT) : 0;
-  // Pagination only matters once a search is active — the plain browse view is
+  // Pagination only matters once a filter is active — the plain browse view is
   // a single unpaginated page of the latest items (by request).
-  const showPagination = q !== "" && pageCount > 1;
+  const showPagination = hasActiveFilters && pageCount > 1;
 
   return (
     <section className="mx-auto flex w-full max-w-5xl flex-col gap-lg px-md py-lg">
+      <PageBackLink href="/" label="ホームへ戻る" className="self-center md:self-start" />
       <h1 className="text-center font-bold text-2xl text-on-surface">ナレッジライブラリー</h1>
 
       <form
-        onSubmit={submitSearch}
-        className="flex flex-col gap-sm rounded-xl border border-outline-variant bg-surface-container-lowest p-md"
+        onSubmit={submitFilters}
+        className="flex flex-col items-center gap-sm rounded-xl border border-outline-variant bg-surface-container-lowest p-md"
       >
-        <label className="flex flex-col gap-xs text-on-surface-variant text-xs">
+        <label className="flex w-full flex-col gap-xs text-on-surface-variant text-xs">
           キーワード
           <input
             type="search"
-            value={pendingQ}
-            onChange={(e) => setPendingQ(e.target.value)}
+            value={pending.q}
+            onChange={(e) => setPending((p) => ({ ...p, q: e.target.value }))}
             placeholder="質問のキーワード"
-            className="rounded-md border border-outline bg-surface px-sm py-xs text-on-surface text-sm"
+            className="w-full rounded-md border border-outline bg-surface px-sm py-xs text-on-surface text-sm"
           />
         </label>
+        <div className="grid w-full grid-cols-1 gap-sm sm:grid-cols-3">
+          <label className="flex flex-col gap-xs text-on-surface-variant text-xs">
+            部署
+            <select
+              value={pending.department}
+              onChange={(e) => setPending((p) => ({ ...p, department: e.target.value }))}
+              className="w-full rounded-md border border-outline bg-surface px-sm py-xs text-on-surface text-sm"
+            >
+              <option value="">すべて</option>
+              {options.departments.map((dept) => (
+                <option key={dept} value={dept}>
+                  {dept}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-xs text-on-surface-variant text-xs">
+            トピック
+            <select
+              value={pending.topic}
+              onChange={(e) => setPending((p) => ({ ...p, topic: e.target.value }))}
+              className="w-full rounded-md border border-outline bg-surface px-sm py-xs text-on-surface text-sm"
+            >
+              <option value="">すべて</option>
+              {options.topics.map((topic) => (
+                <option key={topic} value={topic}>
+                  {topic}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-xs text-on-surface-variant text-xs">
+            期間（この日以降）
+            <input
+              type="date"
+              value={pending.since}
+              onChange={(e) => setPending((p) => ({ ...p, since: e.target.value }))}
+              className="w-full rounded-md border border-outline bg-surface px-sm py-xs text-on-surface text-sm"
+            />
+          </label>
+        </div>
         <div className="flex items-center justify-center gap-sm">
           <button
             type="submit"
@@ -186,10 +276,10 @@ export function KnowledgeScreen() {
           >
             検索
           </button>
-          {q ? (
+          {hasActiveFilters ? (
             <button
               type="button"
-              onClick={clearSearch}
+              onClick={clearFilters}
               className="rounded-md px-md py-xs text-on-surface-variant text-sm hover:underline"
             >
               条件をクリア

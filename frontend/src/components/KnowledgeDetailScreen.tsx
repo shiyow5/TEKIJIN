@@ -4,10 +4,11 @@
  * Past-Q&A knowledge detail viewer (#293, #301) — the `kind="qa"` counterpart
  * to `DocumentViewer` (`kind="document"`, #143), which already had its own
  * stable page. Keyed by `sourceId` (`Answer.id`), the same id a self-answer's
- * QA citation carries (#291), so #321's chat citation chip can finally link
- * somewhere instead of showing a non-linked chip.
+ * QA citation carries (#291), so a chat citation chip has somewhere to link
+ * instead of showing a non-linked chip.
  */
 
+import { PageBackLink } from "@/components/PageBackLink";
 import { getKnowledgeDetail } from "@/lib/api-client";
 import type { KnowledgeItem } from "@/lib/api-types";
 import Link from "next/link";
@@ -48,9 +49,7 @@ export function KnowledgeDetailScreen({ sourceId }: { sourceId: string }) {
 
   return (
     <section className="mx-auto flex w-full max-w-3xl flex-col gap-lg py-lg">
-      <Link href="/knowledge" className="text-primary text-sm hover:underline">
-        ← ナレッジライブラリーへ戻る
-      </Link>
+      <PageBackLink href="/knowledge" label="ナレッジライブラリーへ戻る" className="-mb-sm" />
 
       {state.phase === "loading" ? (
         <p className="text-on-surface-variant text-sm">読み込み中…</p>

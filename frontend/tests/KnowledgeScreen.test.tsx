@@ -55,6 +55,7 @@ describe("KnowledgeScreen", () => {
     render(<KnowledgeScreen />);
 
     expect(screen.getByRole("heading", { name: "ナレッジライブラリー" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /ホームへ戻る/ })).toHaveAttribute("href", "/");
     await waitFor(() => expect(screen.getByText("UTMの移行時の注意点")).toBeInTheDocument());
     expect(screen.getByText("社内Wi-Fi利用ガイド")).toBeInTheDocument();
     expect(
@@ -100,6 +101,60 @@ describe("KnowledgeScreen", () => {
     await waitFor(() =>
       expect(getKnowledgeListMock).toHaveBeenCalledWith(expect.objectContaining({ q: "Wi-Fi" })),
     );
+  });
+
+  it("filters by department/topic/period via the form", async () => {
+    render(<KnowledgeScreen />);
+    await waitFor(() => expect(screen.getByText("UTMの移行時の注意点")).toBeInTheDocument());
+    getKnowledgeListMock.mockClear();
+
+    fireEvent.change(screen.getByLabelText("部署"), { target: { value: "マーケティング部" } });
+    fireEvent.change(screen.getByLabelText("トピック"), { target: { value: "utm" } });
+    fireEvent.change(screen.getByLabelText("期間（この日以降）"), {
+      target: { value: "2026-08-01" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "検索" }));
+
+    await waitFor(() =>
+      expect(getKnowledgeListMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          department: "マーケティング部",
+          topic: "utm",
+          since: "2026-08-01",
+        }),
+      ),
+    );
+
+    // "条件をクリア" only appears once a filter is active, and resets the form.
+    const clearButton = screen.getByRole("button", { name: "条件をクリア" });
+    getKnowledgeListMock.mockClear();
+    fireEvent.click(clearButton);
+
+    await waitFor(() =>
+      expect(getKnowledgeListMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          q: undefined,
+          department: undefined,
+          topic: undefined,
+          since: undefined,
+        }),
+      ),
+    );
+    expect(screen.queryByRole("button", { name: "条件をクリア" })).not.toBeInTheDocument();
+  });
+
+  it("populates department/topic dropdown options from an initial unfiltered fetch", async () => {
+    render(<KnowledgeScreen />);
+    await waitFor(() => expect(screen.getByText("UTMの移行時の注意点")).toBeInTheDocument());
+
+    const departmentSelect = screen.getByLabelText("部署") as HTMLSelectElement;
+    const topicSelect = screen.getByLabelText("トピック") as HTMLSelectElement;
+    await waitFor(() =>
+      expect(Array.from(departmentSelect.options).map((o) => o.value)).toContain(
+        "マーケティング部",
+      ),
+    );
+    expect(Array.from(topicSelect.options).map((o) => o.value)).toContain("utm");
   });
 
   it("clears the search back to the full list", async () => {

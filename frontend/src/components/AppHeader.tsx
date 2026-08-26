@@ -33,7 +33,7 @@ const NAV = [
   { href: "/chat", label: "チャット", adminOnly: false },
   // Company-wide (not scoped to the acting user), but still NOT admin-only:
   // the point is every user can discover someone else's past answer (#293, #301).
-  { href: "/knowledge", label: "ナレッジセンター", adminOnly: false },
+  { href: "/knowledge", label: "ナレッジ", adminOnly: false },
   { href: "/dashboard", label: "ダッシュボード", adminOnly: true },
 ] as const;
 
