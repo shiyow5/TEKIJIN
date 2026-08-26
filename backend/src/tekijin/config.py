@@ -256,6 +256,17 @@ class Settings(BaseSettings):
     # `proximity` weight bump may buy the same thing as this new code path.
     branch_constraint_enabled: bool = False
 
+    # #247: the 直接相談 retrospective. ENABLED by default — this is a kill switch,
+    # not a rollout gate: the feature is the only durable record a face-to-face
+    # consultation leaves, so shipping it OFF would ship nothing. It exists because
+    # this is the one UI-reachable write that feeds C6 expertise evidence; if the
+    # write-ups ever turn out to be noisy (or abused despite the accepted-hand-off
+    # check), the scoring input has to be stoppable without a rollback. Read-only
+    # ``GET /consult-retrospective/{session_id}`` stays up when this is off, so the
+    # screen still renders and the form's 503 branch can say the feature is
+    # switched off rather than "retry" something that cannot succeed.
+    consult_retrospective_enabled: bool = True
+
     # #357: knowledge framework. When the knowledge layer is wired into retrieval,
     # answer a question from structured knowledge units (problem → action → result,
     # with provenance) instead of, or before, pointing at a person. OFF by default —

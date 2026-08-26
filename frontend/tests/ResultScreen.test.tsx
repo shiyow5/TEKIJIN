@@ -16,6 +16,10 @@ vi.mock("@/lib/api-client", () => ({
   excludeHandoffCandidate: (...args: unknown[]) => excludeHandoffCandidateMock(...args),
   regenerateHandoffDraft: (...args: unknown[]) => regenerateHandoffDraftMock(...args),
   correctInterpretation: (...args: unknown[]) => correctInterpretationMock(...args),
+  // #247: the terminal view mounts RetrospectiveLink, which asks whether this was
+  // a 直接相談 someone accepted. Rejecting keeps the CTA hidden (its failure path),
+  // so these tests keep asserting the terminal view exactly as before.
+  getRetrospectiveContext: () => Promise.reject(new Error("not used in these tests")),
 }));
 
 const routerPushMock = vi.fn();

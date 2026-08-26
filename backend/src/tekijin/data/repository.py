@@ -21,6 +21,7 @@ from tekijin.data.dto import (
     DailyReportDTO,
     DocumentDTO,
     EmployeeDTO,
+    OfflineConsultDTO,
     ProfileDTO,
     ProjectMembershipDTO,
     ProjectWithMembersDTO,
@@ -34,6 +35,7 @@ from tekijin.models.tables import (
     Document,
     Employee,
     EmployeeProfile,
+    OfflineConsult,
     Project,
     ProjectMember,
     Question,
@@ -156,6 +158,40 @@ class Repository:
         for row in self._session.scalars(stmt):
             if row.topics:
                 out.setdefault(row.employee_id, []).append(DailyReportDTO.from_row(row))
+        return out
+
+    def offline_consults_for_many(
+        self, employee_ids: Sequence[int]
+    ) -> dict[int, list[OfflineConsultDTO]]:
+        """直接相談のふりかえり for several responders in one query (#247).
+
+        Keyed by ``responder_id`` — the person the retrospective is evidence FOR,
+        not the asker who wrote it. Only rows carrying at least one topic are
+        returned (an untagged retrospective cannot be joined to a topic). Ordered
+        newest first so ``OFFLINE_CONSULT_EVIDENCE_CAP`` keeps the most recent
+        consultations. Unresolved rows are NOT filtered here: the scorer drops
+        them (``collect_topic_evidence``), and keeping the read side dumb means
+        the accumulation metrics can count them without a second query.
+        """
+
+        if not employee_ids:
+            return {}
+        stmt = (
+            select(OfflineConsult)
+            .where(
+                OfflineConsult.responder_id.in_(employee_ids),
+                OfflineConsult.topics.isnot(None),
+            )
+            .order_by(
+                OfflineConsult.responder_id,
+                OfflineConsult.created_at.desc(),
+                OfflineConsult.id,
+            )
+        )
+        out: dict[int, list[OfflineConsultDTO]] = {}
+        for row in self._session.scalars(stmt):
+            if row.topics:
+                out.setdefault(row.responder_id, []).append(OfflineConsultDTO.from_row(row))
         return out
 
     # -- questions & answers --------------------------------------------- #

@@ -44,6 +44,8 @@ _TRUNCATE_ORDER: tuple[str, ...] = (
     "person_topic_edges",
     "events",
     "eval_runs",
+    # #247: runtime-only (no fixture writes it), FKs questions + employees.
+    "offline_consults",
     "messages",
     "recommendations",
     "answers",

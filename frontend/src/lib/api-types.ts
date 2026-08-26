@@ -339,6 +339,8 @@ export interface HandoffAsker {
 export interface HandoffResponse {
   session_id: string;
   question: string;
+  /** The durable question id — what the #247 retrospective is attributed to. */
+  question_id?: string | null;
   asker: HandoffAsker;
   topics: string[];
   products: string[];
@@ -612,4 +614,59 @@ export interface LoginResponse {
   access_token: string;
   token_type: "bearer";
   principal: Principal;
+}
+
+/** GET /topics — the closed topic vocabulary the C6 scorer joins on (#247). */
+export interface TopicVocabularyResponse {
+  topics: string[];
+}
+
+/** How far a 直接相談 got (#247). `unresolved` is recorded but is not evidence. */
+export type ConsultResolution = "resolved" | "partial" | "unresolved";
+
+/** The person a retrospective may be written about (#247). */
+export interface ConsultResponder {
+  person_id: string;
+  name: string;
+}
+
+/**
+ * GET /consult-retrospective/{session_id} — what the write-up form is built from
+ * (#247).
+ *
+ * NOT `HandoffResponse`: that is the pending hand-off view and 404s the moment the
+ * responder records an outcome, which is exactly when the face-to-face
+ * consultation can finally have taken place. This one is read from the database
+ * and stays valid afterwards.
+ *
+ * `responder` is null until someone accepts; `already_recorded` flips once a
+ * write-up exists.
+ */
+export interface ConsultRetrospectiveContext {
+  session_id: string;
+  question_id: string;
+  question: string;
+  consult_method: ConsultMethod;
+  responder: ConsultResponder | null;
+  already_recorded: boolean;
+}
+
+/**
+ * POST /consult-retrospective — the asker's write-up of a face-to-face 直接相談
+ * (#247). `asker_id` is deliberately absent: the backend takes it from the token,
+ * never the body, because this row becomes expertise evidence for `responder_id`.
+ */
+export interface ConsultRetrospectiveRequest {
+  question_id: string;
+  responder_id: string;
+  topics: string[];
+  asked?: string | null;
+  answer_body: string;
+  resolution: ConsultResolution;
+}
+
+/** POST /consult-retrospective response. */
+export interface ConsultRetrospectiveAck {
+  status: string;
+  consult_id: number;
 }

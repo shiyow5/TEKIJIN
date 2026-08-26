@@ -884,6 +884,7 @@ class AgentService:
         return schemas.HandoffResponse(
             session_id=session_id,
             question=values.get("question") or "",
+            question_id=values.get("question_id"),
             asker=schemas.HandoffAsker(
                 id=schemas.format_employee_id(asker_id) if asker_id is not None else "",
                 name=asker_name,

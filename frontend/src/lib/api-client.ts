@@ -14,6 +14,9 @@ import type {
   ChatThreadDetail,
   ChatThreadListResponse,
   ChatThreadSummary,
+  ConsultRetrospectiveAck,
+  ConsultRetrospectiveContext,
+  ConsultRetrospectiveRequest,
   DashboardResponse,
   DeclineNotification,
   DeleteQuestionResponse,
@@ -46,6 +49,7 @@ import type {
   SlackAuthorizeUrlResponse,
   SlackStatusResponse,
   SlackUnlinkResponse,
+  TopicVocabularyResponse,
 } from "@/lib/api-types";
 import { getAuthToken } from "@/lib/auth-token";
 import { getApiBaseUrl } from "@/lib/config";
@@ -409,6 +413,48 @@ export async function resolveQuestion(
     {},
     options,
   );
+}
+
+/**
+ * GET /topics — the closed topic vocabulary the C6 scorer joins on (#247).
+ * Served rather than duplicated here: a hard-coded copy would drift from
+ * `scorer/topics.py`, and a topic the scorer does not know matches no evidence.
+ */
+export async function getTopics(options: RequestOptions = {}): Promise<string[]> {
+  const body = await getJson<TopicVocabularyResponse>("/topics", options);
+  return body.topics;
+}
+
+/**
+ * GET /consult-retrospective/{session_id} — the durable context for the write-up
+ * form (#247): the question, how it was handed off, and who accepted it.
+ *
+ * Deliberately not {@link getHandoff}: that endpoint 404s once the responder
+ * records an outcome, so a form built on it could only be reached BEFORE the
+ * consultation it documents had happened.
+ */
+export function getRetrospectiveContext(
+  sessionId: string,
+  options: RequestOptions = {},
+): Promise<ConsultRetrospectiveContext> {
+  return getJson<ConsultRetrospectiveContext>(
+    `/consult-retrospective/${encodeURIComponent(sessionId)}`,
+    options,
+  );
+}
+
+/**
+ * POST /consult-retrospective — record the asker's write-up of a face-to-face
+ * 直接相談 (#247). Only the question's own asker may (403 otherwise, 404 for an
+ * unknown question, 422 for a topic outside the vocabulary, for a consultation
+ * nobody accepted, or for a responder other than the one who accepted it, 409 if
+ * this question has already been written up, 503 if the feature is switched off).
+ */
+export function postConsultRetrospective(
+  request: ConsultRetrospectiveRequest,
+  options: RequestOptions = {},
+): Promise<ConsultRetrospectiveAck> {
+  return postJson<ConsultRetrospectiveAck>("/consult-retrospective", request, options);
 }
 
 /**

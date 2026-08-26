@@ -11,11 +11,17 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from tekijin.scorer.topics import TOPIC_VOCABULARY
+
 Outcome = Literal["accepted", "declined"]
 
 # The asker's chosen consultation method. "chat" is the implicit default: an
 # unset/legacy value is coalesced to it everywhere it is read.
 ConsultMethod = Literal["direct", "chat"]
+
+# #247: how far the 直接相談 got. "unresolved" is recorded but is NOT expertise
+# evidence and never subtracts (断り≠非専門) — see collect_topic_evidence.
+ConsultResolution = Literal["resolved", "partial", "unresolved"]
 
 
 def normalize_consult_method(value: str | None) -> ConsultMethod:
@@ -331,6 +337,106 @@ class FeedbackRequest(BaseModel):
         return value
 
 
+class TopicVocabularyResponse(BaseModel):
+    """The closed topic list the scorer joins on (#247).
+
+    Served rather than duplicated in the frontend: the retrospective form makes the
+    asker pick from this vocabulary, and a hard-coded copy would drift from
+    ``scorer/topics.py`` silently — a topic that no longer exists matches no
+    evidence and does nothing (#116).
+    """
+
+    topics: list[str]
+
+
+class ConsultRetrospectiveRequest(BaseModel):
+    """The asker's write-up of a face-to-face 直接相談 (#247).
+
+    A "direct" consultation leaves no text behind, so F-10 (回答を索引に追加し
+    専門性の推定を更新) has nothing to work with. This is that record.
+
+    ``asker_id`` is NOT accepted from the body — it comes from the authenticated
+    principal, the same rule as :class:`FeedbackRequest`. That matters more here
+    than for feedback: this row becomes expertise EVIDENCE for ``responder_id``,
+    so an attributable author is what stops it being a way to fabricate someone's
+    standing.
+
+    ``responder_id`` IS accepted from the body, but it is not trusted: the route
+    requires it to equal the employee who ACCEPTED this question's hand-off. It is
+    a confirmation of what the client was shown, not a choice — an author-only
+    check ("who may write") would still have left "whom may they write about" open,
+    which is a way to grant anyone up to ``OFFLINE_CONSULT_EVIDENCE_CAP`` × the
+    offline-consult base score on any topic.
+
+    ``topics`` is validated against ``TOPIC_VOCABULARY`` because the scorer JOINS
+    on these strings — a free-text topic would match no evidence and silently do
+    nothing (#116). ``asked`` is optional (#247 の項目2); the rest are required.
+    """
+
+    question_id: str = Field(min_length=1, max_length=64)
+    responder_id: str = Field(min_length=1, max_length=32)
+    # At most 3 of the 22-topic vocabulary. One consultation is about one thing;
+    # a wide list would spread a single conversation's evidence across most of the
+    # vocabulary, which is how the offline-consult cap gets reached without the
+    # consultations behind it.
+    topics: list[str] = Field(min_length=1, max_length=3)
+    asked: str | None = Field(default=None, max_length=2000)
+    answer_body: str = Field(min_length=1, max_length=4000)
+    resolution: ConsultResolution
+
+    @field_validator("topics")
+    @classmethod
+    def _topics_in_vocabulary(cls, value: list[str]) -> list[str]:
+        unknown = [t for t in value if t not in TOPIC_VOCABULARY]
+        if unknown:
+            raise ValueError(f"未知のトピックです: {', '.join(unknown)}")
+        # De-duplicate, keeping order: the same topic twice must not count twice.
+        return list(dict.fromkeys(value))
+
+    @field_validator("answer_body")
+    @classmethod
+    def _answer_not_blank(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("得られた回答は必須です")
+        return stripped
+
+
+class ConsultResponder(BaseModel):
+    """The person a retrospective may be written about (#247)."""
+
+    person_id: str
+    name: str
+
+
+class ConsultRetrospectiveContext(BaseModel):
+    """What GET /consult-retrospective/{session_id} tells the write-up form (#247).
+
+    Deliberately NOT ``HandoffResponse``: that payload is the pending hand-off view
+    and 404s as soon as the responder records an outcome — i.e. it stops existing
+    exactly when the face-to-face consultation becomes possible. This one is read
+    from SQL and stays valid afterwards.
+
+    ``responder`` is ``None`` until someone accepts, ``already_recorded`` flips once
+    a write-up exists; between them the client can tell "not yet consulted", "ready
+    to write" and "already written" apart without guessing from error codes.
+    """
+
+    session_id: str
+    question_id: str
+    question: str
+    consult_method: ConsultMethod
+    responder: ConsultResponder | None = None
+    already_recorded: bool = False
+
+
+class ConsultRetrospectiveAck(BaseModel):
+    """Acknowledgement for POST /consult-retrospective (#247)."""
+
+    status: str
+    consult_id: int
+
+
 class FeedbackAck(BaseModel):
     """Acknowledgement for POST /feedback (#237)."""
 
@@ -395,6 +501,10 @@ class HandoffResponse(BaseModel):
 
     session_id: str
     question: str
+    # #247: the durable question id. The retrospective form needs it to attribute
+    # the write-up, and it is the only identifier the asker's client can reach from
+    # a session — the checkpoint carries it, so this is a projection, not a lookup.
+    question_id: str | None = None
     asker: HandoffAsker
     topics: list[str] = Field(default_factory=list)
     products: list[str] = Field(default_factory=list)

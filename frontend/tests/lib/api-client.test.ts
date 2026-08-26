@@ -10,6 +10,7 @@ import {
   getHandoff,
   getInbox,
   getRecentQuestions,
+  getRetrospectiveContext,
   getSlackAuthorizeUrl,
   getSlackStatus,
   postAnswer,
@@ -20,7 +21,12 @@ import {
   resolveQuestion,
   selectHandoffCandidate,
 } from "@/lib/api-client";
-import type { AskRequest, HandoffResponse, ResumeRequest } from "@/lib/api-types";
+import type {
+  AskRequest,
+  ConsultRetrospectiveContext,
+  HandoffResponse,
+  ResumeRequest,
+} from "@/lib/api-types";
 import { DEFAULT_API_BASE_URL } from "@/lib/config";
 import { describe, expect, it, vi } from "vitest";
 
@@ -212,6 +218,38 @@ describe("getHandoff", () => {
       name: "ApiError",
       status: 404,
     });
+  });
+});
+
+describe("getRetrospectiveContext", () => {
+  const CONTEXT: ConsultRetrospectiveContext = {
+    session_id: "abc-123",
+    question_id: "q_0001",
+    question: "拠点間VPNが不安定です",
+    consult_method: "direct",
+    responder: { person_id: "E001", name: "高梨 健太" },
+    already_recorded: false,
+  };
+
+  it("GETs {base}/consult-retrospective/{id} and returns the payload", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(CONTEXT));
+
+    const result = await getRetrospectiveContext("abc-123", { fetchImpl });
+
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe(`${DEFAULT_API_BASE_URL}/consult-retrospective/abc-123`);
+    expect(init?.method).toBe("GET");
+    expect(result).toEqual(CONTEXT);
+  });
+
+  it("url-encodes the session id path segment", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(CONTEXT));
+
+    await getRetrospectiveContext("a b/c", { fetchImpl });
+
+    expect(fetchImpl.mock.calls[0][0]).toBe(
+      `${DEFAULT_API_BASE_URL}/consult-retrospective/a%20b%2Fc`,
+    );
   });
 });
 
