@@ -112,6 +112,49 @@ describe("Dashboard", () => {
     expect(labels[5]).toContain("2026-09");
   });
 
+  it("shows — rather than 0% when no hand-off was accepted this month (#294)", async () => {
+    // "Nothing to measure" must not read as "we recovered nothing".
+    getDashboardMock.mockResolvedValue({
+      ...DATA,
+      knowledge_accumulation: {
+        ...DATA.knowledge_accumulation,
+        accepted_handoffs: 0,
+        capture_rate: 0,
+      },
+    });
+    render(<Dashboard />);
+
+    const card = (await screen.findByText("暗黙知の回収率")).closest("div") as HTMLElement;
+    expect(within(card).getByText("—")).toBeInTheDocument();
+    expect(within(card).queryByText("0%")).toBeNull();
+  });
+
+  it("keeps the trend visible in a month with no new knowledge (#294)", async () => {
+    // A quiet month is not an empty state: the six-month trend is exactly what
+    // makes a zero readable.
+    getDashboardMock.mockResolvedValue({
+      ...DATA,
+      knowledge_accumulation: {
+        ...DATA.knowledge_accumulation,
+        this_month: 0,
+        captured_answers: 0,
+        consult_retrospectives: 0,
+        monthly: [
+          { month: "2026-04", count: 0 },
+          { month: "2026-05", count: 2 },
+          { month: "2026-06", count: 3 },
+          { month: "2026-07", count: 1 },
+          { month: "2026-08", count: 4 },
+          { month: "2026-09", count: 0 },
+        ],
+      },
+    });
+    render(<Dashboard />);
+
+    expect(await screen.findByRole("list", { name: "形式知化の月次推移" })).toBeInTheDocument();
+    expect(screen.queryByText(/まだ形式知化された知識がありません/)).toBeNull();
+  });
+
   it("says so plainly when nothing has been accumulated yet (#294)", async () => {
     getDashboardMock.mockResolvedValue({
       ...DATA,

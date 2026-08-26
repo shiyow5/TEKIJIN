@@ -2407,7 +2407,11 @@ def test_dashboard_summary_aggregates_outcomes(seed_counts, session) -> None:
 # --------------------------------------------------------------------------- #
 # #294: 蓄積メトリクス (knowledge accumulation on the admin dashboard)
 # --------------------------------------------------------------------------- #
-ACC_NOW = dt.datetime(2026, 9, 15, 12, 0, 0)
+# Deliberately inside a month the FIXTURES populate: `answers.json` has 16 rows
+# dated 2026-08. With a September `now` the "counts only runtime rows" test passes
+# even for an implementation that counts the whole table, because the seed has
+# nothing in September — the guard would be green for the wrong reason.
+ACC_NOW = dt.datetime(2026, 8, 25, 12, 0, 0)
 
 
 def _accepted_handoff(session, *, qid: str, responder_id: int, created: dt.datetime) -> None:
@@ -2489,7 +2493,7 @@ def test_accumulation_counts_captured_answers_and_retrospectives(seed_counts, se
 
 
 def test_accumulation_separates_this_month_from_last(seed_counts, session) -> None:
-    last_month = dt.datetime(2026, 8, 20, 9, 0, 0)
+    last_month = dt.datetime(2026, 7, 20, 9, 0, 0)
     _accepted_handoff(session, qid="q_0001", responder_id=1, created=last_month)
     _captured_answer(session, aid="ans_acc_old", qid="q_0001", responder_id=1, created=last_month)
     _accepted_handoff(session, qid="q_0002", responder_id=2, created=ACC_NOW)
@@ -2528,7 +2532,7 @@ def test_accumulation_capture_rate_cannot_exceed_one_across_a_month_boundary(
     month captured nothing. Both halves come from one population instead.
     """
 
-    last_month = dt.datetime(2026, 8, 28, 9, 0, 0)
+    last_month = dt.datetime(2026, 7, 28, 9, 0, 0)
     # Shown this month, nobody wrote anything down: the only row the rate is about.
     _accepted_handoff(session, qid="q_0001", responder_id=1, created=ACC_NOW)
     # Shown last month, answered this month — twice.
@@ -2544,6 +2548,55 @@ def test_accumulation_capture_rate_cannot_exceed_one_across_a_month_boundary(
     assert acc["accepted_handoffs"] == 1
     assert acc["capture_rate"] == 0.0, "the hand-off shown this month captured nothing"
     assert acc["capture_rate"] <= 1.0
+
+
+def test_a_direct_consultation_counts_as_captured_not_as_a_miss(seed_counts, session) -> None:
+    """A 直接相談 leaves no ``answers`` row — that is what it IS (#247).
+
+    Counting only ``answers`` scored every properly-written-up direct consult as an
+    uncaptured hand-off: the same function called the retrospective knowledge in
+    ``this_month`` and a failure in ``capture_rate``. The loop closes perfectly and
+    the KPI read 0%.
+    """
+
+    _accepted_handoff(session, qid="q_0001", responder_id=1, created=ACC_NOW)
+    _consult(session, qid="q_0001", responder_id=1, created=ACC_NOW)
+
+    acc = dashboard_summary(session, now=ACC_NOW)["knowledge_accumulation"]
+    assert acc["consult_retrospectives"] == 1
+    assert acc["accepted_handoffs"] == 1
+    assert acc["capture_rate"] == 1.0, "a written-up direct consult is captured knowledge"
+
+
+def test_an_unresolved_retrospective_is_not_counted_as_formalized_knowledge(
+    seed_counts, session
+) -> None:
+    """「聞いたが分からなかった」 is stored, but it is not knowledge.
+
+    Everywhere else an ``unresolved`` consult is inert (断り≠非専門). Counting it
+    here would inflate the headline in the flattering direction — the exact failure
+    this metric is otherwise built to avoid.
+    """
+
+    from tekijin.models.tables import OfflineConsult
+
+    _accepted_handoff(session, qid="q_0001", responder_id=1, created=ACC_NOW)
+    session.add(
+        OfflineConsult(
+            question_id="q_0001",
+            responder_id=1,
+            asker_id=33,
+            topics=["ネットワーク・VPN"],
+            answer_body="聞いたが解決しなかった",
+            resolution="unresolved",
+            created_at=ACC_NOW,
+        )
+    )
+    session.flush()
+
+    acc = dashboard_summary(session, now=ACC_NOW)["knowledge_accumulation"]
+    assert acc["consult_retrospectives"] == 0
+    assert acc["this_month"] == 0
 
 
 def test_accumulation_capture_rate_is_zero_not_one_when_nothing_was_handed_off(
@@ -2567,12 +2620,12 @@ def test_accumulation_monthly_trend_is_dense_and_oldest_first(seed_counts, sessi
 
     monthly = dashboard_summary(session, now=ACC_NOW)["knowledge_accumulation"]["monthly"]
     assert [m["month"] for m in monthly] == [
+        "2026-03",
         "2026-04",
         "2026-05",
         "2026-06",
         "2026-07",
         "2026-08",
-        "2026-09",
     ]
     assert monthly[-1]["count"] == 1
     assert all(m["count"] == 0 for m in monthly[:-1])

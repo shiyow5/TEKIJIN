@@ -118,8 +118,16 @@ function AccumulationSection({ acc }: { acc: KnowledgeAccumulation }) {
         />
         <MetricCard
           label="暗黙知の回収率"
-          value={pct(acc.capture_rate)}
-          hint={`今月承諾された取次ぎ ${acc.accepted_handoffs}件のうち`}
+          // 0/0 is "nothing to measure", not "we recovered nothing" — rendering a
+          // measured-looking 0% on a quiet month is the pessimistic mirror of the
+          // flattering count this metric exists to avoid. `hours()` already does
+          // this for a missing average.
+          value={acc.accepted_handoffs === 0 ? "—" : pct(acc.capture_rate)}
+          hint={
+            acc.accepted_handoffs === 0
+              ? "今月はまだ取次ぎが承諾されていません"
+              : `今月承諾された取次ぎ ${acc.accepted_handoffs}件のうち`
+          }
           title={
             "承諾された取次ぎのうち、回答が記録として残った割合です。" +
             "件数と違い、この値は下がることがあります。"

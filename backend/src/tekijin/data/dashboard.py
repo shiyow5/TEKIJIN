@@ -23,6 +23,7 @@ from tekijin.models.tables import (
     Question,
     Recommendation,
 )
+from tekijin.scorer.weights import OFFLINE_CONSULT_POSITIVE_RESOLUTIONS
 
 # Routes that resolve a question WITHOUT contacting a live person — the numerator
 # of the self-resolution rate (product-spec 画面5). Only ``document`` qualifies in
@@ -204,7 +205,13 @@ def _knowledge_accumulation(session: Session, now: dt.datetime | None) -> dict[s
         return session.scalar(select(func.count()).select_from(scoped.subquery())) or 0
 
     answers_stmt = _captured_answers_stmt()
-    consults_stmt = select(OfflineConsult.created_at).where(OfflineConsult.created_at.isnot(None))
+    # `unresolved` is stored but is inert everywhere else (断り≠非専門, see
+    # OfflineConsult) — a write-up saying "聞いたが分からなかった" is not knowledge,
+    # and counting it would inflate the headline in the flattering direction.
+    consults_stmt = select(OfflineConsult.created_at).where(
+        OfflineConsult.created_at.isnot(None),
+        OfflineConsult.resolution.in_(OFFLINE_CONSULT_POSITIVE_RESOLUTIONS),
+    )
 
     captured_answers = _count(answers_stmt, Answer.created_at, this_start, None)
     retrospectives = _count(consults_stmt, OfflineConsult.created_at, this_start, None)
@@ -243,16 +250,35 @@ def _knowledge_accumulation(session: Session, now: dt.datetime | None) -> dict[s
     accepted_handoffs = (
         session.scalar(select(func.count()).select_from(accepted_stmt.subquery())) or 0
     )
+    # A 直接相談 leaves NO answers row — that is its definition (#247): it happens
+    # face to face, so the retrospective IS the artefact. Counting only `answers`
+    # scored every properly-written-up direct consult as an UNCAPTURED hand-off,
+    # contradicting this same function counting it as knowledge a few lines below.
+    # Either record closes the loop. DISTINCT because a question with two answers
+    # from one responder would otherwise push the rate above 1.0 (nothing in the
+    # schema forbids that pair).
+    left_a_record = or_(
+        select(Answer.id)
+        .where(
+            Answer.question_id == Recommendation.question_id,
+            Answer.responder_id == Recommendation.employee_id,
+        )
+        .exists(),
+        select(OfflineConsult.id)
+        .where(
+            OfflineConsult.question_id == Recommendation.question_id,
+            OfflineConsult.responder_id == Recommendation.employee_id,
+        )
+        .exists(),
+    )
     captured_from_those = (
         session.scalar(
-            select(func.count()).select_from(
-                accepted_stmt.join(
-                    Answer,
-                    and_(
-                        Answer.question_id == Recommendation.question_id,
-                        Answer.responder_id == Recommendation.employee_id,
-                    ),
-                ).subquery()
+            select(func.count(func.distinct(Recommendation.id)))
+            .select_from(Recommendation)
+            .where(
+                Recommendation.outcome == "accepted",
+                Recommendation.created_at >= this_start,
+                left_a_record,
             )
         )
         or 0
