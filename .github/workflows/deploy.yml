@@ -28,7 +28,7 @@ jobs:
         env:
           TEKIJIN_DEPLOY_DIR: /home/team_a/TEKIJIN
           TEKIJIN_VENV_PY: /home/team_a/tekijin-bench/.venv/bin/python
-          TEKIJIN_API_BASE_URL: http://100.118.131.67:18000
+          TEKIJIN_API_BASE_URL: http://internship-dgx1.tail349bcd.ts.net:18000
           TEKIJIN_FRONTEND_CONTAINER: tekijin_frontend
           TEKIJIN_PORT: "18000"
           TEKIJIN_FRONTEND_PORT: "13000"
