@@ -105,16 +105,33 @@ export function RecentQuestions() {
       return;
     }
     let active = true;
-    setState({ phase: "loading" });
-    getRecentQuestions(currentUserId)
-      .then((items) => {
-        if (active) setState({ phase: "ready", items });
-      })
-      .catch(() => {
-        if (active) setState({ phase: "error" });
-      });
+    // Refetch when the page regains focus/visibility (revalidate-on-focus): after a
+    // run completes on /session/[id]/result and the user navigates back here, the
+    // App Router serves this cached subtree WITHOUT remounting, so a mount-only
+    // effect would keep showing a stale list that omits the just-asked question
+    // (#468). The API already returns pending questions, so a plain refetch fixes it.
+    const load = (initial: boolean) => {
+      if (initial) setState({ phase: "loading" });
+      getRecentQuestions(currentUserId)
+        .then((items) => {
+          if (active) setState({ phase: "ready", items });
+        })
+        .catch(() => {
+          if (active) setState((prev) => (prev.phase === "ready" ? prev : { phase: "error" }));
+        });
+    };
+    const revalidate = () => {
+      if (document.visibilityState === "visible") load(false);
+    };
+    load(true);
+    window.addEventListener("focus", revalidate);
+    window.addEventListener("pageshow", revalidate);
+    document.addEventListener("visibilitychange", revalidate);
     return () => {
       active = false;
+      window.removeEventListener("focus", revalidate);
+      window.removeEventListener("pageshow", revalidate);
+      document.removeEventListener("visibilitychange", revalidate);
     };
   }, [currentUserId]);
 
@@ -143,7 +160,7 @@ export function RecentQuestions() {
             <li key={item.question_id} className="relative">
               {item.session_id ? (
                 <Link
-                  href={`/session/${encodeURIComponent(item.session_id)}`}
+                  href={`/session/${encodeURIComponent(item.session_id)}/result`}
                   aria-label={`「${item.title}」（${item.resolved ? "解決済" : "対応中"}）の結果をもう一度見る`}
                   className="block h-full rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 >

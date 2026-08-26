@@ -92,7 +92,7 @@ describe("HistoryScreen", () => {
     expect(screen.getByText("取り次ぎ先を調整中")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "結果を見る" })).toHaveAttribute(
       "href",
-      "/session/sess-q1",
+      "/session/sess-q1/result",
     );
   });
 
