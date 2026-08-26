@@ -1862,6 +1862,161 @@ def test_slack_events_deduplicates_a_retried_delivery(
         get_settings.cache_clear()
 
 
+# --- POST /slack/interactivity (#398/#399: 承諾/辞退/自分より適任がいる buttons) --- #
+def _post_slack_interactivity(
+    client: TestClient,
+    action_id: str,
+    *,
+    session_id: str,
+    recommendation_id: int,
+    outcome: str,
+    slack_user_id: str,
+) -> object:
+    """Build a real Slack Block Kit interactivity payload (form-encoded, a
+    single ``payload`` field holding the JSON) and sign it the same way Slack
+    does, so this exercises the exact wire format the real button posts."""
+
+    from urllib.parse import quote
+
+    action_payload = {
+        "actions": [
+            {
+                "action_id": action_id,
+                "value": json.dumps(
+                    {
+                        "session_id": session_id,
+                        "recommendation_id": recommendation_id,
+                        "outcome": outcome,
+                    }
+                ),
+            }
+        ],
+        "user": {"id": slack_user_id},
+    }
+    body = f"payload={quote(json.dumps(action_payload))}".encode()
+    headers = {**_slack_event_headers(body), "Content-Type": "application/x-www-form-urlencoded"}
+    return client.post("/slack/interactivity", content=body, headers=headers)
+
+
+def test_slack_interactivity_accept_behaves_like_pressing_the_app_button(
+    monkeypatch, seed_counts, engine, fake_embedder
+) -> None:
+    """A Slack 承諾 click must both record the outcome AND advance the run —
+    not just queue a ``Command`` and leave the hand-off parked, which is what
+    made Slack show its "processing failed" warning on the message (the click
+    never resolved anything an app user would see change)."""
+
+    _slack_configured(monkeypatch)
+    try:
+        with get_sessionmaker(engine)() as session:
+            upsert_slack_link(session, 1, slack_user_id="U_RESPONDER", slack_team_id="T1", now=NOW)
+            session.commit()
+
+        client = _client(
+            engine,
+            fake_embedder,
+            retriever=_FakeRetriever(people=[1, 2, 3], people_confidence=0.2),
+            scorer=_FakeScorer(_recs(1, 2, 3)),
+        )
+        sid = "slack-interactivity-accept"
+        client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": sid})
+        _events(client, sid)  # drains to the "send" pause, awaiting employee 1
+
+        recommendation_id = client.get(f"/handoff/{sid}").json()["recommendation_id"]
+
+        resp = _post_slack_interactivity(
+            client,
+            "tekijin_accept",
+            session_id=sid,
+            recommendation_id=recommendation_id,
+            outcome="accepted",
+            slack_user_id="U_RESPONDER",
+        )
+        assert resp.status_code == 200
+        assert "承諾しました" in resp.json()["text"]
+
+        # submit_resume() ALONE already records the outcome (and, for an accept,
+        # seeds the chat thread) synchronously — so a 404 from GET /handoff is
+        # NOT proof the run actually advanced, only that an outcome was queued.
+        # The one thing that requires the graph to genuinely run the queued
+        # Command is this in-memory registry entry: ``_dispatch_stream`` clears
+        # ``ctx.pending`` only once it starts executing it (service.py). If the
+        # fix regresses (interactivity goes back to calling only
+        # ``submit_resume``), this stays non-None forever and the assertion
+        # below times out — exactly the "hand-off parked until the asker's own
+        # tab reconnects" bug this change fixes, which also has a durable-state
+        # consequence: the queued Command lives ONLY in this in-memory
+        # registry, so an app restart before anyone drains it would strand the
+        # session at "send" forever with nothing left to redo it.
+        svc = client.app.state.agent_service
+
+        def _drained() -> bool:
+            ctx = svc._registry.get(sid)
+            return ctx is not None and ctx.pending is None
+
+        assert _wait_until(_drained), "承諾クリック後もグラフが進んでいない(pendingが残ったまま)"
+
+        with get_sessionmaker(engine)() as session:
+            rec = session.get(Recommendation, recommendation_id)
+            assert rec.outcome == "accepted"
+    finally:
+        get_settings.cache_clear()
+
+
+def test_slack_interactivity_refer_declines_and_reroutes_to_the_next_candidate(
+    monkeypatch, seed_counts, engine, fake_embedder
+) -> None:
+    """自分より適任がいる (refer) carries the same "declined" outcome the app's
+    own 今は難しい/自分より適任がいる buttons both send today (#76: no dedicated
+    referral outcome yet) — clicking it in Slack must reroute the hand-off to
+    the next candidate exactly like declining in the app does."""
+
+    _slack_configured(monkeypatch)
+    try:
+        with get_sessionmaker(engine)() as session:
+            upsert_slack_link(session, 1, slack_user_id="U_RESPONDER", slack_team_id="T1", now=NOW)
+            session.commit()
+
+        client = _client(
+            engine,
+            fake_embedder,
+            retriever=_FakeRetriever(people=[1, 2], people_confidence=0.2),
+            scorer=_FakeScorer(_recs(1, 2)),
+        )
+        sid = "slack-interactivity-refer"
+        client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": sid})
+        first = _events(client, sid)
+        assert first[2][1]["recommendations"][0]["person_id"] == "E001"
+
+        recommendation_id = client.get(f"/handoff/{sid}").json()["recommendation_id"]
+
+        resp = _post_slack_interactivity(
+            client,
+            "tekijin_refer",
+            session_id=sid,
+            recommendation_id=recommendation_id,
+            outcome="declined",
+            slack_user_id="U_RESPONDER",
+        )
+        assert resp.status_code == 200
+        assert "自分より適任" in resp.json()["text"]
+
+        def _rerouted_to_next_candidate() -> bool:
+            resp = client.get(f"/handoff/{sid}")
+            return resp.status_code == 200 and resp.json()["recommendation_id"] != recommendation_id
+
+        assert _wait_until(_rerouted_to_next_candidate), (
+            "辞退クリック後も次候補へ振り分けられていない"
+        )
+        assert client.get(f"/handoff/{sid}").json()["responder"]["person_id"] == "E002"
+
+        with get_sessionmaker(engine)() as session:
+            rec = session.get(Recommendation, recommendation_id)
+            assert rec.outcome == "declined"
+    finally:
+        get_settings.cache_clear()
+
+
 def test_accepting_a_second_chat_handoff_between_the_same_pair_reuses_the_channel(
     monkeypatch, seed_counts, engine, fake_embedder
 ) -> None:
