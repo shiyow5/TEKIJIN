@@ -122,6 +122,32 @@ class Settings(BaseSettings):
     # low-hallucination). Safe by construction: it never intercepts a person query.
     self_answer_enabled: bool = True
 
+    # #413: additive self-answer on the PERSON route. self_answer (#291) fires ONLY
+    # on the data-derived routes (document/prior_answer) after C5 — so a knowledge
+    # question that routes to a person (an expert exists) never shows a past-answer
+    # citation, even when one grounds it. This makes System 1 also fire on the
+    # person route: before the hand-off, if a low-relevance FLOOR is cleared, try a
+    # grounded cited answer and surface it ALONGSIDE the recommendation. It NEVER
+    # replaces the hand-off (person recall unchanged) and never marks the run
+    # self-resolved. Requires self_answer to be wired (shares the composer).
+    # DGX sizing (research_selfanswer_person.py): person-route compose grounded rate
+    # 0.237 (avg 3.78 citations) — ~24% of person questions would gain a citation
+    # that today shows none. OFF by default until the full-graph E2E confirms person
+    # recall stays 1.000 and citations fire; the floor gates the compose LLM call so
+    # no-data person questions add no latency.
+    #
+    # Before enabling (security review #413):
+    # * The floor (0.20) is BELOW the data-route thresholds (DOCUMENT_SIM 0.28), so
+    #   it composes on weak-relevance evidence a data route would not pick — re-check
+    #   the false-positive rate on the DGX eval when tuning it.
+    # * The corpus has no per-row ACL, so a past answer is treated as readable by any
+    #   asker. Enabling surfaces past-answer summaries on the person route too, so
+    #   confirm with the product owner that past answers are org-wide readable.
+    # The compose call is best-effort: a failure degrades to a plain hand-off (the
+    # additive_answer node swallows it), so person recall never regresses.
+    additive_self_answer_enabled: bool = False
+    additive_self_answer_floor: float = 0.20
+
     # #327: corpus-count routing for prior_answer. Nemotron's answer cosine cannot
     # separate this route (PRIOR_ANSWER_SIM sits above the observed max — see
     # route.py / #119), so route on whether the top retrieved past answer is a

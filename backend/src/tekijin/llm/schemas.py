@@ -9,11 +9,33 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field, model_validator
 
+from tekijin.scorer.topics import TOPIC_VOCABULARY
+
+# The closed topic list, injected into the JSON Schema C1 is generated against so
+# guided decoding can only emit these strings (#64). Free-text topics drift from
+# the vocabulary the scorer joins on, and an un-joinable topic matches NO evidence
+# — the recommendation then goes random (#116).
+_TOPIC_ENUM_SCHEMA: dict[str, object] = {
+    "type": "string",
+    "enum": list(TOPIC_VOCABULARY),
+}
+
 
 class IntentSchema(BaseModel):
     """C1 structured output (model-definition §2 C1)."""
 
-    topics: list[str] = Field(default_factory=list, description="質問の技術トピック")
+    # NB: the annotation stays ``list[str]`` — deliberately NOT ``list[Literal[...]]``.
+    # The enum belongs in the schema handed to the model (it constrains GENERATION),
+    # but parsing must stay lenient: a backend without guided decoding, or an older
+    # stub/fixture, would otherwise raise ValidationError and fail the whole C1 call
+    # instead of degrading. ``VllmIntentModel.analyze`` still snaps every value onto
+    # the vocabulary via ``normalize_topics``, so a stray topic can never reach the
+    # scorer either way (#116). Constrain generation, forgive parsing.
+    topics: list[str] = Field(
+        default_factory=list,
+        description="質問の技術トピック（一覧から該当するものだけを選ぶ／無ければ空配列）",
+        json_schema_extra={"items": _TOPIC_ENUM_SCHEMA},
+    )
     products: list[str] = Field(default_factory=list, description="言及された製品名")
     situation: str | None = Field(default=None, description="状況の一言要約")
     question_type: str = Field(

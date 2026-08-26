@@ -16,8 +16,13 @@
 > gold トピックあり 52 → **62**）。**分母が動いているので、旧測定と直接は比べられない。**
 > → [robustness.md](robustness.md) §4
 
-**構成**: `nvidia/Nemotron-3-Embed-1B-BF16`（2048次元）/ 経路閾値 0.55・0.30・0.40（[ADR-0004](../adr/0004-c5-route-thresholds-nemotron.md)）/
+**構成**: `nvidia/Nemotron-3-Embed-1B-BF16`（2048次元）/ 経路閾値 0.55・**0.30**・0.40（[ADR-0004](../adr/0004-c5-route-thresholds-nemotron.md)）/
 #115 の RRF 重み。DGX 上の `pgvector/pgvector:pg16` に seed + 埋め込み370行を投入して測定。
+
+> ⚠️ **§0.3 だけが新しい。** #253 で §0.3（経路）を**現行コーパス87件・現行閾値
+> `DOCUMENT_SIM`=0.28** で測り直した。§0.1 / §0.2 / §0.4 は `ablation/e2e_variants.json` 由来で
+> **81件・`DOCUMENT_SIM`=0.30 のまま**（再生成していない）。上の「構成」行は §0.1/0.2/0.4 の条件。
+> §0.2 の「経路 `document` で構造上0点 = 4件」も 0.30・81件時点の数で、§0.3 の 11件とは別基準。
 
 ### 0.1 層2 Recall@3
 
@@ -68,40 +73,60 @@
 > `scripts/research_fullgraph_eval.py` / [eval-metrics.md](eval-metrics.md) を参照。**下の数値は変更していない。**
 
 ```
-予測経路の分布: {'person': 77, 'document': 4}   ← 81件
-候補者数の分布: {10: 81}
+予測経路の分布: {'person': 76, 'document': 11}   ← 87件
+候補者数の分布: {10: 87}
 ```
 
 <!-- gen:route_channels -->
 | チャネル | 最小 | 中央 | 最大 | 閾値 |
 |---|---|---|---|---|
-| `answer_confidence` | 0.106 | 0.220 | **0.543** | `PRIOR_ANSWER_SIM = 0.55` |
-| `document_confidence` | 0.025 | 0.144 | 0.486 | `DOCUMENT_SIM = 0.30` |
-| `people_confidence` | 0.052 | 0.226 | 0.473 | `PERSON_WEAK_SIM = 0.40` |
+| `answer_confidence` | 0.105 | 0.220 | **0.542** | `PRIOR_ANSWER_SIM = 0.55` |
+| `document_confidence` | 0.025 | 0.158 | 0.528 | `DOCUMENT_SIM = 0.28` |
+| `people_confidence` | 0.053 | 0.215 | 0.473 | `PERSON_WEAK_SIM = 0.40` |
 <!-- /gen:route_channels -->
 
-**経路精度 0.803（53/66、`gold_route` が `none` でない66件基準）。**
+**経路精度 0.833（60/72、`gold_route` が `none` でない72件基準）。**
 #103 当時の 0.125 からは大きく回復している。**#158 の前は 0.821（46/56）**、
-#158 第1段（制約15件）では 0.768（43/56）だった。**分母が 56 → 66 に変わっているので、
-3つの値を直接は比べられない。** `document` に振られるのは 7件 → 4件 のまま戻っていない。
-**ADR-0004 の閾値は再較正の余地がある。** 全81件を分母にすると 0.654。**基準に注意。**
+#158 第1段（制約15件）では 0.768（43/56）、**66件基準・`DOCUMENT_SIM`=0.30 の時点では 0.803（53/66）**
+だった。**分母が 56 → 66 → 72 と動いているので、これらを直接は比べられない。**
+document recall は **11/16 = 0.688**（ADR-0007 の baseline 行と一致）。
+全87件を分母にすると 0.690。**基準に注意。**
+
+> **内訳（同じ JSON 上で閾値だけ振って測った）。** 「`document` が 4件 → 11件」を
+> `DOCUMENT_SIM` 再較正の効果と読まないこと — **閾値が買っているのは1件だけ**で、
+> 残りは評価セット側で gold `document` が 10 → 16 に増えた分:
+>
+> | 行数 | `DOCUMENT_SIM` | 経路精度 | document recall |
+> |---|---|---|---|
+> | 81（旧） | 0.30 | 53/66 = 0.803 | 4/10 |
+> | 81（旧） | 0.28 | 54/66 = 0.818 | **5**/10 |
+> | 87（現行） | 0.30 | 59/72 = 0.819 | 10/16 |
+> | 87（現行） | 0.28 | **60/72 = 0.833** | **11**/16 |
+>
+> 81件・0.28 の行は [ADR-0004](../adr/0004-c5-route-thresholds-nemotron.md) 追補の記録
+> （0.818 / 5-of-10）と一致する。**「0.26 に下げれば同じだけ稼げる」とは読めない。**
+
+> この表は #253 で **現行コーパス（87件）・現行閾値（`DOCUMENT_SIM` 0.28）** で再生成した。
+> それ以前の生成物は **81件・0.30** のままで、#191 の再較正も評価セットの拡張も反映されていなかった。
 
 gold → 予測の内訳:
 
 <!-- gen:route_matrix -->
 | gold | → 予測 | 件数 |
 |---|---|---|
-| `document` | `document` | 4 |
-| `document` | `person` | 6 |
+| `document` | `document` | 11 |
+| `document` | `person` | 5 |
 | `none` | `person` | 15 |
 | `person` | `person` | 49 |
 | `prior_answer` | `person` | 7 |
 <!-- /gen:route_matrix -->
 
-**`prior_answer` は0件。** `answer_confidence` の最大 0.543 が閾値 0.55 に届かない。
+**`prior_answer` は0件。** `answer_confidence` の最大 0.542 が閾値 0.55 に届かない。
 これは不具合ではなく **ADR-0004 が意図してこの経路を無効化した**もので（person gold の
-`answer_confidence` 最大 0.543 が prior_answer gold の最大 0.410 を上回り、
-どこに閾値を置いても分離できない）、本筋の直しは **#119**。
+`answer_confidence` 最大 0.542 が prior_answer gold の最大 0.410 を上回り、
+どこに閾値を置いても分離できない）。**この経路の復活は打ち止め**:
+コーパス集計ルーティング（#119/#327）はどの config も baseline を Pareto 改善せず、
+[ADR-0007](../adr/0007-c5-data-route-recall-ceiling.md) で棄却された（#119 は close 済み）。
 
 ### 0.4 C1 の実トピックを使った切り分け
 
