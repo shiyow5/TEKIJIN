@@ -11,6 +11,7 @@ import datetime as dt
 import hashlib
 import hmac
 import json
+import threading
 import time
 
 import pytest
@@ -237,6 +238,82 @@ def _events(client: TestClient, session_id: str) -> list[tuple[str, dict]]:
     return _parse_sse(resp.text)
 
 
+# Slack's request handlers finish the slow part AFTER responding, in daemon
+# threads (its interactivity budget is ~3s, a graph advance is not). Those
+# threads write to the DB, so a test that returns while one is still running
+# races the cleanup below: it deletes events, then questions, and the thread
+# inserts a fresh event in between -> events_question_id_fkey (#460).
+_ASYNC_SLACK_THREADS = (
+    "slack-interactivity-advance",
+    "slack-pending-handoff-setup",
+    "slack-handoff-channel-setup",
+)
+
+
+def _join_async_slack_work(timeout: float = 15.0) -> None:
+    """Block until no Slack background thread is still touching the DB.
+
+    Waiting on ``ctx.pending is None`` is NOT enough: ``_dispatch_stream`` clears
+    that when it STARTS the queued Command, while the event rows are written at
+    the end of the run.
+    """
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        alive = [
+            t for t in threading.enumerate() if t.name in _ASYNC_SLACK_THREADS and t.is_alive()
+        ]
+        if not alive:
+            return
+        time.sleep(0.02)
+    raise AssertionError(
+        f"Slack background threads still running after {timeout}s: "
+        f"{[t.name for t in threading.enumerate() if t.name in _ASYNC_SLACK_THREADS]}"
+    )
+
+
+def test_join_async_slack_work_waits_for_a_running_thread() -> None:
+    """The guard for #460: if this join is ever dropped, the FK error comes back
+    as an intermittent teardown failure that reruns hide. Test the mechanism
+    directly rather than by racing the graph, so it is fast and deterministic.
+    """
+
+    released = threading.Event()
+    finished: list[float] = []
+
+    def _work() -> None:
+        released.wait(timeout=5.0)
+        finished.append(time.monotonic())
+
+    worker = threading.Thread(target=_work, name="slack-interactivity-advance")
+    worker.start()
+    try:
+        threading.Timer(0.2, released.set).start()
+        _join_async_slack_work(timeout=5.0)
+        returned = time.monotonic()
+        assert finished, "join returned while the thread was still running"
+        assert returned >= finished[0]
+    finally:
+        released.set()
+        worker.join(timeout=5.0)
+
+
+def test_join_async_slack_work_raises_rather_than_deleting_under_a_live_writer() -> None:
+    # Timing out must FAIL loudly. Returning quietly would drop straight into the
+    # deletes with a writer still live — the exact condition being guarded against.
+    released = threading.Event()
+    worker = threading.Thread(
+        target=lambda: released.wait(timeout=5.0), name="slack-pending-handoff-setup"
+    )
+    worker.start()
+    try:
+        with pytest.raises(AssertionError, match="still running"):
+            _join_async_slack_work(timeout=0.3)
+    finally:
+        released.set()
+        worker.join(timeout=5.0)
+
+
 @pytest.fixture(autouse=True)
 def _cleanup_api_rows(engine):
     # The API COMMITS questions/recommendations (id prefix "api_"). Remove them
@@ -244,6 +321,9 @@ def _cleanup_api_rows(engine):
     from sqlalchemy import text
 
     yield
+    # BEFORE any delete: see _join_async_slack_work. Ordering the deletes by FK
+    # is not enough on its own when a writer is still running.
+    _join_async_slack_work()
     session = get_sessionmaker(engine)()
     try:
         # messages FK-reference recommendations (no ON DELETE CASCADE), so chat
