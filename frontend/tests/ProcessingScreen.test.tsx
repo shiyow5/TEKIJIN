@@ -100,6 +100,26 @@ describe("ProcessingScreen", () => {
     expect(pushMock).toHaveBeenCalledWith("/session/abc-123/result");
   });
 
+  it("renders the additive cited answer alongside the live flow (#413)", () => {
+    renderScreen(
+      state({
+        route: { route: "person", reason: "詳しい人がいます", confidence: 0.8 },
+        reference: {
+          answer: "過去の類似回答です。",
+          citations: [{ source_id: "qa_7", kind: "qa" }],
+        },
+      }),
+    );
+    expect(screen.getByText("参考: 過去の類似回答")).toBeInTheDocument();
+    expect(screen.getByText("過去の類似回答です。")).toBeInTheDocument();
+    expect(screen.getByText("過去の回答 qa_7")).toBeInTheDocument();
+  });
+
+  it("omits the reference block when no additive answer arrived (#413)", () => {
+    renderScreen(state({ route: { route: "person", reason: "", confidence: 0.8 } }));
+    expect(screen.queryByText("参考: 過去の類似回答")).not.toBeInTheDocument();
+  });
+
   it("stops the active-step spinner once a result is ready (person route pauses, #148)", () => {
     // The person route pauses at `send` (non-terminal) after recommend/draft — the
     // spinner must not keep spinning once the candidate + draft are ready.

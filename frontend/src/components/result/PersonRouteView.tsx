@@ -30,6 +30,7 @@
  * fresh clarification or land on a new result).
  */
 
+import { ReferenceAnswer } from "@/components/ReferenceAnswer";
 import { CandidateCard } from "@/components/result/CandidateCard";
 import { ConsultMethodDialog } from "@/components/result/ConsultMethodDialog";
 import { DraftEditor } from "@/components/result/DraftEditor";
@@ -40,7 +41,7 @@ import {
   selectHandoffCandidate,
   updateHandoffDraft,
 } from "@/lib/api-client";
-import type { ConsultMethod, Recommendation } from "@/lib/api-types";
+import type { ConsultMethod, Recommendation, ReferenceData } from "@/lib/api-types";
 import { fitPercents } from "@/lib/fit";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
@@ -49,6 +50,8 @@ export interface PersonRouteViewProps {
   recommendations: Recommendation[];
   reason?: string;
   draft: string;
+  /** #413: additive cited answer to show above the candidates (optional). */
+  reference?: ReferenceData;
   /** Session id for the confirm POST; null when rendered outside a session. */
   sessionId: string | null;
 }
@@ -64,6 +67,7 @@ export function PersonRouteView({
   recommendations,
   reason,
   draft,
+  reference,
   sessionId,
 }: PersonRouteViewProps) {
   const router = useRouter();
@@ -261,6 +265,10 @@ export function PersonRouteView({
           {reason || "直近で同様の案件を担当した方の知見が役立ちそうです。"}
         </p>
       </header>
+
+      {/* #413: past-answer citation shown above the candidates — a supporting
+          reference, not a replacement for the hand-off. */}
+      <ReferenceAnswer reference={reference} sessionId={sessionId} />
 
       {candidates.length > 0 ? (
         <div className="grid grid-cols-1 gap-md md:grid-cols-3">
