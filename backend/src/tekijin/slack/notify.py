@@ -30,6 +30,16 @@ from tekijin.slack.client import create_private_channel, invite_to_channel, post
 
 logger = logging.getLogger(__name__)
 
+# Well under Slack's chat.postMessage text limit — long enough that a normal
+# chat message or hand-off draft is never touched, short enough that an
+# accidentally-pasted log dump doesn't silently fail to post at all (the
+# DM-based predecessor this module replaced capped at the same length).
+_MAX_TEXT_LENGTH = 3000
+
+
+def _truncate(text: str) -> str:
+    return text if len(text) <= _MAX_TEXT_LENGTH else f"{text[:_MAX_TEXT_LENGTH]}…"
+
 
 def ensure_pair_channel(session: Session, *, thread_id: int, parties: dict) -> str | None:
     """Create (once per pair) or reuse the Slack channel for this hand-off's
@@ -121,7 +131,7 @@ def relay_to_channel(
     post_message(
         bot_token=settings.slack_bot_token,
         channel_id=link.slack_channel_id,
-        text=f"{sender_name}: {body}",
+        text=_truncate(f"{sender_name}: {body}"),
     )
 
 
@@ -139,14 +149,26 @@ def schedule_channel_setup_and_draft(
     calls, so running it inline would hold that response (and the
     per-session lock ``submit_resume`` takes) for however long Slack takes.
     A plain daemon thread is enough: every step it calls already swallows its
-    own errors and logs them, so there is nothing here to join or propagate.
+    own errors and logs them EXCEPT ``session_scope``'s own commit — e.g. two
+    hand-offs between the same pair accepted within milliseconds of each
+    other can both miss the other's not-yet-committed channel row and race
+    to insert one, so the outer ``try`` here exists to make that (and any
+    other failure this function's own code can raise) visible in the log
+    instead of only as an unhandled-thread exception on stderr.
     """
 
     def _run() -> None:
-        with session_scope(session_factory) as session:
-            channel_id = ensure_pair_channel(session, thread_id=thread_id, parties=parties)
-        if channel_id is not None:
-            settings = get_settings()
-            post_message(bot_token=settings.slack_bot_token, channel_id=channel_id, text=draft)
+        try:
+            with session_scope(session_factory) as session:
+                channel_id = ensure_pair_channel(session, thread_id=thread_id, parties=parties)
+            if channel_id is not None:
+                settings = get_settings()
+                post_message(
+                    bot_token=settings.slack_bot_token,
+                    channel_id=channel_id,
+                    text=_truncate(draft),
+                )
+        except Exception:  # noqa: BLE001 - background thread boundary, must not crash silently
+            logger.warning("Slack hand-off channel setup failed", exc_info=True)
 
     threading.Thread(target=_run, daemon=True, name="slack-handoff-channel-setup").start()

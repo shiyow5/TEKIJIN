@@ -59,6 +59,9 @@ export function SlackLinkButton() {
     try {
       await postSlackUnlink();
       setStatus("unlinked");
+    } catch {
+      // Leave `status` as "linked" — the unlink didn't happen, so the UI
+      // must keep reflecting that rather than silently doing nothing.
     } finally {
       setBusy(false);
     }
