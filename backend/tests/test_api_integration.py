@@ -531,6 +531,185 @@ def test_flow_persists_question_and_recommendation(seed_counts, engine, fake_emb
         check.close()
 
 
+def test_accept_with_answer_body_creates_embedded_answer_row(
+    seed_counts, engine, fake_embedder
+) -> None:
+    # #274: when the responder accepts WITH an answer body, the flow persists an
+    # ``answers`` row — attributed to the responder, tagged with the question topic,
+    # and embedded — so the accumulation loop closes (reuse + history + dashboard).
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2]),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    client.post("/ask", json={"asker_id": 7, "question": GOOD_Q, "session_id": "ab1"})
+    _events(client, "ab1")
+    resp = client.post(
+        "/answer",
+        json={
+            "session_id": "ab1",
+            "outcome": "accepted",
+            "answer_body": "拠点間はIPsec VPNで設定し、各ルータのSAを揃えてください。",
+        },
+    )
+    assert resp.status_code == 200
+    _events(client, "ab1")
+
+    check = get_sessionmaker(engine)()
+    try:
+        q = (
+            check.query(Question)
+            .filter(Question.asker_id == 7, Question.body == GOOD_Q)
+            .order_by(Question.created_at.desc())
+            .first()
+        )
+        assert q is not None
+        answers = check.query(Answer).filter(Answer.question_id == q.id).all()
+        assert len(answers) == 1
+        ans = answers[0]
+        assert ans.id.startswith("ans_")  # uuid-based, collision-free
+        assert ans.responder_id == 1  # the primary (rank 1) responder
+        assert ans.body == "拠点間はIPsec VPNで設定し、各ルータのSAを揃えてください。"
+        assert ans.topic == "ネットワーク・VPN"  # C1 topic, drives answers_by_topic reuse
+        assert ans.reuse_count == 0
+        # Embedded (FakeEmbedder sizes to the configured dim) -> dense-reusable.
+        assert ans.embedding is not None
+        assert len(ans.embedding) == get_settings().embedding_dim
+    finally:
+        check.close()
+
+
+def test_accept_without_answer_body_creates_no_answer_row(
+    seed_counts, engine, fake_embedder
+) -> None:
+    # Accepting WITHOUT a body (older client / "direct" method / blank text) leaves
+    # no ``answers`` row — capture is opt-in and never fabricated.
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2]),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    client.post("/ask", json={"asker_id": 7, "question": GOOD_Q, "session_id": "ab2"})
+    _events(client, "ab2")
+    # A blank body is treated as no answer (stripped -> None), not an empty row.
+    client.post("/answer", json={"session_id": "ab2", "outcome": "accepted", "answer_body": "  "})
+    _events(client, "ab2")
+
+    check = get_sessionmaker(engine)()
+    try:
+        q = (
+            check.query(Question)
+            .filter(Question.asker_id == 7, Question.body == GOOD_Q)
+            .order_by(Question.created_at.desc())
+            .first()
+        )
+        assert q is not None
+        assert check.query(Answer).filter(Answer.question_id == q.id).count() == 0
+    finally:
+        check.close()
+
+
+def test_answer_body_rejected_on_non_accept_outcome_422(seed_counts, engine, fake_embedder) -> None:
+    # An answer body only belongs on an accepted hand-off; pairing it with a
+    # decline (or a clarification reply) is a 422 boundary error, not silently
+    # dropped (#274).
+    client = _client(engine, fake_embedder)
+    bad = client.post(
+        "/answer",
+        json={"session_id": "x1", "outcome": "declined", "answer_body": "本文"},
+    )
+    assert bad.status_code == 422
+
+
+def test_answer_body_from_non_responder_forbidden(seed_counts, engine, fake_embedder) -> None:
+    # #274 security: the asker is a valid participant (they own the clarification
+    # reply) but must NOT be able to forge an answer attributed to the responder.
+    # Supplying answer_body as anyone but the responder (or admin) is 403, and no
+    # answers row is written.
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2]),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    client.post(
+        "/ask",
+        json={"asker_id": 7, "question": GOOD_Q, "session_id": "ab3"},
+        headers=_user_headers(7),
+    )
+    _events(client, "ab3")
+    # asker (7) tries to attach an answer -> 403 (responder is employee 1).
+    forbidden = client.post(
+        "/answer",
+        json={"session_id": "ab3", "outcome": "accepted", "answer_body": "偽の回答"},
+        headers=_user_headers(7),
+    )
+    assert forbidden.status_code == 403
+
+    check = get_sessionmaker(engine)()
+    try:
+        q = (
+            check.query(Question)
+            .filter(Question.asker_id == 7, Question.body == GOOD_Q)
+            .order_by(Question.created_at.desc())
+            .first()
+        )
+        assert q is not None
+        assert check.query(Answer).filter(Answer.question_id == q.id).count() == 0
+    finally:
+        check.close()
+
+
+def test_answer_capture_failure_does_not_block_accept(
+    seed_counts, engine, fake_embedder, monkeypatch
+) -> None:
+    # #274 best-effort: if persisting the answers row fails, the accept still
+    # succeeds (outcome recorded, question resolved, graph resumed) — the capture
+    # runs in its own post-commit transaction and swallows failures.
+    import tekijin.api.service as service_mod
+
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("simulated answers insert failure")
+
+    monkeypatch.setattr(service_mod, "create_answer", _boom)
+
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2]),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    client.post("/ask", json={"asker_id": 7, "question": GOOD_Q, "session_id": "ab4"})
+    _events(client, "ab4")
+    resp = client.post(
+        "/answer",
+        json={"session_id": "ab4", "outcome": "accepted", "answer_body": "落ちる回答"},
+    )
+    assert resp.status_code == 200  # the accept is not blocked by the capture failure
+    done = _events(client, "ab4")
+    assert done and done[-1][0] == "done"
+
+    check = get_sessionmaker(engine)()
+    try:
+        q = (
+            check.query(Question)
+            .filter(Question.asker_id == 7, Question.body == GOOD_Q)
+            .order_by(Question.created_at.desc())
+            .first()
+        )
+        assert q is not None
+        assert q.resolved_at is not None  # outcome transaction committed
+        # The accepted outcome is durably recorded despite the capture failure.
+        recs = check.query(Recommendation).filter(Recommendation.question_id == q.id).all()
+        assert any(r.outcome == "accepted" for r in recs)
+        # No answers row (the capture failed and was swallowed).
+        assert check.query(Answer).filter(Answer.question_id == q.id).count() == 0
+    finally:
+        check.close()
+
+
 def test_document_route_stamps_resolved_at(seed_counts, engine, fake_embedder) -> None:
     # A self-resolving document route records resolved_at even though no responder
     # ever accepts — so it counts toward the dashboard's avg resolution time (#97).
