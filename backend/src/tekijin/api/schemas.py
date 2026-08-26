@@ -604,6 +604,12 @@ class MessageThreadDetail(BaseModel):
     question_title: str
     counterpart: HandoffAsker
     messages: list[MessageItem] = Field(default_factory=list)
+    # Deep link to this pair's shared Slack channel (#hand-off-chat) — present
+    # only once one exists (both parties linked Slack and a "chat" hand-off
+    # between them was accepted). The channel is shared across every thread
+    # between the two, so this link is the same regardless of which of their
+    # threads it's fetched from.
+    slack_channel_url: str | None = None
 
 
 # --------------------------------------------------------------------------- #
@@ -798,3 +804,24 @@ class LoginResponse(BaseModel):
     access_token: str
     token_type: Literal["bearer"] = "bearer"
     principal: PrincipalResponse
+
+
+# --------------------------------------------------------------------------- #
+# Slack integration (chat -> Slack DM notification)
+# --------------------------------------------------------------------------- #
+class SlackAuthorizeUrlResponse(BaseModel):
+    """The "Sign in with Slack" URL for the frontend to navigate the browser to."""
+
+    url: str
+
+
+class SlackStatusResponse(BaseModel):
+    """Whether the acting employee currently has a linked Slack account."""
+
+    linked: bool
+
+
+class SlackUnlinkResponse(BaseModel):
+    """Ack for ``POST /slack/unlink``."""
+
+    ok: bool = True
