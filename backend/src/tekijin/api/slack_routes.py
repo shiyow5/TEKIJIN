@@ -344,9 +344,14 @@ def _handle_interactivity_action(service: AgentService, raw: str) -> Response:
         outcome = value["outcome"]
         recommendation_id = int(value["recommendation_id"])
         slack_user_id = (payload.get("user") or {}).get("id")
-        with service.session_factory() as session:
-            link = get_slack_link_by_slack_user_id(session, slack_user_id)
-            responder_id = link.employee_id if link else None
+        # A payload without `user.id` cannot identify a responder. Querying with
+        # None would ask the DB for `slack_user_id IS NULL` — a row that must never
+        # match anyone — so decide it here instead of leaning on that (#441).
+        responder_id = None
+        if slack_user_id:
+            with service.session_factory() as session:
+                link = get_slack_link_by_slack_user_id(session, str(slack_user_id))
+                responder_id = link.employee_id if link else None
         _, current_responder_id = service.session_participants(session_id)
         if responder_id is None or responder_id != current_responder_id:
             logger.info(
