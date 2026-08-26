@@ -204,7 +204,8 @@ describe("KnowledgeScreen", () => {
       ),
     );
 
-    expect(screen.getByText("1 / 2")).toBeInTheDocument();
+    // `findBy`: the waitFor above proves only that the fetch was issued.
+    expect(await screen.findByText("1 / 2")).toBeInTheDocument();
     const prevButton = screen.getByRole("button", { name: "前へ" });
     const nextButton = screen.getByRole("button", { name: "次へ" });
     expect(prevButton).toBeDisabled();
@@ -217,7 +218,7 @@ describe("KnowledgeScreen", () => {
         expect.objectContaining({ q: "質問", offset: 8, limit: 8 }),
       ),
     );
-    expect(screen.getByText("2 / 2")).toBeInTheDocument();
+    expect(await screen.findByText("2 / 2")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "次へ" })).toBeDisabled();
   });
 
