@@ -103,6 +103,26 @@ def test_resume_request_exactly_one_of_outcome_or_reply() -> None:
         schemas.ResumeRequest(session_id="s", reply="x", recommendation_id=7)
 
 
+def test_resume_request_answer_body_only_with_accepted() -> None:
+    # #274: an answer body rides on an accepted hand-off; it is meaningless on a
+    # decline or a clarification reply, and blank text collapses to no answer.
+    req = schemas.ResumeRequest(session_id="s", outcome="accepted", answer_body="  本文  ")
+    assert req.clean_answer_body == "本文"  # trimmed
+    assert schemas.ResumeRequest(session_id="s", outcome="accepted").clean_answer_body is None
+    # Blank body collapses to None (treated as "accepted without an answer").
+    blank = schemas.ResumeRequest(session_id="s", outcome="accepted", answer_body="   ")
+    assert blank.clean_answer_body is None
+    with pytest.raises(ValueError):
+        schemas.ResumeRequest(session_id="s", outcome="declined", answer_body="本文")
+    with pytest.raises(ValueError):
+        schemas.ResumeRequest(session_id="s", reply="x", answer_body="本文")
+    # Bounded to 2000 chars (matches supplement / message body) — an unbounded body
+    # is a storage/CPU foot-gun since it is embedded and stored (#274).
+    assert schemas.ResumeRequest(session_id="s", outcome="accepted", answer_body="あ" * 2000)
+    with pytest.raises(ValueError):
+        schemas.ResumeRequest(session_id="s", outcome="accepted", answer_body="あ" * 2001)
+
+
 # --------------------------------------------------------------------------- #
 # node -> SSE event mapping
 # --------------------------------------------------------------------------- #
@@ -186,6 +206,7 @@ def test_node_event_terminals_are_messages() -> None:
             "status": status,
             "message": "終端メッセージ",
             "doc_id": None,
+            "fallback_responder": None,
             "citations": [],  # #291: only the self_answered terminal populates this
             "latency_ms": None,
         }
@@ -199,6 +220,7 @@ def test_node_event_document_carries_doc_id() -> None:
         "status": "document",
         "message": "社内文書に該当",
         "doc_id": "doc_001",
+        "fallback_responder": None,
         "citations": [],
         "latency_ms": None,
     }
@@ -221,9 +243,23 @@ def test_node_event_self_answered_carries_citations() -> None:
         "status": "self_answered",
         "message": "保守時間内に更新します。",
         "doc_id": None,
+        "fallback_responder": None,
         "citations": [{"source_id": "doc_001", "kind": "document"}],
         "latency_ms": None,
     }
+
+
+def test_node_event_document_carries_structured_fallback_responder() -> None:
+    rec = {
+        "person_id": 1,
+        "name": "社員1",
+        "dept": "営業部",
+        "score": 0.89,
+        "confidence": "中",
+        "reasons": [],
+    }
+    sse = _ev(events.node_event("document", {"answer": "文書あり", "fallback_responder": rec}))
+    assert _data(sse)["fallback_responder"] == {**rec, "person_id": "E001"}
 
 
 def test_node_event_internal_nodes_emit_nothing() -> None:
@@ -1056,8 +1092,20 @@ def test_self_answer_schema_requires_answer_when_grounded() -> None:
     assert SelfAnswerSchema(grounded=False).grounded is False
 
 
-def test_self_answer_settings_default_dormant() -> None:
-    assert _settings().self_answer_enabled is False
+def test_self_answer_settings_enabled_by_default() -> None:
+    # #291 enabled after the #380 full-graph E2E verification: self-answer fires
+    # only on the data-derived routes (after C5), leaving person routing at recall
+    # 1.000 while citing grounded answers on the data rows. Safe by construction.
+    assert _settings().self_answer_enabled is True
+
+
+def test_build_default_service_wires_self_answer_per_flag() -> None:
+    # Enabling the flag must actually wire the composer into the service (else the
+    # graph never self-answers); disabling keeps the pre-#291 data routes.
+    from tekijin.api.factory import build_default_service
+
+    assert build_default_service(_settings(self_answer_enabled=True))._self_answer is not None
+    assert build_default_service(_settings(self_answer_enabled=False))._self_answer is None
 
 
 def _evidence() -> list[CitedEvidence]:

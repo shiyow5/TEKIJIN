@@ -1,6 +1,29 @@
 import HomePage from "@/../app/page";
+import type { AuthContextValue } from "@/components/AuthProvider";
+import type { Principal } from "@/lib/api-types";
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const useAuthMock = vi.fn<() => AuthContextValue>();
+vi.mock("@/components/AuthProvider", () => ({
+  useAuth: () => useAuthMock(),
+}));
+
+const ADMIN: Principal = { id: null, name: "管理者", dept: null, is_admin: true };
+const USER: Principal = { id: "E001", name: "山田 太郎", dept: "営業部", is_admin: false };
+
+function auth(principal: Principal): AuthContextValue {
+  return { principal, loading: false, login: vi.fn(), logout: vi.fn() };
+}
+
+beforeEach(() => {
+  // Admin by default; individual tests override for the non-admin case (#347).
+  useAuthMock.mockReturnValue(auth(ADMIN));
+});
+
+afterEach(() => {
+  useAuthMock.mockReset();
+});
 
 describe("HomePage (hub)", () => {
   it("links only to real, existing routes (#121: no /results or /answers 404s)", () => {
@@ -16,6 +39,21 @@ describe("HomePage (hub)", () => {
     // The old placeholder dead links must be gone.
     expect(hrefs).not.toContain("/results");
     expect(hrefs).not.toContain("/answers");
+  });
+
+  it("shows the dashboard card to an admin but hides it from a regular user (#347)", () => {
+    useAuthMock.mockReturnValue(auth(ADMIN));
+    const { rerender } = render(<HomePage />);
+    expect(screen.getByRole("link", { name: /ダッシュボード/ })).toHaveAttribute(
+      "href",
+      "/dashboard",
+    );
+
+    useAuthMock.mockReturnValue(auth(USER));
+    rerender(<HomePage />);
+    expect(screen.queryByRole("link", { name: /ダッシュボード/ })).toBeNull();
+    // The other action cards stay available to a regular user.
+    expect(screen.getByRole("link", { name: /回答する/ })).toBeInTheDocument();
   });
 
   it("no longer describes itself as a placeholder", () => {

@@ -64,6 +64,8 @@ export interface UseEventStreamOptions {
   eventSourceFactory?: (url: string) => EventSource;
   /** Subscribe only when true (default true). */
   enabled?: boolean;
+  /** Change to intentionally discard terminal state and subscribe again. */
+  restartKey?: number;
 }
 
 const EVENT_NAMES: readonly SseEventName[] = [
@@ -159,9 +161,10 @@ export function useEventStream(
   sessionId: string,
   options: UseEventStreamOptions = {},
 ): EventStreamState {
-  const { baseUrl, eventSourceFactory, enabled = true } = options;
+  const { baseUrl, eventSourceFactory, enabled = true, restartKey = 0 } = options;
   const [state, setState] = useState<EventStreamState>(INITIAL_STATE);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: restartKey intentionally reopens the same session after an explicit transition.
   useEffect(() => {
     if (!enabled || !sessionId) {
       return;
@@ -239,7 +242,7 @@ export function useEventStream(
       }
       close();
     };
-  }, [sessionId, baseUrl, eventSourceFactory, enabled]);
+  }, [sessionId, baseUrl, eventSourceFactory, enabled, restartKey]);
 
   return state;
 }

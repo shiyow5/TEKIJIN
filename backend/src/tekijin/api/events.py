@@ -101,6 +101,12 @@ def node_event(
             schemas.DoneData(status="sent", answer=update.get("answer"), latency_ms=latency_ms),
         )
     if node in _TERMINAL_STATUS:
+        fallback = update.get("fallback_responder")
+        if fallback is not None:
+            fallback = {
+                **fallback,
+                "person_id": schemas.format_employee_id(fallback["person_id"]),
+            }
         return _sse(
             "message",
             schemas.MessageData(
@@ -108,6 +114,7 @@ def node_event(
                 message=update.get("answer") or "",
                 # Only the document terminal carries a doc id; harmless None elsewhere.
                 doc_id=update.get("document_id"),
+                fallback_responder=fallback,
                 # #291: the self_answered terminal carries the sources it cited so
                 # the chat renders a link per source; empty elsewhere.
                 citations=update.get("self_answer_citations") or [],

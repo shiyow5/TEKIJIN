@@ -125,6 +125,22 @@ def recall_at_k(result: QueryResult, k: int) -> float:
     return hit / min(k, len(result.gold_experts))
 
 
+def hit_at_k(result: QueryResult, k: int) -> bool:
+    """True if AT LEAST ONE gold expert is in the top-``k`` (product-true routing).
+
+    Unlike :func:`recall_at_k` (fractional set-coverage), this credits the product
+    outcome — the asker reached ≥1 genuinely useful expert — regardless of how many
+    of the 2–4 gold were caught. On the eval set (40% of rows carry |gold|=4),
+    surfacing 2 valid experts scores Recall@3 = 0.67 but Hit@3 = True, so Hit@3 is
+    the metric that matches "route to someone who can help". No gold -> never hits.
+    """
+
+    if k <= 0:
+        raise ValueError(f"k must be positive, got {k}")
+    rank = _first_hit_rank(result.ranked_experts[:k], result.gold_experts)
+    return rank is not None
+
+
 def reciprocal_rank(result: QueryResult) -> float:
     """1 / (rank of the first correct expert), or 0 when none are ranked."""
 
@@ -191,6 +207,10 @@ class EvalMetrics:
     n_abstain: int  # queries whose gold route is abstain ("none")
     top1_accuracy: float
     recall_at_3: float
+    # Product-true routing metric: fraction of ranked rows with ≥1 gold expert in
+    # the top-3 (see :func:`hit_at_k`). Recall@3 stays as the fractional coverage
+    # signal; Hit@3 is the "did the asker reach someone useful" outcome.
+    hit_at_3: float
     mrr: float
     route_accuracy: float
     # Fraction of abstain queries where the system produced NO experts (declined).
@@ -209,6 +229,7 @@ class EvalMetrics:
             "n_abstain": self.n_abstain,
             "top1_accuracy": self.top1_accuracy,
             "recall_at_3": self.recall_at_3,
+            "hit_at_3": self.hit_at_3,
             "mrr": self.mrr,
             "route_accuracy": self.route_accuracy,
             "abstain_accuracy": self.abstain_accuracy,
@@ -278,6 +299,7 @@ def evaluate(results: Sequence[QueryResult]) -> EvalMetrics:
         n_abstain=len(abstain),
         top1_accuracy=_mean([1.0 if top1_hit(r) else 0.0 for r in ranked]),
         recall_at_3=_mean([recall_at_k(r, RECALL_K) for r in ranked]),
+        hit_at_3=_mean([1.0 if hit_at_k(r, RECALL_K) else 0.0 for r in ranked]),
         mrr=_mean([reciprocal_rank(r) for r in ranked]),
         route_accuracy=_mean([1.0 if route_hit(r) else 0.0 for r in routed]),
         # Declined correctly == produced no experts for an abstain query.

@@ -132,16 +132,28 @@ def answer(
 
     Object-level auth (#241): only the session's asker/responder (or admin) may
     resume it — a non-participant is 403 even with a valid token and session id.
+
+    Answer capture is further restricted (#274): an ``answer_body`` is attributed to
+    the responder and re-surfaced to others as their answer, so ONLY the responder
+    (or admin) may supply one. The asker is a valid participant (they own the
+    clarification reply), but must not be able to forge an answer in the responder's
+    name — a mismatch is 403.
     """
 
     asker_id, responder_id = _service(request).session_participants(req.session_id)
     require_session_participant(principal, asker_id, responder_id)
+    if req.clean_answer_body is not None and not principal.may_act_as(responder_id or -1):
+        raise HTTPException(
+            status_code=403,
+            detail="回答本文を登録できるのは取次ぎ先の担当者本人のみです。",
+        )
     try:
         _service(request).submit_resume(
             req.session_id,
             outcome=req.outcome,
             reply=req.reply,
             recommendation_id=req.recommendation_id,
+            answer_body=req.clean_answer_body,
         )
     except SessionConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -207,6 +219,34 @@ def handoff(
     except Exception as exc:  # unexpected: log detail, return a generic 500
         logger.exception("GET /handoff failed for session %s", session_id)
         raise HTTPException(status_code=500, detail="内部エラーが発生しました") from exc
+
+
+@router.post("/handoff/document-fallback", response_model=schemas.AckResponse)
+def document_fallback(
+    req: schemas.DocumentFallbackRequest,
+    request: Request,
+    principal: Principal = Depends(require_principal),
+) -> schemas.AckResponse:
+    """Let the asker turn a completed document result into a person hand-off."""
+
+    service = _service(request)
+    asker_id, _ = service.session_participants(req.session_id)
+    if asker_id is not None:
+        # This transition belongs to the asker; a suggested responder must not be
+        # able to volunteer the asker into a hand-off. Admin impersonation remains.
+        require_can_act_as(principal, asker_id)
+    try:
+        service.request_document_fallback(req.session_id)
+    except HandoffNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SessionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except SessionInvalid as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("POST /handoff/document-fallback failed for %s", req.session_id)
+        raise HTTPException(status_code=500, detail="内部エラーが発生しました") from exc
+    return schemas.AckResponse(session_id=req.session_id, status="handoff_queued")
 
 
 @router.post("/handoff/draft", response_model=schemas.AckResponse)

@@ -47,7 +47,12 @@ export interface HandoffState {
 }
 
 export interface UseHandoffResult extends HandoffState {
-  submit: (action: HandoffAction) => void;
+  /**
+   * Resolve the hand-off. On the "answer" (accept) action, an optional
+   * `answerBody` is captured as an `answers` row so the accumulation loop closes
+   * (#274); it is ignored for defer/refer (a decline carries no answer).
+   */
+  submit: (action: HandoffAction, answerBody?: string) => void;
 }
 
 export function useHandoff(sessionId: string): UseHandoffResult {
@@ -88,7 +93,7 @@ export function useHandoff(sessionId: string): UseHandoffResult {
   }, [sessionId]);
 
   const submit = useCallback(
-    (action: HandoffAction) => {
+    (action: HandoffAction, answerBody?: string) => {
       if (inFlight.current) return; // gate the POST itself, not just the state
       inFlight.current = true;
       setState((prev) =>
@@ -106,12 +111,16 @@ export function useHandoff(sessionId: string): UseHandoffResult {
         });
       };
 
+      // Only an accept carries an answer body; a blank one is omitted so the
+      // backend records the accept without an answers row (#274).
+      const trimmedBody = action === "answer" ? answerBody?.trim() : undefined;
       // Echo the recommendation id we were shown so a stale outcome (the hand-off
       // moved to another candidate, or a competing tab) is rejected with 409 (#94).
       postAnswer({
         session_id: sessionId,
         outcome: OUTCOME_BY_ACTION[action],
         recommendation_id: recommendationId.current,
+        ...(trimmedBody ? { answer_body: trimmedBody } : {}),
       })
         .then(finish)
         .catch((err: unknown) => {

@@ -15,12 +15,13 @@
  */
 
 import { type EventStreamState, useEventStream } from "@/hooks/useEventStream";
-import { type ReactNode, createContext, useContext } from "react";
+import { type ReactNode, createContext, useContext, useState } from "react";
 
 const SessionStreamContext = createContext<EventStreamState | null>(null);
 // The session id is exposed separately so a screen can POST for this session
 // (e.g. confirming the hand-off draft, #174) without threading it through props.
 const SessionIdContext = createContext<string | null>(null);
+const SessionStreamRestartContext = createContext<(() => void) | null>(null);
 
 export interface SessionStreamProviderProps {
   sessionId: string;
@@ -40,15 +41,19 @@ export function SessionStreamProvider({
   eventSourceFactory,
   baseUrl,
 }: SessionStreamProviderProps) {
+  const [restartKey, setRestartKey] = useState(0);
   const live = useEventStream(sessionId, {
     enabled: streamState === undefined,
     eventSourceFactory,
     baseUrl,
+    restartKey,
   });
   const value = streamState ?? live;
   return (
     <SessionIdContext.Provider value={sessionId}>
-      <SessionStreamContext.Provider value={value}>{children}</SessionStreamContext.Provider>
+      <SessionStreamRestartContext.Provider value={() => setRestartKey((key) => key + 1)}>
+        <SessionStreamContext.Provider value={value}>{children}</SessionStreamContext.Provider>
+      </SessionStreamRestartContext.Provider>
     </SessionIdContext.Provider>
   );
 }
@@ -61,6 +66,11 @@ export function useOptionalSessionStream(): EventStreamState | null {
 /** Read the current session id, or `null` when rendered outside a provider. */
 export function useOptionalSessionId(): string | null {
   return useContext(SessionIdContext);
+}
+
+/** Restart the shared stream after an explicit server-side state transition. */
+export function useOptionalSessionStreamRestart(): (() => void) | null {
+  return useContext(SessionStreamRestartContext);
 }
 
 /** Read the session stream; throws if used outside a {@link SessionStreamProvider}. */

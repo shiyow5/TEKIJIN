@@ -31,7 +31,9 @@ from tekijin.agent.stubs import (
     INTENT_CONFIDENCE_THRESHOLD,
     MAX_FOLLOWUPS,
     collect_known_values,
+    missing_required_slots,
 )
+from tekijin.knowledge.answer import answer_from_knowledge
 from tekijin.retrieval.embedding import QUERY, Embedder
 from tekijin.retrieval.fragments import FragmentSource, collect_cited_evidence
 from tekijin.scorer.scorer import ExpertiseScorer
@@ -113,6 +115,9 @@ class AgentNodes:
         fragment_source: FragmentSource | None = None,
         prior_answer_reuse_min: int | None = None,
         prior_answer_relevance_floor: float = 0.15,
+        knowledge_session: Any | None = None,
+        knowledge_answer_min_similarity: float | None = None,
+        query_expansion_enabled: bool = False,
     ) -> None:
         self._intent = intent_model
         self._sufficiency = sufficiency_model
@@ -129,9 +134,19 @@ class AgentNodes:
         # from. Both None (default) -> no self_answer node is added (inert).
         self._self_answer = self_answer_model
         self._fragment_source = fragment_source
+        # #357 slice 4c: optional knowledge-answer step. ``knowledge_answer_min_
+        # similarity`` None (default) -> no knowledge_answer node is added (inert);
+        # a float wires the node, which answers a query directly from approved
+        # knowledge units before routing (bypassing the C5 separation problem, #327).
+        self._knowledge_session = knowledge_session
+        self._knowledge_floor = knowledge_answer_min_similarity
         # #327: corpus-count routing for prior_answer (None = OFF, dormant route).
         self._prior_answer_reuse_min = prior_answer_reuse_min
         self._prior_answer_relevance_floor = prior_answer_relevance_floor
+        # #371: fold the C1 topics into the C4 retrieval query. False (default) keeps
+        # c4_retrieve byte-for-byte the pre-#371 behaviour (raw query + reused C3
+        # vector). See c4_retrieve for the multi-facet rationale.
+        self._query_expansion_enabled = query_expansion_enabled
 
     # -- entry: validate input, reset per-question control fields ---------
     def reset(self, state: AgentState) -> AgentState:
@@ -232,18 +247,34 @@ class AgentNodes:
             confidence=state.get("intent_confidence", 0.0),
         )
         followup_count = state.get("followup_count", 0)
-        result = self._sufficiency.check(state["question"], intent, followup_count)
-        # Graph-level termination guarantee: never ask more than MAX_FOLLOWUPS,
-        # whatever the (possibly future vLLM) model returns.
-        capped = followup_count >= MAX_FOLLOWUPS
         # Safety valve (#113): once C1 has confidently identified the topic, we can
         # already decide WHO to route to — the responder can ask for any missing
         # detail (現行製品/対象拠点数…). So don't let C2 block a confident, on-topic
         # consultation on estimate-style slots, no matter how a (prompt-sensitive)
-        # model feels. This overrides the model, but never fires on a vague/low-signal
-        # request (no topic, or confidence below threshold), which still clarifies.
+        # model feels. This never fires on a vague/low-signal request (no topic, or
+        # confidence below threshold), which still clarifies.
         can_route = bool(intent.topics) and intent.confidence >= INTENT_CONFIDENCE_THRESHOLD
-        sufficient = result.sufficient or capped or can_route
+        # Speed (#376): ``can_route`` is decidable from C1's output ALONE, and it
+        # forces ``sufficient=True`` anyway — so on the common confident path SKIP the
+        # C2 sufficiency LLM call entirely, removing one of the three serial
+        # generations on the critical path. We still compute ``missing`` DETERMINISTICALLY
+        # (LLM-free, same slot logic the rule model uses) so C7's hand-off draft keeps
+        # its 「補足いただきたい点」hint — matching the pre-#376 behaviour, where the
+        # model's ``missing`` flowed through even though ``sufficient`` was already
+        # forced True by ``can_route``. ``followup_question`` is unused when sufficient
+        # (graph goes to C3), and ``intent_unresolved`` is False whenever topics exist.
+        if can_route:
+            return {
+                "sufficient": True,
+                "missing": missing_required_slots(state["question"], intent),
+                "followup_question": None,
+                "intent_unresolved": False,
+            }
+        result = self._sufficiency.check(state["question"], intent, followup_count)
+        # Graph-level termination guarantee: never ask more than MAX_FOLLOWUPS,
+        # whatever the (possibly future vLLM) model returns.
+        capped = followup_count >= MAX_FOLLOWUPS
+        sufficient = result.sufficient or capped
         # If we have already asked once (capped) and STILL have no topic, the
         # intent is unresolved. Rather than silently search on nothing and land in
         # no_candidate, flag it so the graph routes to an explicit "couldn't
@@ -277,11 +308,21 @@ class AgentNodes:
 
     # -- C4: hybrid retrieval ---------------------------------------------
     def c4_retrieve(self, state: AgentState) -> AgentState:
-        # Reuse the C3 embedding so the dense channels do not re-embed the query
-        # (halves embedding calls under a real vLLM; BM25 still uses raw text).
-        retrieval = self._retriever.search(
-            state["question"], query_vector=state.get("query_vector")
-        )
+        question = state["question"]
+        topics = state.get("topics") or []
+        # #371: on a multi-facet question (e.g. "経理×データ基盤") the raw query's dense
+        # signal collapses onto the facet with the thicker corpus, dropping the other
+        # department's experts out of the top_k candidate pool — the measured cause of
+        # ~2/3 of R@3 misses. Folding the C1 topics into the query surfaces each facet
+        # (DGX: R@3 0.79->0.83). The expanded string must be RE-EMBEDDED, so the reused
+        # C3 vector (which embeds only the raw question) is dropped on this path.
+        if self._query_expansion_enabled and topics:
+            expanded = f"{question} {' '.join(topics)}"
+            retrieval = self._retriever.search(expanded)
+        else:
+            # Reuse the C3 embedding so the dense channels do not re-embed the query
+            # (halves embedding calls under a real vLLM; BM25 still uses raw text).
+            retrieval = self._retriever.search(question, query_vector=state.get("query_vector"))
         return {"retrieval": retrieval}
 
     # -- C5: route decision (deterministic) -------------------------------
@@ -453,6 +494,35 @@ class AgentNodes:
         }
 
     # -- self-answer (#291): compose a cited answer from retrieved data ----
+    def knowledge_answer(self, state: AgentState) -> AgentState:
+        """Try to answer directly from structured knowledge units (#357 slice 4c).
+
+        Runs (when wired) right after C3 embeds the query, BEFORE routing — so it
+        applies to every route, sidestepping the C5 person/document separation the
+        #327 measurement proved unfixable (ADR-0007). Searches approved knowledge
+        units by the query embedding and, if one clears the similarity floor,
+        composes a grounded answer deterministically (no LLM, no hallucination) and
+        terminates at ``self_answered``. No relevant knowledge -> ``grounded=False``
+        and the run proceeds to normal retrieval/routing (never a degraded answer).
+        Reuses the #291 ``self_answer_*`` state + terminal so this is a drop-in.
+        """
+
+        assert self._knowledge_session is not None and self._knowledge_floor is not None
+        query_vec = state.get("query_vector") or []
+        if not query_vec:
+            return {"self_answer_grounded": False}
+        result = answer_from_knowledge(
+            self._knowledge_session, query_vec, min_similarity=self._knowledge_floor
+        )
+        if result is None or not result.grounded:
+            return {"self_answer_grounded": False}
+        citations = [{"source_id": sid, "kind": "knowledge"} for sid in result.cited_source_ids]
+        return {
+            "self_answer_grounded": True,
+            "self_answer_text": result.answer,
+            "self_answer_citations": citations,
+        }
+
     def self_answer(self, state: AgentState) -> AgentState:
         """Try to answer directly from the retrieved sources (data-derived routes).
 
@@ -503,9 +573,10 @@ class AgentNodes:
         # at zero person-recall. Self-resolution stays the main line (no hand-off
         # interrupt); the person is a "if this does not solve it" backstop.
         recs = state.get("recommendations") or []
-        if recs:
-            answer += f"（解決しない場合は{recs[0]['name']}さんにも取り次げます）"
-        return {"answer": answer, "document_id": doc_id}
+        fallback = recs[0] if recs else None
+        if fallback:
+            answer += f"（解決しない場合は{fallback['name']}さんにも取り次げます）"
+        return {"answer": answer, "document_id": doc_id, "fallback_responder": fallback}
 
     def no_candidate(self, state: AgentState) -> AgentState:
         return {

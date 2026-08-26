@@ -2,12 +2,13 @@ import {
   SessionStreamProvider,
   useOptionalSessionId,
   useOptionalSessionStream,
+  useOptionalSessionStreamRestart,
   useSessionStream,
 } from "@/components/SessionStreamProvider";
 import type { EventStreamState } from "@/hooks/useEventStream";
-import { render, renderHook, screen } from "@testing-library/react";
+import { fireEvent, render, renderHook, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 function state(partial: Partial<EventStreamState>): EventStreamState {
   return { events: [], terminal: false, ...partial };
@@ -16,6 +17,15 @@ function state(partial: Partial<EventStreamState>): EventStreamState {
 function Consumer() {
   const stream = useSessionStream();
   return <div data-testid="route">{stream.route?.route ?? "none"}</div>;
+}
+
+function RestartConsumer() {
+  const restart = useOptionalSessionStreamRestart();
+  return (
+    <button type="button" onClick={() => restart?.()}>
+      再接続
+    </button>
+  );
 }
 
 describe("SessionStreamProvider", () => {
@@ -74,5 +84,29 @@ describe("SessionStreamProvider", () => {
     );
     renderHook(() => useOptionalSessionStream(), { wrapper });
     expect(urls).toEqual(["http://api.test/events/abc-123"]);
+  });
+
+  it("reopens the shared stream when a consumer requests a restart", () => {
+    const sources: Array<{ close: ReturnType<typeof vi.fn> }> = [];
+    const factory = () => {
+      const source = {
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        close: vi.fn(),
+        onerror: null,
+        readyState: 1,
+      };
+      sources.push(source);
+      return source as unknown as EventSource;
+    };
+    render(
+      <SessionStreamProvider sessionId="abc-123" eventSourceFactory={factory}>
+        <RestartConsumer />
+      </SessionStreamProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "再接続" }));
+
+    expect(sources).toHaveLength(2);
+    expect(sources[0].close).toHaveBeenCalledOnce();
   });
 });

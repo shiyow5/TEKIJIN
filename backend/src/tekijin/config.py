@@ -114,10 +114,13 @@ class Settings(BaseSettings):
 
     # Self-answer (#291): when the retrieved past Q&A / documents already hold the
     # answer, reply DIRECTLY with a cited answer instead of handing off to a person
-    # (the product pivot — "the answer is not always a person"). OFF by default until
-    # the composer is wired into the graph + verified on the recall-centric eval; this
-    # is the component-only slice (the graph does not call it yet).
-    self_answer_enabled: bool = False
+    # (the product pivot — "the answer is not always a person"). ENABLED after the
+    # full-graph E2E verification (#380, DGX, real Qwen3.6 + Nemotron): firing ONLY
+    # on the data-derived routes AFTER C5, it leaves person routing untouched
+    # (person recall 1.000 -> 1.000) while citing a grounded answer on the data
+    # rows (source recall 0.239, precision 0.739, grounded 0.261 — conservative,
+    # low-hallucination). Safe by construction: it never intercepts a person query.
+    self_answer_enabled: bool = True
 
     # #327: corpus-count routing for prior_answer. Nemotron's answer cosine cannot
     # separate this route (PRIOR_ANSWER_SIM sits above the observed max — see
@@ -129,6 +132,48 @@ class Settings(BaseSettings):
     # routes prior_answer. Calibrate the two on the DGX eval before enabling.
     prior_answer_reuse_min: int | None = None
     prior_answer_relevance_floor: float = 0.15
+
+    # #355: include daily reports as C6 topic evidence. The eval gold derives from
+    # projects + daily_reports(0.15), but the scorer was blind to daily reports —
+    # so enriching daily activity (#326) could not lift R@3. This closes that
+    # asymmetry. OFF by default (develop behaviour byte-identical); enable only
+    # after DGX confirms a Pareto gain (primary R@3 up, alt not down).
+    daily_evidence_enabled: bool = False
+
+    # #357: knowledge framework. When the knowledge layer is wired into retrieval,
+    # answer a question from structured knowledge units (problem → action → result,
+    # with provenance) instead of, or before, pointing at a person. OFF by default —
+    # this is the schema/CRUD skeleton slice; extraction, vector retrieval, and the
+    # graph wiring land in later slices, and the graph does not call it yet. Enable
+    # only after the extraction quality + A/B are verified on the eval.
+    # #357: answer directly from structured knowledge units. Slice 4c wired the
+    # ``knowledge_answer`` node into the graph (before C5), so flipping this to True
+    # DOES make /ask try a knowledge answer live. OFF by default until the knowledge
+    # corpus is populated (extract + embed + human-approve) AND the frontend renders
+    # the ``knowledge`` citation kind (see #357 slice-4d gate). Off = pre-#357 graph.
+    knowledge_retrieval_enabled: bool = False
+    # #357 slice 4: the cosine-similarity floor a retrieved knowledge unit must clear
+    # to be used in a knowledge answer. CALIBRATED on the eval (slice 4b A/B, DGX,
+    # real Nemotron): CRM-topic queries score 0.224–0.305 against CRM case units,
+    # non-CRM queries 0.015–0.312 (compressed cosines). A floor of 0.20 answers all
+    # 3 CRM eval queries (topic-matched) with only 3/84 non-CRM false-fires; 0.35
+    # (the initial guess) sat ABOVE the CRM range and would never fire. Small CRM
+    # sample (n=3) — directional. Inert while knowledge_retrieval_enabled=False.
+    knowledge_answer_min_similarity: float = 0.20
+
+    # #371: fold the C1-extracted topics into the C4 retrieval query. The idea was
+    # that a multi-facet question collapses onto the thicker-corpus facet under a
+    # single dense query; folding topics in surfaced each facet on the RETRIEVAL
+    # harness (gold_topics fed to the scorer — an ORACLE): R@3 0.7903 -> 0.8306.
+    # BUT the full-graph E2E run (#380, real C1 predicting topics at acc@1=0.750)
+    # showed the opposite: folding NOISY predicted topics into the query shifts the
+    # C5 retrieval confidences and BREAKS routing — person recall 1.000 -> 0.776,
+    # RouteAccuracy 0.833 -> 0.667, with Hit@3 unchanged (0.742). The oracle-harness
+    # win did not survive real topic prediction. **DO NOT ENABLE** on the live graph
+    # until C1 topic quality is high enough that expansion stops mis-routing (the
+    # real lever is C1 intent, not retrieval). Kept OFF and inert; the c4_retrieve
+    # branch is byte-for-byte dormant while False.
+    query_expansion_enabled: bool = False
 
     # LangGraph checkpointer for session persistence / interrupt-resume:
     # "memory" = in-process MemorySaver (safe default, works without a DB);

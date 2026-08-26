@@ -733,6 +733,40 @@ def test_node_enforces_followup_cap(seed_counts, session, fake_embedder) -> None
     assert agent.get_state(cfg).next == ("send",)  # reached the hand-off, not ask
 
 
+def test_c2_fast_path_keeps_missing_in_handoff_draft(seed_counts, session, fake_embedder) -> None:
+    # #376 end-to-end: a confident 技術相談 with no product / no site count skips the C2
+    # LLM call (the exploding model would raise if consulted), yet the hand-off draft
+    # still surfaces the open estimate slots — the deterministic ``missing`` on the
+    # fast path flows through C7 exactly as the pre-#376 model's ``missing`` did.
+    from tekijin.agent.protocols import IntentResult
+
+    class _ConfidentTechIntent:
+        def analyze(self, question, asker):  # noqa: ARG002
+            return IntentResult(
+                topics=[TOPIC], products=[], question_type="技術相談", confidence=0.9
+            )
+
+    class _ExplodingSufficiency:
+        def check(self, *_a, **_k):
+            raise AssertionError("C2 sufficiency LLM must be skipped when can_route")
+
+    for emp in (1, 2):
+        _seed_skill(session, f"sk_miss_{emp}", emp)
+    agent = build_agent(
+        fake_embedder,
+        session,
+        intent_model=_ConfidentTechIntent(),
+        sufficiency_model=_ExplodingSufficiency(),
+        retriever=_FakeRetriever(people=[1, 2]),
+    )
+    cfg = _cfg("fastmiss")
+    state = agent.invoke(_init(question="ネットワークの技術相談です。"), cfg)
+    assert agent.get_state(cfg).next == ("send",)  # no ask pause: valve proceeded
+    draft = state["draft"]
+    assert "補足いただきたい点" in draft
+    assert "現行製品" in draft and "対象拠点数" in draft
+
+
 # --------------------------------------------------------------------------- #
 # fix G: prior_answer hands off to the past responder, not a higher scorer
 # #307: prior_answer still backfills up to 3 candidates from the general pool
@@ -846,3 +880,84 @@ def test_ask_ignores_non_string_resume(seed_counts, session, fake_embedder) -> N
     values = agent.get_state(cfg).values
     assert values["question"] == original  # not corrupted with the dict
     assert agent.get_state(cfg).next == ("send",)
+
+
+# --------------------------------------------------------------------------- #
+# knowledge answer (#357 slice 4c): answer from structured knowledge before C5
+# --------------------------------------------------------------------------- #
+def _seed_approved_knowledge(session, fake_embedder, source_id, problem, action) -> None:
+    from tekijin.data.knowledge import (
+        get_knowledge_unit_by_source,
+        set_review_status,
+        upsert_knowledge_unit,
+    )
+    from tekijin.knowledge.index import embed_knowledge_units
+
+    upsert_knowledge_unit(
+        session,
+        kind="case",
+        problem=problem,
+        action=action,
+        result="受注",
+        topics=["CRM・営業支援"],
+        source_type="daily_report",
+        source_id=source_id,
+        confidence=0.9,
+    )
+    session.flush()
+    dto = get_knowledge_unit_by_source(session, "daily_report", source_id)
+    set_review_status(session, dto.id, "approved")
+    session.flush()
+    embed_knowledge_units(session, fake_embedder)
+
+
+def test_knowledge_answer_terminates_before_routing(seed_counts, session, fake_embedder) -> None:
+    # A query matching an approved knowledge unit is answered from structure and
+    # terminates at self_answered — before C5 routing (bypassing #327/ADR-0007).
+    # Use the canonical GOOD_Q so C2 passes; seed a unit whose problem IS that query
+    # so the (bag-of-tokens) fake embedding is a strong match.
+    _seed_approved_knowledge(session, fake_embedder, "kb_c4c_1", GOOD_Q, "SFA/CRM を提案")
+    agent = build_agent(
+        fake_embedder,
+        session,
+        retriever=_FakeRetriever(people=[1, 2]),
+        knowledge_answer_min_similarity=0.1,
+    )
+    state = agent.invoke(_init(), _cfg("kb_ok"))
+
+    assert state["self_answer_grounded"] is True
+    assert GOOD_Q in state["answer"]  # the case's problem is surfaced in the answer
+    # Cited as the knowledge unit (ku_{id}), kind "knowledge".
+    assert len(state["self_answer_citations"]) == 1
+    cite = state["self_answer_citations"][0]
+    assert cite["kind"] == "knowledge" and cite["source_id"].startswith("ku_")
+    # It never reached a person hand-off: terminal, no send interrupt (C5/C6 never ran;
+    # any ``route`` value is only the reset() default, not a real routing decision).
+    assert not _is_paused(agent, _cfg("kb_ok"))
+
+
+def test_knowledge_answer_falls_through_when_irrelevant(
+    seed_counts, session, fake_embedder
+) -> None:
+    # No approved knowledge matches (floor above any similarity) -> the run proceeds
+    # to normal retrieval/routing exactly as pre-#357 (a person hand-off here).
+    _seed_approved_knowledge(session, fake_embedder, "kb_c4c_2", "全く無関係な話題", "何もしない")
+    for emp in (1, 2):
+        _seed_skill(session, f"sk_kb_{emp}", emp)
+    agent = build_agent(
+        fake_embedder,
+        session,
+        retriever=_FakeRetriever(people=[1, 2]),
+        knowledge_answer_min_similarity=0.99,  # unreachable floor -> never fires
+    )
+    state = agent.invoke(_init(), _cfg("kb_fall"))
+
+    assert state["self_answer_grounded"] is False
+    assert _is_paused(agent, _cfg("kb_fall"))  # fell through to the person hand-off
+
+
+def test_knowledge_answer_dormant_when_unwired(seed_counts, session, fake_embedder) -> None:
+    # No floor -> no knowledge_answer node is added; graph is the pre-#357 flow.
+    agent = build_agent(fake_embedder, session, retriever=_FakeRetriever(people=[1, 2]))
+    assert "knowledge_answer" not in agent.get_graph().nodes
+    assert "self_answered" not in agent.get_graph().nodes

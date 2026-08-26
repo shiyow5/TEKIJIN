@@ -18,6 +18,7 @@ import type {
   DeclineNotification,
   DeleteQuestionResponse,
   DocumentDetail,
+  DocumentFallbackRequest,
   EmployeeListResponse,
   EmployeeSummary,
   HandoffCorrectRequest,
@@ -191,6 +192,14 @@ export function postAnswer(
   options: RequestOptions = {},
 ): Promise<AckResponse> {
   return postJson<AckResponse>("/answer", request, options);
+}
+
+/** Convert a completed document result into the existing person hand-off flow. */
+export function requestDocumentFallback(
+  request: DocumentFallbackRequest,
+  options: RequestOptions = {},
+): Promise<AckResponse> {
+  return postJson<AckResponse>("/handoff/document-fallback", request, options);
 }
 
 /**

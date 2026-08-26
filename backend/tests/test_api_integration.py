@@ -122,6 +122,7 @@ def _client(
     answerability_model=None,
     answerability_threshold=40,
     self_answer_model=None,
+    knowledge_answer_min_similarity=None,
 ) -> TestClient:
     service = AgentService(
         session_factory=get_sessionmaker(engine),
@@ -133,6 +134,7 @@ def _client(
         answerability_model=answerability_model,
         answerability_threshold=answerability_threshold,
         self_answer_model=self_answer_model,
+        knowledge_answer_min_similarity=knowledge_answer_min_similarity,
         retriever=retriever,
         scorer=scorer,
         now_factory=lambda: NOW,
@@ -529,6 +531,185 @@ def test_flow_persists_question_and_recommendation(seed_counts, engine, fake_emb
         check.close()
 
 
+def test_accept_with_answer_body_creates_embedded_answer_row(
+    seed_counts, engine, fake_embedder
+) -> None:
+    # #274: when the responder accepts WITH an answer body, the flow persists an
+    # ``answers`` row — attributed to the responder, tagged with the question topic,
+    # and embedded — so the accumulation loop closes (reuse + history + dashboard).
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2]),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    client.post("/ask", json={"asker_id": 7, "question": GOOD_Q, "session_id": "ab1"})
+    _events(client, "ab1")
+    resp = client.post(
+        "/answer",
+        json={
+            "session_id": "ab1",
+            "outcome": "accepted",
+            "answer_body": "拠点間はIPsec VPNで設定し、各ルータのSAを揃えてください。",
+        },
+    )
+    assert resp.status_code == 200
+    _events(client, "ab1")
+
+    check = get_sessionmaker(engine)()
+    try:
+        q = (
+            check.query(Question)
+            .filter(Question.asker_id == 7, Question.body == GOOD_Q)
+            .order_by(Question.created_at.desc())
+            .first()
+        )
+        assert q is not None
+        answers = check.query(Answer).filter(Answer.question_id == q.id).all()
+        assert len(answers) == 1
+        ans = answers[0]
+        assert ans.id.startswith("ans_")  # uuid-based, collision-free
+        assert ans.responder_id == 1  # the primary (rank 1) responder
+        assert ans.body == "拠点間はIPsec VPNで設定し、各ルータのSAを揃えてください。"
+        assert ans.topic == "ネットワーク・VPN"  # C1 topic, drives answers_by_topic reuse
+        assert ans.reuse_count == 0
+        # Embedded (FakeEmbedder sizes to the configured dim) -> dense-reusable.
+        assert ans.embedding is not None
+        assert len(ans.embedding) == get_settings().embedding_dim
+    finally:
+        check.close()
+
+
+def test_accept_without_answer_body_creates_no_answer_row(
+    seed_counts, engine, fake_embedder
+) -> None:
+    # Accepting WITHOUT a body (older client / "direct" method / blank text) leaves
+    # no ``answers`` row — capture is opt-in and never fabricated.
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2]),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    client.post("/ask", json={"asker_id": 7, "question": GOOD_Q, "session_id": "ab2"})
+    _events(client, "ab2")
+    # A blank body is treated as no answer (stripped -> None), not an empty row.
+    client.post("/answer", json={"session_id": "ab2", "outcome": "accepted", "answer_body": "  "})
+    _events(client, "ab2")
+
+    check = get_sessionmaker(engine)()
+    try:
+        q = (
+            check.query(Question)
+            .filter(Question.asker_id == 7, Question.body == GOOD_Q)
+            .order_by(Question.created_at.desc())
+            .first()
+        )
+        assert q is not None
+        assert check.query(Answer).filter(Answer.question_id == q.id).count() == 0
+    finally:
+        check.close()
+
+
+def test_answer_body_rejected_on_non_accept_outcome_422(seed_counts, engine, fake_embedder) -> None:
+    # An answer body only belongs on an accepted hand-off; pairing it with a
+    # decline (or a clarification reply) is a 422 boundary error, not silently
+    # dropped (#274).
+    client = _client(engine, fake_embedder)
+    bad = client.post(
+        "/answer",
+        json={"session_id": "x1", "outcome": "declined", "answer_body": "本文"},
+    )
+    assert bad.status_code == 422
+
+
+def test_answer_body_from_non_responder_forbidden(seed_counts, engine, fake_embedder) -> None:
+    # #274 security: the asker is a valid participant (they own the clarification
+    # reply) but must NOT be able to forge an answer attributed to the responder.
+    # Supplying answer_body as anyone but the responder (or admin) is 403, and no
+    # answers row is written.
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2]),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    client.post(
+        "/ask",
+        json={"asker_id": 7, "question": GOOD_Q, "session_id": "ab3"},
+        headers=_user_headers(7),
+    )
+    _events(client, "ab3")
+    # asker (7) tries to attach an answer -> 403 (responder is employee 1).
+    forbidden = client.post(
+        "/answer",
+        json={"session_id": "ab3", "outcome": "accepted", "answer_body": "偽の回答"},
+        headers=_user_headers(7),
+    )
+    assert forbidden.status_code == 403
+
+    check = get_sessionmaker(engine)()
+    try:
+        q = (
+            check.query(Question)
+            .filter(Question.asker_id == 7, Question.body == GOOD_Q)
+            .order_by(Question.created_at.desc())
+            .first()
+        )
+        assert q is not None
+        assert check.query(Answer).filter(Answer.question_id == q.id).count() == 0
+    finally:
+        check.close()
+
+
+def test_answer_capture_failure_does_not_block_accept(
+    seed_counts, engine, fake_embedder, monkeypatch
+) -> None:
+    # #274 best-effort: if persisting the answers row fails, the accept still
+    # succeeds (outcome recorded, question resolved, graph resumed) — the capture
+    # runs in its own post-commit transaction and swallows failures.
+    import tekijin.api.service as service_mod
+
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("simulated answers insert failure")
+
+    monkeypatch.setattr(service_mod, "create_answer", _boom)
+
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2]),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    client.post("/ask", json={"asker_id": 7, "question": GOOD_Q, "session_id": "ab4"})
+    _events(client, "ab4")
+    resp = client.post(
+        "/answer",
+        json={"session_id": "ab4", "outcome": "accepted", "answer_body": "落ちる回答"},
+    )
+    assert resp.status_code == 200  # the accept is not blocked by the capture failure
+    done = _events(client, "ab4")
+    assert done and done[-1][0] == "done"
+
+    check = get_sessionmaker(engine)()
+    try:
+        q = (
+            check.query(Question)
+            .filter(Question.asker_id == 7, Question.body == GOOD_Q)
+            .order_by(Question.created_at.desc())
+            .first()
+        )
+        assert q is not None
+        assert q.resolved_at is not None  # outcome transaction committed
+        # The accepted outcome is durably recorded despite the capture failure.
+        recs = check.query(Recommendation).filter(Recommendation.question_id == q.id).all()
+        assert any(r.outcome == "accepted" for r in recs)
+        # No answers row (the capture failed and was swallowed).
+        assert check.query(Answer).filter(Answer.question_id == q.id).count() == 0
+    finally:
+        check.close()
+
+
 def test_document_route_stamps_resolved_at(seed_counts, engine, fake_embedder) -> None:
     # A self-resolving document route records resolved_at even though no responder
     # ever accepts — so it counts toward the dashboard's avg resolution time (#97).
@@ -554,6 +735,7 @@ def test_document_route_stamps_resolved_at(seed_counts, engine, fake_embedder) -
     assert "recommend" not in names
     message = next(data for e, data in events if e == "message")
     assert "社員1さん" in message.get("message", "")  # the inline person fallback
+    assert message["fallback_responder"]["person_id"] == "E001"
 
     check = get_sessionmaker(engine)()
     try:
@@ -564,6 +746,57 @@ def test_document_route_stamps_resolved_at(seed_counts, engine, fake_embedder) -
         assert check.query(Recommendation).filter(Recommendation.question_id == q.id).count() == 0
     finally:
         check.close()
+
+
+def test_document_fallback_reuses_question_and_enters_existing_handoff_flow(
+    seed_counts, engine, fake_embedder
+) -> None:
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(
+            documents=[{"doc_id": "doc_001", "score": 0.05}],
+            document_confidence=0.8,
+            people_confidence=0.2,
+            people=[1, 2],
+        ),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    client.post("/ask", json={"asker_id": 8, "question": GOOD_Q, "session_id": "docfallback"})
+    _events(client, "docfallback")
+
+    ack = client.post("/handoff/document-fallback", json={"session_id": "docfallback"})
+    assert ack.status_code == 200
+    assert ack.json() == {"session_id": "docfallback", "status": "handoff_queued"}
+
+    resumed = _events(client, "docfallback")
+    assert [name for name, _ in resumed] == ["recommend", "draft"]
+    assert resumed[0][1]["recommendations"][0]["person_id"] == "E001"
+    assert "社員1さん" in resumed[1][1]["draft"]
+
+    check = get_sessionmaker(engine)()
+    try:
+        questions = check.query(Question).filter(Question.session_id == "docfallback").all()
+        assert len(questions) == 1  # the original question is reused, never duplicated
+        question = questions[0]
+        assert question.route == "person"
+        assert question.resolved_at is None
+        recs = (
+            check.query(Recommendation)
+            .filter(Recommendation.question_id == question.id)
+            .order_by(Recommendation.rank)
+            .all()
+        )
+        assert [rec.employee_id for rec in recs] == [1, 2]
+    finally:
+        check.close()
+
+    handoff = client.get("/handoff/docfallback")
+    assert handoff.status_code == 200
+    assert handoff.json()["responder"]["person_id"] == "E001"
+
+    duplicate = client.post("/handoff/document-fallback", json={"session_id": "docfallback"})
+    assert duplicate.status_code == 409
 
 
 # --------------------------------------------------------------------------- #
@@ -595,6 +828,60 @@ def test_self_answer_message_carries_citations(seed_counts, engine, fake_embedde
     assert message["status"] == "self_answered"
     assert message["message"] == "保守時間内に更新します。"
     assert message["citations"] == [{"source_id": "doc_001", "kind": "document"}]
+
+
+def test_knowledge_answer_persists_route_and_self_resolution(
+    seed_counts, engine, fake_embedder
+) -> None:
+    # #357 slice 4c: a grounded knowledge answer terminates before C5, so the run
+    # must still (a) emit a self_answered message and (b) persist a synthetic
+    # "knowledge" route + mark the question self-resolved (dashboards segment by route).
+    from tekijin.data.knowledge import (
+        get_knowledge_unit_by_source,
+        set_review_status,
+        upsert_knowledge_unit,
+    )
+    from tekijin.knowledge.index import embed_knowledge_units
+
+    setup = get_sessionmaker(engine)()
+    try:
+        upsert_knowledge_unit(
+            setup,
+            kind="case",
+            problem=GOOD_Q,
+            action="SFA/CRM を提案",
+            result="受注",
+            topics=["CRM・営業支援"],
+            source_type="daily_report",
+            source_id="kb_api_1",
+            confidence=0.9,
+        )
+        setup.flush()
+        dto = get_knowledge_unit_by_source(setup, "daily_report", "kb_api_1")
+        set_review_status(setup, dto.id, "approved")
+        setup.flush()
+        embed_knowledge_units(setup, fake_embedder)
+        setup.commit()
+    finally:
+        setup.close()
+
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2]),
+        knowledge_answer_min_similarity=0.1,
+    )
+    client.post("/ask", json={"asker_id": 8, "question": GOOD_Q, "session_id": "skb"})
+    events = _events(client, "skb")
+    assert next(d for e, d in events if e == "message")["status"] == "self_answered"
+
+    check = get_sessionmaker(engine)()
+    try:
+        q = check.query(Question).filter(Question.session_id == "skb").first()
+        assert q is not None and q.route == "knowledge"  # synthetic route persisted
+        assert q.resolved_at is not None and q.resolution_kind == "self"
+    finally:
+        check.close()
 
 
 def test_self_answer_on_prior_answer_route_marks_self_resolved(

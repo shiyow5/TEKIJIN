@@ -69,22 +69,26 @@ from tekijin.data.feedback import record_feedback
 from tekijin.data.handoff import employee_brief, question_consult_method, responder_reuse_stats
 from tekijin.data.messages import create_message
 from tekijin.data.writes import (
+    create_answer,
     employee_exists,
     insert_shown_recommendations,
     latest_primary_recommendation,
     mark_question_resolved,
     mark_self_resolved,
     persist_question,
+    recommendation_employee_id,
     recommendation_outcome,
     record_events,
+    reopen_question_for_handoff,
     reorder_recommendation_ranks,
     set_recommendation_outcome,
+    shown_recommendation_ids,
     update_question_body,
     update_question_consult_method,
     update_question_route,
     update_question_topics,
 )
-from tekijin.retrieval.embedding import Embedder
+from tekijin.retrieval.embedding import PASSAGE, Embedder
 
 logger = logging.getLogger(__name__)
 
@@ -184,6 +188,9 @@ class AgentService:
         bm25_weight: float | None = None,
         prior_answer_reuse_min: int | None = None,
         prior_answer_relevance_floor: float = 0.15,
+        daily_evidence: bool = False,
+        knowledge_answer_min_similarity: float | None = None,
+        query_expansion_enabled: bool = False,
         max_concurrent_runs: int = 0,
         now_factory: Any = _default_now,
         clock: Any = time.monotonic,
@@ -202,6 +209,9 @@ class AgentService:
         self._answerability_threshold = answerability_threshold
         # #291: self-answer composer; None (default) compiles the pre-#291 graph.
         self._self_answer = self_answer_model
+        # #357 slice 4c: knowledge-answer similarity floor; None (default) compiles
+        # the pre-#357 graph (no knowledge_answer node). Passed to build_agent.
+        self._knowledge_answer_min_similarity = knowledge_answer_min_similarity
         # Optional C4/C6 overrides — default (None) uses the real HybridRetriever
         # / ExpertiseScorer over the request session; tests inject deterministic
         # fakes so the SSE flow does not depend on retrieval scores.
@@ -215,6 +225,11 @@ class AgentService:
         # build_agent so C5 can revive the route on reuse_count when calibrated.
         self._prior_answer_reuse_min = prior_answer_reuse_min
         self._prior_answer_relevance_floor = prior_answer_relevance_floor
+        # #355: include daily reports as C6 evidence. Passed to build_agent's default
+        # scorer (None = dormant). Ignored when a scorer is injected (tests).
+        self._daily_evidence = daily_evidence
+        # #371: fold C1 topics into the C4 retrieval query (False = OFF, dormant).
+        self._query_expansion_enabled = query_expansion_enabled
         # Backpressure (#180): max graph runs executing at once before /ask sheds new
         # questions with 503. 0 (default) disables it — set from settings via the
         # factory in production. Guarded by its own lock; independent of the per-
@@ -371,6 +386,59 @@ class AgentService:
         responder_id = recs[0]["person_id"] if recs else None
         return (asker_id, responder_id)
 
+    def request_document_fallback(self, session_id: str) -> None:
+        """Reopen a completed document route at C7 using its ranked candidate.
+
+        C6 already ranked the fallback while producing the document message. The
+        explicit asker action converts that dormant result into a real hand-off;
+        recommendation rows are deliberately created later, as C7 streams.
+        """
+
+        with self._lock(session_id):
+            session = self._session_factory()
+            try:
+                graph = self._graph(session)
+                config = self._config(session_id)
+                snapshot = graph.get_state(config)
+                values = snapshot.values or {}
+                if snapshot.next:
+                    raise SessionConflict("session is already awaiting a response")
+                if values.get("route") != "document" or not values.get("question_id"):
+                    raise HandoffNotFound("no document fallback for this session")
+                if values.get("self_answer_grounded"):
+                    raise HandoffNotFound("the session was already answered")
+                if not values.get("recommendations"):
+                    raise SessionInvalid("no fallback responder is available")
+                if not values.get("fallback_responder"):
+                    raise SessionInvalid("no fallback responder is available")
+                last_event = values.get("last_event") or {}
+                if last_event.get("event") != "message":
+                    raise HandoffNotFound("no completed document result for this session")
+
+                # Pretend C6 just completed on the person route. LangGraph then
+                # schedules the existing C7/answerability path without re-ranking.
+                graph.update_state(
+                    config,
+                    {
+                        "route": "person",
+                        "route_reason": "文書で解決しなかったため、候補者へ取り次ぎます。",
+                        "answer": None,
+                        "document_id": None,
+                        "fallback_responder": None,
+                        "draft": None,
+                        "outcome": None,
+                        "last_event": None,
+                        "document_fallback_requested": True,
+                    },
+                    as_node="c6_score",
+                )
+                with session_scope(self._session_factory) as write_session:
+                    reopen_question_for_handoff(write_session, values["question_id"])
+                ctx = self._reg_ensure(session_id)
+                ctx.touched_at = self._clock()
+            finally:
+                session.close()
+
     # -- /ask : start a new question -------------------------------------- #
     def start_question(self, session_id: str, asker_id: int, question: str) -> None:
         """Queue a NEW question; reject (409) if the session is busy or paused.
@@ -419,6 +487,7 @@ class AgentService:
         outcome: str | None = None,
         reply: str | None = None,
         recommendation_id: int | None = None,
+        answer_body: str | None = None,
     ) -> None:
         """Queue a resume, validating it matches the pending interrupt kind.
 
@@ -430,6 +499,11 @@ class AgentService:
         stale (a reroute moved the hand-off on, or a competing tab) and is rejected
         with :class:`SessionConflict` (409) — so it never binds to a new candidate
         (#94). ``None`` skips the check for older clients / clarification replies.
+
+        ``answer_body`` (only on an ``accepted`` outcome) is the responder's answer
+        text; it is persisted as an ``answers`` row so the accumulation loop closes
+        (#274). It is captured on a best-effort basis — a failure to embed or store
+        it never blocks the hand-off from resuming.
         """
 
         with self._lock(session_id):
@@ -471,7 +545,14 @@ class AgentService:
                 # wins. We resume the graph with that effective value so the
                 # checkpoint always advances consistently with the DB — never
                 # diverging, and never left permanently paused at ``send``.
-                _status, resume_value = self._record_outcome(session_id, snapshot.values, outcome)
+                status, resume_value = self._record_outcome(session_id, snapshot.values, outcome)
+                # #274: capture the answer only on a FRESHLY recorded accept (not a
+                # duplicate "already"/"no_target"), in its own post-commit transaction
+                # so it cannot roll back the accept. answer_body is pre-validated to
+                # ride only on an accept, and route-level auth restricts it to the
+                # responder (or admin).
+                if status == "recorded" and outcome == "accepted" and answer_body:
+                    self._capture_answer(snapshot.values, answer_body)
             else:  # pragma: no cover - the graph only ever interrupts at ask/send
                 raise SessionConflict("session cannot be resumed from its current state")
 
@@ -517,6 +598,9 @@ class AgentService:
             # resolution time (first-wins) for the dashboard's avg-resolution (#97).
             if outcome == "accepted" and question_id is not None:
                 mark_question_resolved(session, question_id, self._now_factory())
+                # NB: the #274 answer capture is deliberately NOT done here — it runs
+                # in its own transaction AFTER this one commits (see submit_resume /
+                # _capture_answer) so a capture failure can never roll back the accept.
                 # Seed the chat with the asker's own request text (the hand-off
                 # draft) as its first message, so the responder opens the thread
                 # already seeing what they were asked — not an empty conversation.
@@ -532,6 +616,73 @@ class AgentService:
                         # graph's (possibly injected/frozen) clock.
                         create_message(session, primary, asker_id, draft, dt.datetime.now())
             return "recorded", outcome
+
+    def _capture_answer(self, values: dict[str, Any], body: str) -> None:
+        """Persist the responder's answer text as an ``answers`` row (#274).
+
+        Runs in its OWN transaction, AFTER the outcome has already been committed by
+        ``_record_outcome`` — so this is genuinely best-effort: any failure here (a
+        flush error, a DB hiccup, a NULL responder) is logged and swallowed, and the
+        hand-off has already resumed regardless. The answer is attributed to the
+        recommendation's employee via an authoritative DB lookup (not the external
+        ``E###`` wire form) and tagged with the question's first predicted topic so
+        ``answers_by_topic`` reuse can find it. The dense embedding is computed BEFORE
+        the transaction opens (so a slow encode does not hold DB row locks) and
+        degrades to ``None`` on failure — still BM25-reusable.
+        """
+
+        body = body.strip()
+        if not body:
+            return
+        embedding = self._embed_answer(body)
+        try:
+            with session_scope(self._session_factory) as session:
+                question_id = values.get("question_id")
+                if question_id is None:
+                    return
+                primary = values.get("primary_recommendation_id")
+                if primary is None:
+                    primary = latest_primary_recommendation(session, question_id)
+                if primary is None:
+                    logger.warning(
+                        "no recommendation to attribute the captured answer (question %s)",
+                        question_id,
+                    )
+                    return
+                responder_id = recommendation_employee_id(session, primary)
+                if responder_id is None:
+                    logger.warning(
+                        "no responder to attribute the captured answer (question %s)",
+                        question_id,
+                    )
+                    return
+                topics = values.get("topics") or []
+                create_answer(
+                    session,
+                    question_id=question_id,
+                    responder_id=responder_id,
+                    body=body,
+                    topic=topics[0] if topics else None,
+                    embedding=embedding,
+                    created_at=self._now_factory(),
+                )
+        except Exception:  # pragma: no cover - defensive; exercised via logging path
+            logger.exception("failed to capture the answer; the hand-off proceeds without it")
+
+    def _embed_answer(self, body: str) -> list[float] | None:
+        """Embed an answer body for dense reuse, or ``None`` if embedding fails.
+
+        Kept non-fatal: the first ``encode`` may load a heavy model and can raise
+        (missing ML deps, OOM). A NULL embedding still leaves the answer reusable
+        via BM25 and visible to history/metrics, so a failure must not lose the
+        answer or block the hand-off.
+        """
+
+        try:
+            return self._embedder.encode([body], kind=PASSAGE)[0]
+        except Exception:  # pragma: no cover - defensive; exercised via logging path
+            logger.exception("failed to embed captured answer; storing without embedding")
+            return None
 
     # -- /handoff : responder-facing view (product-spec 画面4) ------------- #
     def get_handoff(self, session_id: str) -> schemas.HandoffResponse:
@@ -1067,6 +1218,9 @@ class AgentService:
             bm25_weight=self._bm25_weight,
             prior_answer_reuse_min=self._prior_answer_reuse_min,
             prior_answer_relevance_floor=self._prior_answer_relevance_floor,
+            daily_evidence=self._daily_evidence,
+            knowledge_answer_min_similarity=self._knowledge_answer_min_similarity,
+            query_expansion_enabled=self._query_expansion_enabled,
         )
 
     def _run(
@@ -1114,6 +1268,16 @@ class AgentService:
                             # A clarification reply enriched the question in-graph;
                             # persist it so /inbox and /history match the run (#268).
                             self._persist_question_body(question_id, data)
+                        elif node == "knowledge_answer":
+                            # #357 slice 4c: a grounded knowledge answer terminates
+                            # BEFORE C5, so c5_route never persists a route. Stamp a
+                            # synthetic "knowledge" route so dashboards that segment by
+                            # route account for knowledge-answered questions instead of
+                            # silently omitting them (self-resolution is still credited
+                            # by _persist_self_answered on the shared self_answered node).
+                            if (data or {}).get("self_answer_grounded"):
+                                route = "knowledge"
+                                self._persist_route(question_id, {"route": "knowledge"})
                         elif node == "c5_route":
                             route = (data or {}).get("route") or route
                             self._persist_route(question_id, data)
@@ -1135,6 +1299,26 @@ class AgentService:
                                 pending_rec_data = data
                             else:
                                 rec_ids = self._persist_recommendations(question_id, data)
+                        elif node == "c7_draft":
+                            # An explicit document fallback resumes *after* C6. Turn
+                            # its dormant ranking into the visible/persisted hand-off
+                            # now (normal person runs already have rec_ids from C6).
+                            values = graph.get_state(config).values
+                            if values.get("document_fallback_requested") and not values.get(
+                                "recommendation_ids"
+                            ):
+                                rec_data = {"recommendations": values.get("recommendations") or []}
+                                # A disconnect can happen after SQL insert but
+                                # before _persist_run_state. Reuse those ids instead
+                                # of double-inserting on the continuation.
+                                if question_id is not None:
+                                    with session_scope(self._session_factory) as session:
+                                        rec_ids = shown_recommendation_ids(session, question_id)
+                                if not rec_ids:
+                                    rec_ids = self._persist_recommendations(question_id, rec_data)
+                                recommend = node_event("c6_score", rec_data)
+                                if recommend is not None:
+                                    yield recommend
                         if node == "__interrupt__":
                             event = interrupt_event(_interrupt_payload(data))
                         else:
@@ -1211,6 +1395,7 @@ class AgentService:
         if rec_ids:
             updates["recommendation_ids"] = rec_ids
             updates["primary_recommendation_id"] = rec_ids[0]
+            updates["document_fallback_requested"] = False
         if terminal is not None:
             updates["last_event"] = {"event": terminal.event, "data": terminal.data}
         if updates:

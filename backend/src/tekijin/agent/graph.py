@@ -65,6 +65,13 @@ def _after_c6(state: AgentState) -> str:
     return "c7_draft" if state.get("recommendations") else "no_candidate"
 
 
+def _after_knowledge_answer(state: AgentState) -> str:
+    # #357 slice 4c: grounded knowledge answer -> ``self_answered`` terminal.
+    # Otherwise proceed to normal retrieval (C4) and routing (C5) — the knowledge
+    # step is a fast pre-check that never blocks the tacit-knowledge hand-off path.
+    return "self_answered" if state.get("self_answer_grounded") else "c4_retrieve"
+
+
 def _after_self_answer(state: AgentState) -> str:
     # #291: grounded -> the assistant answered from data; terminate at
     # ``self_answered``. Not grounded (evidence insufficient) -> fall back to the
@@ -119,6 +126,9 @@ def build_agent(
     bm25_weight: float | None = None,
     prior_answer_reuse_min: int | None = None,
     prior_answer_relevance_floor: float = 0.15,
+    daily_evidence: bool = False,
+    knowledge_answer_min_similarity: float | None = None,
+    query_expansion_enabled: bool = False,
 ):
     """Compile and return the C1-C8 agent graph.
 
@@ -151,7 +161,8 @@ def build_agent(
         or HybridRetriever(
             embedder, session, top_k=retriever_top_k, rrf_k=rrf_k, bm25_weight=bm25_weight
         ),
-        scorer=scorer or ExpertiseScorer(Repository(session), weights=weights),
+        scorer=scorer
+        or ExpertiseScorer(Repository(session), weights=weights, daily_evidence=daily_evidence),
         answerability_model=answerability_model,
         answerability_threshold=answerability_threshold,
         self_answer_model=self_answer_model,
@@ -160,6 +171,12 @@ def build_agent(
         fragment_source=Repository(session) if self_answer_model is not None else None,
         prior_answer_reuse_min=prior_answer_reuse_min,
         prior_answer_relevance_floor=prior_answer_relevance_floor,
+        # #357 slice 4c: the knowledge-answer step shares the run's session and only
+        # gets a floor when wired (None -> no node added, inert).
+        knowledge_session=session if knowledge_answer_min_similarity is not None else None,
+        knowledge_answer_min_similarity=knowledge_answer_min_similarity,
+        # #371: fold C1 topics into the C4 retrieval query (False = OFF, dormant).
+        query_expansion_enabled=query_expansion_enabled,
     )
     # #70: the critic is wired only when a model is supplied. Off (the default) the
     # graph is byte-for-byte the pre-#70 flow — C6 -> C7 directly.
@@ -168,6 +185,12 @@ def build_agent(
     # data-derived routes keep their pre-#291 behaviour (document terminal / pinned
     # hand-off) untouched.
     self_answer_wired = self_answer_model is not None
+    # #357 slice 4c: knowledge-answer is wired only when a similarity floor is given.
+    # Off (default) the graph is byte-for-byte the pre-#357 flow — c3_embed -> c4.
+    knowledge_wired = knowledge_answer_min_similarity is not None
+    # The ``self_answered`` terminal is shared by #291 self-answer and #357 knowledge
+    # answer; add it when EITHER is wired.
+    self_answered_wired = self_answer_wired or knowledge_wired
 
     graph = StateGraph(AgentState)
     graph.add_node("reset", nodes.reset)
@@ -192,6 +215,9 @@ def build_agent(
         graph.add_node("no_expert", nodes.no_expert)
     if self_answer_wired:
         graph.add_node("self_answer", nodes.self_answer)
+    if knowledge_wired:
+        graph.add_node("knowledge_answer", nodes.knowledge_answer)
+    if self_answered_wired:
         graph.add_node("self_answered", nodes.self_answered)
 
     # START -> reset -> C1. ``reset`` clears per-question control fields on a fresh
@@ -209,7 +235,18 @@ def build_agent(
         {"c3_embed": "c3_embed", "ask": "ask", "unresolved_intent": "unresolved_intent"},
     )
     graph.add_edge("ask", "c1_intent")  # re-understand the enriched question
-    graph.add_edge("c3_embed", "c4_retrieve")
+    # #357 slice 4c: when knowledge-answer is wired, C3's embedding first goes to the
+    # knowledge step; a grounded hit ends at ``self_answered``, otherwise it falls
+    # through to C4 retrieval. Off, the pre-#357 direct edge is kept.
+    if knowledge_wired:
+        graph.add_edge("c3_embed", "knowledge_answer")
+        graph.add_conditional_edges(
+            "knowledge_answer",
+            _after_knowledge_answer,
+            {"self_answered": "self_answered", "c4_retrieve": "c4_retrieve"},
+        )
+    else:
+        graph.add_edge("c3_embed", "c4_retrieve")
     graph.add_edge("c4_retrieve", "c5_route")
     # #291: when self-answer is wired, the DATA-DERIVED routes (document /
     # prior_answer) try a cited self-answer first; the PERSON route (weak data)
@@ -237,6 +274,7 @@ def build_agent(
                 "prior_answer": "prior_answer",
             },
         )
+    if self_answered_wired:
         graph.add_edge("self_answered", END)
     graph.add_edge("prior_answer", "c6_score")
     # #70: when the critic is wired, the hand-off branch first passes through the

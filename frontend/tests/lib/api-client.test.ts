@@ -13,6 +13,7 @@ import {
   postAnswer,
   postAsk,
   regenerateHandoffDraft,
+  requestDocumentFallback,
   resolveQuestion,
   selectHandoffCandidate,
 } from "@/lib/api-client";
@@ -138,6 +139,21 @@ describe("postAnswer", () => {
       name: "ApiError",
       status: 409,
     });
+  });
+});
+
+describe("requestDocumentFallback", () => {
+  it("POSTs the same session to the document-fallback endpoint", async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonResponse({ session_id: "abc-123", status: "handoff_queued" }));
+
+    await requestDocumentFallback({ session_id: "abc-123" }, { fetchImpl });
+
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe(`${DEFAULT_API_BASE_URL}/handoff/document-fallback`);
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(init?.body as string)).toEqual({ session_id: "abc-123" });
   });
 });
 

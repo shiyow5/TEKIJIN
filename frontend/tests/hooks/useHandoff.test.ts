@@ -82,6 +82,52 @@ describe("useHandoff", () => {
     expect(result.current.action).toBe("answer");
   });
 
+  it("includes a trimmed answer_body on accept when one is provided (#274)", async () => {
+    getHandoffMock.mockResolvedValue(HANDOFF);
+    const { result } = renderHook(() => useHandoff("s1"));
+    await waitFor(() => expect(result.current.phase).toBe("ready"));
+
+    act(() => result.current.submit("answer", "  IPsecで設定してください  "));
+
+    await waitFor(() => expect(result.current.phase).toBe("done"));
+    expect(postAnswerMock).toHaveBeenCalledWith({
+      session_id: "s1",
+      outcome: "accepted",
+      recommendation_id: 42,
+      answer_body: "IPsecで設定してください",
+    });
+  });
+
+  it("omits answer_body when the accept body is blank (#274)", async () => {
+    getHandoffMock.mockResolvedValue(HANDOFF);
+    const { result } = renderHook(() => useHandoff("s1"));
+    await waitFor(() => expect(result.current.phase).toBe("ready"));
+
+    act(() => result.current.submit("answer", "   "));
+
+    await waitFor(() => expect(result.current.phase).toBe("done"));
+    expect(postAnswerMock).toHaveBeenCalledWith({
+      session_id: "s1",
+      outcome: "accepted",
+      recommendation_id: 42,
+    });
+  });
+
+  it("never sends answer_body on a decline, even if text was passed (#274)", async () => {
+    getHandoffMock.mockResolvedValue(HANDOFF);
+    const { result } = renderHook(() => useHandoff("s1"));
+    await waitFor(() => expect(result.current.phase).toBe("ready"));
+
+    act(() => result.current.submit("defer", "本文"));
+
+    await waitFor(() => expect(result.current.phase).toBe("done"));
+    expect(postAnswerMock).toHaveBeenCalledWith({
+      session_id: "s1",
+      outcome: "declined",
+      recommendation_id: 42,
+    });
+  });
+
   it("submits a declined outcome for the 'defer' action (今は難しい)", async () => {
     getHandoffMock.mockResolvedValue(HANDOFF);
     const { result } = renderHook(() => useHandoff("s1"));
