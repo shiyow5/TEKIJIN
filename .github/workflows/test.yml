@@ -11,6 +11,11 @@ on:
       # to start this workflow, or the guard is unreachable exactly when it matters
       # — the same shape as the Makefile-only hole in #309.
       - "docker-compose.yml"
+      # #76: `test_single_worker_pin.py` reads deploy/start_backend.sh (the launch
+      # path systemd and deploy.sh both exec). A deploy-only PR — "bump --workers
+      # for throughput" is exactly that shape — must start this workflow, or the
+      # guard is unreachable when it matters. Same hole as Makefile-only in #309.
+      - "deploy/**"
       - ".github/workflows/test.yml"
       - ".github/actions/**"
   push:
@@ -24,6 +29,11 @@ on:
       # to start this workflow, or the guard is unreachable exactly when it matters
       # — the same shape as the Makefile-only hole in #309.
       - "docker-compose.yml"
+      # #76: `test_single_worker_pin.py` reads deploy/start_backend.sh (the launch
+      # path systemd and deploy.sh both exec). A deploy-only PR — "bump --workers
+      # for throughput" is exactly that shape — must start this workflow, or the
+      # guard is unreachable when it matters. Same hole as Makefile-only in #309.
+      - "deploy/**"
       - ".github/workflows/test.yml"
       - ".github/actions/**"
   workflow_dispatch:
@@ -54,6 +64,8 @@ jobs:
               # doing exactly that.
               - 'docker-compose.yml'
               - 'Makefile'
+              # #76: single-worker pin, see the trigger `paths:` above.
+              - 'deploy/**'
               - '.github/workflows/test.yml'
               - '.github/actions/setup-backend/**'
             frontend:
