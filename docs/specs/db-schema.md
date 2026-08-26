@@ -1,10 +1,11 @@
 # DBスキーマ（ER図） — TEKIJIN
 
-TEKIJIN のデータベース設計。**3層**で構成する。
+TEKIJIN のデータベース設計。**4層**で構成する。
 
 - **A. 入力データ層** … 合成データ（PR #19）が埋める、社員・プロフィール・案件・チャット・日報。PR #18 の ER をベースとし、本ドキュメントを正とする。
 - **B. アプリ実行時テーブル** … 質問・回答・推薦・計測など、アプリ稼働で溜まるデータ（技術仕様 §4 準拠）。
 - **C. 専門性グラフ** … 行動痕跡から推定した「人×トピック」の重み付きエッジ（doc15＝新規性の中核）。
+- **D. 形式知層** … 生データから抽出した構造化ケース知識 `knowledge_units`（#357/#448＝蓄積＝主軸）。
 
 他テーブルはすべて `EMPLOYEES` の「誰」を FK で指す。永続化は PostgreSQL 16 + pgvector 1本（LangGraph の checkpoints は PostgresSaver が自動管理し、本図には含めない）。
 
@@ -61,6 +62,8 @@ erDiagram
     text content
     text issue
     timestamp created_at
+    text_array topics
+    vector embedding
   }
   PROJECTS {
     uuid id PK
@@ -182,6 +185,8 @@ erDiagram
 | `content` | その日行った業務内容 |
 | `issue` | その日感じた課題・困りごと |
 | `created_at` | 日報が登録された日時 |
+| `topics` | **#355**: C6 スコアラーの証拠源に使う事前トピックタグ（`text[]`・seed 時付与） |
+| `embedding` | **#433**: 自己回答（System1）の知識源。日報を dense 検索チャネルに載せ、出典 `kind="daily"` で引用（`daily_knowledge_enabled=true`・既定ON）。`migrate` が `ADD COLUMN IF NOT EXISTS`、`deploy.sh` の `embed_missing` が NULL 行を埋める |
 
 ---
 
@@ -324,13 +329,54 @@ erDiagram
 
 ---
 
+## D. 形式知層（#357/#448＝蓄積＝主軸の実体）
+
+生データ（日報・社員間チャット）から LLM で蒸留した**構造化ケース知識**。graph からは呼ばない
+オフライン抽出バッチ（`knowledge/extract.py` 日報／`knowledge/chat.py` チャット）が upsert し、
+埋め込み索引を張れば C4／自己回答（System1）が再利用する。承認（`review_status`）まで検索経路に出さない（#354）。
+
+```mermaid
+erDiagram
+  KNOWLEDGE_UNITS {
+    uuid id PK
+    string kind
+    text problem
+    text action
+    text result
+    text_array topics
+    string industry
+    string source_type
+    string source_id
+    float confidence
+    string review_status
+    vector embedding
+    timestamp created_at
+  }
+```
+
+| カラム | 説明 |
+|---|---|
+| `kind` | `case`（問題→打ち手→結果）/ `procedure` / `decision`（CHECK 制約） |
+| `problem` / `action` / `result` | ケースの中身（`result` は未確定なら NULL） |
+| `topics` | 正規22語彙のトピック（日報はタグ継承、チャットは LLM 提案を `normalize_topics` でスナップ） |
+| `industry` | 業種（明示があるときのみ） |
+| `source_type` / `source_id` | 出典（`daily_report`/`chat` 等）。**`UNIQUE(source_type, source_id)`** で冪等 upsert |
+| `confidence` | 抽出の確信度（0.0–1.0） |
+| `review_status` | `unreviewed` / `approved` / `rejected`（CHECK）。既定は検索で `approved` のみ露出 |
+| `embedding` | ケーステキスト（problem+action+result）の dense ベクトル。索引後に検索で再利用 |
+
+> **索引**: `GIN(topics)`。**measure-first の結果（#448）**: 合成チャットは抽出0件（ケース不在＝データの限界・手法は正）、
+> 日報は 25/30 抽出（陽性対照）。実データ（解決済スレッド）で価値が出る。
+
+---
+
 ## A層の補足（仕様整合のための追加が必要な列）
 
 PR #18 の ER（A層）に、仕様上あと少し不足がある。実データ(PR #19)を寄せる際に合わせて補う。
 
 | 対象 | 追加/変更 | 理由 |
 |---|---|---|
-| `EMPLOYEES` | `branch`(拠点) を追加 | `proximity`（同支店>同エリア>全社）の計算に必要（技術仕様 §5 `w4·proximity`） |
-| `EMPLOYEES` | `role` を追加（`position` と別に職種） | 職種比率・スコアの説明に使用 |
+| `EMPLOYEES` | ~~`branch`(拠点) を追加~~ **実装済**（`models/tables.py`） | `proximity`（同支店>同エリア>全社）の計算に必要（技術仕様 §5 `w4·proximity`） |
+| `EMPLOYEES` | ~~`role` を追加~~ **実装済**（`department_history` / `password_hash` も追加済） | 職種比率・スコアの説明に使用 |
 | `PROJECTS` | `employees uuid[]` は **`PROJECT_MEMBERS`（役割つき）を正**とする | 配列では lead/member を区別できず base_score(0.8/0.5)を割り当てられない |
 | （算出でよい） | `years`(在籍年数) は `hire_date` から算出 | 冗長カラムにしない |

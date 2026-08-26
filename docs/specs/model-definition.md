@@ -1,7 +1,15 @@
 # モデル定義 — TEKIJIN
 
-version 0.2 / 2026-08-25（#292 で方針転換を反映）
+version 0.3 / 2026-08-26（#291 方針転換に加え、System1 の本番有効化を反映）
 対象プロダクト: TEKIJIN。**暗黙知を蓄積し、形式知へ変換し続ける AIチャットボット基盤**。
+
+> **この版（0.3）の主な更新**（いずれも実装済み・本番有効）:
+> - **自己回答を取次ぎにも併記**（#413 additive・既定ON）: 専門家が居て `person` 経路に流れる知識質問でも、
+>   引用付きの回答を**人取次ぎと並べて**提示する（取次ぎは必ず残す）。System1 が data 経路だけでなく person 経路でも発火。
+> - **日報を知識源に**（#433 daily・既定ON）: 日報を C4 の dense チャネル／自己回答の証拠源に追加（出典 `kind="daily"`）。
+> - **C6 に質問一致項**（#405 qsim・既定ON）: 質問↔過去回答の意味一致で専門家順位を質問特異的に補正（経路不変）。
+> - **知識抽出パイプライン**（#357/#448）: 生データ（日報・チャット）から構造化ケース知識（`knowledge_units`）を
+>   オフライン抽出（蓄積＝主軸の実体化）。
 
 メイン機能は次の**三系統**（2026-08-25 の方針転換・#291）:
 
@@ -44,12 +52,14 @@ LLM への接続は **LangChain**（`init_chat_model` / `with_structured_output`
 | C5 | 解決経路の判定（**自己回答 vs 取次ぎ**） | 決定的（確信度＋閾値） | **`add_conditional_edges`**（person/prior_answer/document）。データ由来経路(document/prior_answer)は C7' 自己回答へ、person は取次ぎへ | 検索結果 → 経路選択 |
 | C6 | 専門性スコアラー | 決定的（証拠積み上げ） | ノード（決定的） | トピック＋人 → 適合度・根拠・順位 |
 | C7 | 依頼文の下書き生成 | LLM | ノード（LLM） | 質問＋相手＋必須項目 → 依頼文 |
-| C7' | 自己回答生成（#291・**配線済み/既定ON（#380）**） | LLM（構造化出力） | ノード（LLM、`self_answer_enabled` で gate・既定 true）。データ由来経路(document/prior_answer)で C5 の後に発火し、grounded なら `self_answered` 終端、不足なら元経路へフォールバック | 質問＋検索根拠（過去QA/文書, 出典ID付き） → 出典付き回答 or 「答えられない」 |
-| C8 | 専門性グラフ更新＋**形式知の蓄積** | 決定的（オンライン更新） | ノード（決定的） | 結果イベント → エッジ重み更新／取次ぎで得た回答を形式知として蓄積 |
+| C7' | 自己回答生成（#291・**配線済み/既定ON（#380）**） | LLM（構造化出力） | ノード（LLM、`self_answer_enabled` で gate・既定 true）。データ由来経路(document/prior_answer)で C5 の後に発火し、grounded なら `self_answered` 終端、不足なら元経路へフォールバック | 質問＋検索根拠（過去QA/文書/日報, 出典ID付き） → 出典付き回答 or 「答えられない」 |
+| C7''| 自己回答の**併記**（#413 additive・**既定ON**） | LLM（構造化出力・C7' の composer を共有） | ノード `additive_answer`（`additive_self_answer_enabled` で gate・既定 true）。**person 経路**で C5 の後・C6 の前に発火し、relevance floor(0.20) を超え grounded なら引用付き回答を `reference` イベントで**取次ぎと併記**（終端にしない・取次ぎは必ず残す） | 質問＋検索根拠 → 併記用の出典付き回答（best-effort・失敗時は取次ぎのみ） |
+| C8 | 専門性グラフ更新＋**形式知の蓄積** | 決定的（オンライン更新）＋オフライン抽出 | ノード（決定的）＋**知識抽出バッチ**（#357/#448・graph外） | 結果イベント → エッジ重み更新／取次ぎで得た回答を蓄積／生データ(日報・チャット)から `knowledge_units` を抽出 |
 
-LLM を使うのは **C1・C2・C7（＋#291 で C7'）**。推薦の中核（C4・C5・C6・C8）は決定的ノード。
+LLM を使うのは **C1・C2・C7（＋#291 で C7'／#413 で C7''）**。推薦の中核（C4・C5・C6・C8）は決定的ノード。
 C7'（self-answer）は**提供された根拠だけ**から回答し、使った出典を `cited_source_ids` に列挙、根拠が
 不十分なら `grounded=false` で人への取次ぎにフォールバックする（ハルシネーション禁止・#291）。
+C7''（additive・#413）は同じ composer を person 経路で使い、**取次ぎを置き換えず**引用回答を併記する（routing 不変）。
 **LangGraph はノードの接続・分岐・ストリーミング・中断再開・永続化を担い、"並べ替え"はしない。**
 
 ---
@@ -67,7 +77,8 @@ flowchart TD
   C5 -->|"データ由来<br/>(document / prior_answer)"| SA["C7' 自己回答生成<br/>（LLM・根拠のみ／出典付き）"]
   SA -->|grounded| SANS["自己回答を返す<br/>（self_answered・出典リンク付き）"]
   SA -->|"不足<br/>(grounded=false)"| C6
-  C5 -->|"人（データ弱）"| C6["C6 専門性スコアラー<br/>候補3名＋適合度＋根拠"]
+  C5 -->|"人（データ弱）"| ADD["C7'' 自己回答の併記<br/>（LLM・floor超で引用回答／取次ぎは残す）"]
+  ADD --> C6["C6 専門性スコアラー<br/>候補3名＋適合度＋根拠<br/>（#405 質問一致で補正）"]
   C6 --> C7["C7 依頼文の下書き生成<br/>（LLM）"]
   C7 --> SEND["送信"]
   SEND --> DEC{"断られた？"}
@@ -78,9 +89,13 @@ flowchart TD
 
   classDef llm fill:#e3f2fd,stroke:#1565c0;
   classDef det fill:#f1f8e9,stroke:#558b2f;
-  class C1,C2,C7,SA llm;
+  class C1,C2,C7,SA,ADD llm;
   class C4,C5,C6,C8 det;
 ```
+
+> **併記（#413 additive）**: person 経路でも C6 の前に C7''（`additive_answer`）が走り、relevance floor(0.20)超で
+> grounded な引用回答を `reference` イベントで**取次ぎと並べて**出す。取次ぎ（recommend/draft/send）は必ず残り、
+> person 取次ぎ recall は 1.000 のまま（routing 不変・best-effort で失敗時は取次ぎのみ）。
 
 > 青 = 生成LLM（C1・C2・C7・C7'）、緑 = 決定的処理（C4〜C8）。**推薦の中核は決定的**。
 > データ由来経路は **C7' 自己回答**を試し、grounded なら出典付きで直接回答、不足なら取次ぎへフォールバック。
@@ -166,8 +181,13 @@ flowchart TD
 ```json
 { "past_answers": [{ "qa_id": "...", "score": 0.62, "responder_id": "E017" }],
   "documents":   [{ "doc_id": "...", "score": 0.31 }],
+  "daily_reports": [{ "daily_id": 42, "score": 0.30 }],   // #433・daily_knowledge_enabled 時のみ
   "candidate_people": ["E017", "E042", "E103"] }
 ```
+
+- **日報 dense チャネル（#433・既定ON）**: `daily_knowledge_enabled=true` のとき、質問↔日報(issue+content)の
+  dense 検索を追加し、自己回答（C7'/C7''）が日報の暗黙知を出典 `kind="daily"` で引用できる。**routing には使わない**
+  （C5 は日報チャネルを読まない＝取次ぎ判定不変）。日報の埋め込みは NULL のとき dense 検索から除外され、無害に空を返す。
 
 ### C5. 解決経路の判定（決定的：確信度 × 閾値）＝「自己回答 vs 取次ぎ」
 
@@ -207,8 +227,12 @@ flowchart TD
         { "type": "load",    "detail": "今週の対応件数: 少なめ" } ] } ] }
 ```
 
-- **式（要点）**: `score = w1·topic_fit + w2·recency + w3·answer_quality + w4·proximity − w5·load`。
+- **式（要点）**: `score = w1·topic_fit + w2·recency + w3·answer_quality + w4·proximity − w5·load + w6·question_fit`。
   各項の寄与をそのまま UI の「選ばれた理由」に出す（説明可能性＝誤推薦対策）。
+- **質問一致項 `question_fit`（#405 qsim・既定ON）**: `topic_fit` はトピック**タグ**しか見ず飽和する（ADR-0006）ため、
+  質問文と各候補の過去回答本文の意味一致（最大コサイン・C4 の answer dense チャネル由来）を加点する。C1 がトピックを
+  誤予測した行で正解専門家を救い、実 E2E Hit@3 を **0.742→0.788** に改善（person recall 1.000 維持・スコアラーは経路非依存）。
+  `QUESTION_FIT_REASON_FLOOR`(0.15) 超で理由「質問内容が過去の回答と一致」を表示。
 
 ### C7. 依頼文の下書き生成（LLM）
 
@@ -229,8 +253,8 @@ flowchart TD
 
 - **目的**: 過去QA・社内文書に**答えが既にある**ものを、**その根拠だけ**から出典付きで回答する。人に取り次がない。
 - **配線**: `self_answer_enabled`（既定 true・#380）で gate。データ由来経路（document / prior_answer）で C5 の後に発火。
-- **入力**: 質問＋C4 上位ヒットを**出典ID付き**で再構成した根拠（`collect_cited_evidence`。過去QA=`qa`／文書=`document`、
-  各 `source_id` 付き）。`<evidence>` タグで囲み、質問ともども `_fence_safe` で無害化（注入対策・#282と同型）。
+- **入力**: 質問＋C4 上位ヒットを**出典ID付き**で再構成した根拠（`collect_cited_evidence`。過去QA=`qa`／文書=`document`／
+  日報=`daily`（#433）、各 `source_id` 付き）。`<evidence>` タグで囲み、質問ともども `_fence_safe` で無害化（注入対策・#282と同型）。
 - **出力（JSON Schema 準拠を強制）**:
 
 ```json
@@ -246,7 +270,21 @@ flowchart TD
 - **終端**: grounded → `self_answered`（SSE `message`。`citations`=`[{source_id, kind}]` を伴い、**チャットに出典リンク**を出す）。
   自己回答は**自己解決**として計上（`resolution_kind="self"`・経路に依らず）。
 
-### C8. 専門性グラフ更新＋形式知の蓄積（決定的：オンライン更新）
+### C7''. 自己回答の併記（LLM / 構造化出力）＝person 経路での引用併記（#413 additive）
+
+- **目的**: 専門家が居て `person` 経路に流れる知識質問でも、**取次ぎを置き換えずに**引用付きの回答を併記し、
+  「答えは必ずしも人でない」を person 経路にも広げる（ユーザー報告「引用が人経路で全然発火しない」の根治）。
+- **配線**: `additive_self_answer_enabled`（既定 true）で gate。node `additive_answer` が **person 経路**で C5 の後・C6 の前に発火。
+  C7' と同じ composer を共有（`self_answer_enabled` が前提）。
+- **ゲート**: relevance **floor（`additive_self_answer_floor`=0.20）**を超える根拠がある時だけ compose LLM を呼ぶ
+  （無関係質問はレイテンシ増ゼロ）。DGX floor スイープで 0.20 が最適（発火17/76・precision 0.740。0.15 は precision 0.583 に崩壊、
+  0.30 は発火6/76に激減）。
+- **不変条件**: **取次ぎを絶対に消さない**。終端にも自己解決にもしない（`self_answer_grounded` とは別 state
+  `additive_answer_text`/`additive_citations`）。compose 失敗は例外を握って取次ぎのみに degrade（best-effort）。
+  → person 取次ぎ recall は有効時も 1.000（routing-safe by construction・C5 はこのノードを読まない）。
+- **終端しない**: grounded なら `reference` イベント（`{answer, citations}`）で取次ぎ結果と**並べて**描画（フロント `ReferenceAnswer`）。
+
+### C8. 専門性グラフ更新＋形式知の蓄積（決定的：オンライン更新）＋知識抽出（オフライン）
 
 - **目的**: 1回のやり取りの結果を形式知として取り込み、エッジ重みを増分更新して
   **使うほど精度を上げ、ナレッジを蓄積する**。これが本システムの主軸機構（暗黙知→形式知の変換点）。
@@ -275,6 +313,23 @@ flowchart LR
 ```
 
 - **出力**: 更新後の `person_topic_edges`（weight, confidence, evidence_count）。
+
+#### 知識抽出パイプライン（#357/#448・オフライン・graph 外）
+
+蓄積（主軸）の骨格。生データを**構造化ケース知識** `knowledge_units`（`kind="case"`・問題→打ち手→結果・
+`topics`・`embedding`・`review_status`・出典 `source_type/source_id`）へ LLM で蒸留し、冪等に upsert する
+バッチ（graph からは呼ばない）。抽出後に埋め込み索引を張れば、C4／自己回答が再利用できる。
+
+- **日報から**（`knowledge/extract.py`・`scripts/extract_knowledge.py`）: トピックタグは日報の事前タグを継承
+  （語彙固定＝eval gold とドリフトしない）。
+- **チャットから**（`knowledge/chat.py`・`scripts/extract_chat_knowledge.py`・#448）: `employee_chat_history` を
+  channel×時間窓で**会話単位**にまとめ（生チャットはノイズなので"やり取り"を単位にする）、会話プロンプトで
+  `extractable=false` を強く効かせて雑談を捨てる。チャットはタグを持たないので、LLM の `topic_hints` を正規22語彙へ
+  `normalize_topics` でスナップ（off-vocab は破棄＝モデルは新トピックを作れない）。
+- **measure-first の結果（DGX 実測）**: 合成チャット92会話→抽出 **0件**（実LLMが全会話を「回答の付かない独立
+  リクエストの羅列＝ケース不在」と正しく判定＝捏造しない）。同パイプラインは日報30件→**25件**の coherent なケースを
+  抽出（陽性対照）。**手法は正・合成チャットに知識が無いのが限界**。実データ（解決済スレッド）なら抽出が効く。
+- **review ゲート**: 抽出物は `review_status="unreviewed"` で入り、承認するまで検索経路に出さない（#354）。
 
 ---
 
@@ -405,6 +460,7 @@ sequenceDiagram
 c1_understand: {topics, situation}   → event: understood
 c2_sufficiency: interrupt(逆質問)     → event: followup   （回答で resume）
 c5_route: {route, confidence}         → event: route
+additive_answer: {additive_answer_text, additive_citations} → event: reference （#413・person経路の引用併記・非終端）
 c6_score: {recommendations}           → event: recommend
 c7_draft: {draft}                     → event: draft
 c8_update: {status}                   → event: done
@@ -418,6 +474,7 @@ off_topic / document /               → event: message   （非人ルートの�
 event: understood   data: {"topics":[...],"situation":"…"}
 event: followup      data: {"question":"現行製品と拠点数を教えてください"}
 event: route         data: {"route":"person","reason":"…","confidence":0.78}
+event: reference     data: {"answer":"…","citations":[{"source_id":"qa_0123","kind":"qa"}]}  // #413・取次ぎと併記
 event: recommend     data: {"recommendations":[ … C6出力 … ]}
 event: draft         data: {"draft":"高梨さん …"}
 event: done          data: {"status":"sent","answer":"…"}
@@ -431,7 +488,7 @@ event: error         data: {"error":"内部エラーが発生しました"}
 
 | status | 発生元ノード | 意味 |
 |---|---|---|
-| `self_answered` | self_answered | **データ由来の自己回答（#291）**。`citations`=`[{source_id, kind}]` に使った出典（`kind`=`qa`/`document`）。チャットは各出典へのリンクを描画 |
+| `self_answered` | self_answered | **データ由来の自己回答（#291）**。`citations`=`[{source_id, kind}]` に使った出典（`kind`=`qa`/`document`/`daily`）。チャットは各出典へのリンクを描画 |
 | `off_topic` | off_topic | 業務外・悪意ある入力（C1 が `out_of_scope`。個人情報要求/注入含む、#118） |
 | `document` | document | 社内文書ルートで自己解決。`doc_id` に該当文書ID（#143。`GET /documents/{doc_id}` で本文取得） |
 | `unresolved` | unresolved_intent | 逆質問後もトピックを特定できず |
@@ -498,6 +555,12 @@ event: error         data: {"error":"内部エラーが発生しました"}
 - 自己回答（C7'）は既定 ON（`self_answer_enabled=True`）。full-graph の ranker `scripts/research_fullgraph_eval.py` が
   実装され、**DGX 実測（実 Qwen3.6）で source recall ≈ 0.239 / precision ≈ 0.739 / grounded ≈ 0.261**（#380）。
   LLM-free の `PipelineRanker` は依然 LLM を呼ばないので source recall は 0 のままだが、**唯一のハーネスではなくなった**。
+- **併記自己回答（C7''・#413）**は既定 ON。同ハーネスの floor スイープ（`--additive-floor`）で person 取次ぎ recall は
+  全 floor で 1.000（routing-safe）、floor 0.20 が最適（発火 17/76・precision 0.740）。**Hit@3 は C1 トピック予測 acc@1≈0.75 が
+  律速**で、C6 側の決定的レバーは出し尽くし（ADR-0006）＝qsim(#405) が実 E2E で唯一の勝ち（0.742→0.788）。
+- **開発の区切り（2026-08-26）**: 三系統は配線・本番稼働まで到達。System2 取次ぎ recall 1.000 は満たすが、
+  R@3 0.90（必須要件）は未達（実 E2E Hit@3 ≈0.79・律速は C1 精度）。System1 grounded は低め（0.261）。
+  残る本命は C1 精度向上（LLMリランカー/ルーターの真 E2E 再測定）と #357 知識層の識別的発火ゲート。
 
 ---
 
@@ -510,6 +573,12 @@ event: error         data: {"error":"内部エラーが発生しました"}
 - ~~**自己回答 C7' の有効化**（`self_answer_enabled`）~~：**解決済み。#380 の full-graph E2E 検証を経て既定ON**
   （`self_answer_enabled=True`）。「自己回答すべき/取り次ぐべき」の取りこぼしと出典正しさは #296→#297 の枠組みで測り、
   DGX 実測で source recall ≈ 0.239 / precision ≈ 0.739 を確認した
+- ~~**併記自己回答 C7''（#413 additive）の有効化**（`additive_self_answer_enabled`）~~：**解決済み。DGX floor スイープで
+  既定ON**（floor 0.20）。全 floor で person 取次ぎ recall 1.000・floor 0.20 が発火/precision の最適点。日報併用で
+  grounded 0.217→0.261。過去回答は #293 ナレッジライブラリで既に org-wide 閲覧可（プロダクトオーナー承認）
+- ~~**日報の知識源化（#433 daily）**（`daily_knowledge_enabled`）~~：**解決済み。既定ON**。deploy.sh の `embed_missing`
+  段が本番の日報埋め込みを冪等に計算する（初回 3070 行・以降 no-op）
+- ~~**C6 質問一致項（#405 qsim）**（`question_fit_enabled`）~~：**解決済み。既定ON**（実 E2E Hit@3 0.742→0.788）
 - **証拠十分性クリティック #70 の有効化**（`answerability_enabled`）：DGX の閾値スイープ後（現状 net+6 だが recall 毀損あり）
 - トピックのタクソノミ語彙（大塚商会の商材体系から種を作る。15_専門性推定とグラフ成長 §1）
 - LangGraph / LangChain の**固定バージョン**（着手時に context7 等で当該版のAPIを確認して pin）
