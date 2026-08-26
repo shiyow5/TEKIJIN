@@ -16,6 +16,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="${TEKIJIN_BACKEND_DIR:-$SCRIPT_DIR/../backend}"
 VENV_PY="${TEKIJIN_VENV_PY:-python3}"
 PORT="${TEKIJIN_PORT:-18000}"
+# Pinned here, not in each caller (#456): the code writes naive timestamps from
+# BOTH `datetime.now()` (host TZ) and Postgres `now()` (UTC) depending on the
+# table, so a host on Asia/Tokyo — as the DGX is — ends up with `questions` in JST
+# and `messages` in UTC inside one database. Containers never hit it (already UTC);
+# only bare-metal deploys diverged. Every launch path (nohup, deploy.sh, the
+# systemd unit) execs this script, so setting it here is the only way all three
+# stay in step. Overridable, but there is no good reason to.
+TZ="${TZ:-UTC}"
+export TZ
 
 cd "$BACKEND_DIR"
 exec env PYTHONPATH=src "$VENV_PY" -m uvicorn tekijin.main:app \
