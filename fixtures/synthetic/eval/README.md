@@ -18,12 +18,12 @@ python3 scripts/eval_label_agreement.py  # 自動 gold と人手ラベルの一�
 
 | ファイル | 件数 | 中身 | 生成 |
 |---|---|---|---|
-| `eval_person.json` | 71 | **主指標**。質問 → 正しい専門家 | `scripts/build_eval_v2.py` |
-| `eval_retrieval.json` | 56 | 層1。質問 → 正しい根拠チャンク。**埋め込みモデルの横並び比較用** | 同上 |
+| `eval_person.json` | 87 | **主指標**。質問 → 正しい専門家 | `scripts/build_eval_v2.py` |
+| `eval_retrieval.json` | 72 | 層1。質問 → 正しい根拠チャンク。**埋め込みモデルの横並び比較用** | 同上 |
 | `eval_robustness.json` | 20 | 異常系。**全件 abstain（答えない・聞き返す）が正解** | 同上 |
 | `topic_experts_human.json` | 67トピック | **人手ラベル**。topic → 専門家(`employee_id`) | `scripts/import_human_labels.py` |
 | `eval_queries.json` | 40 | **非推奨**（#26）。比較のため残置 | `scripts/build_eval.py` |
-| `route_calibration.json` | 71 | **C5 の閾値較正**。実 DB・実埋め込みで記録したチャネル類似度 | `scripts/research_e2e.py --task route` |
+| `route_calibration.json` | 87 | **C5 の閾値較正**。実 DB・実埋め込みで記録したチャネル類似度 | `scripts/research_e2e.py --task route` |
 
 ---
 
