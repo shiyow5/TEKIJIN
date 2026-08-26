@@ -22,7 +22,7 @@
 
 import { ApiError, structureQuestion } from "@/lib/api-client";
 import { REVEAL_CLASS, revealStyle } from "@/lib/motion";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export interface QuestionStructurePanelProps {
   sessionId: string;
@@ -68,7 +68,16 @@ export function QuestionStructurePanel({
   const [open, setOpen] = useState(false);
   const [fields, setFields] = useState<Fields>(EMPTY);
   const [error, setError] = useState<string | null>(null);
+  // The parent (PersonRouteView) can remount mid-flight — a decline→reroute
+  // remounts it while a request may still be in flight — so drop post-await state
+  // updates if that happened, matching PersonRouteView's own async-guard convention.
   const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   async function handleStructure() {
     if (loading || disabled) return;
