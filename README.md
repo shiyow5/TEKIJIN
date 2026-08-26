@@ -130,7 +130,7 @@ Issue → ブランチ → 実装 → `make check` → PR（develop向け）→ 
 `main` への push と Pull Request で、変更のあった領域だけ以下が走ります。
 
 - **Format Check** … 整形崩れの検出
-- **Lint** … 静的解析（ruff / Biome）＋ フロントエンドの型検査（`tsc --noEmit`）
+- **Lint** … 静的解析（ruff / Biome）＋ 型検査（backend: `mypy src` / frontend: `tsc --noEmit`）
 - **Test** … backend pytest（PostgreSQL+pgvector 結合を含む）／frontend vitest
 - **E2E** … frontend の Playwright（主要フローのブラウザテスト）
 
