@@ -195,6 +195,7 @@ class AgentService:
         question_fit_enabled: bool = False,
         additive_self_answer_enabled: bool = False,
         additive_self_answer_floor: float = 0.20,
+        score_all_employees: bool = False,
         max_concurrent_runs: int = 0,
         now_factory: Any = _default_now,
         clock: Any = time.monotonic,
@@ -239,6 +240,7 @@ class AgentService:
         # #413: additive cited answer on the person route (False = OFF, dormant).
         self._additive_self_answer_enabled = additive_self_answer_enabled
         self._additive_self_answer_floor = additive_self_answer_floor
+        self._score_all_employees = score_all_employees
         # Backpressure (#180): max graph runs executing at once before /ask sheds new
         # questions with 503. 0 (default) disables it — set from settings via the
         # factory in production. Guarded by its own lock; independent of the per-
@@ -1327,6 +1329,7 @@ class AgentService:
             question_fit_enabled=self._question_fit_enabled,
             additive_self_answer_enabled=self._additive_self_answer_enabled,
             additive_self_answer_floor=self._additive_self_answer_floor,
+            score_all_employees=self._score_all_employees,
         )
 
     def _run(
