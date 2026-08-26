@@ -10,22 +10,37 @@ dense-similarity floor deferred from #29.
 
 Threshold rationale is **model-specific** — cosine absolute values depend on the
 embedding. These constants are calibrated to Nemotron-3-Embed-1B, whose cosines
-are heavily compressed (observed range ~0.04–0.57 on the eval corpus, not the
-0.6–0.95 spread of e5/BERT-style encoders). See ``docs/adr/0004`` and
-``fixtures/synthetic/eval/route_calibration.json`` (#90, recalibrated on the
-66-item basis in #191). Calibrated bands (routed-set accuracy 0.818 vs 0.742
-majority, 66-item basis):
+are heavily compressed (observed 0.025–0.542 across all three channels on the
+eval corpus, not the 0.6–0.95 spread of e5/BERT-style encoders). See
+``docs/adr/0004`` and ``fixtures/synthetic/eval/route_calibration.json`` (#90;
+recalibrated on the 66-item basis in #191; **calibration data regenerated on the
+current 87-row corpus in #434 — the thresholds themselves did not move**).
+
+Every figure below is labelled with the basis it was measured on, because the
+eval corpus grew underneath these constants. On the CURRENT corpus the routed-set
+accuracy is **0.833 (60/72) vs a 0.681 majority baseline**; on the 66-item basis
+it read 0.818 vs 0.742.
 
 * ``DOCUMENT_SIM`` = 0.28 — a document is on-topic enough to be the demotion
-  target. Recalibrated 0.30→0.28 in #191: on the current corpus 0.30 both dipped
-  document recall to 4/10 and pushed the single-route share to 0.95 (the collapse
-  ceiling); 0.28 restores recall to 5/10, lifts overall accuracy 0.803→0.818, and
-  drops the share back to 0.94. The three lowest document golds (conf
-  0.166/0.177/0.189) cannot be recovered without collapsing accuracy below the
+  target. Recalibrated 0.30→0.28 in #191, where 0.30 dipped document recall to
+  4/10 and pushed the single-route share to 0.95 (the collapse ceiling) while
+  0.28 restored recall to 5/10 and lifted accuracy 0.803→0.818. Re-swept on the
+  87-row corpus (#434) the decision is unchanged and the margins are wider:
+
+  ==============  ==========  ================  =========
+  DOCUMENT_SIM    accuracy    document recall   collapse
+  ==============  ==========  ================  =========
+  **0.28**        **0.833**   **11/16**         **0.874**
+  0.30            0.819       10/16             0.885
+  0.32            0.806        9/16             0.897
+  ==============  ==========  ================  =========
+
+  The three lowest document golds (conf 0.166/0.177/0.189 — the same three rows
+  on both bases) cannot be recovered without collapsing accuracy below the
   majority baseline — that is the corpus-count-routing job (#116/#119), not a
   threshold job.
 * ``PERSON_WEAK_SIM`` = 0.40 — profile match below this counts as weak, letting a
-  document take over (sits inside the observed 0.053–0.454 people range).
+  document take over (sits inside the observed 0.053–0.473 people range).
 * ``PRIOR_ANSWER_SIM`` = 0.55 — **deliberately above the observed answer-cosine
   max (0.542): prior_answer never fires with Nemotron.** ``answer_confidence``
   cannot separate this route — person-gold rows reach 0.542 while prior_answer
