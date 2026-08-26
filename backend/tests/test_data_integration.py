@@ -660,6 +660,15 @@ def test_apply_schema_upgrades_migrates_old_db(database_url: str) -> None:
             conn.execute(text("CREATE TABLE employees (id int primary key)"))
             # #355: pre-existing daily_reports without the new topics column.
             conn.execute(text("CREATE TABLE daily_reports (id int primary key)"))
+            # #451: pre-existing chat history without the conversation-scan index.
+            # `create_all` builds the TABLE on a real upgrade but never its index,
+            # so the old DB below starts with the columns and no index at all.
+            conn.execute(
+                text(
+                    "CREATE TABLE employee_chat_history ("
+                    "id int primary key, channel text, message text, sent_at timestamp)"
+                )
+            )
             stale = "[" + ",".join(["0.01"] * 1024) + "]"
             conn.execute(text(f"INSERT INTO documents (id, embedding) VALUES (1, '{stale}')"))
 
@@ -701,6 +710,20 @@ def test_apply_schema_upgrades_migrates_old_db(database_url: str) -> None:
             # had no embedding column) at the current dim, so a daily report can be
             # a knowledge source. Exercises the new ADD COLUMN + widen-array entry.
             assert embedding_type(conn, "daily_reports") == "vector(2048)"
+            # #451: the chat-extraction batch reads the whole table ordered by
+            # (channel, sent_at, id) filtered to non-null message/sent_at, so the
+            # index has to match that shape exactly to replace the sort. Asserting
+            # the DEFINITION, not just the name: an index on the right columns in
+            # the wrong order (or without the partial predicate) still "exists"
+            # while leaving the scan exactly as slow as before.
+            definition = conn.execute(
+                text("SELECT indexdef FROM pg_indexes WHERE schemaname = :s AND indexname = :n"),
+                {"s": schema, "n": "ix_chat_history_channel_sent_at_id"},
+            ).scalar()
+            assert definition is not None, "the chat conversation-scan index was not created"
+            assert "(channel, sent_at, id)" in definition, definition
+            assert "message IS NOT NULL" in definition, definition
+            assert "sent_at IS NOT NULL" in definition, definition
 
         # Idempotent: a second run is a no-op (still 2048, no error).
         _apply_schema_upgrades(eng)
