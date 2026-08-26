@@ -11,27 +11,32 @@ describe("levelFraction", () => {
 });
 
 describe("fitPercent", () => {
-  it("normalises a composite score against the fit ceiling (0.9 -> 100%)", () => {
+  it("normalises a composite score against the qsim-inclusive ceiling (1.9 -> 100%)", () => {
+    // #498: the ceiling now includes the #405 question-fit term, so a full score of
+    // 1.9 is 100%; a base-only score of 0.9 no longer saturates.
+    expect(MAX_COMPOSITE_SCORE).toBe(1.9);
     expect(fitPercent(MAX_COMPOSITE_SCORE)).toBe(100);
-    expect(fitPercent(0.45)).toBe(50);
+    expect(fitPercent(0.9)).toBe(47); // base-only strong — de-saturated (was 100)
+    expect(fitPercent(0.45)).toBe(24);
     expect(fitPercent(0)).toBe(0);
   });
 
   it("clamps: a score above the ceiling caps at 100, a negative score floors at 0", () => {
-    expect(fitPercent(1.0)).toBe(100); // 1.0/0.9 -> clamp 100
+    expect(fitPercent(2.5)).toBe(100); // above the 1.9 ceiling -> clamp 100
     expect(fitPercent(-0.5)).toBe(0);
   });
 });
 
 describe("fitPercents", () => {
   it("returns each candidate's absolute fit, independent of order", () => {
+    // Normalised against the 1.9 ceiling (#498): 0.9->47, 0.45->24, 0.18->9.
     expect(
       fitPercents([
         { score: 0.9, confidence: "低" },
         { score: 0.45, confidence: "高" },
         { score: 0.18, confidence: "中" },
       ]),
-    ).toEqual([100, 50, 20]);
+    ).toEqual([47, 24, 9]);
   });
 
   it("is decoupled from the confidence label — a 低 top still reads high (#240)", () => {
@@ -49,7 +54,8 @@ describe("fitPercents", () => {
       { score: 0.81, confidence: "高" },
       { score: 0.54, confidence: "高" },
     ]);
-    expect(out).toEqual([100, 90, 60]);
+    // #498: 0.9->47, 0.81->43, 0.54->28 against the 1.9 ceiling — still monotonic.
+    expect(out).toEqual([47, 43, 28]);
     expect(new Set(out).size).toBeGreaterThan(1);
   });
 
