@@ -275,17 +275,25 @@ def handoff_draft(
         )
         if req.consult_method == "chat":
             meta = _service(request).pending_handoff_metadata(req.session_id)
-            if all(
-                meta.get(k) is not None for k in ("asker_id", "responder_id", "recommendation_id")
-            ):
+            # Bound to locals rather than checked with `all(meta.get(k) is not None ...)`:
+            # the values are `int | str | None`, and a comprehension-based guard narrows
+            # nothing — neither for a type checker nor for a reader, who still has to
+            # match the key strings in the guard against the ones used below (#441).
+            # `meta_*` rather than `asker_id`/`responder_id`: those names are already
+            # bound above from `session_participants` and are what the authorization
+            # check used. Reusing them here would silently rebind the audited values.
+            rec_id = meta.get("recommendation_id")
+            meta_asker = meta.get("asker_id")
+            meta_responder = meta.get("responder_id")
+            if rec_id is not None and meta_asker is not None and meta_responder is not None:
                 schedule_pending_handoff(
                     _service(request).session_factory,
                     session_id=req.session_id,
-                    recommendation_id=int(meta["recommendation_id"]),
-                    thread_id=int(meta["recommendation_id"]),
+                    recommendation_id=int(rec_id),
+                    thread_id=int(rec_id),
                     parties={
-                        "asker_id": int(meta["asker_id"]),
-                        "responder_id": int(meta["responder_id"]),
+                        "asker_id": int(meta_asker),
+                        "responder_id": int(meta_responder),
                     },
                     draft=req.draft,
                 )
