@@ -203,14 +203,19 @@ class Settings(BaseSettings):
     # worse, never better; person route recall stayed 1.000 either way. C4's set is
     # not only a narrowing, it is the prior "this person was retrievable for this
     # question"; widening it lets a high-generic-topic_fit person with no
-    # question-specific evidence displace the right one. #405's qsim does not rescue
-    # them either: it is built from the ANSWER dense channel's hits (pool = 50), so
-    # it is 0 for anyone whose past answers did not reach that pool — a different
-    # set from `candidate_people` (top_k = 10), which neither contains it nor is
-    # contained by it. (An earlier version of this comment said "qsim is 0 for
-    # anyone C4 did not surface"; that is wrong — see ADR-0009, which carries the
-    # correction.) The flag stays so the measurement is one command away when the
-    # scorer or corpus changes.
+    # question-specific evidence displace the right one. #405's qsim only partly
+    # offsets that: it is built from the ANSWER dense channel's hits (pool = 50 for
+    # every current call site, where top_k = 10), so it is 0 for anyone whose past
+    # answers did not reach that pool. On this corpus that is a different set from
+    # `candidate_people` (top_k = 10) — neither contains the other — so widening to
+    # the roster still adds people who can take no question-specific credit.
+    # An earlier version of this comment said "qsim is 0 for anyone C4 did not
+    # surface"; that is WRONG (ADR-0009 carries the correction) and it understated
+    # qsim's reach — the true nonzero domain is LARGER than `candidate_people`.
+    # So treat this sentence as secondary, exactly as ADR-0009 does: the decision
+    # rests on the measured Hit@3 above, not on this mechanism being airtight.
+    # The flag stays so the measurement is one command away when the scorer or
+    # corpus changes.
     # At thousands of employees the pool should come from person_topic_edges by
     # topic rather than the whole table; that is a cost concern, not an accuracy one.
     score_all_employees: bool = False
