@@ -18,7 +18,12 @@
  * employee from the directory (``GET /employees`` via {@link useCurrentUser});
  * the asker screen's ``asker_id`` and the inbox follow the selection.
  * Switching also navigates home (#210): becoming a different person mid-flow
- * makes the previous screen meaningless, so we start over at the hub.
+ * makes the previous screen meaningless, so we start over at the hub. Because
+ * that discards whatever was on the previous screen, the switch is EXPLICIT
+ * (#231): choosing in the select only points at someone; 切替 — or Enter — is
+ * what actually switches. A native select fires `change` on every arrow key, so
+ * acting on `change` meant browsing the list repeatedly threw the admin home and
+ * took any unsent draft with it.
  */
 
 import { useAuth } from "@/components/AuthProvider";
@@ -244,26 +249,40 @@ function UserSwitcher({
   onChange: (id: string) => void;
   className: string;
 }) {
-  // What the control SHOWS while the keyboard is still browsing. A native <select>
-  // fires `change` on every arrow key with the popup closed — it does not wait for
-  // Enter — so committing straight from `change` turned "look through the list"
-  // into one identity switch and one router.push per keypress, discarding an unsent
-  // draft the admin never chose to leave (#231).
-  const [browsing, setBrowsing] = useState<string | null>(null);
-  // Whether the pending `change` came from a key. Pointer selection has no
-  // preceding keydown, so a click still commits immediately — the fix must not slow
-  // down the ordinary path.
-  const fromKeyboard = useRef(false);
+  // Who the select is POINTING AT, which is not yet who the app acts as (#231).
+  //
+  // A native <select> fires `change` for every arrow key while the popup is closed
+  // — it does not wait for Enter — so switching straight from `change` turned "look
+  // through the list" into one identity switch and one router.push per keypress,
+  // discarding an unsent draft the admin never chose to leave.
+  //
+  // The first fix tried to tell browsing apart from confirming by watching the
+  // events (defer a keyboard `change`, commit on Enter/blur/pointer). That is not
+  // decidable from the DOM: on macOS ArrowDown OPENS the popup and the confirming
+  // Enter never reaches the page, so a real selection would never commit; and
+  // committing on blur meant clicking back into your own textarea still threw you
+  // home — the very harm #231 reports. So the confirmation is explicit instead. It
+  // costs mouse users one click on a demo-only control and is unambiguous on every
+  // platform, with no event-order guessing.
+  const [pending, setPending] = useState<string | null>(null);
 
-  const shown = browsing ?? currentUserId ?? "";
+  // Drop a stale pending choice when the acting user changes from ELSEWHERE (a
+  // reload restoring the default, another tab). Without this the select would keep
+  // showing someone the app is no longer acting as.
+  useEffect(() => {
+    setPending(null);
+  }, [currentUserId]);
 
-  function commit(id: string) {
-    setBrowsing(null);
-    fromKeyboard.current = false;
-    // Re-selecting the current user is not a switch: it would push home for nothing.
-    if (id && id !== currentUserId) {
-      onChange(id);
+  const shown = pending ?? currentUserId ?? "";
+  // Re-selecting the current user is not a switch: nothing to confirm.
+  const canApply = shown !== "" && shown !== currentUserId;
+
+  function apply() {
+    if (!canApply) {
+      return;
     }
+    setPending(null);
+    onChange(shown);
   }
 
   return (
@@ -281,36 +300,14 @@ function UserSwitcher({
         className="rounded-md border border-outline bg-surface-container-lowest px-sm py-xs text-sm disabled:text-on-surface-variant"
         value={shown}
         disabled={!ready}
-        onPointerDown={() => {
-          fromKeyboard.current = false;
-        }}
+        onChange={(e) => setPending(e.target.value)}
         onKeyDown={(e) => {
+          // Enter in a closed select submits the surrounding form by default; here
+          // it is the natural "yes, this one" for a keyboard user, so it applies
+          // rather than making them tab to the button.
           if (e.key === "Enter") {
-            // The keyboard user's explicit confirmation.
-            commit(shown);
-            return;
-          }
-          if (e.key === "Escape") {
-            // Abandon the browsing and snap back to who they actually are.
-            setBrowsing(null);
-            fromKeyboard.current = false;
-            return;
-          }
-          fromKeyboard.current = true;
-        }}
-        onChange={(e) => {
-          if (fromKeyboard.current) {
-            setBrowsing(e.target.value);
-            return;
-          }
-          commit(e.target.value);
-        }}
-        onBlur={() => {
-          // Tabbing away is a commit: the browser leaves the browsed value in the
-          // control, so dropping it here would leave the header showing one person
-          // while the app acts as another.
-          if (browsing !== null) {
-            commit(browsing);
+            e.preventDefault();
+            apply();
           }
         }}
       >
@@ -324,6 +321,14 @@ function UserSwitcher({
           <option value="">{loading ? "読み込み中…" : "利用できません"}</option>
         )}
       </select>
+      <button
+        type="button"
+        onClick={apply}
+        disabled={!canApply}
+        className="rounded-md border border-outline px-sm py-xs text-primary text-xs transition-colors hover:bg-surface-container-low disabled:border-outline-variant disabled:text-on-surface-variant"
+      >
+        切替
+      </button>
       {error ? (
         <button
           type="button"

@@ -117,6 +117,8 @@ test.describe("navigation", () => {
     const select = page.getByRole("combobox", { name: /利用者を切替/ });
     await expect(select).toBeEnabled();
     await select.selectOption("E002");
+    // Choosing only points at someone; 切替 is what switches (#231).
+    await page.getByRole("button", { name: "切替" }).click();
 
     // Switching leaves for the hub (#210); wait for it so the reload below has a
     // settled URL rather than racing the client-side navigation.
@@ -333,6 +335,9 @@ test.describe("navigation", () => {
     await expect(page.getByRole("heading", { name: "受信箱" })).toBeVisible();
 
     await page.getByRole("combobox", { name: /利用者を切替/ }).selectOption("E002");
+    // The select alone must NOT navigate — that is #231. 切替 confirms.
+    await expect(page.getByRole("heading", { name: "受信箱" })).toBeVisible();
+    await page.getByRole("button", { name: "切替" }).click();
 
     await page.waitForURL(/\/$/);
     await expect(
