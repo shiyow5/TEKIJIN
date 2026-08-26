@@ -46,7 +46,11 @@ describe("HeroQuestionBar", () => {
     vi.restoreAllMocks();
   });
 
-  it("mirrors the /questions heading", () => {
+  it("renders the question heading", () => {
+    // Was called "mirrors the /questions heading" while comparing only the words,
+    // so it stayed green through #411's 24px-vs-30px drift. The mirroring claim now
+    // belongs to tests/QuestionForm.test.tsx, which compares the rendered markup;
+    // this one only says the heading is present.
     render(<HeroQuestionBar />);
     expect(screen.getByRole("heading", { name: "何を知りたいですか？" })).toBeInTheDocument();
   });
