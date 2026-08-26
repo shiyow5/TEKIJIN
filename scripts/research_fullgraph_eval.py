@@ -113,6 +113,9 @@ class GraphRanker:
         self._graph = graph
         self._critique_wired = critique_wired
         self.errors = 0  # rows whose invoke crashed (counted for the output audit)
+        # #413: rows where the additive cited answer fired on a person route.
+        self.additive_fired_person = 0
+        self.person_rows = 0
 
     def __call__(self, query):
         from tekijin.eval.runner import RankResult
@@ -142,6 +145,11 @@ class GraphRanker:
         ranked = [r["person_id"] for r in recs if isinstance(r, dict) and "person_id" in r]
         citations = values.get("self_answer_citations") or []
         cited = [c["source_id"] for c in citations if isinstance(c, dict) and c.get("source_id")]
+        # #413: additive citation firing on the person route (does NOT change route).
+        if route == "person":
+            self.person_rows += 1
+            if values.get("additive_answer_text"):
+                self.additive_fired_person += 1
         topics = list(values.get("topics") or [])
         return RankResult(
             ranked_experts=ranked,
@@ -162,6 +170,11 @@ def main() -> None:
         "--question-fit",
         action="store_true",
         help="#405 C6 に質問↔過去回答の意味一致(qsim)項を足す(routing不変)",
+    )
+    ap.add_argument(
+        "--additive",
+        action="store_true",
+        help="#413 person経路でも引用付き回答を併記(self_answer composer 配線・routing不変)",
     )
     ap.add_argument("--answerability", action="store_true", help="#70 棄却クリティックを配線")
     ap.add_argument(
@@ -194,8 +207,10 @@ def main() -> None:
         revision=settings.embedding_model_revision,
         app_env=settings.app_env,
     )
+    # #413 additive needs the self_answer composer wired (it shares it).
+    wire_self_answer = args.self_answer or args.additive
     intent, sufficiency, draft, sa_model, ans_model = _build_models(
-        args.backend, settings, self_answer=args.self_answer, answerability=args.answerability
+        args.backend, settings, self_answer=wire_self_answer, answerability=args.answerability
     )
 
     graph = build_agent(
@@ -209,6 +224,7 @@ def main() -> None:
         knowledge_answer_min_similarity=args.knowledge_floor,
         query_expansion_enabled=args.query_expansion,
         question_fit_enabled=args.question_fit,
+        additive_self_answer_enabled=args.additive,
     )
     ranker = GraphRanker(graph, critique_wired=ans_model is not None)
 
@@ -226,6 +242,11 @@ def main() -> None:
     print(format_report(report))
     if ranker.errors:
         print(f"  ※ invoke 失敗行: {ranker.errors}/{len(queries)}（miss/abstain として計上）")
+    if args.additive:
+        print(
+            f"  #413 additive: person経路 {ranker.person_rows}行中 "
+            f"{ranker.additive_fired_person}行で引用回答が併記(取次ぎは維持)"
+        )
 
     out = {
         "config": {

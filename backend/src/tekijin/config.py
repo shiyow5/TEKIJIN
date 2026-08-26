@@ -122,6 +122,22 @@ class Settings(BaseSettings):
     # low-hallucination). Safe by construction: it never intercepts a person query.
     self_answer_enabled: bool = True
 
+    # #413: additive self-answer on the PERSON route. self_answer (#291) fires ONLY
+    # on the data-derived routes (document/prior_answer) after C5 — so a knowledge
+    # question that routes to a person (an expert exists) never shows a past-answer
+    # citation, even when one grounds it. This makes System 1 also fire on the
+    # person route: before the hand-off, if a low-relevance FLOOR is cleared, try a
+    # grounded cited answer and surface it ALONGSIDE the recommendation. It NEVER
+    # replaces the hand-off (person recall unchanged) and never marks the run
+    # self-resolved. Requires self_answer to be wired (shares the composer).
+    # DGX sizing (research_selfanswer_person.py): person-route compose grounded rate
+    # 0.237 (avg 3.78 citations) — ~24% of person questions would gain a citation
+    # that today shows none. OFF by default until the full-graph E2E confirms person
+    # recall stays 1.000 and citations fire; the floor gates the compose LLM call so
+    # no-data person questions add no latency.
+    additive_self_answer_enabled: bool = False
+    additive_self_answer_floor: float = 0.20
+
     # #327: corpus-count routing for prior_answer. Nemotron's answer cosine cannot
     # separate this route (PRIOR_ANSWER_SIM sits above the observed max — see
     # route.py / #119), so route on whether the top retrieved past answer is a

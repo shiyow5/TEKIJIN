@@ -130,6 +130,8 @@ def build_agent(
     knowledge_answer_min_similarity: float | None = None,
     query_expansion_enabled: bool = False,
     question_fit_enabled: bool = False,
+    additive_self_answer_enabled: bool = False,
+    additive_self_answer_floor: float = 0.20,
 ):
     """Compile and return the C1-C8 agent graph.
 
@@ -180,6 +182,9 @@ def build_agent(
         query_expansion_enabled=query_expansion_enabled,
         # #405: add the question↔past-answer term to C6 (False = OFF, dormant).
         question_fit_enabled=question_fit_enabled,
+        # #413: additive cited answer on the person route (False = OFF, dormant).
+        additive_self_answer_enabled=additive_self_answer_enabled,
+        additive_self_answer_floor=additive_self_answer_floor,
     )
     # #70: the critic is wired only when a model is supplied. Off (the default) the
     # graph is byte-for-byte the pre-#70 flow — C6 -> C7 directly.
@@ -255,13 +260,23 @@ def build_agent(
     # prior_answer) try a cited self-answer first; the PERSON route (weak data)
     # goes straight to the hand-off as before. Off, the mapping is the pre-#291 one.
     data_route_target = "self_answer" if self_answer_wired else None
+    # #413: additive cited answer on the person route. Only when self_answer is
+    # wired (shares the composer) AND enabled. PERSON then flows through the
+    # ``additive_answer`` node, which composes a grounded citation to show ALONGSIDE
+    # the hand-off and ALWAYS continues to c6_score (never terminates, never steals
+    # the route). Off, PERSON goes straight to c6_score exactly as before.
+    additive_wired = self_answer_wired and additive_self_answer_enabled
+    person_target = "additive_answer" if additive_wired else "c6_score"
+    if additive_wired:
+        graph.add_node("additive_answer", nodes.additive_answer)
+        graph.add_edge("additive_answer", "c6_score")
     graph.add_conditional_edges(
         "c5_route",
         _after_c5,
         # #279: the document route now also runs C6 to rank a person fallback; the
         # DOCUMENT terminal presents the document AND those candidates.
         {
-            PERSON: "c6_score",
+            PERSON: person_target,
             PRIOR_ANSWER: data_route_target or "prior_answer",
             DOCUMENT: data_route_target or "c6_score",
         },
