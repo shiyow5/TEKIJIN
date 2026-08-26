@@ -172,6 +172,50 @@ test.describe("navigation", () => {
     expect(overflow).toBeLessThanOrEqual(0);
   });
 
+  // #391 AI review: the drawer's full-screen overlay blocked mouse clicks on
+  // the page behind it, but Tab could still reach — and type into — the
+  // hidden content (the question input, the brand link, the bell). jsdom
+  // can't move focus on a synthetic Tab press, so this real-browser check is
+  // the only place the wrap actually exercises native focus order.
+  test("the nav menu traps Tab focus and every close path restores it to the toggle (#391 review)", async ({
+    page,
+  }) => {
+    await mockChrome(page);
+    await page.goto("/questions");
+
+    const toggle = page.getByRole("button", { name: "メニューを開く" });
+    await toggle.click();
+    const menu = page.locator("#nav-menu");
+    await expect(menu).toBeVisible();
+
+    // Forward Tab from the last element (ログアウト) wraps to the first
+    // (the drawer's own 閉じる button) — it must not escape to the header's
+    // brand link or the question input sitting behind the overlay.
+    await menu.getByRole("button", { name: "ログアウト" }).focus();
+    await page.keyboard.press("Tab");
+    await expect(menu.getByRole("button", { name: "閉じる" })).toBeFocused();
+
+    // Shift+Tab from the first element wraps to the last, likewise never
+    // reaching the toggle button sitting just before the drawer in the DOM.
+    await page.keyboard.press("Shift+Tab");
+    await expect(menu.getByRole("button", { name: "ログアウト" })).toBeFocused();
+
+    // Escape closes and restores focus to the toggle (already covered by a
+    // component test) — check the other two paths, which dropped focus to
+    // `body` before this fix.
+    await menu.getByRole("button", { name: "閉じる" }).click();
+    await expect(menu).toHaveCount(0);
+    await expect(toggle).toBeFocused();
+
+    await toggle.click();
+    await expect(menu).toBeVisible();
+    // Click the overlay itself (top-left corner, well outside the drawer,
+    // which is docked to the right edge).
+    await page.mouse.click(5, 5);
+    await expect(menu).toHaveCount(0);
+    await expect(toggle).toBeFocused();
+  });
+
   test("desktop width also uses the single hamburger menu (#391)", async ({ page }) => {
     await mockChrome(page);
     await page.setViewportSize({ width: 1280, height: 800 });

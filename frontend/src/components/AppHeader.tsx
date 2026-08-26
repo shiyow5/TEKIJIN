@@ -24,10 +24,11 @@
 import { useAuth } from "@/components/AuthProvider";
 import { useCurrentUser } from "@/components/CurrentUserProvider";
 import { NotificationBell } from "@/components/NotificationBell";
+import { useFocusTrap } from "@/hooks/useFocusTrap";
 import type { EmployeeSummary } from "@/lib/api-types";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { type ComponentType, useEffect, useRef, useState } from "react";
+import { type ComponentType, useCallback, useEffect, useRef, useState } from "react";
 
 function IconHome({ className }: { className: string }) {
   return (
@@ -323,20 +324,42 @@ export function AppHeader() {
     setMenuOpen(false);
   }, [pathname]);
 
+  // Shared with `Tab` cycling within the open drawer (#391 review: the new
+  // full-screen overlay blocked mouse clicks on the page behind it but not
+  // keyboard/AT focus, which could still tab into — and type into — the
+  // hidden question bar).
+  useFocusTrap(menuRef, menuOpen);
+
+  // Every close path — Escape, the drawer's own close button, and a click on
+  // the overlay — returns focus to the toggle button, not just Escape (#391
+  // review: the other two paths dropped focus to `body`). `useCallback` with
+  // no deps: it only touches the stable `setMenuOpen` setter and a ref.
+  const closeMenu = useCallback(() => {
+    setMenuOpen(false);
+    menuButtonRef.current?.focus();
+  }, []);
+
   useEffect(() => {
     if (!menuOpen) return;
 
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        setMenuOpen(false);
-        menuButtonRef.current?.focus();
-      }
+      if (e.key === "Escape") closeMenu();
     }
 
     function handlePointerDown(e: MouseEvent) {
       const target = e.target as Node;
       if (menuRef.current?.contains(target) || menuButtonRef.current?.contains(target)) return;
-      setMenuOpen(false);
+      // `mousedown` fires before the backdrop's own `onClick` — closing here
+      // first unmounts the backdrop before its click handler can run, so this
+      // path (not just the backdrop's onClick) is what actually needs to
+      // restore focus (#391 review: it previously dropped to `body`).
+      // `preventDefault` matters here: clicking a non-focusable element like
+      // the backdrop is itself a browser default action that blurs whatever
+      // is currently focused, and that default runs AFTER this handler — so
+      // without suppressing it, it would silently undo the `.focus()` call
+      // in `closeMenu()` a moment later.
+      e.preventDefault();
+      closeMenu();
     }
 
     document.addEventListener("keydown", handleKeyDown);
@@ -345,7 +368,7 @@ export function AppHeader() {
       document.removeEventListener("keydown", handleKeyDown);
       document.removeEventListener("mousedown", handlePointerDown);
     };
-  }, [menuOpen]);
+  }, [menuOpen, closeMenu]);
 
   return (
     <>
@@ -398,17 +421,20 @@ export function AppHeader() {
 
       {menuOpen ? (
         <>
-          {/* biome-ignore lint/a11y/useKeyWithClickEvents: mouse-only dismissal;
-          the keyboard path is the document-level Escape listener registered
-          above, not a key event on this element (matches ModalDialog's overlay). */}
+          {/* Purely decorative dimming — closing on a click here is handled by
+              the document-level `mousedown` listener below (`handlePointerDown`),
+              not a click handler on this element: `mousedown` fires first and
+              unmounts this div before a `click` here would ever get a chance to. */}
+          <div aria-hidden="true" className="fixed inset-0 z-50 bg-on-surface/40" />
+          {/* biome-ignore lint/a11y/useSemanticElements: role="dialog" + aria-modal
+          matches this component's own Escape/focus-trap handling, the same
+          reasoning as ModalDialog's overlay. */}
           <div
-            aria-hidden="true"
-            onClick={() => setMenuOpen(false)}
-            className="fixed inset-0 z-50 bg-on-surface/40"
-          />
-          <div
+            role="dialog"
             id="nav-menu"
             ref={menuRef}
+            aria-modal="true"
+            aria-label="ナビゲーションメニュー"
             className={`fixed inset-y-0 right-0 z-50 flex w-full max-w-xs flex-col gap-md overflow-y-auto border-outline-variant border-l bg-surface-container-lowest p-lg shadow-md transition-transform duration-200 ${
               menuVisible ? "translate-x-0" : "translate-x-full"
             }`}
@@ -420,7 +446,7 @@ export function AppHeader() {
             <button
               type="button"
               aria-label="閉じる"
-              onClick={() => setMenuOpen(false)}
+              onClick={closeMenu}
               className="ml-auto flex h-9 w-9 items-center justify-center rounded-md text-on-surface-variant transition-colors hover:bg-surface-container-low"
             >
               <IconClose />
