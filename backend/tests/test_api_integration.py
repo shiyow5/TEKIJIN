@@ -8,7 +8,10 @@ no model download. ``now`` is injected for determinism.
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
+import hmac
 import json
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -28,7 +31,9 @@ from tekijin.auth.principal import Principal
 from tekijin.auth.tokens import create_access_token
 from tekijin.config import get_settings
 from tekijin.data.dashboard import dashboard_summary
-from tekijin.data.db import get_sessionmaker
+from tekijin.data.db import get_sessionmaker, session_scope
+from tekijin.data.slack_channel_links import get_channel_link
+from tekijin.data.slack_links import upsert_slack_link
 from tekijin.models.tables import Answer, Event, Feedback, Message, Question, Recommendation
 
 NOW = dt.datetime(2026, 9, 15, 12, 0, 0)
@@ -124,7 +129,40 @@ def _client(
     self_answer_model=None,
     knowledge_answer_min_similarity=None,
 ) -> TestClient:
-    service = AgentService(
+    return _app_client(
+        _service(
+            engine,
+            embedder,
+            retriever=retriever,
+            scorer=scorer,
+            checkpointer=checkpointer,
+            answerability_model=answerability_model,
+            answerability_threshold=answerability_threshold,
+            self_answer_model=self_answer_model,
+            knowledge_answer_min_similarity=knowledge_answer_min_similarity,
+        )
+    )
+
+
+def _service(
+    engine,
+    embedder,
+    *,
+    retriever=None,
+    scorer=None,
+    checkpointer=None,
+    answerability_model=None,
+    answerability_threshold=40,
+    self_answer_model=None,
+    knowledge_answer_min_similarity=None,
+) -> AgentService:
+    """Same wiring as :func:`_client`, but hands back the service itself.
+
+    Tests that need to poke at durable state (rather than only the HTTP surface)
+    build the service here and wrap it with :func:`_app_client` themselves.
+    """
+
+    return AgentService(
         session_factory=get_sessionmaker(engine),
         checkpointer=checkpointer or MemorySaver(),
         embedder=embedder,
@@ -139,7 +177,6 @@ def _client(
         scorer=scorer,
         now_factory=lambda: NOW,
     )
-    return _app_client(service)
 
 
 class _FixedSelfAnswer:
@@ -308,6 +345,37 @@ def test_dashboard_exposes_processing_latency_from_events(
     # p50/p95 are present and non-negative once at least one run is recorded.
     assert lat["p50_ms"] is not None and lat["p50_ms"] >= 0
     assert lat["p95_ms"] is not None and lat["p95_ms"] >= 0
+
+
+def test_dashboard_top_responders_is_a_bounded_query_param(
+    seed_counts, engine, fake_embedder
+) -> None:
+    # #76: the load list size was hardcoded at 5. It is now a query param, bounded
+    # at 1..50 — the dashboard is aggregate-only by design (product-spec §241-251),
+    # so an unbounded limit would turn it into a per-employee roster.
+    client = _client(engine, fake_embedder)
+
+    default = client.get("/dashboard").json()["answers_per_responder"]
+    assert len(default) == 5  # unchanged default (the seed has 40 distinct responders)
+
+    wider = client.get("/dashboard", params={"top_responders": 12}).json()
+    assert len(wider["answers_per_responder"]) > len(default)  # the seed has >5 responders
+    assert len(wider["answers_per_responder"]) <= 12
+    # The list stays ordered by load, and widening only appends.
+    assert [r["employee_id"] for r in wider["answers_per_responder"]][: len(default)] == [
+        r["employee_id"] for r in default
+    ]
+
+    assert client.get("/dashboard", params={"top_responders": 0}).status_code == 422
+    assert client.get("/dashboard", params={"top_responders": 51}).status_code == 422
+    assert client.get("/dashboard", params={"top_responders": "all"}).status_code == 422
+
+    # The load KPI must NOT move with the limit: its denominator is the total answer
+    # count, not the sum of the truncated list. (If it were the latter, widening the
+    # list would silently change a headline number.)
+    assert wider["top_responder_share"] == pytest.approx(
+        client.get("/dashboard").json()["top_responder_share"]
+    )
 
 
 def test_run_records_nonzero_monotonic_durations(seed_counts, engine, fake_embedder) -> None:
@@ -1219,6 +1287,146 @@ def test_accepted_thread_is_seeded_with_the_asker_draft_as_first_message(
     assert listing["last_message"] == draft
 
 
+def _wait_until(predicate, *, timeout: float = 2.0, interval: float = 0.02) -> bool:
+    """Poll ``predicate`` until it's true or ``timeout`` elapses — used to wait
+    for the fire-and-forget background thread `schedule_channel_setup_and_draft`
+    spawns (accept-time Slack channel setup has no request/response cycle to
+    hook a synchronous check into, unlike ``BackgroundTasks``-based sends)."""
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if predicate():
+            return True
+        time.sleep(interval)
+    return predicate()
+
+
+def _reset_channel_link(engine, employee_a: int, employee_b: int) -> None:
+    """Delete any pre-existing SlackChannelLink for this pair.
+
+    Every hand-off test below asks as E010 and gets routed to responder E001
+    (the shared `_recs`/`_FakeRetriever` boilerplate always ranks candidate 1
+    first), so every one of them shares the SAME (1, 10) pair. `engine` is a
+    session-scoped fixture — the DB persists across every test in the run —
+    so without this, a channel a PRIOR test created would leak into the next
+    one and be silently reused instead of freshly created.
+    """
+
+    with get_sessionmaker(engine)() as session:
+        link = get_channel_link(session, employee_a, employee_b)
+        if link is not None:
+            session.delete(link)
+            session.commit()
+
+
+def test_accepting_a_chat_handoff_sets_up_the_pair_channel_and_posts_the_draft(
+    monkeypatch, seed_counts, engine, fake_embedder
+) -> None:
+    """#hand-off-chat: accepting (with BOTH parties Slack-linked) creates their
+    shared private channel, invites them, and posts the draft into it — a
+    background thread (see `schedule_channel_setup_and_draft`), so this waits
+    briefly for it to land rather than asserting immediately."""
+
+    with get_sessionmaker(engine)() as session:
+        upsert_slack_link(session, 1, slack_user_id="U_RESPONDER", slack_team_id="T1", now=NOW)
+        upsert_slack_link(session, 10, slack_user_id="U_ASKER", slack_team_id="T1", now=NOW)
+        session.commit()
+    _reset_channel_link(engine, 1, 10)
+
+    created: list[dict] = []
+    invited: list[dict] = []
+    posted: list[dict] = []
+    monkeypatch.setattr(
+        "tekijin.slack.notify.create_private_channel",
+        lambda **kw: (created.append(kw), "C1")[1],
+    )
+    monkeypatch.setattr(
+        "tekijin.slack.notify.invite_to_channel",
+        lambda **kw: (invited.append(kw), True)[1],
+    )
+    monkeypatch.setattr("tekijin.slack.notify.post_message", lambda **kw: posted.append(kw))
+    monkeypatch.setenv("TEKIJIN_SLACK_BOT_TOKEN", "xoxb-test")
+    get_settings.cache_clear()
+    try:
+        client = _client(
+            engine,
+            fake_embedder,
+            retriever=_FakeRetriever(people=[1, 2, 3], people_confidence=0.2),
+            scorer=_FakeScorer(_recs(1, 2, 3)),
+        )
+        client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "msg-seed2"})
+        _events(client, "msg-seed2")
+        draft = client.get("/handoff/msg-seed2").json()["draft"]
+        assert draft
+
+        client.post("/answer", json={"session_id": "msg-seed2", "outcome": "accepted"})
+        _events(client, "msg-seed2")
+        thread_id = client.get("/messages/threads", params={"employee_id": "E010"}).json()["items"][
+            0
+        ]["thread_id"]
+
+        assert _wait_until(lambda: len(posted) == 1)
+    finally:
+        get_settings.cache_clear()
+
+    assert created == [{"bot_token": "xoxb-test", "name": "tekijin-1-10"}]
+    assert invited == [
+        {"bot_token": "xoxb-test", "channel_id": "C1", "user_ids": ["U_ASKER", "U_RESPONDER"]}
+    ]
+    assert posted == [{"bot_token": "xoxb-test", "channel_id": "C1", "text": draft}]
+
+    with get_sessionmaker(engine)() as session:
+        link = get_channel_link(session, 1, 10)
+        assert link is not None
+        assert link.slack_channel_id == "C1"
+        assert link.current_thread_id == thread_id
+
+
+def test_accepting_a_direct_handoff_never_sets_up_a_slack_channel(
+    monkeypatch, seed_counts, engine, fake_embedder
+) -> None:
+    """ "直接相談" never gets a chat thread at all (existing behaviour) — the new
+    accept-time Slack hook must not fire for it either."""
+
+    with get_sessionmaker(engine)() as session:
+        upsert_slack_link(session, 1, slack_user_id="U_RESPONDER", slack_team_id="T1", now=NOW)
+        upsert_slack_link(session, 10, slack_user_id="U_ASKER", slack_team_id="T1", now=NOW)
+        session.commit()
+    _reset_channel_link(engine, 1, 10)
+
+    created: list[dict] = []
+    monkeypatch.setattr(
+        "tekijin.slack.notify.create_private_channel",
+        lambda **kw: (created.append(kw), "C1")[1],
+    )
+    monkeypatch.setenv("TEKIJIN_SLACK_BOT_TOKEN", "xoxb-test")
+    get_settings.cache_clear()
+    try:
+        client = _client(
+            engine,
+            fake_embedder,
+            retriever=_FakeRetriever(people=[1, 2, 3], people_confidence=0.2),
+            scorer=_FakeScorer(_recs(1, 2, 3)),
+        )
+        client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "msg-seed3"})
+        _events(client, "msg-seed3")
+        client.post(
+            "/handoff/draft",
+            json={
+                "session_id": "msg-seed3",
+                "draft": "直接会って話します",
+                "consult_method": "direct",
+            },
+        )
+        client.post("/answer", json={"session_id": "msg-seed3", "outcome": "accepted"})
+        _events(client, "msg-seed3")
+        time.sleep(0.2)  # give any (unexpected) background thread a chance to run
+    finally:
+        get_settings.cache_clear()
+
+    assert created == []
+
+
 def test_direct_consultation_gets_no_seeded_message(seed_counts, engine, fake_embedder) -> None:
     # No chat thread exists at all for "direct", so there is nothing to seed —
     # covered here as a guard against the seeding write itself erroring out.
@@ -1245,6 +1453,39 @@ def test_direct_consultation_gets_no_seeded_message(seed_counts, engine, fake_em
 # --------------------------------------------------------------------------- #
 # consultation method: 直接相談 / チャットで相談
 # --------------------------------------------------------------------------- #
+def test_consult_method_falls_back_to_chat_for_an_unknown_stored_value(
+    seed_counts, engine, fake_embedder
+) -> None:
+    # `questions.consult_method` is a bare VARCHAR(32) with no CHECK constraint, so
+    # anything can land in it (an older client, a manual fix-up, a future value rolled
+    # back). The API schema types it as Literal["direct", "chat"], so an unknown value
+    # reaching the response model is a 500 on two live endpoints — GET /handoff and
+    # GET /inbox — for a row that is otherwise perfectly serviceable. Snap it at the
+    # DB boundary instead: "not direct" behaves as "chat", which is what every
+    # downstream branch already assumes (see data/messages.py's COALESCE ... != 'direct').
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2, 3], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2, 3)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "cm-unknown"})
+    _events(client, "cm-unknown")
+
+    with session_scope(get_sessionmaker(engine)) as session:
+        row = session.query(Question).filter(Question.session_id == "cm-unknown").one()
+        row.consult_method = "email"  # never a valid value; simulates stale/foreign data
+
+    handoff = client.get("/handoff/cm-unknown")
+    assert handoff.status_code == 200
+    assert handoff.json()["consult_method"] == "chat"
+
+    inbox = client.get("/inbox", params={"responder_id": "E001"})
+    assert inbox.status_code == 200
+    item = next(i for i in inbox.json()["items"] if i["session_id"] == "cm-unknown")
+    assert item["consult_method"] == "chat"
+
+
 def test_consult_method_defaults_to_chat_when_never_set(seed_counts, engine, fake_embedder) -> None:
     # Backward compatibility: an asker who never calls POST /handoff/draft (or a
     # client that predates this field) behaves exactly as before — "chat" everywhere.
@@ -1389,6 +1630,553 @@ def test_send_and_list_messages_round_trip(seed_counts, engine, fake_embedder) -
     listing = client.get("/messages/threads", params={"employee_id": "E010"}).json()["items"][0]
     assert listing["last_message"] == "承知しました"
     assert listing["last_message_at"] is not None
+
+
+def test_send_message_relays_into_the_pairs_existing_slack_channel(
+    monkeypatch, seed_counts, engine, fake_embedder
+) -> None:
+    """An ordinary chat send, once the pair's Slack channel exists, is relayed
+    into it as a background task (unlike accept-time setup, `POST /messages`
+    runs inside a normal request with `BackgroundTasks` — no polling needed;
+    `TestClient` runs them before returning the response)."""
+
+    with get_sessionmaker(engine)() as session:
+        upsert_slack_link(session, 1, slack_user_id="U_RESPONDER", slack_team_id="T1", now=NOW)
+        upsert_slack_link(session, 10, slack_user_id="U_ASKER", slack_team_id="T1", now=NOW)
+        session.commit()
+    _reset_channel_link(engine, 1, 10)
+
+    monkeypatch.setattr("tekijin.slack.notify.create_private_channel", lambda **kw: "C1")
+    monkeypatch.setattr("tekijin.slack.notify.invite_to_channel", lambda **kw: True)
+    monkeypatch.setattr("tekijin.slack.notify.post_message", lambda **kw: None)
+    monkeypatch.setenv("TEKIJIN_SLACK_BOT_TOKEN", "xoxb-test")
+    get_settings.cache_clear()
+    try:
+        client = _client(
+            engine,
+            fake_embedder,
+            retriever=_FakeRetriever(people=[1, 2, 3], people_confidence=0.2),
+            scorer=_FakeScorer(_recs(1, 2, 3)),
+        )
+        client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "msg-slack1"})
+        _events(client, "msg-slack1")
+        client.post("/answer", json={"session_id": "msg-slack1", "outcome": "accepted"})
+        _events(client, "msg-slack1")
+        thread_id = client.get("/messages/threads", params={"employee_id": "E010"}).json()["items"][
+            0
+        ]["thread_id"]
+
+        # Accept-time channel setup is its own background thread — wait for it.
+        def _channel_ready() -> bool:
+            with get_sessionmaker(engine)() as session:
+                return get_channel_link(session, 1, 10) is not None
+
+        assert _wait_until(_channel_ready)
+
+        relayed: list[dict] = []
+        monkeypatch.setattr("tekijin.slack.notify.post_message", lambda **kw: relayed.append(kw))
+
+        resp = client.post(
+            "/messages",
+            json={"thread_id": thread_id, "sender_id": "E010", "body": "よろしくお願いします"},
+        )
+        assert resp.status_code == 200
+    finally:
+        get_settings.cache_clear()
+
+    assert len(relayed) == 1
+    assert relayed[0]["bot_token"] == "xoxb-test"
+    assert relayed[0]["channel_id"] == "C1"
+    assert "よろしくお願いします" in relayed[0]["text"]
+
+
+def test_send_message_skips_slack_when_not_configured(
+    monkeypatch, seed_counts, engine, fake_embedder
+) -> None:
+    """No bot token configured (the default) -> no Slack channel setup or
+    relay attempted at all, even for two linked employees."""
+
+    with get_sessionmaker(engine)() as session:
+        upsert_slack_link(session, 1, slack_user_id="U_RESPONDER", slack_team_id="T1", now=NOW)
+        upsert_slack_link(session, 10, slack_user_id="U_ASKER", slack_team_id="T1", now=NOW)
+        session.commit()
+    _reset_channel_link(engine, 1, 10)
+
+    created: list[dict] = []
+    posted: list[dict] = []
+    monkeypatch.setattr(
+        "tekijin.slack.notify.create_private_channel",
+        lambda **kw: (created.append(kw), "C1")[1],
+    )
+    monkeypatch.setattr("tekijin.slack.notify.post_message", lambda **kw: posted.append(kw))
+
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2, 3], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2, 3)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "msg-slack2"})
+    _events(client, "msg-slack2")
+    client.post("/answer", json={"session_id": "msg-slack2", "outcome": "accepted"})
+    _events(client, "msg-slack2")
+    thread_id = client.get("/messages/threads", params={"employee_id": "E010"}).json()["items"][0][
+        "thread_id"
+    ]
+    time.sleep(0.2)  # give any (unexpected) background thread a chance to run
+
+    resp = client.post(
+        "/messages",
+        json={"thread_id": thread_id, "sender_id": "E010", "body": "よろしくお願いします"},
+    )
+    assert resp.status_code == 200
+    assert created == []
+    assert posted == []
+
+
+# --- POST /slack/events (#388: Slack -> TEKIJIN direction) ------------------ #
+SLACK_SIGNING_SECRET = "test-signing-secret"  # noqa: S105 - test fixture, not a real secret
+
+
+def _slack_event_headers(body: bytes, *, timestamp: str | None = None) -> dict[str, str]:
+    # The endpoint verifies against the real clock (no test seam there, unlike
+    # the `now`/`NOW` used elsewhere for `created_at`), so this must be fresh.
+    ts = timestamp or str(int(time.time()))
+    base = f"v0:{ts}:".encode() + body
+    digest = hmac.new(SLACK_SIGNING_SECRET.encode(), base, hashlib.sha256).hexdigest()
+    return {"X-Slack-Request-Timestamp": ts, "X-Slack-Signature": f"v0={digest}"}
+
+
+def _post_slack_event(client: TestClient, payload: dict) -> object:
+    body = json.dumps(payload).encode()
+    return client.post("/slack/events", content=body, headers=_slack_event_headers(body))
+
+
+def _slack_configured(monkeypatch) -> None:
+    monkeypatch.setenv("TEKIJIN_SLACK_SIGNING_SECRET", SLACK_SIGNING_SECRET)
+    get_settings.cache_clear()
+
+
+def test_slack_events_url_verification_echoes_the_challenge(
+    monkeypatch, engine, fake_embedder
+) -> None:
+    _slack_configured(monkeypatch)
+    try:
+        client = _client(engine, fake_embedder)
+        resp = _post_slack_event(client, {"type": "url_verification", "challenge": "abc123"})
+        assert resp.status_code == 200
+        assert resp.text == "abc123"
+    finally:
+        get_settings.cache_clear()
+
+
+def test_slack_events_rejects_an_invalid_signature(engine, fake_embedder) -> None:
+    # No TEKIJIN_SLACK_SIGNING_SECRET set -> verify_signature always fails closed.
+    client = _client(engine, fake_embedder)
+    body = json.dumps({"type": "url_verification", "challenge": "abc"}).encode()
+    resp = client.post(
+        "/slack/events",
+        content=body,
+        headers={"X-Slack-Request-Timestamp": "1700000000", "X-Slack-Signature": "v0=deadbeef"},
+    )
+    assert resp.status_code == 401
+
+
+def test_slack_events_message_lands_in_the_channels_current_thread(
+    monkeypatch, seed_counts, engine, fake_embedder
+) -> None:
+    """A message posted in a hand-off's shared Slack channel is mirrored into
+    the TEKIJIN thread its `current_thread_id` names. No relay back into
+    Slack is needed here — both parties already see it there natively, since
+    they're both members of the same channel."""
+
+    with get_sessionmaker(engine)() as session:
+        upsert_slack_link(session, 1, slack_user_id="U_RESPONDER", slack_team_id="T1", now=NOW)
+        upsert_slack_link(session, 10, slack_user_id="U_ASKER", slack_team_id="T1", now=NOW)
+        session.commit()
+    _reset_channel_link(engine, 1, 10)
+
+    monkeypatch.setattr("tekijin.slack.notify.create_private_channel", lambda **kw: "C1")
+    monkeypatch.setattr("tekijin.slack.notify.invite_to_channel", lambda **kw: True)
+    monkeypatch.setattr("tekijin.slack.notify.post_message", lambda **kw: None)
+    monkeypatch.setenv("TEKIJIN_SLACK_BOT_TOKEN", "xoxb-test")
+    _slack_configured(monkeypatch)
+    try:
+        client = _client(
+            engine,
+            fake_embedder,
+            retriever=_FakeRetriever(people=[1, 2, 3], people_confidence=0.2),
+            scorer=_FakeScorer(_recs(1, 2, 3)),
+        )
+        client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "msg-slack3"})
+        _events(client, "msg-slack3")
+        client.post("/answer", json={"session_id": "msg-slack3", "outcome": "accepted"})
+        _events(client, "msg-slack3")
+        thread_id = client.get("/messages/threads", params={"employee_id": "E010"}).json()["items"][
+            0
+        ]["thread_id"]
+
+        def _channel_ready() -> bool:
+            with get_sessionmaker(engine)() as session:
+                return get_channel_link(session, 1, 10) is not None
+
+        assert _wait_until(_channel_ready)
+
+        resp = _post_slack_event(
+            client,
+            {
+                "type": "event_callback",
+                "event_id": "Ev-lands-in-thread",
+                "event": {
+                    "type": "message",
+                    "channel": "C1",
+                    "user": "U_RESPONDER",
+                    "text": "承知しました（Slackから返信）",
+                },
+            },
+        )
+        assert resp.status_code == 200
+
+        detail = client.get(f"/messages/threads/{thread_id}", params={"employee_id": "E010"}).json()
+        bodies = [m["body"] for m in detail["messages"]]
+        assert "承知しました（Slackから返信）" in bodies
+        last = next(m for m in detail["messages"] if m["body"] == "承知しました（Slackから返信）")
+        assert last["sender_id"] == "E001"  # the responder who replied in Slack
+    finally:
+        get_settings.cache_clear()
+
+
+def test_slack_events_ignores_the_bots_own_message(monkeypatch, engine, fake_embedder) -> None:
+    """Without this, the bot's own post landing back in the channel it just
+    sent to would loop back in as if a human had sent it."""
+
+    _slack_configured(monkeypatch)
+    try:
+        client = _client(engine, fake_embedder)
+        resp = _post_slack_event(
+            client,
+            {
+                "type": "event_callback",
+                "event_id": "Ev-bot-own-message",
+                "event": {
+                    "type": "message",
+                    "channel": "C1",
+                    "user": "U_RESPONDER",
+                    "bot_id": "B_TEKIJIN",
+                    "text": "通知メッセージ本文",
+                },
+            },
+        )
+        assert resp.status_code == 200  # ack'd; the bot_id short-circuit never touches the DB
+    finally:
+        get_settings.cache_clear()
+
+
+def test_slack_events_ignores_a_message_for_an_unmanaged_channel(
+    monkeypatch, engine, fake_embedder
+) -> None:
+    """A message in some other Slack channel the app happens to be able to see
+    (not one TEKIJIN created) is ack'd and dropped — there's no SlackChannelLink
+    to route it through."""
+
+    _slack_configured(monkeypatch)
+    try:
+        client = _client(engine, fake_embedder)
+        resp = _post_slack_event(
+            client,
+            {
+                "type": "event_callback",
+                "event_id": "Ev-unmanaged-channel",
+                "event": {
+                    "type": "message",
+                    "channel": "C_UNMANAGED",
+                    "user": "U_RESPONDER",
+                    "text": "hello",
+                },
+            },
+        )
+        assert resp.status_code == 200
+    finally:
+        get_settings.cache_clear()
+
+
+def test_slack_events_deduplicates_a_retried_delivery(
+    monkeypatch, seed_counts, engine, fake_embedder
+) -> None:
+    """Slack retries a delivery whenever it didn't get a fast-enough ack — the
+    SAME event_id arriving twice must only create one chat message."""
+
+    with get_sessionmaker(engine)() as session:
+        upsert_slack_link(session, 1, slack_user_id="U_RESPONDER", slack_team_id="T1", now=NOW)
+        upsert_slack_link(session, 10, slack_user_id="U_ASKER", slack_team_id="T1", now=NOW)
+        session.commit()
+    _reset_channel_link(engine, 1, 10)
+
+    monkeypatch.setattr("tekijin.slack.notify.create_private_channel", lambda **kw: "C1")
+    monkeypatch.setattr("tekijin.slack.notify.invite_to_channel", lambda **kw: True)
+    monkeypatch.setattr("tekijin.slack.notify.post_message", lambda **kw: None)
+    monkeypatch.setenv("TEKIJIN_SLACK_BOT_TOKEN", "xoxb-test")
+    _slack_configured(monkeypatch)
+    try:
+        client = _client(
+            engine,
+            fake_embedder,
+            retriever=_FakeRetriever(people=[1, 2, 3], people_confidence=0.2),
+            scorer=_FakeScorer(_recs(1, 2, 3)),
+        )
+        client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "msg-slack4"})
+        _events(client, "msg-slack4")
+        client.post("/answer", json={"session_id": "msg-slack4", "outcome": "accepted"})
+        _events(client, "msg-slack4")
+        thread_id = client.get("/messages/threads", params={"employee_id": "E010"}).json()["items"][
+            0
+        ]["thread_id"]
+
+        def _channel_ready() -> bool:
+            with get_sessionmaker(engine)() as session:
+                return get_channel_link(session, 1, 10) is not None
+
+        assert _wait_until(_channel_ready)
+
+        payload = {
+            "type": "event_callback",
+            "event_id": "Ev-retry-dedup",
+            "event": {
+                "type": "message",
+                "channel": "C1",
+                "user": "U_RESPONDER",
+                "text": "重複チェック用メッセージ",
+            },
+        }
+        assert _post_slack_event(client, payload).status_code == 200
+        assert _post_slack_event(client, payload).status_code == 200  # Slack's retry
+
+        detail = client.get(f"/messages/threads/{thread_id}", params={"employee_id": "E010"}).json()
+        matching = [m for m in detail["messages"] if m["body"] == "重複チェック用メッセージ"]
+        assert len(matching) == 1
+    finally:
+        get_settings.cache_clear()
+
+
+# --- POST /slack/interactivity (#398/#399: 承諾/辞退/自分より適任がいる buttons) --- #
+def _post_slack_interactivity(
+    client: TestClient,
+    action_id: str,
+    *,
+    session_id: str,
+    recommendation_id: int,
+    outcome: str,
+    slack_user_id: str,
+) -> object:
+    """Build a real Slack Block Kit interactivity payload (form-encoded, a
+    single ``payload`` field holding the JSON) and sign it the same way Slack
+    does, so this exercises the exact wire format the real button posts."""
+
+    from urllib.parse import quote
+
+    action_payload = {
+        "actions": [
+            {
+                "action_id": action_id,
+                "value": json.dumps(
+                    {
+                        "session_id": session_id,
+                        "recommendation_id": recommendation_id,
+                        "outcome": outcome,
+                    }
+                ),
+            }
+        ],
+        "user": {"id": slack_user_id},
+    }
+    body = f"payload={quote(json.dumps(action_payload))}".encode()
+    headers = {**_slack_event_headers(body), "Content-Type": "application/x-www-form-urlencoded"}
+    return client.post("/slack/interactivity", content=body, headers=headers)
+
+
+def test_slack_interactivity_accept_behaves_like_pressing_the_app_button(
+    monkeypatch, seed_counts, engine, fake_embedder
+) -> None:
+    """A Slack 承諾 click must both record the outcome AND advance the run —
+    not just queue a ``Command`` and leave the hand-off parked, which is what
+    made Slack show its "processing failed" warning on the message (the click
+    never resolved anything an app user would see change)."""
+
+    _slack_configured(monkeypatch)
+    try:
+        with get_sessionmaker(engine)() as session:
+            upsert_slack_link(session, 1, slack_user_id="U_RESPONDER", slack_team_id="T1", now=NOW)
+            session.commit()
+
+        client = _client(
+            engine,
+            fake_embedder,
+            retriever=_FakeRetriever(people=[1, 2, 3], people_confidence=0.2),
+            scorer=_FakeScorer(_recs(1, 2, 3)),
+        )
+        sid = "slack-interactivity-accept"
+        client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": sid})
+        _events(client, sid)  # drains to the "send" pause, awaiting employee 1
+
+        recommendation_id = client.get(f"/handoff/{sid}").json()["recommendation_id"]
+
+        resp = _post_slack_interactivity(
+            client,
+            "tekijin_accept",
+            session_id=sid,
+            recommendation_id=recommendation_id,
+            outcome="accepted",
+            slack_user_id="U_RESPONDER",
+        )
+        assert resp.status_code == 200
+        assert "承諾しました" in resp.json()["text"]
+
+        # submit_resume() ALONE already records the outcome (and, for an accept,
+        # seeds the chat thread) synchronously — so a 404 from GET /handoff is
+        # NOT proof the run actually advanced, only that an outcome was queued.
+        # The one thing that requires the graph to genuinely run the queued
+        # Command is this in-memory registry entry: ``_dispatch_stream`` clears
+        # ``ctx.pending`` only once it starts executing it (service.py). If the
+        # fix regresses (interactivity goes back to calling only
+        # ``submit_resume``), this stays non-None forever and the assertion
+        # below times out — exactly the "hand-off parked until the asker's own
+        # tab reconnects" bug this change fixes, which also has a durable-state
+        # consequence: the queued Command lives ONLY in this in-memory
+        # registry, so an app restart before anyone drains it would strand the
+        # session at "send" forever with nothing left to redo it.
+        svc = client.app.state.agent_service
+
+        def _drained() -> bool:
+            ctx = svc._registry.get(sid)
+            return ctx is not None and ctx.pending is None
+
+        assert _wait_until(_drained), "承諾クリック後もグラフが進んでいない(pendingが残ったまま)"
+
+        with get_sessionmaker(engine)() as session:
+            rec = session.get(Recommendation, recommendation_id)
+            assert rec.outcome == "accepted"
+    finally:
+        get_settings.cache_clear()
+
+
+def test_slack_interactivity_refer_declines_and_reroutes_to_the_next_candidate(
+    monkeypatch, seed_counts, engine, fake_embedder
+) -> None:
+    """自分より適任がいる (refer) carries the same "declined" outcome the app's
+    own 今は難しい/自分より適任がいる buttons both send today (#76: no dedicated
+    referral outcome yet) — clicking it in Slack must reroute the hand-off to
+    the next candidate exactly like declining in the app does."""
+
+    _slack_configured(monkeypatch)
+    try:
+        with get_sessionmaker(engine)() as session:
+            upsert_slack_link(session, 1, slack_user_id="U_RESPONDER", slack_team_id="T1", now=NOW)
+            session.commit()
+
+        client = _client(
+            engine,
+            fake_embedder,
+            retriever=_FakeRetriever(people=[1, 2], people_confidence=0.2),
+            scorer=_FakeScorer(_recs(1, 2)),
+        )
+        sid = "slack-interactivity-refer"
+        client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": sid})
+        first = _events(client, sid)
+        assert first[2][1]["recommendations"][0]["person_id"] == "E001"
+
+        recommendation_id = client.get(f"/handoff/{sid}").json()["recommendation_id"]
+
+        resp = _post_slack_interactivity(
+            client,
+            "tekijin_refer",
+            session_id=sid,
+            recommendation_id=recommendation_id,
+            outcome="declined",
+            slack_user_id="U_RESPONDER",
+        )
+        assert resp.status_code == 200
+        assert "自分より適任" in resp.json()["text"]
+
+        def _rerouted_to_next_candidate() -> bool:
+            resp = client.get(f"/handoff/{sid}")
+            return resp.status_code == 200 and resp.json()["recommendation_id"] != recommendation_id
+
+        assert _wait_until(_rerouted_to_next_candidate), (
+            "辞退クリック後も次候補へ振り分けられていない"
+        )
+        assert client.get(f"/handoff/{sid}").json()["responder"]["person_id"] == "E002"
+
+        with get_sessionmaker(engine)() as session:
+            rec = session.get(Recommendation, recommendation_id)
+            assert rec.outcome == "declined"
+    finally:
+        get_settings.cache_clear()
+
+
+def test_accepting_a_second_chat_handoff_between_the_same_pair_reuses_the_channel(
+    monkeypatch, seed_counts, engine, fake_embedder
+) -> None:
+    """Consulting the same colleague again doesn't create a second channel —
+    the existing one is reused and current_thread_id moves to the new thread."""
+
+    with get_sessionmaker(engine)() as session:
+        upsert_slack_link(session, 1, slack_user_id="U_RESPONDER", slack_team_id="T1", now=NOW)
+        upsert_slack_link(session, 10, slack_user_id="U_ASKER", slack_team_id="T1", now=NOW)
+        session.commit()
+    _reset_channel_link(engine, 1, 10)
+
+    created: list[dict] = []
+    monkeypatch.setattr(
+        "tekijin.slack.notify.create_private_channel",
+        lambda **kw: (created.append(kw), "C1")[1],
+    )
+    monkeypatch.setattr("tekijin.slack.notify.invite_to_channel", lambda **kw: True)
+    monkeypatch.setattr("tekijin.slack.notify.post_message", lambda **kw: None)
+    monkeypatch.setenv("TEKIJIN_SLACK_BOT_TOKEN", "xoxb-test")
+    get_settings.cache_clear()
+    try:
+        client = _client(
+            engine,
+            fake_embedder,
+            retriever=_FakeRetriever(people=[1, 2, 3], people_confidence=0.2),
+            scorer=_FakeScorer(_recs(1, 2, 3)),
+        )
+
+        def _accept(session_id: str) -> int:
+            client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": session_id})
+            _events(client, session_id)
+            client.post("/answer", json={"session_id": session_id, "outcome": "accepted"})
+            _events(client, session_id)
+            return client.get("/messages/threads", params={"employee_id": "E010"}).json()["items"][
+                0
+            ]["thread_id"]
+
+        first_thread_id = _accept("msg-reuse1")
+
+        def _channel_ready() -> bool:
+            with get_sessionmaker(engine)() as session:
+                return get_channel_link(session, 1, 10) is not None
+
+        assert _wait_until(_channel_ready)
+
+        second_thread_id = _accept("msg-reuse2")
+        assert second_thread_id != first_thread_id
+
+        def _current_thread_is_second() -> bool:
+            with get_sessionmaker(engine)() as session:
+                link = get_channel_link(session, 1, 10)
+                return link is not None and link.current_thread_id == second_thread_id
+
+        assert _wait_until(_current_thread_is_second)
+    finally:
+        get_settings.cache_clear()
+
+    # Only ONE channel ever created — the second accept reused it.
+    assert created == [{"bot_token": "xoxb-test", "name": "tekijin-1-10"}]
+    with get_sessionmaker(engine)() as session:
+        link = get_channel_link(session, 1, 10)
+        assert link.slack_channel_id == "C1"
+        assert link.current_thread_id == second_thread_id
 
 
 def test_message_thread_rejects_non_party(seed_counts, engine, fake_embedder) -> None:
@@ -1599,6 +2387,164 @@ def test_stale_outcome_recommendation_id_is_rejected(seed_counts, engine, fake_e
         json={"session_id": "stale1", "outcome": "accepted", "recommendation_id": new_rid},
     )
     assert ok.status_code == 200
+
+
+def test_stale_checkpoint_primary_rebinds_to_the_shown_candidate(
+    seed_counts, engine, fake_embedder
+) -> None:
+    # #94-3: `primary_recommendation_id` reaches the checkpoint only at the END of a
+    # stream segment, while the graph checkpoints `recommendations` per node. A
+    # disconnect in between (decline -> reroute -> rows INSERTed -> GeneratorExit)
+    # leaves the id on the DECLINED row while the shown candidate has moved on.
+    # Recording the next outcome there would attribute it to the wrong person AND
+    # wedge the hand-off (that row already carries "declined", so every later submit
+    # returns "already"). The SHOWN person wins.
+    service = _service(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    client = _app_client(service)
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "stale2"})
+    _events(client, "stale2")
+    old_rid = client.get("/handoff/stale2").json()["recommendation_id"]
+
+    client.post("/answer", json={"session_id": "stale2", "outcome": "declined"})
+    _events(client, "stale2")
+    new_rid = client.get("/handoff/stale2").json()["recommendation_id"]
+    assert new_rid != old_rid
+
+    check = get_sessionmaker(engine)()
+    try:
+        question_id = check.get(Recommendation, new_rid).question_id
+    finally:
+        check.close()
+
+    # The state the lost write-back leaves behind: shown person is candidate 2,
+    # the stored id still points at candidate 1's declined row.
+    stale_values = {
+        "question_id": question_id,
+        "primary_recommendation_id": old_rid,
+        "recommendations": [{"person_id": 2}],
+    }
+    with session_scope(service._session_factory) as session:
+        assert service._resolve_primary(session, stale_values) == new_rid
+        # A consistent checkpoint is left alone (no rebind, no surprise).
+        consistent = {
+            "question_id": question_id,
+            "primary_recommendation_id": old_rid,
+            "recommendations": [{"person_id": 1}],
+        }
+        assert service._resolve_primary(session, consistent) == old_rid
+        # A shown candidate with NO persisted row resolves to None rather than to
+        # someone else's row: binding this person's answer to another employee's
+        # recommendation would mis-attribute `answers.responder_id` (#274). The
+        # caller degrades to "no_target" instead.
+        orphan = {
+            "question_id": question_id,
+            "primary_recommendation_id": old_rid,
+            "recommendations": [{"person_id": 39}],  # never recommended here
+        }
+        assert service._resolve_primary(session, orphan) is None
+
+
+def test_stale_checkpoint_outcome_lands_on_the_shown_candidate(
+    seed_counts, engine, fake_embedder
+) -> None:
+    # End-to-end consequence of the above: with a stale id in the checkpoint, the
+    # responder's accept must still (a) be accepted rather than 409'd by its own
+    # generation token, and (b) be recorded on the SHOWN candidate's row.
+    service = _service(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    client = _app_client(service)
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "stale3"})
+    _events(client, "stale3")
+    old_rid = client.get("/handoff/stale3").json()["recommendation_id"]
+    client.post("/answer", json={"session_id": "stale3", "outcome": "declined"})
+    _events(client, "stale3")
+    new_rid = client.get("/handoff/stale3").json()["recommendation_id"]
+
+    # Rewind ONLY the id, exactly as the lost `_persist_run_state` would.
+    db = service._session_factory()
+    try:
+        service._graph(db).update_state(
+            service._config("stale3"), {"primary_recommendation_id": old_rid}
+        )
+    finally:
+        db.close()
+
+    # /handoff must hand out the RESOLVED id, or the responder would echo the
+    # superseded one straight back into the #94-2 guard and 409 their own submit.
+    assert client.get("/handoff/stale3").json()["recommendation_id"] == new_rid
+
+    ok = client.post(
+        "/answer",
+        json={"session_id": "stale3", "outcome": "accepted", "recommendation_id": new_rid},
+    )
+    assert ok.status_code == 200
+
+    check = get_sessionmaker(engine)()
+    try:
+        assert check.get(Recommendation, new_rid).outcome == "accepted"
+        assert check.get(Recommendation, old_rid).outcome == "declined"  # untouched
+    finally:
+        check.close()
+
+
+def test_stale_checkpoint_answer_row_is_attributed_to_the_shown_responder(
+    seed_counts, engine, fake_embedder
+) -> None:
+    # #94-3 x #274: the captured answer must be attributed to the person who
+    # actually answered. Resolving through the stale id would file candidate 2's
+    # answer under candidate 1 — polluting the reuse corpus and lighting the wrong
+    # employee's "回答が届きました".
+    service = _service(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    client = _app_client(service)
+    client.post("/ask", json={"asker_id": 7, "question": GOOD_Q, "session_id": "stale4"})
+    _events(client, "stale4")
+    old_rid = client.get("/handoff/stale4").json()["recommendation_id"]
+    client.post("/answer", json={"session_id": "stale4", "outcome": "declined"})
+    _events(client, "stale4")
+
+    db = service._session_factory()
+    try:
+        service._graph(db).update_state(
+            service._config("stale4"), {"primary_recommendation_id": old_rid}
+        )
+    finally:
+        db.close()
+
+    body = "拠点間はIPsec VPNで設定し、各ルータのSAを揃えてください。"
+    assert (
+        client.post(
+            "/answer", json={"session_id": "stale4", "outcome": "accepted", "answer_body": body}
+        ).status_code
+        == 200
+    )
+
+    check = get_sessionmaker(engine)()
+    try:
+        q = (
+            check.query(Question)
+            .filter(Question.asker_id == 7, Question.body == GOOD_Q)
+            .order_by(Question.created_at.desc())
+            .first()
+        )
+        answers = check.query(Answer).filter(Answer.question_id == q.id).all()
+        assert len(answers) == 1
+        assert answers[0].responder_id == 2  # the SHOWN candidate, not the declined 1
+    finally:
+        check.close()
 
 
 def test_handoff_conflicts_when_awaiting_clarification(seed_counts, engine, fake_embedder) -> None:

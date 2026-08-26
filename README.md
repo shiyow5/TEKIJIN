@@ -123,14 +123,14 @@ Issue → ブランチ → 実装 → `make check` → PR（develop向け）→ 
 | 対象 | 言語/FW | フォーマッタ | Linter | テスト |
 |---|---|---|---|---|
 | backend | Python 3.12（FastAPI + LangGraph + SQLAlchemy/pgvector） | ruff format | ruff（型検査は mypy を併用） | pytest |
-| frontend | TypeScript（Next.js 15 + React 19 + Tailwind） | Biome | Biome | vitest + Playwright(E2E) |
+| frontend | TypeScript（Next.js 15 + React 19 + Tailwind） | Biome | Biome（型検査は tsc を併用） | vitest + Playwright(E2E) |
 
 ## CI
 
 `main` への push と Pull Request で、変更のあった領域だけ以下が走ります。
 
 - **Format Check** … 整形崩れの検出
-- **Lint** … 静的解析（ruff / Biome）
+- **Lint** … 静的解析（ruff / Biome）＋ 型検査（backend: `mypy src` / frontend: `tsc --noEmit`）
 - **Test** … backend pytest（PostgreSQL+pgvector 結合を含む）／frontend vitest
 - **E2E** … frontend の Playwright（主要フローのブラウザテスト）
 

@@ -28,6 +28,10 @@ build/
 # Environment & secrets
 # ============================================================
 .env
+# `.env` alone does not cover a dated backup — and a teardown that copies
+# secrets next to it would otherwise be one `git add .` away from committing them.
+.env.bak*
+env.bak*
 .env.local
 .env.*.local
 .env.production

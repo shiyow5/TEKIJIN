@@ -190,3 +190,81 @@ def test_daily_report_sources_reads_topic_bearing_reports(seed_counts, session) 
         assert s.source_type == "daily_report" and s.source_id
         assert s.text  # content (plus issue) is present
         assert topic in s.topics  # the filter matched via the topics array
+
+
+# --------------------------------------------------------------------------- #
+# chat extraction (#448): topics inferred from LLM hints, snapped to vocabulary
+# --------------------------------------------------------------------------- #
+def _chat_src(source_id: str = "chat_IT問い合わせ_1") -> ExtractionSource:
+    # A tag-less chat conversation: topics come from the model's hints, not source.
+    return ExtractionSource(
+        source_type="chat",
+        source_id=source_id,
+        text="社員5: VPNが繋がりません\n社員9: クライアント証明書を入れ直してください",
+        topics=(),
+    )
+
+
+def test_chat_prompt_uses_the_chat_system_instruction() -> None:
+    # A chat source must get the conversation prompt (asks for topic_hints), not the
+    # daily-report prompt.
+    fake = _FakeModel(CaseExtractionSchema(extractable=False))
+    extractor = CaseExtractor(model=fake)
+    extractor.extract(_chat_src())
+    system_text = fake.calls[0][0][1]
+    assert "会話" in system_text and "topic_hints" in system_text
+    # a daily source still gets the daily prompt
+    fake2 = _FakeModel(CaseExtractionSchema(extractable=False))
+    CaseExtractor(model=fake2).extract(_src())
+    assert "営業日報" in fake2.calls[0][0][1]
+
+
+def test_chat_extract_infers_and_normalizes_topics(seed_counts, session) -> None:
+    # The model proposes free-text hints; the caller snaps them to the canonical
+    # vocabulary ("VPN" -> "ネットワーク・VPN") and never lets the model mint a topic.
+    schema = CaseExtractionSchema(
+        extractable=True,
+        problem="VPNが繋がらない",
+        action="クライアント証明書を再インストール",
+        result="解決",
+        topic_hints=["VPN", "存在しないトピック"],
+        confidence=0.7,
+    )
+    extractor = CaseExtractor(model=_FakeModel(schema))
+    counts = extract_and_store(
+        session, [_chat_src("chat_IT問い合わせ_9001")], extractor, infer_topics_from_hints=True
+    )
+    assert counts == {"seen": 1, "stored": 1, "skipped": 0, "errored": 0}
+    unit = get_knowledge_unit_by_source(session, "chat", "chat_IT問い合わせ_9001")
+    assert unit is not None
+    assert unit.topics == ("ネットワーク・VPN",)  # normalized; off-vocab hint dropped
+
+
+def test_chat_extract_skips_case_with_no_routable_topic(seed_counts, session) -> None:
+    # A real case whose hints all fall off the vocabulary is not storable (untopiced
+    # units match no evidence). It is skipped, not stored with empty topics.
+    schema = CaseExtractionSchema(
+        extractable=True,
+        problem="p",
+        action="a",
+        topic_hints=["まったく無関係な語"],
+    )
+    extractor = CaseExtractor(model=_FakeModel(schema))
+    counts = extract_and_store(
+        session, [_chat_src("chat_x_9002")], extractor, infer_topics_from_hints=True
+    )
+    assert counts == {"seen": 1, "stored": 0, "skipped": 1, "errored": 0}
+    assert get_knowledge_unit_by_source(session, "chat", "chat_x_9002") is None
+
+
+def test_daily_extract_ignores_topic_hints_when_source_has_tags(seed_counts, session) -> None:
+    # Even if a (daily) model response carried hints, a tagged source keeps its own
+    # tags — the vocabulary lock for tag-bearing sources is unchanged (#357).
+    schema = CaseExtractionSchema(
+        extractable=True, problem="p", action="a", topic_hints=["セキュリティ"]
+    )
+    extractor = CaseExtractor(model=_FakeModel(schema))
+    src = ExtractionSource("daily_report", "80777", "text", ("CRM・営業支援",))
+    extract_and_store(session, [src], extractor, infer_topics_from_hints=True)
+    unit = get_knowledge_unit_by_source(session, "daily_report", "80777")
+    assert unit is not None and unit.topics == ("CRM・営業支援",)

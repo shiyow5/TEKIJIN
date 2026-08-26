@@ -285,6 +285,21 @@ export interface NotificationAckResponse {
   acknowledged: number;
 }
 
+/** GET /slack/authorize-url response (schemas.py `SlackAuthorizeUrlResponse`). */
+export interface SlackAuthorizeUrlResponse {
+  url: string;
+}
+
+/** GET /slack/status response (schemas.py `SlackStatusResponse`). */
+export interface SlackStatusResponse {
+  linked: boolean;
+}
+
+/** POST /slack/unlink response (schemas.py `SlackUnlinkResponse`). */
+export interface SlackUnlinkResponse {
+  ok: boolean;
+}
+
 // --------------------------------------------------------------------------- //
 // domain models (shared by SSE data and final response)
 // --------------------------------------------------------------------------- //
@@ -386,6 +401,8 @@ export interface ChatThreadDetail {
   question_title: string;
   counterpart: HandoffAsker;
   messages: ChatMessage[];
+  /** Deep link to this pair's shared Slack channel, or null if none exists yet. */
+  slack_channel_url: string | null;
 }
 
 // --------------------------------------------------------------------------- //
@@ -506,8 +523,23 @@ export interface DoneData {
  */
 export interface SourceCitation {
   source_id: string;
-  /** Closed set from the backend contract (fragments.py): a past Q&A or an internal doc. */
-  kind: "qa" | "document";
+  /**
+   * Closed set from the backend contract (fragments.py): a past Q&A, an internal
+   * doc, or a daily report (#433). "daily" has no detail page, so the UI shows it
+   * as a label chip rather than a link.
+   */
+  kind: "qa" | "document" | "daily";
+}
+
+/**
+ * #413: a cited answer surfaced ALONGSIDE a person hand-off ("参考: 過去の類似
+ * 回答"). Emitted as a `reference` event on the person route before `recommend`
+ * when a grounded past answer exists — additive, never a substitute for the
+ * hand-off (schemas.py `ReferenceData`).
+ */
+export interface ReferenceData {
+  answer: string;
+  citations: SourceCitation[];
 }
 
 export interface MessageData {
@@ -547,6 +579,7 @@ export interface SseEventDataMap {
   understood: UnderstoodData;
   followup: FollowupData;
   route: RouteData;
+  reference: ReferenceData;
   recommend: RecommendData;
   draft: DraftData;
   done: DoneData;

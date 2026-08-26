@@ -122,6 +122,39 @@ class Settings(BaseSettings):
     # low-hallucination). Safe by construction: it never intercepts a person query.
     self_answer_enabled: bool = True
 
+    # #413: additive self-answer on the PERSON route. self_answer (#291) fires ONLY
+    # on the data-derived routes (document/prior_answer) after C5 — so a knowledge
+    # question that routes to a person (an expert exists) never shows a past-answer
+    # citation, even when one grounds it. This makes System 1 also fire on the
+    # person route: before the hand-off, if a low-relevance FLOOR is cleared, try a
+    # grounded cited answer and surface it ALONGSIDE the recommendation. It NEVER
+    # replaces the hand-off (person recall unchanged) and never marks the run
+    # self-resolved. Requires self_answer to be wired (shares the composer).
+    # DGX sizing (research_selfanswer_person.py): person-route compose grounded rate
+    # 0.237 (avg 3.78 citations) — ~24% of person questions would gain a citation
+    # that today shows none. OFF by default until the full-graph E2E confirms person
+    # recall stays 1.000 and citations fire; the floor gates the compose LLM call so
+    # no-data person questions add no latency.
+    #
+    # Before enabling (security review #413):
+    # * The floor (0.20) is BELOW the data-route thresholds (DOCUMENT_SIM 0.28), so
+    #   it composes on weak-relevance evidence a data route would not pick — re-check
+    #   the false-positive rate on the DGX eval when tuning it.
+    # * The corpus has no per-row ACL, so a past answer is treated as readable by any
+    #   asker. Enabling surfaces past-answer summaries on the person route too, so
+    #   confirm with the product owner that past answers are org-wide readable.
+    # The compose call is best-effort: a failure degrades to a plain hand-off (the
+    # additive_answer node swallows it), so person recall never regresses.
+    #
+    # Enabled by default (#413 → task3): the DGX full-graph floor sweep confirmed
+    # floor 0.20 is the sweet spot — person route recall stays 1.000 at every floor
+    # (additive is routing-safe by construction), and 0.20 fires on 17/76 person rows
+    # at precision 0.740, while 0.15 collapses precision to 0.583 for one extra firing
+    # and 0.30 fires on only 6/76. The product owner confirmed past answers are
+    # org-wide readable (already surfaced by the knowledge library, #293).
+    additive_self_answer_enabled: bool = True
+    additive_self_answer_floor: float = 0.20
+
     # #327: corpus-count routing for prior_answer. Nemotron's answer cosine cannot
     # separate this route (PRIOR_ANSWER_SIM sits above the observed max — see
     # route.py / #119), so route on whether the top retrieved past answer is a
@@ -140,6 +173,25 @@ class Settings(BaseSettings):
     # after DGX confirms a Pareto gain (primary R@3 up, alt not down).
     daily_evidence_enabled: bool = False
 
+    # #433: search daily reports as a KNOWLEDGE SOURCE for System 1 (distinct from
+    # #355 daily_evidence, which uses topic-overlap for the C6 scorer). When on, C4
+    # runs a question↔daily dense search and self-answer / #413 additive can cite a
+    # report's tacit knowledge (issue + content) alongside answers/documents. OFF by
+    # default (no daily channel, RetrievalResult byte-identical). DGX sizing
+    # (research_knowledge_source.py): person-route self-answer grounded rate
+    # 0.265->0.347 (+0.082, daily cited on 6%) — chat was noise and even hurt, so
+    # ONLY daily is wired. Requires the daily embedding column filled (make embed).
+    #
+    # Enabled by default (#433 → task3): the DGX full-graph run (--additive
+    # --daily-knowledge, floor 0.20) held person route recall at 1.000 and raised the
+    # self-answer grounded rate 0.217->0.261 (+0.044) with source recall +0.010. Daily
+    # is routing-safe (C5 reads retrieval *_confidence, not the daily channel). The
+    # daily embedding column starts NULL after migrate; deploy.sh's embed_missing step
+    # (best-effort, only-missing) fills it on the next deploy, so the flag is inert
+    # (no daily hits, never an error) only until that first post-enable deploy runs —
+    # if that embed is skipped/fails, the channel simply stays empty until it succeeds.
+    daily_knowledge_enabled: bool = True
+
     # #405: add a question↔past-answer similarity (qsim) term to the C6 score. The
     # scorer's topic_fit sees only the topic TAG and saturates (ADR-0006), so it
     # cannot re-rank on the specific question — and when C1 mispredicts the topic it
@@ -153,6 +205,56 @@ class Settings(BaseSettings):
     # localised the gain to the rows where C1 mispredicts the topic (Hit@3 on those
     # 0.444->0.778). Set False to restore the pre-#405 (tag-only) ranking.
     question_fit_enabled: bool = True
+
+    # #87: score the WHOLE employee roster in C6 instead of only the people C4's
+    # top chunks surfaced. C4's narrowing drops people who hold the evidence but
+    # whose chunks did not rank, and that loss was measured (層2 R@3 -0.048 at
+    # top-10, -0.020 at top-20/40 — i.e. it is the reachable SET, not the cut-off).
+    # At a 40-person roster the scorer is a deterministic few-ms computation, so
+    # there is no cost argument for narrowing. OFF by default until the full-graph
+    # E2E measurement confirms Hit@3 improves without moving person route recall
+    # (the route reads C4's set separately and must stay at 1.000 — ADR-0007).
+    # MEASURED AND NOT ADOPTED (ADR-0009): on the real graph, 3 paired replicates
+    # put Hit@3 at 0.7778 (C4 pool) vs 0.7626 (whole roster) — consistently one row
+    # worse, never better; person route recall stayed 1.000 either way. C4's set is
+    # not only a narrowing, it is the prior "this person was retrievable for this
+    # question"; widening it lets a high-generic-topic_fit person with no
+    # question-specific evidence displace the right one. #405's qsim only partly
+    # offsets that: it is built from the ANSWER dense channel's hits (pool = 50 for
+    # every current call site, where top_k = 10), so it is 0 for anyone whose past
+    # answers did not reach that pool. On this corpus that is a different set from
+    # `candidate_people` (top_k = 10) — neither contains the other — so widening to
+    # the roster still adds people who can take no question-specific credit.
+    # An earlier version of this comment said "qsim is 0 for anyone C4 did not
+    # surface"; that is WRONG (ADR-0009 carries the correction) and it understated
+    # qsim's reach — the true nonzero domain is LARGER than `candidate_people`.
+    # So treat this sentence as secondary, exactly as ADR-0009 does: the decision
+    # rests on the measured Hit@3 above, not on this mechanism being airtight.
+    # The flag stays so the measurement is one command away when the scorer or
+    # corpus changes.
+    # At thousands of employees the pool should come from person_topic_edges by
+    # topic rather than the whole table; that is a cost concern, not an accuracy one.
+    score_all_employees: bool = False
+
+    # #83: when the asker explicitly asks for someone at a given branch ("福岡の拠点で
+    # 動ける方だと助かります"), treat it as a CONDITION in C6 rather than a scoring term.
+    #
+    # OFF, and NOT yet enablable — the measurement that would justify enabling it is
+    # CONTAMINATED. The DGX full-graph A/B looks strong (Hit@3 0.7626 -> 0.8232 over 3
+    # paired replicates, +0.0606 every time, routing byte-identical), and C1's branch
+    # extraction measured 15/15 with 1 false fire in 72. But the C1 prompt was written
+    # AFTER reading the eval's constrained rows: its two special rules (本部->本社,
+    # 地方名->拠点) cover exactly the ids a naive extractor misses
+    # (`ablation/robustness_results.json`: 11/13/15/17/19/21/24/25), and its negative
+    # example is a verbatim lift of eval row 1. So both numbers measure a prompt fitted
+    # to the rows it is scored on — the same defect that got "C1 few-shot Hit@3 0.803"
+    # retracted (#384). Enabling needs held-out constraint phrasings authored without
+    # reference to this prompt.
+    #
+    # Also unsettled: the committed bench has 「拠点一致を加点」 and 「拠点で絞ってから
+    # 並べる」 at the SAME 0.9333/0.7727 (`robustness_results.json`), so a one-line
+    # `proximity` weight bump may buy the same thing as this new code path.
+    branch_constraint_enabled: bool = False
 
     # #357: knowledge framework. When the knowledge layer is wired into retrieval,
     # answer a question from structured knowledge units (problem → action → result,
@@ -354,6 +456,18 @@ class Settings(BaseSettings):
     feedback_max_per_window: int = 60
     feedback_window_seconds: float = 60.0
 
+    # FastAPI's auto-docs (``/docs``, ``/redoc``, ``/openapi.json``). Default OFF:
+    # ``/openapi.json`` publishes every endpoint's path, parameters and types, which
+    # is a map of the protected surface even though no data leaks. It was reachable
+    # on the internet-exposed deploy (#452/#457) purely because nobody set anything,
+    # so the default has to be the safe one.
+    #
+    # A SEPARATE knob, not derived from ``app_env`` — the DGX runs
+    # ``app_env=development`` for an unrelated reason (#108/#173), so gating on that
+    # would leave production open. Same reasoning as ``strict_durability`` /
+    # ``strict_auth``; set ``TEKIJIN_EXPOSE_API_DOCS=true`` on a dev box that wants them.
+    expose_api_docs: bool = False
+
     # Fail-closed on insecure auth defaults (#241), mirroring ``strict_durability``.
     # ``None`` (default) derives from ``app_env`` (enforced when not "development").
     # A SEPARATE knob because the DGX host runs app_env=development for an unrelated
@@ -368,6 +482,44 @@ class Settings(BaseSettings):
         if self.strict_auth is not None:
             return self.strict_auth
         return self.app_env != "development"
+
+    # --- Slack integration (chat <-> Slack DM, #388) --------------------------- #
+    # "Sign in with Slack" OAuth app credentials for account linking, plus a bot
+    # token for sending DM notifications once linked. All blank by default — no
+    # real Slack App has been registered yet — which leaves the feature disabled
+    # (see ``slack_configured()``) rather than failing at import time. Set these
+    # via TEKIJIN_SLACK_* env vars once a Slack App exists.
+    slack_client_id: str = ""
+    slack_client_secret: str = ""
+    # Must exactly match a Redirect URL registered on the Slack App (points at
+    # this backend's GET /slack/oauth/callback, e.g. http://localhost:8000/slack/oauth/callback).
+    slack_redirect_uri: str = ""
+    # Bot token (xoxb-...) used only to send the DM notification itself — never
+    # the linking user's own token, so there is nothing per-user to refresh.
+    slack_bot_token: str = ""
+    # Signing Secret (Slack App -> Basic Information), used to verify that a
+    # POST /slack/events request genuinely came from Slack (#388: a reply typed
+    # in the linked Slack DM lands back in the TEKIJIN thread). Requires the
+    # backend to have a public URL Slack can reach (e.g. ngrok in local dev) —
+    # a purely local/offline setup can leave this blank and use notifications
+    # (TEKIJIN -> Slack) only.
+    slack_signing_secret: str = ""
+    # Where the OAuth callback sends the browser back to once linking finishes.
+    slack_frontend_url: str = "http://localhost:3000"
+
+    def slack_configured(self) -> bool:
+        """True once the OAuth app credentials needed to start linking exist.
+
+        ``slack_bot_token`` is checked separately (:func:`slack_notifications_enabled`)
+        since notifications and linking can be turned on independently.
+        """
+
+        return bool(self.slack_client_id and self.slack_client_secret and self.slack_redirect_uri)
+
+    def slack_notifications_enabled(self) -> bool:
+        """True once a bot token exists to actually send DM notifications."""
+
+        return bool(self.slack_bot_token)
 
 
 @lru_cache

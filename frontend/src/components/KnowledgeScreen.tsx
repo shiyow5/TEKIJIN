@@ -28,10 +28,10 @@
  * — no end date — by request; the API's `until` param exists but is
  * deliberately not exposed here.
  *
- * The unsearched (browse) view is a single unpaginated page of the latest
- * `RESULT_LIMIT` items; once any filter is active, results page through
- * `RESULT_LIMIT` at a time via `offset` (pagination matters once a filter can
- * match more than one page's worth).
+ * Results always page through `RESULT_LIMIT` at a time via `offset`, including
+ * the unfiltered browse view — a library whose whole point is "someone already
+ * asked this" is unusable if only the newest page is ever reachable, and a
+ * reader who cannot think of a keyword has no other way in.
  *
  * The side panel's stats reuse the dashboard's existing self-resolution rate
  * (via `summary` on the same response) rather than introducing a new
@@ -46,7 +46,7 @@ import { formatDateJst } from "@/lib/datetime";
 import Link from "next/link";
 import { type FormEvent, useEffect, useState } from "react";
 
-const RESULT_LIMIT = 8;
+const RESULT_LIMIT = 5;
 
 type Phase = "loading" | "ready" | "error";
 
@@ -205,87 +205,103 @@ export function KnowledgeScreen() {
 
   const hasActiveFilters = Object.values(filters).some((v) => v !== "");
   const pageCount = state.totalMatching ? Math.ceil(state.totalMatching / RESULT_LIMIT) : 0;
-  // Pagination only matters once a filter is active — the plain browse view is
-  // a single unpaginated page of the latest items (by request).
-  const showPagination = hasActiveFilters && pageCount > 1;
+  // Shown whenever there is more than one page — browsing included. Gating this
+  // on an active filter left everything past the newest page unreachable unless
+  // the reader already knew a keyword to search for.
+  const showPagination = pageCount > 1;
 
   return (
     <section className="mx-auto flex w-full max-w-5xl flex-col gap-lg px-md py-lg">
       <PageBackLink href="/" label="ホームへ戻る" className="self-center md:self-start" />
       <h1 className="text-center font-bold text-2xl text-on-surface">ナレッジライブラリー</h1>
 
-      <form
-        onSubmit={submitFilters}
-        className="flex flex-col items-center gap-sm rounded-xl border border-outline-variant bg-surface-container-lowest p-md"
-      >
-        <label className="flex w-full flex-col gap-xs text-on-surface-variant text-xs">
-          キーワード
+      <form onSubmit={submitFilters} className="flex w-full flex-col gap-md">
+        {/* The keyword box is the primary action, so it is sized like one: the
+            same bordered, shadowed, focus-highlighted bar the question input
+            uses, with the submit inline. It used to be a `text-sm` field
+            stacked with the three filters inside one card, which read as "four
+            equal inputs" rather than "search, plus optional narrowing". */}
+        <div className="flex w-full items-center gap-xs rounded-xl border border-outline-variant bg-surface-container-lowest px-sm py-xs shadow-sm focus-within:border-primary">
           <input
             type="search"
             value={pending.q}
             onChange={(e) => setPending((p) => ({ ...p, q: e.target.value }))}
-            placeholder="質問のキーワード"
-            className="w-full rounded-md border border-outline bg-surface px-sm py-xs text-on-surface text-sm"
+            aria-label="キーワードで検索"
+            placeholder="キーワードで検索（例: VPN, 経費精算）"
+            className="w-full bg-transparent px-sm py-2 text-base text-on-surface outline-none placeholder:text-on-surface-variant"
           />
-        </label>
-        <div className="grid w-full grid-cols-1 gap-sm sm:grid-cols-3">
-          <label className="flex flex-col gap-xs text-on-surface-variant text-xs">
-            部署
-            <select
-              value={pending.department}
-              onChange={(e) => setPending((p) => ({ ...p, department: e.target.value }))}
-              className="w-full rounded-md border border-outline bg-surface px-sm py-xs text-on-surface text-sm"
-            >
-              <option value="">すべて</option>
-              {options.departments.map((dept) => (
-                <option key={dept} value={dept}>
-                  {dept}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex flex-col gap-xs text-on-surface-variant text-xs">
-            トピック
-            <select
-              value={pending.topic}
-              onChange={(e) => setPending((p) => ({ ...p, topic: e.target.value }))}
-              className="w-full rounded-md border border-outline bg-surface px-sm py-xs text-on-surface text-sm"
-            >
-              <option value="">すべて</option>
-              {options.topics.map((topic) => (
-                <option key={topic} value={topic}>
-                  {topic}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex flex-col gap-xs text-on-surface-variant text-xs">
-            期間（この日以降）
-            <input
-              type="date"
-              value={pending.since}
-              onChange={(e) => setPending((p) => ({ ...p, since: e.target.value }))}
-              className="w-full rounded-md border border-outline bg-surface px-sm py-xs text-on-surface text-sm"
-            />
-          </label>
-        </div>
-        <div className="flex items-center justify-center gap-sm">
           <button
             type="submit"
-            className="rounded-md bg-primary px-md py-xs font-bold text-on-primary text-sm"
+            className="shrink-0 rounded-lg bg-primary px-md py-sm font-bold text-on-primary text-sm transition-colors hover:bg-primary-container"
           >
             検索
           </button>
-          {hasActiveFilters ? (
-            <button
-              type="button"
-              onClick={clearFilters}
-              className="rounded-md px-md py-xs text-on-surface-variant text-sm hover:underline"
-            >
-              条件をクリア
-            </button>
-          ) : null}
         </div>
+
+        {/* The three narrowing controls are grouped under their own heading so
+            they read as optional refinements of the search above, not as more
+            things that must be filled in. */}
+        <fieldset className="flex flex-col gap-sm rounded-xl border border-outline-variant bg-surface-container-lowest p-md">
+          <legend className="px-xs font-bold text-on-surface-variant text-xs">絞り込み</legend>
+          <div className="grid w-full grid-cols-1 gap-sm sm:grid-cols-3">
+            <label className="flex flex-col gap-xs text-on-surface-variant text-xs">
+              部署
+              <select
+                value={pending.department}
+                onChange={(e) => setPending((p) => ({ ...p, department: e.target.value }))}
+                className="w-full rounded-md border border-outline bg-surface px-sm py-xs text-on-surface text-sm"
+              >
+                <option value="">すべて</option>
+                {options.departments.map((dept) => (
+                  <option key={dept} value={dept}>
+                    {dept}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-xs text-on-surface-variant text-xs">
+              トピック
+              <select
+                value={pending.topic}
+                onChange={(e) => setPending((p) => ({ ...p, topic: e.target.value }))}
+                className="w-full rounded-md border border-outline bg-surface px-sm py-xs text-on-surface text-sm"
+              >
+                <option value="">すべて</option>
+                {options.topics.map((topic) => (
+                  <option key={topic} value={topic}>
+                    {topic}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-xs text-on-surface-variant text-xs">
+              期間（この日以降）
+              <input
+                type="date"
+                value={pending.since}
+                onChange={(e) => setPending((p) => ({ ...p, since: e.target.value }))}
+                className="w-full rounded-md border border-outline bg-surface px-sm py-xs text-on-surface text-sm"
+              />
+            </label>
+          </div>
+          <div className="flex items-center justify-end gap-sm">
+            <button
+              type="submit"
+              className="rounded-md border border-outline px-md py-xs text-on-surface text-sm transition-colors hover:bg-surface-container-low"
+            >
+              絞り込む
+            </button>
+            {hasActiveFilters ? (
+              <button
+                type="button"
+                onClick={clearFilters}
+                className="rounded-md px-md py-xs text-on-surface-variant text-sm hover:underline"
+              >
+                条件をクリア
+              </button>
+            ) : null}
+          </div>
+        </fieldset>
       </form>
 
       <div className="flex flex-col gap-lg md:flex-row md:items-start">

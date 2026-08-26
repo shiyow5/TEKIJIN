@@ -127,6 +127,15 @@ TEKIJIN_PORT=18001 TEKIJIN_VENV_PY=~/tekijin-bench/.venv/bin/python \
 curl -s http://localhost:18001/health        # {"status":"ok",...} を確認
 ```
 
+- `start_backend.sh` が **`TZ=UTC` を固定する**（#456）。このホストは `Asia/Tokyo` だが、
+  コードは naive な timestamp を**2系統**で書いている。
+  `questions` `slack_links` などは Python の `datetime.now()`（＝ホストのTZ）、
+  `messages` `answers` などは Postgres の `now()`（＝UTC）。
+  UTC に固定しないと**同じDBの中で JST と UTC が混ざり**、画面の時刻が
+  テーブルによって9時間ずれる。コンテナは元から UTC なのでこの問題が出ない。
+  **`nohup` / `deploy.sh` / systemd のどれで起動しても同じ**になるよう、
+  呼び出し側ではなくスクリプト内で設定している。
+
 - `deploy/start_backend.sh` は foreground で `exec uvicorn` する（`TEKIJIN_PORT` /
   `TEKIJIN_VENV_PY` で上書き可）。**末尾に他コマンドを付けない**（ssh が閉じて起動失敗する）。
 - 常駐させたいなら [`deploy/tekijin-backend.service`](../deploy/tekijin-backend.service)

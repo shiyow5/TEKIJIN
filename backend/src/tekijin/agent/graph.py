@@ -127,9 +127,14 @@ def build_agent(
     prior_answer_reuse_min: int | None = None,
     prior_answer_relevance_floor: float = 0.15,
     daily_evidence: bool = False,
+    daily_knowledge_enabled: bool = False,
     knowledge_answer_min_similarity: float | None = None,
     query_expansion_enabled: bool = False,
     question_fit_enabled: bool = False,
+    branch_constraint_enabled: bool = False,
+    additive_self_answer_enabled: bool = False,
+    additive_self_answer_floor: float = 0.20,
+    score_all_employees: bool = False,
 ):
     """Compile and return the C1-C8 agent graph.
 
@@ -150,6 +155,12 @@ def build_agent(
             prior_answer routes first try a cited answer from the retrieved
             evidence; a grounded answer terminates at ``self_answered``, otherwise
             the run falls back to the original route (document terminal / hand-off).
+        score_all_employees: #87, MEASURED AND REJECTED (ADR-0009) — kept only so the
+            measurement can be reproduced. ``False`` (default) scores only the people
+            C4's top chunks surfaced. ``True`` hands C6 the whole roster instead; the
+            C5 route signal keeps reading C4's set either way, but note that with the
+            whole roster C6 essentially always finds someone, so the ``no_candidate``
+            terminal (「適任者が見つかりませんでした」) becomes unreachable in practice.
         checkpointer: LangGraph checkpointer; default ``MemorySaver``.
     """
 
@@ -160,7 +171,13 @@ def build_agent(
         embedder=embedder,
         retriever=retriever
         or HybridRetriever(
-            embedder, session, top_k=retriever_top_k, rrf_k=rrf_k, bm25_weight=bm25_weight
+            embedder,
+            session,
+            top_k=retriever_top_k,
+            rrf_k=rrf_k,
+            bm25_weight=bm25_weight,
+            # #433: search daily reports as a knowledge source (False = OFF, dormant).
+            daily_knowledge_enabled=daily_knowledge_enabled,
         ),
         scorer=scorer
         or ExpertiseScorer(Repository(session), weights=weights, daily_evidence=daily_evidence),
@@ -180,6 +197,14 @@ def build_agent(
         query_expansion_enabled=query_expansion_enabled,
         # #405: add the question↔past-answer term to C6 (False = OFF, dormant).
         question_fit_enabled=question_fit_enabled,
+        # #83: honour an explicitly requested branch in C6 (False = OFF, dormant).
+        branch_constraint_enabled=branch_constraint_enabled,
+        employee_branches=Repository(session) if branch_constraint_enabled else None,
+        # #413: additive cited answer on the person route (False = OFF, dormant).
+        additive_self_answer_enabled=additive_self_answer_enabled,
+        additive_self_answer_floor=additive_self_answer_floor,
+        # #87: score the whole roster in C6 (False = OFF -> C4's candidate set).
+        employee_source=Repository(session) if score_all_employees else None,
     )
     # #70: the critic is wired only when a model is supplied. Off (the default) the
     # graph is byte-for-byte the pre-#70 flow — C6 -> C7 directly.
@@ -255,13 +280,23 @@ def build_agent(
     # prior_answer) try a cited self-answer first; the PERSON route (weak data)
     # goes straight to the hand-off as before. Off, the mapping is the pre-#291 one.
     data_route_target = "self_answer" if self_answer_wired else None
+    # #413: additive cited answer on the person route. Only when self_answer is
+    # wired (shares the composer) AND enabled. PERSON then flows through the
+    # ``additive_answer`` node, which composes a grounded citation to show ALONGSIDE
+    # the hand-off and ALWAYS continues to c6_score (never terminates, never steals
+    # the route). Off, PERSON goes straight to c6_score exactly as before.
+    additive_wired = self_answer_wired and additive_self_answer_enabled
+    person_target = "additive_answer" if additive_wired else "c6_score"
+    if additive_wired:
+        graph.add_node("additive_answer", nodes.additive_answer)
+        graph.add_edge("additive_answer", "c6_score")
     graph.add_conditional_edges(
         "c5_route",
         _after_c5,
         # #279: the document route now also runs C6 to rank a person fallback; the
         # DOCUMENT terminal presents the document AND those candidates.
         {
-            PERSON: "c6_score",
+            PERSON: person_target,
             PRIOR_ANSWER: data_route_target or "prior_answer",
             DOCUMENT: data_route_target or "c6_score",
         },

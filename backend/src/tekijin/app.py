@@ -15,8 +15,10 @@ from tekijin.api.health import router as health_router
 from tekijin.api.rate_limit import SlidingWindowLimiter
 from tekijin.api.routes import router as api_router
 from tekijin.api.service import AgentService
+from tekijin.api.slack_routes import router as slack_router
 from tekijin.auth.service import LoginRateLimiter
 from tekijin.config import DEV_ADMIN_PASSWORD, DEV_AUTH_SECRET, Settings, get_settings
+from tekijin.slack.dedup import SeenEventIds
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +66,19 @@ def create_app(agent_service: AgentService | None = None) -> FastAPI:
 
     settings = get_settings()
     _enforce_secure_auth(settings)
-    app = FastAPI(title="TEKIJIN", version=__version__, lifespan=_lifespan)
+    # ``None`` removes the route entirely (404), rather than serving an empty page.
+    # ``openapi_url=None`` alone would already disable /docs and /redoc (they have
+    # nothing to render without it), but all three are spelled out so the intent
+    # survives someone re-enabling just the schema later.
+    docs = settings.expose_api_docs
+    app = FastAPI(
+        title="TEKIJIN",
+        version=__version__,
+        lifespan=_lifespan,
+        docs_url="/docs" if docs else None,
+        redoc_url="/redoc" if docs else None,
+        openapi_url="/openapi.json" if docs else None,
+    )
 
     # Explicit origins: a wildcard origin combined with allow_credentials=True is
     # rejected by browsers, so the allowed origins come from settings.cors_origins.
@@ -93,8 +107,12 @@ def create_app(agent_service: AgentService | None = None) -> FastAPI:
         max_events=settings.feedback_max_per_window,
         window_seconds=settings.feedback_window_seconds,
     )
+    # In-process de-dup for Slack Events API retries (#hand-off-chat), across
+    # the process — see SeenEventIds' docstring.
+    app.state.slack_seen_event_ids = SeenEventIds()
 
     app.include_router(health_router)
     app.include_router(auth_router)
     app.include_router(api_router)
+    app.include_router(slack_router)
     return app

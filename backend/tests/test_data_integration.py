@@ -697,6 +697,10 @@ def test_apply_schema_upgrades_migrates_old_db(database_url: str) -> None:
                 {"s": schema},
             ).scalar()
             assert has_daily_topics == 1
+            # #433: daily_reports.embedding is ADDED to the pre-existing table (it
+            # had no embedding column) at the current dim, so a daily report can be
+            # a knowledge source. Exercises the new ADD COLUMN + widen-array entry.
+            assert embedding_type(conn, "daily_reports") == "vector(2048)"
 
         # Idempotent: a second run is a no-op (still 2048, no error).
         _apply_schema_upgrades(eng)

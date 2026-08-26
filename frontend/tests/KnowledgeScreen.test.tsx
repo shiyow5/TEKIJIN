@@ -93,7 +93,7 @@ describe("KnowledgeScreen", () => {
     await waitFor(() => expect(screen.getByText("UTMの移行時の注意点")).toBeInTheDocument());
     getKnowledgeListMock.mockClear();
 
-    fireEvent.change(screen.getByPlaceholderText("質問のキーワード"), {
+    fireEvent.change(screen.getByPlaceholderText(/キーワードで検索/), {
       target: { value: "Wi-Fi" },
     });
     fireEvent.click(screen.getByRole("button", { name: "検索" }));
@@ -162,7 +162,7 @@ describe("KnowledgeScreen", () => {
     await waitFor(() => expect(screen.getByText("UTMの移行時の注意点")).toBeInTheDocument());
     getKnowledgeListMock.mockClear();
 
-    fireEvent.change(screen.getByPlaceholderText("質問のキーワード"), {
+    fireEvent.change(screen.getByPlaceholderText(/キーワードで検索/), {
       target: { value: "Wi-Fi" },
     });
     fireEvent.click(screen.getByRole("button", { name: "検索" }));
@@ -181,31 +181,32 @@ describe("KnowledgeScreen", () => {
     expect(screen.queryByRole("button", { name: "条件をクリア" })).not.toBeInTheDocument();
   });
 
-  it("paginates search results 8 at a time, but not the plain browse view", async () => {
-    render(<KnowledgeScreen />);
-    await waitFor(() => expect(screen.getByText("UTMの移行時の注意点")).toBeInTheDocument());
-    // The unsearched browse view never paginates, even with more than one
-    // page's worth of matches (total_matching from the seeded RESPONSE mock).
-    expect(screen.queryByRole("button", { name: "次へ" })).not.toBeInTheDocument();
-
+  it("paginates 5 at a time, browsing included", async () => {
     getKnowledgeListMock.mockResolvedValue({
       items: ITEMS,
-      total_matching: 12, // > RESULT_LIMIT (8) -> two pages
+      total_matching: 12, // > RESULT_LIMIT (5) -> three pages
       summary: RESPONSE.summary,
     });
+    render(<KnowledgeScreen />);
+    await waitFor(() => expect(screen.getByText("UTMの移行時の注意点")).toBeInTheDocument());
+    // Browsing paginates too: gating this on an active filter left everything
+    // past the newest page unreachable for a reader with no keyword in mind.
+    expect(await screen.findByText("1 / 3")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "次へ" })).toBeInTheDocument();
+
     getKnowledgeListMock.mockClear();
-    fireEvent.change(screen.getByPlaceholderText("質問のキーワード"), {
+    fireEvent.change(screen.getByPlaceholderText(/キーワードで検索/), {
       target: { value: "質問" },
     });
     fireEvent.click(screen.getByRole("button", { name: "検索" }));
     await waitFor(() =>
       expect(getKnowledgeListMock).toHaveBeenCalledWith(
-        expect.objectContaining({ q: "質問", offset: 0, limit: 8 }),
+        expect.objectContaining({ q: "質問", offset: 0, limit: 5 }),
       ),
     );
 
     // `findBy`: the waitFor above proves only that the fetch was issued.
-    expect(await screen.findByText("1 / 2")).toBeInTheDocument();
+    expect(await screen.findByText("1 / 3")).toBeInTheDocument();
     const prevButton = screen.getByRole("button", { name: "前へ" });
     const nextButton = screen.getByRole("button", { name: "次へ" });
     expect(prevButton).toBeDisabled();
@@ -215,11 +216,13 @@ describe("KnowledgeScreen", () => {
     fireEvent.click(nextButton);
     await waitFor(() =>
       expect(getKnowledgeListMock).toHaveBeenCalledWith(
-        expect.objectContaining({ q: "質問", offset: 8, limit: 8 }),
+        expect.objectContaining({ q: "質問", offset: 5, limit: 5 }),
       ),
     );
-    expect(await screen.findByText("2 / 2")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "次へ" })).toBeDisabled();
+    expect(await screen.findByText("2 / 3")).toBeInTheDocument();
+    // Page 2 of 3 — still more to go, so 次へ stays live and 前へ wakes up.
+    expect(screen.getByRole("button", { name: "次へ" })).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: "前へ" })).not.toBeDisabled();
   });
 
   it("shows an empty-state message when no items match", async () => {
