@@ -344,9 +344,13 @@ def _handle_interactivity_action(service: AgentService, raw: str) -> Response:
         outcome = value["outcome"]
         recommendation_id = int(value["recommendation_id"])
         slack_user_id = (payload.get("user") or {}).get("id")
-        # A payload without `user.id` cannot identify a responder. Querying with
-        # None would ask the DB for `slack_user_id IS NULL` — a row that must never
-        # match anyone — so decide it here instead of leaning on that (#441).
+        # A payload without `user.id` cannot identify a responder, so decide it here
+        # rather than sending the None to SQL. `slack_links.slack_user_id` is
+        # NOT NULL, so `WHERE slack_user_id IS NULL` could never have matched — the
+        # old code was not unsafe, it just spent a round-trip proving that and made
+        # the outcome depend on a constraint stated nowhere near here (#441).
+        # Truthiness rather than `is not None`: an empty-string id is equally
+        # unusable, and this way both fail closed at the same place.
         responder_id = None
         if slack_user_id:
             with service.session_factory() as session:

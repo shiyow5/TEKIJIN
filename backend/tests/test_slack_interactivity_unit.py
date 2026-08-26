@@ -185,9 +185,11 @@ def test_unlinked_slack_user_is_rejected_without_raising(monkeypatch) -> None:
 def test_payload_without_a_slack_user_id_never_queries_the_link_table(monkeypatch) -> None:
     """A `block_actions` payload with no `user.id` cannot identify a responder.
 
-    Previously that `None` was handed straight to `get_slack_link_by_slack_user_id`,
-    which turns into `WHERE slack_user_id IS NULL` — a query whose safety depends on
-    no link row ever having a NULL slack_user_id. Decide it before the DB instead (#441).
+    Previously that `None` was handed straight to `get_slack_link_by_slack_user_id`.
+    `slack_links.slack_user_id` is NOT NULL so the resulting `IS NULL` lookup could
+    never match — the old code was not unsafe, it just paid a round-trip to learn
+    that, and the rejection depended on a constraint declared far away. Decide it
+    before the DB instead (#441).
     """
 
     calls: list[object] = []
