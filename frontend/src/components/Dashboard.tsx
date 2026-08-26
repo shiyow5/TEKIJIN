@@ -7,9 +7,9 @@
  * (自己解決率 / 負荷分散 / 平均解決時間 / 推薦精度) plus load + topic distributions.
  */
 
-import { PageBackLink } from "@/components/PageBackLink";
 import { ApiError, getDashboard } from "@/lib/api-client";
-import type { DashboardResponse } from "@/lib/api-types";
+import type { DashboardResponse, KnowledgeAccumulation } from "@/lib/api-types";
+import { PageBackLink } from "@/components/PageBackLink";
 import { useEffect, useState } from "react";
 
 type Phase = "loading" | "ready" | "error" | "forbidden";
@@ -82,6 +82,104 @@ function DistributionBars({
         </li>
       ))}
     </ul>
+  );
+}
+
+/**
+ * The accumulation section (#294): how much tacit knowledge became explicit.
+ *
+ * Two headline numbers, because a raw count alone is unreadable — it only ever
+ * grows, so it says nothing about whether the loop is working. The month-over-month
+ * delta and the recovery rate are the parts that can fall.
+ */
+function AccumulationSection({ acc }: { acc: KnowledgeAccumulation }) {
+  const delta = acc.this_month - acc.last_month;
+  const trend = delta === 0 ? "±0" : delta > 0 ? `+${delta}` : String(delta);
+  const max = Math.max(1, ...acc.monthly.map((m) => m.count));
+
+  return (
+    <section className="flex flex-col gap-md">
+      <header className="flex flex-col gap-xs">
+        <h2 className="font-bold text-on-surface text-sm">形式知化された知識（蓄積）</h2>
+        <p className="text-on-surface-variant text-xs">
+          実際に使われて生まれた分だけを数えます（初期投入データは含みません）。
+        </p>
+      </header>
+
+      <div className="grid grid-cols-1 gap-md sm:grid-cols-2">
+        <MetricCard
+          label="今月の形式知化"
+          value={String(acc.this_month)}
+          hint={`前月 ${acc.last_month}件（${trend}）`}
+          title={
+            "取次ぎ先が回答して蓄積された件数と、直接相談のふりかえりの件数の合計です。" +
+            "初期投入した合成データは数えません。"
+          }
+        />
+        <MetricCard
+          label="暗黙知の回収率"
+          // 0/0 is "nothing to measure", not "we recovered nothing" — rendering a
+          // measured-looking 0% on a quiet month is the pessimistic mirror of the
+          // flattering count this metric exists to avoid. `hours()` already does
+          // this for a missing average.
+          value={acc.accepted_handoffs === 0 ? "—" : pct(acc.capture_rate)}
+          hint={
+            acc.accepted_handoffs === 0
+              ? "今月はまだ取次ぎが承諾されていません"
+              : `今月承諾された取次ぎ ${acc.accepted_handoffs}件のうち`
+          }
+          title={
+            "承諾された取次ぎのうち、回答が記録として残った割合です。" +
+            "件数と違い、この値は下がることがあります。"
+          }
+        />
+      </div>
+
+      {acc.this_month > 0 || acc.monthly.some((m) => m.count > 0) ? (
+        <div className="grid grid-cols-1 gap-lg lg:grid-cols-2">
+          <div className="flex flex-col gap-sm">
+            <h3 className="text-on-surface-variant text-xs">今月の内訳</h3>
+            <DistributionBars
+              items={[
+                {
+                  key: "captured",
+                  label: "回答の蓄積",
+                  count: acc.captured_answers,
+                },
+                {
+                  key: "consult",
+                  label: "直接相談のふりかえり",
+                  count: acc.consult_retrospectives,
+                },
+              ]}
+            />
+          </div>
+          <div className="flex flex-col gap-sm">
+            <h3 className="text-on-surface-variant text-xs">月次推移</h3>
+            <ul aria-label="形式知化の月次推移" className="flex flex-col gap-xs">
+              {acc.monthly.map((m) => (
+                <li key={m.month} className="flex items-center gap-sm text-sm">
+                  <span className="w-20 shrink-0 text-on-surface tabular-nums">{m.month}</span>
+                  <span className="h-3 flex-1 overflow-hidden rounded-full bg-surface-variant">
+                    <span
+                      className="block h-full rounded-full bg-primary"
+                      style={{ width: `${(m.count / max) * 100}%` }}
+                    />
+                  </span>
+                  <span className="w-10 shrink-0 text-right text-on-surface-variant tabular-nums">
+                    {m.count}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      ) : (
+        <p className="text-on-surface-variant text-sm">
+          まだ形式知化された知識がありません。取次ぎで回答が返るか、直接相談のふりかえりが記録されると、ここに増えていきます。
+        </p>
+      )}
+    </section>
   );
 }
 
@@ -216,6 +314,8 @@ export function Dashboard() {
           hint="accepted / 判定済み"
         />
       </div>
+
+      <AccumulationSection acc={d.knowledge_accumulation} />
 
       <div className="grid grid-cols-1 gap-lg lg:grid-cols-2">
         <section className="flex flex-col gap-sm">

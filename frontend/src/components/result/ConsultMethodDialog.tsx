@@ -6,9 +6,9 @@
  * (POST /handoff/draft carries the choice as `consult_method`).
  */
 
+import { useId, useRef } from "react";
 import { ModalDialog } from "@/components/ModalDialog";
 import type { ConsultMethod } from "@/lib/api-types";
-import { useId, useRef } from "react";
 
 export interface ConsultMethodDialogProps {
   onChoose: (consultMethod: ConsultMethod) => void;

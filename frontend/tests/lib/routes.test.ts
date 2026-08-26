@@ -1,5 +1,5 @@
-import { ROUTE_LABELS, routeLabel } from "@/lib/routes";
 import { describe, expect, it } from "vitest";
+import { ROUTE_LABELS, routeLabel } from "@/lib/routes";
 
 describe("routeLabel", () => {
   it("maps every backend route enum to a Japanese label", () => {
