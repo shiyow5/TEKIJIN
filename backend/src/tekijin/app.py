@@ -15,6 +15,7 @@ from tekijin.api.health import router as health_router
 from tekijin.api.rate_limit import SlidingWindowLimiter
 from tekijin.api.routes import router as api_router
 from tekijin.api.service import AgentService
+from tekijin.api.slack_routes import router as slack_router
 from tekijin.auth.service import LoginRateLimiter
 from tekijin.config import DEV_ADMIN_PASSWORD, DEV_AUTH_SECRET, Settings, get_settings
 
@@ -97,4 +98,5 @@ def create_app(agent_service: AgentService | None = None) -> FastAPI:
     app.include_router(health_router)
     app.include_router(auth_router)
     app.include_router(api_router)
+    app.include_router(slack_router)
     return app

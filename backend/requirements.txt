@@ -49,3 +49,8 @@ psycopg-pool==3.3.1
 # uses the standard library (PBKDF2 via hashlib) — no bcrypt/argon2 C extension —
 # so nothing else is added here and the ARM64 deploy needs no extra wheel.
 pyjwt==2.10.1
+
+# Slack integration: OAuth account linking + DM notifications (tekijin.slack.client).
+# Already pulled in transitively (fastapi/langchain-openai depend on it); pinned
+# explicitly here since this is now a direct dependency, not an incidental one.
+httpx==0.28.1

@@ -240,6 +240,21 @@ export interface NotificationAckResponse {
   acknowledged: number;
 }
 
+/** GET /slack/authorize-url response (schemas.py `SlackAuthorizeUrlResponse`). */
+export interface SlackAuthorizeUrlResponse {
+  url: string;
+}
+
+/** GET /slack/status response (schemas.py `SlackStatusResponse`). */
+export interface SlackStatusResponse {
+  linked: boolean;
+}
+
+/** POST /slack/unlink response (schemas.py `SlackUnlinkResponse`). */
+export interface SlackUnlinkResponse {
+  ok: boolean;
+}
+
 // --------------------------------------------------------------------------- //
 // domain models (shared by SSE data and final response)
 // --------------------------------------------------------------------------- //

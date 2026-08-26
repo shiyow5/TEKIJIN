@@ -9,6 +9,11 @@ vi.mock("@/components/CurrentUserProvider", () => ({
   useCurrentUser: () => useCurrentUserMock(),
 }));
 
+const replaceMock = vi.fn();
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ replace: replaceMock }),
+}));
+
 const getChatThreadsMock = vi.fn();
 const getChatThreadMock = vi.fn();
 const postMessageMock = vi.fn();
@@ -76,6 +81,7 @@ const DETAIL_A: ChatThreadDetail = {
 
 beforeEach(() => {
   useCurrentUserMock.mockReset();
+  replaceMock.mockReset();
   getChatThreadsMock.mockReset();
   getChatThreadMock.mockReset();
   postMessageMock.mockReset();
@@ -202,5 +208,57 @@ describe("ChatScreen", () => {
     );
 
     expect(screen.getByRole("button", { name: "送信" })).toBeDisabled();
+  });
+
+  // --- Slack OAuth-result banner (#slack-integration) ------------------------- #
+  describe("Slack OAuth result banner", () => {
+    it("shows a success message and clears ?slack= from the URL when linked", async () => {
+      useCurrentUserMock.mockReturnValue(asUser("E010"));
+      getChatThreadsMock.mockResolvedValue([]);
+      render(<ChatScreen initialSlackResult="linked" />);
+
+      expect(await screen.findByText("Slackと連携しました。")).toBeInTheDocument();
+      await waitFor(() => expect(replaceMock).toHaveBeenCalledWith("/chat"));
+    });
+
+    it("shows an error message when the Slack link failed", async () => {
+      useCurrentUserMock.mockReturnValue(asUser("E010"));
+      getChatThreadsMock.mockResolvedValue([]);
+      render(<ChatScreen initialSlackResult="error" />);
+
+      expect(
+        await screen.findByText("Slack連携に失敗しました。時間をおいて再度お試しください。"),
+      ).toBeInTheDocument();
+    });
+
+    it("preserves ?thread= when clearing the Slack result", async () => {
+      useCurrentUserMock.mockReturnValue(asUser("E010"));
+      getChatThreadsMock.mockResolvedValue([THREAD_A]);
+      getChatThreadMock.mockResolvedValue(DETAIL_A);
+      render(<ChatScreen initialThreadId="42" initialSlackResult="linked" />);
+
+      await waitFor(() => expect(replaceMock).toHaveBeenCalledWith("/chat?thread=42"));
+    });
+
+    it("dismisses the banner on close", async () => {
+      useCurrentUserMock.mockReturnValue(asUser("E010"));
+      getChatThreadsMock.mockResolvedValue([]);
+      render(<ChatScreen initialSlackResult="linked" />);
+
+      const banner = await screen.findByText("Slackと連携しました。");
+      fireEvent.click(screen.getByRole("button", { name: "閉じる" }));
+      expect(banner).not.toBeInTheDocument();
+    });
+
+    it("shows no banner when there is no Slack result", async () => {
+      useCurrentUserMock.mockReturnValue(asUser("E010"));
+      getChatThreadsMock.mockResolvedValue([]);
+      render(<ChatScreen />);
+      await waitFor(() =>
+        expect(screen.getByText("承諾済みの依頼がまだありません。")).toBeInTheDocument(),
+      );
+      expect(screen.queryByText("Slackと連携しました。")).not.toBeInTheDocument();
+      expect(replaceMock).not.toHaveBeenCalled();
+    });
   });
 });

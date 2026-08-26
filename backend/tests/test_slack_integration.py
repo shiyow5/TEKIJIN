@@ -1,0 +1,204 @@
+"""Integration tests for Slack account linking (GET /slack/authorize-url,
+GET /slack/oauth/callback, GET /slack/status, POST /slack/unlink).
+
+Talks to the live seeded DB (pgserver/CI), same as ``test_auth_integration.py``.
+No real Slack API calls: ``exchange_code``/``send_dm`` are monkeypatched at the
+module boundary they're imported into.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+
+import jwt
+import pytest
+from fastapi.testclient import TestClient
+from langgraph.checkpoint.memory import MemorySaver
+
+from tekijin.agent.stubs import KeywordIntentModel, RuleSufficiencyModel, TemplateDraftModel
+from tekijin.api.service import AgentService
+from tekijin.app import create_app
+from tekijin.auth.principal import Principal
+from tekijin.auth.tokens import create_access_token
+from tekijin.config import get_settings
+from tekijin.data.db import get_sessionmaker
+from tekijin.data.slack_links import get_slack_link, upsert_slack_link
+from tekijin.slack.client import SlackIdentity
+
+NOW = dt.datetime(2026, 9, 15, 12, 0, 0)
+
+
+def _admin_headers() -> dict[str, str]:
+    token = create_access_token(
+        Principal(employee_id=None, name="管理者", dept=None, is_admin=True),
+        secret=get_settings().auth_secret,
+        ttl_hours=1,
+    )
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _user_headers(employee_id: int) -> dict[str, str]:
+    token = create_access_token(
+        Principal(employee_id=employee_id, name="社員", dept=None, is_admin=False),
+        secret=get_settings().auth_secret,
+        ttl_hours=1,
+    )
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _raw_client(engine, embedder) -> TestClient:
+    service = AgentService(
+        session_factory=get_sessionmaker(engine),
+        checkpointer=MemorySaver(),
+        embedder=embedder,
+        intent_model=KeywordIntentModel(),
+        sufficiency_model=RuleSufficiencyModel(),
+        draft_model=TemplateDraftModel(),
+    )
+    return TestClient(create_app(agent_service=service))
+
+
+@pytest.fixture
+def slack_app_configured(monkeypatch):
+    """Set a full (fake) Slack App config for the duration of one test."""
+
+    monkeypatch.setenv("TEKIJIN_SLACK_CLIENT_ID", "test-client-id")
+    monkeypatch.setenv("TEKIJIN_SLACK_CLIENT_SECRET", "test-client-secret")
+    monkeypatch.setenv("TEKIJIN_SLACK_REDIRECT_URI", "http://localhost:8000/slack/oauth/callback")
+    get_settings.cache_clear()
+    try:
+        yield
+    finally:
+        get_settings.cache_clear()
+
+
+@pytest.fixture
+def slack_app_unconfigured(monkeypatch):
+    """Ensure no Slack App config leaks in from the environment."""
+
+    for key in (
+        "TEKIJIN_SLACK_CLIENT_ID",
+        "TEKIJIN_SLACK_CLIENT_SECRET",
+        "TEKIJIN_SLACK_REDIRECT_URI",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    get_settings.cache_clear()
+    try:
+        yield
+    finally:
+        get_settings.cache_clear()
+
+
+# --- GET /slack/authorize-url ------------------------------------------------ #
+def test_authorize_url_503_when_not_configured(
+    slack_app_unconfigured, seed_counts, engine, fake_embedder
+) -> None:
+    client = _raw_client(engine, fake_embedder)
+    resp = client.get("/slack/authorize-url", headers=_user_headers(5))
+    assert resp.status_code == 503
+
+
+def test_authorize_url_returns_signed_state_for_the_caller(
+    slack_app_configured, seed_counts, engine, fake_embedder
+) -> None:
+    client = _raw_client(engine, fake_embedder)
+    resp = client.get("/slack/authorize-url", headers=_user_headers(5))
+    assert resp.status_code == 200
+    url = resp.json()["url"]
+    assert url.startswith("https://slack.com/oauth/v2/authorize?")
+    assert "client_id=test-client-id" in url
+
+    state = dict(pair.split("=", 1) for pair in url.split("?", 1)[1].split("&"))["state"]
+    payload = jwt.decode(state, get_settings().auth_secret, algorithms=["HS256"])
+    assert payload["employee_id"] == 5
+    assert payload["purpose"] == "slack_link"
+
+
+def test_authorize_url_forbidden_for_admin(
+    slack_app_configured, seed_counts, engine, fake_embedder
+) -> None:
+    client = _raw_client(engine, fake_embedder)
+    resp = client.get("/slack/authorize-url", headers=_admin_headers())
+    assert resp.status_code == 403
+
+
+# --- GET /slack/status, POST /slack/unlink ----------------------------------- #
+def test_status_and_unlink_roundtrip(seed_counts, engine, fake_embedder) -> None:
+    with get_sessionmaker(engine)() as session:
+        upsert_slack_link(session, 6, slack_user_id="U_SIX", slack_team_id="T1", now=NOW)
+        session.commit()
+
+    client = _raw_client(engine, fake_embedder)
+    assert client.get("/slack/status", headers=_user_headers(6)).json() == {"linked": True}
+
+    unlink_resp = client.post("/slack/unlink", headers=_user_headers(6))
+    assert unlink_resp.status_code == 200
+    assert unlink_resp.json()["ok"] is True
+
+    assert client.get("/slack/status", headers=_user_headers(6)).json() == {"linked": False}
+
+
+def test_status_false_for_an_unlinked_employee(seed_counts, engine, fake_embedder) -> None:
+    client = _raw_client(engine, fake_embedder)
+    assert client.get("/slack/status", headers=_user_headers(7)).json() == {"linked": False}
+
+
+def test_status_always_false_for_admin(seed_counts, engine, fake_embedder) -> None:
+    client = _raw_client(engine, fake_embedder)
+    assert client.get("/slack/status", headers=_admin_headers()).json() == {"linked": False}
+
+
+def test_unlink_forbidden_for_admin(seed_counts, engine, fake_embedder) -> None:
+    client = _raw_client(engine, fake_embedder)
+    assert client.post("/slack/unlink", headers=_admin_headers()).status_code == 403
+
+
+# --- GET /slack/oauth/callback ------------------------------------------------ #
+def test_oauth_callback_missing_params_redirects_to_error(
+    seed_counts, engine, fake_embedder
+) -> None:
+    client = _raw_client(engine, fake_embedder)
+    resp = client.get("/slack/oauth/callback", follow_redirects=False)
+    assert resp.status_code in (302, 307)
+    assert "slack=error" in resp.headers["location"]
+
+
+def test_oauth_callback_invalid_state_redirects_to_error(
+    slack_app_configured, seed_counts, engine, fake_embedder
+) -> None:
+    client = _raw_client(engine, fake_embedder)
+    resp = client.get(
+        "/slack/oauth/callback",
+        params={"code": "abc", "state": "not-a-real-token"},
+        follow_redirects=False,
+    )
+    assert resp.status_code in (302, 307)
+    assert "slack=error" in resp.headers["location"]
+
+
+def test_oauth_callback_success_links_and_redirects(
+    monkeypatch, slack_app_configured, seed_counts, engine, fake_embedder
+) -> None:
+    monkeypatch.setattr(
+        "tekijin.api.slack_routes.exchange_code",
+        lambda **kwargs: SlackIdentity(slack_user_id="U_EIGHT", slack_team_id="T1"),
+    )
+    client = _raw_client(engine, fake_embedder)
+
+    authorize_resp = client.get("/slack/authorize-url", headers=_user_headers(8))
+    state = dict(
+        pair.split("=", 1) for pair in authorize_resp.json()["url"].split("?", 1)[1].split("&")
+    )["state"]
+
+    resp = client.get(
+        "/slack/oauth/callback",
+        params={"code": "a-real-looking-code", "state": state},
+        follow_redirects=False,
+    )
+    assert resp.status_code in (302, 307)
+    assert "slack=linked" in resp.headers["location"]
+
+    with get_sessionmaker(engine)() as session:
+        link = get_slack_link(session, 8)
+        assert link is not None
+        assert link.slack_user_id == "U_EIGHT"

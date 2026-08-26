@@ -8,7 +8,10 @@ no model download. ``now`` is injected for determinism.
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
+import hmac
 import json
+import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -29,6 +32,7 @@ from tekijin.auth.tokens import create_access_token
 from tekijin.config import get_settings
 from tekijin.data.dashboard import dashboard_summary
 from tekijin.data.db import get_sessionmaker
+from tekijin.data.slack_links import get_slack_link, upsert_slack_link
 from tekijin.models.tables import Answer, Event, Feedback, Message, Question, Recommendation
 
 NOW = dt.datetime(2026, 9, 15, 12, 0, 0)
@@ -1389,6 +1393,293 @@ def test_send_and_list_messages_round_trip(seed_counts, engine, fake_embedder) -
     listing = client.get("/messages/threads", params={"employee_id": "E010"}).json()["items"][0]
     assert listing["last_message"] == "承知しました"
     assert listing["last_message_at"] is not None
+
+
+def test_send_message_notifies_the_other_party_via_slack_when_linked(
+    monkeypatch, seed_counts, engine, fake_embedder
+) -> None:
+    """The OTHER party's linked Slack account gets a best-effort DM notification."""
+
+    with get_sessionmaker(engine)() as session:
+        upsert_slack_link(session, 1, slack_user_id="U_RESPONDER", slack_team_id="T1", now=NOW)
+        session.commit()
+
+    sent: list[dict] = []
+    monkeypatch.setattr("tekijin.slack.notify.send_dm", lambda **kwargs: sent.append(kwargs))
+    monkeypatch.setenv("TEKIJIN_SLACK_BOT_TOKEN", "xoxb-test")
+    get_settings.cache_clear()
+    try:
+        client = _client(
+            engine,
+            fake_embedder,
+            retriever=_FakeRetriever(people=[1, 2, 3], people_confidence=0.2),
+            scorer=_FakeScorer(_recs(1, 2, 3)),
+        )
+        client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "msg-slack1"})
+        _events(client, "msg-slack1")
+        client.post("/answer", json={"session_id": "msg-slack1", "outcome": "accepted"})
+        _events(client, "msg-slack1")
+        thread_id = client.get("/messages/threads", params={"employee_id": "E010"}).json()["items"][
+            0
+        ]["thread_id"]
+
+        resp = client.post(
+            "/messages",
+            json={"thread_id": thread_id, "sender_id": "E010", "body": "よろしくお願いします"},
+        )
+        assert resp.status_code == 200
+    finally:
+        get_settings.cache_clear()
+
+    assert len(sent) == 1
+    assert sent[0]["slack_user_id"] == "U_RESPONDER"
+    assert sent[0]["bot_token"] == "xoxb-test"
+    assert "よろしくお願いします" in sent[0]["text"]
+    assert f"/chat?thread={thread_id}" in sent[0]["text"]
+
+    # #388: this notification is also what lets a reply typed directly in
+    # Slack find its way back to the right TEKIJIN thread.
+    with get_sessionmaker(engine)() as session:
+        assert get_slack_link(session, 1).last_notified_thread_id == thread_id
+
+
+def test_send_message_skips_slack_notification_when_not_configured(
+    monkeypatch, seed_counts, engine, fake_embedder
+) -> None:
+    """No bot token configured (the default) -> no Slack call attempted at all,
+    even for a linked recipient."""
+
+    with get_sessionmaker(engine)() as session:
+        upsert_slack_link(session, 1, slack_user_id="U_RESPONDER", slack_team_id="T1", now=NOW)
+        session.commit()
+
+    sent: list[dict] = []
+    monkeypatch.setattr("tekijin.slack.notify.send_dm", lambda **kwargs: sent.append(kwargs))
+
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2, 3], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2, 3)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "msg-slack2"})
+    _events(client, "msg-slack2")
+    client.post("/answer", json={"session_id": "msg-slack2", "outcome": "accepted"})
+    _events(client, "msg-slack2")
+    thread_id = client.get("/messages/threads", params={"employee_id": "E010"}).json()["items"][0][
+        "thread_id"
+    ]
+
+    resp = client.post(
+        "/messages",
+        json={"thread_id": thread_id, "sender_id": "E010", "body": "よろしくお願いします"},
+    )
+    assert resp.status_code == 200
+    assert sent == []
+
+
+# --- POST /slack/events (#388: Slack -> TEKIJIN direction) ------------------ #
+SLACK_SIGNING_SECRET = "test-signing-secret"  # noqa: S105 - test fixture, not a real secret
+
+
+def _slack_event_headers(body: bytes, *, timestamp: str | None = None) -> dict[str, str]:
+    # The endpoint verifies against the real clock (no test seam there, unlike
+    # the `now`/`NOW` used elsewhere for `created_at`), so this must be fresh.
+    ts = timestamp or str(int(time.time()))
+    base = f"v0:{ts}:".encode() + body
+    digest = hmac.new(SLACK_SIGNING_SECRET.encode(), base, hashlib.sha256).hexdigest()
+    return {"X-Slack-Request-Timestamp": ts, "X-Slack-Signature": f"v0={digest}"}
+
+
+def _post_slack_event(client: TestClient, payload: dict) -> object:
+    body = json.dumps(payload).encode()
+    return client.post("/slack/events", content=body, headers=_slack_event_headers(body))
+
+
+def _slack_configured(monkeypatch) -> None:
+    monkeypatch.setenv("TEKIJIN_SLACK_SIGNING_SECRET", SLACK_SIGNING_SECRET)
+    get_settings.cache_clear()
+
+
+def test_slack_events_url_verification_echoes_the_challenge(
+    monkeypatch, engine, fake_embedder
+) -> None:
+    _slack_configured(monkeypatch)
+    try:
+        client = _client(engine, fake_embedder)
+        resp = _post_slack_event(client, {"type": "url_verification", "challenge": "abc123"})
+        assert resp.status_code == 200
+        assert resp.text == "abc123"
+    finally:
+        get_settings.cache_clear()
+
+
+def test_slack_events_rejects_an_invalid_signature(engine, fake_embedder) -> None:
+    # No TEKIJIN_SLACK_SIGNING_SECRET set -> verify_signature always fails closed.
+    client = _client(engine, fake_embedder)
+    body = json.dumps({"type": "url_verification", "challenge": "abc"}).encode()
+    resp = client.post(
+        "/slack/events",
+        content=body,
+        headers={"X-Slack-Request-Timestamp": "1700000000", "X-Slack-Signature": "v0=deadbeef"},
+    )
+    assert resp.status_code == 401
+
+
+def test_slack_events_reply_lands_in_the_last_notified_thread(
+    monkeypatch, seed_counts, engine, fake_embedder
+) -> None:
+    """A DM typed by the (linked) responder in Slack shows up as a chat message
+    in the TEKIJIN thread they were last notified about, and — since the asker
+    is ALSO linked here — the asker gets notified of it in turn."""
+
+    with get_sessionmaker(engine)() as session:
+        upsert_slack_link(session, 1, slack_user_id="U_RESPONDER", slack_team_id="T1", now=NOW)
+        upsert_slack_link(session, 10, slack_user_id="U_ASKER", slack_team_id="T1", now=NOW)
+        session.commit()
+
+    sent: list[dict] = []
+    monkeypatch.setattr("tekijin.slack.notify.send_dm", lambda **kwargs: sent.append(kwargs))
+    monkeypatch.setenv("TEKIJIN_SLACK_BOT_TOKEN", "xoxb-test")
+    _slack_configured(monkeypatch)
+    try:
+        client = _client(
+            engine,
+            fake_embedder,
+            retriever=_FakeRetriever(people=[1, 2, 3], people_confidence=0.2),
+            scorer=_FakeScorer(_recs(1, 2, 3)),
+        )
+        client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "msg-slack3"})
+        _events(client, "msg-slack3")
+        client.post("/answer", json={"session_id": "msg-slack3", "outcome": "accepted"})
+        _events(client, "msg-slack3")
+        thread_id = client.get("/messages/threads", params={"employee_id": "E010"}).json()["items"][
+            0
+        ]["thread_id"]
+
+        # Establishes last_notified_thread_id for the responder (E001/id 1).
+        client.post(
+            "/messages",
+            json={"thread_id": thread_id, "sender_id": "E010", "body": "よろしくお願いします"},
+        )
+        sent.clear()
+
+        resp = _post_slack_event(
+            client,
+            {
+                "type": "event_callback",
+                "event": {
+                    "type": "message",
+                    "channel_type": "im",
+                    "user": "U_RESPONDER",
+                    "text": "承知しました（Slackから返信）",
+                },
+            },
+        )
+        assert resp.status_code == 200
+
+        detail = client.get(f"/messages/threads/{thread_id}", params={"employee_id": "E010"}).json()
+        bodies = [m["body"] for m in detail["messages"]]
+        assert "承知しました（Slackから返信）" in bodies
+        last = next(m for m in detail["messages"] if m["body"] == "承知しました（Slackから返信）")
+        assert last["sender_id"] == "E001"  # the responder who replied in Slack
+    finally:
+        get_settings.cache_clear()
+
+    # The asker (linked too) gets notified in turn of the Slack-originated reply.
+    assert len(sent) == 1
+    assert sent[0]["slack_user_id"] == "U_ASKER"
+    assert "承知しました（Slackから返信）" in sent[0]["text"]
+
+
+def test_slack_events_ignores_the_bots_own_message(
+    monkeypatch, seed_counts, engine, fake_embedder
+) -> None:
+    """Without this, the bot's own notification landing in the same DM channel
+    would loop back in as if the user had sent it."""
+
+    with get_sessionmaker(engine)() as session:
+        upsert_slack_link(
+            session,
+            1,
+            slack_user_id="U_RESPONDER",
+            slack_team_id="T1",
+            now=NOW,
+        )
+        link = get_slack_link(session, 1)
+        link.last_notified_thread_id = 999999  # any id; must never be reached
+        session.commit()
+
+    _slack_configured(monkeypatch)
+    try:
+        client = _client(engine, fake_embedder)
+        resp = _post_slack_event(
+            client,
+            {
+                "type": "event_callback",
+                "event": {
+                    "type": "message",
+                    "channel_type": "im",
+                    "user": "U_RESPONDER",
+                    "bot_id": "B_TEKIJIN",
+                    "text": "通知メッセージ本文",
+                },
+            },
+        )
+        assert resp.status_code == 200
+    finally:
+        get_settings.cache_clear()
+
+    with get_sessionmaker(engine)() as session:
+        assert get_slack_link(session, 1).last_notified_thread_id == 999999
+
+
+def test_slack_events_ignores_an_unlinked_sender(monkeypatch, engine, fake_embedder) -> None:
+    _slack_configured(monkeypatch)
+    try:
+        client = _client(engine, fake_embedder)
+        resp = _post_slack_event(
+            client,
+            {
+                "type": "event_callback",
+                "event": {
+                    "type": "message",
+                    "channel_type": "im",
+                    "user": "U_UNKNOWN",
+                    "text": "hello",
+                },
+            },
+        )
+        assert resp.status_code == 200  # ack'd; nothing to route it to
+    finally:
+        get_settings.cache_clear()
+
+
+def test_slack_events_ignores_a_reply_with_no_remembered_thread(
+    monkeypatch, seed_counts, engine, fake_embedder
+) -> None:
+    with get_sessionmaker(engine)() as session:
+        upsert_slack_link(session, 1, slack_user_id="U_RESPONDER", slack_team_id="T1", now=NOW)
+        session.commit()  # last_notified_thread_id stays NULL — never notified yet
+
+    _slack_configured(monkeypatch)
+    try:
+        client = _client(engine, fake_embedder)
+        resp = _post_slack_event(
+            client,
+            {
+                "type": "event_callback",
+                "event": {
+                    "type": "message",
+                    "channel_type": "im",
+                    "user": "U_RESPONDER",
+                    "text": "hello",
+                },
+            },
+        )
+        assert resp.status_code == 200
+    finally:
+        get_settings.cache_clear()
 
 
 def test_message_thread_rejects_non_party(seed_counts, engine, fake_embedder) -> None:

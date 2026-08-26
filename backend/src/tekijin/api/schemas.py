@@ -735,3 +735,24 @@ class LoginResponse(BaseModel):
     access_token: str
     token_type: Literal["bearer"] = "bearer"
     principal: PrincipalResponse
+
+
+# --------------------------------------------------------------------------- #
+# Slack integration (chat -> Slack DM notification)
+# --------------------------------------------------------------------------- #
+class SlackAuthorizeUrlResponse(BaseModel):
+    """The "Sign in with Slack" URL for the frontend to navigate the browser to."""
+
+    url: str
+
+
+class SlackStatusResponse(BaseModel):
+    """Whether the acting employee currently has a linked Slack account."""
+
+    linked: bool
+
+
+class SlackUnlinkResponse(BaseModel):
+    """Ack for ``POST /slack/unlink``."""
+
+    ok: bool = True

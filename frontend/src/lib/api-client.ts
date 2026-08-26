@@ -41,6 +41,9 @@ import type {
   ResolveQuestionResponse,
   ResumeRequest,
   SendMessageRequest,
+  SlackAuthorizeUrlResponse,
+  SlackStatusResponse,
+  SlackUnlinkResponse,
 } from "@/lib/api-types";
 import { getAuthToken } from "@/lib/auth-token";
 import { getApiBaseUrl } from "@/lib/config";
@@ -383,6 +386,29 @@ export function ackNotifications(
   options: RequestOptions = {},
 ): Promise<NotificationAckResponse> {
   return postJson<NotificationAckResponse>("/notifications/ack", request, options);
+}
+
+/**
+ * GET /slack/status — whether the acting employee has a linked Slack account.
+ */
+export function getSlackStatus(options: RequestOptions = {}): Promise<SlackStatusResponse> {
+  return getJson<SlackStatusResponse>("/slack/status", options);
+}
+
+/**
+ * GET /slack/authorize-url — the "Sign in with Slack" URL to navigate the
+ * browser to. Throws {@link ApiError} with status 503 while no Slack App is
+ * registered yet (see `Settings.slack_configured` on the backend).
+ */
+export function getSlackAuthorizeUrl(
+  options: RequestOptions = {},
+): Promise<SlackAuthorizeUrlResponse> {
+  return getJson<SlackAuthorizeUrlResponse>("/slack/authorize-url", options);
+}
+
+/** POST /slack/unlink — remove the acting employee's linked Slack account. */
+export function postSlackUnlink(options: RequestOptions = {}): Promise<SlackUnlinkResponse> {
+  return postJson<SlackUnlinkResponse>("/slack/unlink", undefined, options);
 }
 
 /**

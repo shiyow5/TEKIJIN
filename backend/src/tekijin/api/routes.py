@@ -22,7 +22,7 @@ import datetime as dt
 import logging
 from collections.abc import Iterator
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from sse_starlette import EventSourceResponse
 
 from tekijin.api import schemas
@@ -57,6 +57,7 @@ from tekijin.data.messages import (
 from tekijin.data.notifications import pending_decline_notifications_for_asker
 from tekijin.data.repository import Repository
 from tekijin.data.writes import ack_decline_notifications, delete_question, mark_self_resolved
+from tekijin.slack.notify import maybe_notify_via_slack
 
 logger = logging.getLogger(__name__)
 
@@ -800,12 +801,18 @@ def message_thread_detail(
 def send_message(
     req: schemas.MessageSendRequest,
     request: Request,
+    background_tasks: BackgroundTasks,
     principal: Principal = Depends(require_principal),
 ) -> schemas.MessageItem:
     """Send one chat message on an accepted thread (#224). 404 if unaccepted or non-party.
 
     ``sender_id`` is bound to the authenticated principal (#241): without this a
     party could post as the OTHER party, and anyone could post as anyone.
+
+    If the OTHER party has linked Slack (and a bot token is configured), a DM
+    notification is sent as a background task after the response — Slack being
+    slow or unreachable must never delay or fail sending the chat message itself
+    (:func:`maybe_notify_via_slack`, shared with the Slack-reply path, #388).
     """
 
     with _generic_500("POST /messages"):
@@ -819,6 +826,14 @@ def send_message(
                 raise HTTPException(status_code=404, detail="thread not found")
             now = dt.datetime.now()  # noqa: DTZ005 - naive is intentional, matches created_at
             row = create_message(session, req.thread_id, req.sender_id, req.body, now)
+            maybe_notify_via_slack(
+                session,
+                background_tasks,
+                parties=parties,
+                sender_id=req.sender_id,
+                body=req.body,
+                thread_id=req.thread_id,
+            )
         return schemas.MessageItem(
             id=row["id"],
             thread_id=row["thread_id"],

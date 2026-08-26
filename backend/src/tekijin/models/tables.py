@@ -83,6 +83,35 @@ class EmployeeProfile(Base):
     updated_at: Mapped[dt.datetime | None] = mapped_column(DateTime)
 
 
+class SlackLink(Base):
+    """One employee's linked Slack account (one row per employee).
+
+    Only the Slack user/team id is stored — no per-user OAuth token. DM
+    notifications (see ``tekijin.slack.client.send_dm``) go through the app's own
+    bot token instead, so there is nothing here to refresh or revoke on Slack's
+    side beyond the identity mapping itself.
+
+    ``last_notified_thread_id`` supports the Slack -> TEKIJIN direction (#388):
+    a Slack DM channel is 1:1 between the bot and the employee, not per chat
+    thread, so a reply typed in Slack carries no thread id of its own. Instead,
+    each outbound notification (``POST /messages`` or a prior Slack-side reply)
+    stamps this with the thread it was about, and ``POST /slack/events`` routes
+    the NEXT inbound reply there. This is a "most recent thread wins" heuristic
+    — good enough for one active conversation, not a guarantee under several
+    concurrent threads with the same person.
+    """
+
+    __tablename__ = "slack_links"
+
+    employee_id: Mapped[int] = mapped_column(
+        ForeignKey("employees.id"), primary_key=True, index=True
+    )
+    slack_user_id: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    slack_team_id: Mapped[str] = mapped_column(String(32))
+    linked_at: Mapped[dt.datetime] = mapped_column(DateTime)
+    last_notified_thread_id: Mapped[int | None] = mapped_column(Integer)
+
+
 class AiChatHistory(Base):
     """AI <-> employee conversation log (one row per message)."""
 
