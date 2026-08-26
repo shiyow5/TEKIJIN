@@ -275,6 +275,20 @@ class HybridRetriever:
             {"doc_id": id_, "score": score} for id_, score in fused_docs
         ]
 
+        # #405: per-person question↔past-answer similarity. Reuse the answer dense
+        # channel (already computed above): each answer_hit is (answer_id, cosine of
+        # the QUESTION vs that answer body), so the max over a responder's hits is
+        # how well their past answers match THIS question — the signal C6 adds to
+        # break topic_fit saturation and rescue C1 topic mispredictions. No extra
+        # embedding; answers outside the dense pool are simply absent (treated as 0).
+        person_question_similarity: dict[int, float] = {}
+        for answer_id, sim in answer_hits:
+            responder_id = responder_of.get(answer_id)
+            if responder_id is None:
+                continue
+            if sim > person_question_similarity.get(responder_id, 0.0):
+                person_question_similarity[responder_id] = sim
+
         # --- candidate people ---------------------------------------------- #
         dense_people = [id_ for id_, _ in people_hits]
         sparse_people = [id_ for id_, _ in profile_index.search(query, self._pool)]
@@ -290,6 +304,7 @@ class HybridRetriever:
             "answer_confidence": answer_confidence,
             "document_confidence": document_confidence,
             "people_confidence": people_confidence,
+            "person_question_similarity": person_question_similarity,
         }
 
     def _aggregate_people(

@@ -158,6 +158,11 @@ def main() -> None:
     ap.add_argument("--backend", choices=["stub", "vllm"], default="vllm")
     ap.add_argument("--self-answer", action="store_true", help="#291 self_answer を配線")
     ap.add_argument("--query-expansion", action="store_true", help="#371 クエリ拡張を ON")
+    ap.add_argument(
+        "--question-fit",
+        action="store_true",
+        help="#405 C6 に質問↔過去回答の意味一致(qsim)項を足す(routing不変)",
+    )
     ap.add_argument("--answerability", action="store_true", help="#70 棄却クリティックを配線")
     ap.add_argument(
         "--knowledge-floor",
@@ -203,6 +208,7 @@ def main() -> None:
         answerability_model=ans_model,
         knowledge_answer_min_similarity=args.knowledge_floor,
         query_expansion_enabled=args.query_expansion,
+        question_fit_enabled=args.question_fit,
     )
     ranker = GraphRanker(graph, critique_wired=ans_model is not None)
 
@@ -211,7 +217,8 @@ def main() -> None:
         queries = queries[: args.limit]
     print(
         f"backend={args.backend} self_answer={args.self_answer} "
-        f"query_expansion={args.query_expansion} answerability={args.answerability} "
+        f"query_expansion={args.query_expansion} question_fit={args.question_fit} "
+        f"answerability={args.answerability} "
         f"knowledge_floor={args.knowledge_floor} rows={len(queries)}"
     )
 
@@ -225,6 +232,7 @@ def main() -> None:
             "backend": args.backend,
             "self_answer": args.self_answer,
             "query_expansion": args.query_expansion,
+            "question_fit": args.question_fit,
             "answerability": args.answerability,
             "knowledge_floor": args.knowledge_floor,
             "rows": len(queries),

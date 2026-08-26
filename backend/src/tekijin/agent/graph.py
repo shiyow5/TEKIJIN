@@ -129,6 +129,7 @@ def build_agent(
     daily_evidence: bool = False,
     knowledge_answer_min_similarity: float | None = None,
     query_expansion_enabled: bool = False,
+    question_fit_enabled: bool = False,
 ):
     """Compile and return the C1-C8 agent graph.
 
@@ -177,6 +178,8 @@ def build_agent(
         knowledge_answer_min_similarity=knowledge_answer_min_similarity,
         # #371: fold C1 topics into the C4 retrieval query (False = OFF, dormant).
         query_expansion_enabled=query_expansion_enabled,
+        # #405: add the question↔past-answer term to C6 (False = OFF, dormant).
+        question_fit_enabled=question_fit_enabled,
     )
     # #70: the critic is wired only when a model is supplied. Off (the default) the
     # graph is byte-for-byte the pre-#70 flow — C6 -> C7 directly.
