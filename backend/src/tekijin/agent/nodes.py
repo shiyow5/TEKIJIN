@@ -439,11 +439,12 @@ class AgentNodes:
 
         if remaining > 0:
             filled_ids = existing_ids | {r["person_id"] for r in fresh}
-            # #87: C4 narrows the candidate set by "who appears in the top chunks",
-            # which drops people who HAVE the evidence but whose chunks did not
-            # surface — measured as a real loss (R@3 -0.048 at top-10). At a 40-person
-            # roster the scorer is a deterministic few-ms computation, so score
-            # everyone and let C6 decide.
+            # #87 proposed scoring the WHOLE roster here, on the theory that C4's
+            # "who appears in the top chunks" narrowing drops people who HAVE the
+            # evidence. MEASURED AND REJECTED (ADR-0009): on the real graph it is
+            # consistently one row WORSE (Hit@3 0.7778 -> 0.7626 over 3 paired
+            # replicates). `employee_source` keeps the lever so the measurement is one
+            # command away, but it is OFF and should stay off absent new evidence.
             #
             # This deliberately changes ONLY the scoring pool. ``candidate_people``
             # is ALSO the C5 person-route signal (`route.py`: `if candidate_people:`),

@@ -151,10 +151,12 @@ def build_agent(
             prior_answer routes first try a cited answer from the retrieved
             evidence; a grounded answer terminates at ``self_answered``, otherwise
             the run falls back to the original route (document terminal / hand-off).
-        score_all_employees: #87. ``False`` (default) scores only the people C4's
-            top chunks surfaced. ``True`` hands C6 the whole roster instead — C4's
-            narrowing drops people who hold the evidence but whose chunks did not
-            rank. The C5 route signal keeps reading C4's set either way.
+        score_all_employees: #87, MEASURED AND REJECTED (ADR-0009) — kept only so the
+            measurement can be reproduced. ``False`` (default) scores only the people
+            C4's top chunks surfaced. ``True`` hands C6 the whole roster instead; the
+            C5 route signal keeps reading C4's set either way, but note that with the
+            whole roster C6 essentially always finds someone, so the ``no_candidate``
+            terminal (「適任者が見つかりませんでした」) becomes unreachable in practice.
         checkpointer: LangGraph checkpointer; default ``MemorySaver``.
     """
 
