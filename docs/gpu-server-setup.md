@@ -47,7 +47,7 @@
 ```bash
 docker run -d --name tekijin_app_pg --restart unless-stopped \
   -e POSTGRES_USER=tekijin -e POSTGRES_PASSWORD=tekijin -e POSTGRES_DB=tekijin \
-  -p 15432:5432 pgvector/pgvector:pg16
+  -p 15432:5432 pgvector/pgvector:0.8.6-pg16
 
 cd ~/TEKIJIN
 export TEKIJIN_DATABASE_URL=postgresql+psycopg://tekijin:tekijin@localhost:15432/tekijin
