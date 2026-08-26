@@ -7,9 +7,9 @@
  */
 
 import { useAuth } from "@/components/AuthProvider";
-import { ApiError } from "@/lib/api-client";
+import { ApiError, getSlackLoginUrl } from "@/lib/api-client";
 import { useRouter } from "next/navigation";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
 
 function messageForError(error: unknown): string {
   if (error instanceof ApiError) {
@@ -21,15 +21,58 @@ function messageForError(error: unknown): string {
   return "ログインに失敗しました。時間をおいて、もう一度お試しください。";
 }
 
+/** `?slack=` outcomes the callback can send back (#406). */
+function messageForSlackOutcome(outcome: string | null): string | null {
+  if (outcome === "unlinked") {
+    return "このSlackアカウントは、まだ社員アカウントと連携されていません。管理者にお問い合わせください。";
+  }
+  if (outcome === "error") return "Slackでのログインに失敗しました。もう一度お試しください。";
+  return null;
+}
+
 export default function LoginPage() {
-  const { login } = useAuth();
+  const { login, adoptToken } = useAuth();
   const router = useRouter();
+  const [slackUrl, setSlackUrl] = useState<string | null>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const canSubmit = email.trim() !== "" && password !== "" && !submitting;
+
+  // The Slack callback hands the token back in the FRAGMENT, which never
+  // reaches a server (a query parameter would be written to the access log).
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+    const token = params.get("slack_token");
+    if (!token) {
+      setError(messageForSlackOutcome(new URLSearchParams(window.location.search).get("slack")));
+      return;
+    }
+    // Drop it from the address bar (and history) before doing anything else —
+    // it is a live credential, and the user can see and copy what is up there.
+    window.history.replaceState({}, "", window.location.pathname);
+    adoptToken(token)
+      .then(() => router.replace("/"))
+      .catch(() => setError("Slackでのログインに失敗しました。もう一度お試しください。"));
+  }, [adoptToken, router]);
+
+  // Absence is the signal: the endpoint 503s while Slack login is off, so the
+  // button simply does not appear rather than failing when pressed.
+  useEffect(() => {
+    let active = true;
+    getSlackLoginUrl()
+      .then((res) => {
+        if (active) setSlackUrl(res.url);
+      })
+      .catch(() => {
+        if (active) setSlackUrl(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -93,6 +136,25 @@ export default function LoginPage() {
             {submitting ? "ログイン中…" : "ログイン"}
           </button>
         </form>
+
+        {slackUrl ? (
+          <>
+            <div className="my-md flex items-center gap-sm text-on-surface-variant text-xs">
+              <span className="h-px flex-1 bg-outline-variant" />
+              または
+              <span className="h-px flex-1 bg-outline-variant" />
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                window.location.assign(slackUrl);
+              }}
+              className="w-full rounded-md border border-outline px-md py-sm font-bold text-on-surface transition-colors hover:bg-surface-container-low"
+            >
+              Slackでログイン
+            </button>
+          </>
+        ) : null}
       </div>
     </div>
   );

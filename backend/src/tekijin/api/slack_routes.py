@@ -40,7 +40,8 @@ from tekijin.api import schemas
 from tekijin.api.service import AgentService
 from tekijin.auth.deps import require_principal
 from tekijin.auth.principal import Principal
-from tekijin.config import get_settings
+from tekijin.auth.tokens import create_access_token
+from tekijin.config import Settings, get_settings
 from tekijin.data.db import session_scope
 from tekijin.data.messages import create_message, thread_parties
 from tekijin.data.slack_channel_links import get_channel_link_by_channel_id
@@ -50,7 +51,13 @@ from tekijin.data.slack_links import (
     get_slack_link_by_slack_user_id,
     upsert_slack_link,
 )
-from tekijin.slack.client import build_authorize_url, exchange_code, respond_to_response_url
+from tekijin.models.tables import Employee
+from tekijin.slack.client import (
+    SlackIdentity,
+    build_authorize_url,
+    exchange_code,
+    respond_to_response_url,
+)
 from tekijin.slack.verify import verify_signature
 
 logger = logging.getLogger(__name__)
@@ -58,6 +65,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/slack", tags=["slack"])
 
 _STATE_PURPOSE = "slack_link"
+# A SECOND purpose over the same secret. Without this claim a link state — which
+# any signed-in user can mint from /slack/authorize-url — would be replayable at
+# the callback to obtain a bearer token (#406).
+_LOGIN_STATE_PURPOSE = "slack_login"
 _STATE_TTL_MINUTES = 10.0
 
 
@@ -70,24 +81,37 @@ def _require_linkable_employee(principal: Principal) -> int:
     return principal.employee_id
 
 
-def _encode_state(employee_id: int, *, secret: str) -> str:
+def _encode_state(*, purpose: str, secret: str, employee_id: int | None = None) -> str:
     now = dt.datetime.now(dt.UTC)
-    payload = {
-        "purpose": _STATE_PURPOSE,
-        "employee_id": employee_id,
+    payload: dict[str, object] = {
+        "purpose": purpose,
         "iat": int(now.timestamp()),
         "exp": int((now + dt.timedelta(minutes=_STATE_TTL_MINUTES)).timestamp()),
     }
+    if employee_id is not None:
+        # Login states carry no employee: WHO is signing in is decided by the
+        # Slack identity the callback resolves, never by the state.
+        payload["employee_id"] = employee_id
     return jwt.encode(payload, secret, algorithm="HS256")
 
 
-def _decode_state(state: str, *, secret: str) -> int:
+def _state_purpose(state: str, *, secret: str) -> str:
+    """The verified ``purpose`` claim, or a 400 if the state is not ours."""
+
     try:
         payload = jwt.decode(state, secret, algorithms=["HS256"])
     except jwt.PyJWTError as exc:
         raise HTTPException(status_code=400, detail="invalid or expired state") from exc
-    if payload.get("purpose") != _STATE_PURPOSE:
+    purpose = payload.get("purpose")
+    if purpose not in (_STATE_PURPOSE, _LOGIN_STATE_PURPOSE):
         raise HTTPException(status_code=400, detail="invalid state")
+    return str(purpose)
+
+
+def _decode_state(state: str, *, secret: str) -> int:
+    if _state_purpose(state, secret=secret) != _STATE_PURPOSE:
+        raise HTTPException(status_code=400, detail="invalid state")
+    payload = jwt.decode(state, secret, algorithms=["HS256"])
     return int(payload["employee_id"])
 
 
@@ -106,13 +130,70 @@ def authorize_url(
     settings = get_settings()
     if not settings.slack_configured():
         raise HTTPException(status_code=503, detail="Slack連携は現在利用できません。")
-    state = _encode_state(employee_id, secret=settings.auth_secret)
+    state = _encode_state(
+        purpose=_STATE_PURPOSE, employee_id=employee_id, secret=settings.auth_secret
+    )
     url = build_authorize_url(
         client_id=settings.slack_client_id,
         redirect_uri=settings.slack_redirect_uri,
         state=state,
     )
     return schemas.SlackAuthorizeUrlResponse(url=url)
+
+
+@router.get("/login-url", response_model=schemas.SlackAuthorizeUrlResponse)
+def login_url() -> schemas.SlackAuthorizeUrlResponse:
+    """ "Sign in with Slack" for someone who has NO session yet (#406 案A).
+
+    Deliberately unauthenticated — that is the whole point — so it carries no
+    employee id and reveals nothing: the state says only "this is a login
+    attempt", and which employee that becomes is decided by the Slack identity
+    the callback resolves.
+    """
+
+    settings = get_settings()
+    if not settings.slack_login_enabled or not settings.slack_configured():
+        raise HTTPException(status_code=503, detail="Slackログインは現在利用できません。")
+    return schemas.SlackAuthorizeUrlResponse(
+        url=build_authorize_url(
+            client_id=settings.slack_client_id,
+            redirect_uri=settings.slack_redirect_uri,
+            state=_encode_state(purpose=_LOGIN_STATE_PURPOSE, secret=settings.auth_secret),
+        )
+    )
+
+
+def _login_redirect(settings: Settings, identity: SlackIdentity, session: Session) -> str:
+    """Where to send the browser after a Slack LOGIN attempt.
+
+    The token rides in the URL **fragment**, never the query string: a query
+    parameter is written verbatim into the server access log (the OAuth ``code``
+    already appears there), while a fragment is never sent to any server.
+    """
+
+    frontend = settings.slack_frontend_url.rstrip("/")
+    link = get_slack_link_by_slack_user_id(
+        session, identity.slack_user_id, expected_team_id=settings.slack_team_id
+    )
+    if link is None:
+        # Authenticated by Slack, but no employee claims this identity. Sync
+        # (#406 step 3) is what normally fills this in.
+        logger.info("Slack login for an unlinked slack_user %s", identity.slack_user_id)
+        return f"{frontend}/login?slack=unlinked"
+    employee = session.get(Employee, link.employee_id)
+    if employee is None:
+        return f"{frontend}/login?slack=error"
+    token = create_access_token(
+        Principal(
+            employee_id=employee.id,
+            name=employee.name,
+            dept=employee.department,
+            is_admin=False,
+        ),
+        secret=settings.auth_secret,
+        ttl_hours=settings.auth_token_ttl_hours,
+    )
+    return f"{frontend}/login#slack_token={token}"
 
 
 @router.get("/oauth/callback")
@@ -136,13 +217,17 @@ def oauth_callback(
     if error or not code or not state:
         return RedirectResponse(f"{frontend_chat_url}?slack=error")
     try:
-        employee_id = _decode_state(state, secret=settings.auth_secret)
+        purpose = _state_purpose(state, secret=settings.auth_secret)
         identity = exchange_code(
             client_id=settings.slack_client_id,
             client_secret=settings.slack_client_secret,
             redirect_uri=settings.slack_redirect_uri,
             code=code,
         )
+        if purpose == _LOGIN_STATE_PURPOSE and not settings.slack_login_enabled:
+            # A state minted while the feature was on must not outlive it.
+            logger.warning("Slack login attempted while disabled")
+            return RedirectResponse(f"{frontend_chat_url}?slack=error")
         if settings.slack_team_id and identity.slack_team_id != settings.slack_team_id:
             # Same redirect as any other failure — the person is not one of ours,
             # so telling them WHICH workspace we expect would leak it.
@@ -153,6 +238,10 @@ def oauth_callback(
             )
             return RedirectResponse(f"{frontend_chat_url}?slack=error")
         service = request.app.state.agent_service
+        if purpose == _LOGIN_STATE_PURPOSE:
+            with service.session_factory() as session:
+                return RedirectResponse(_login_redirect(settings, identity, session))
+        employee_id = _decode_state(state, secret=settings.auth_secret)
         with session_scope(service.session_factory) as session:
             # Also covers the DB write: `slack_user_id` is unique, so a Slack
             # account already linked to a DIFFERENT employee raises an

@@ -1,4 +1,4 @@
-import { createSessionId, isValidSessionId, SESSION_ID_PATTERN } from "@/lib/session";
+import { SESSION_ID_PATTERN, createSessionId, isValidSessionId } from "@/lib/session";
 import { afterEach, describe, expect, it } from "vitest";
 
 describe("isValidSessionId", () => {

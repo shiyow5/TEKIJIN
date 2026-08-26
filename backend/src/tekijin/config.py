@@ -479,6 +479,13 @@ class Settings(BaseSettings):
     # explicitly rather than inherit this permissive default.
     slack_team_id: str = ""
 
+    # Accept "Sign in with Slack" as a way to OBTAIN a session, not just to attach
+    # a Slack identity to an existing one (#406 案A). Off by default: turning it on
+    # makes workspace membership an authorisation boundary, which is only sound
+    # once ``slack_team_id`` names the workspace — ``_enforce_secure_auth`` refuses
+    # to boot on the combination rather than trusting an operator to notice.
+    slack_login_enabled: bool = False
+
     # FastAPI's auto-docs (``/docs``, ``/redoc``, ``/openapi.json``). Default OFF:
     # ``/openapi.json`` publishes every endpoint's path, parameters and types, which
     # is a map of the protected surface even though no data leaks. It was reachable

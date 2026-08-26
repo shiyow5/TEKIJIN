@@ -30,7 +30,7 @@ const ADMIN: Principal = { id: null, name: "管理者", dept: null, is_admin: tr
 const USER: Principal = { id: "E005", name: "山田 太郎", dept: "営業部", is_admin: false };
 
 function auth(principal: Principal | null): AuthContextValue {
-  return { principal, loading: false, login: vi.fn(), logout: vi.fn() };
+  return { principal, loading: false, login: vi.fn(), logout: vi.fn(), adoptToken: vi.fn() };
 }
 
 const originalLocation = window.location;

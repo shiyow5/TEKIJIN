@@ -30,6 +30,7 @@ function setPrincipal(principal: Principal | null): void {
     loading: false,
     login: vi.fn(),
     logout: vi.fn(),
+    adoptToken: vi.fn(),
   });
 }
 

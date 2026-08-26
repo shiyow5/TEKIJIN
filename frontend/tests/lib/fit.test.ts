@@ -1,4 +1,4 @@
-import { fitPercent, fitPercents, levelFraction, MAX_COMPOSITE_SCORE } from "@/lib/fit";
+import { MAX_COMPOSITE_SCORE, fitPercent, fitPercents, levelFraction } from "@/lib/fit";
 import { describe, expect, it } from "vitest";
 
 describe("levelFraction", () => {

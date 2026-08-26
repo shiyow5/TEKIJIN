@@ -496,6 +496,17 @@ export function getSlackAuthorizeUrl(
   return getJson<SlackAuthorizeUrlResponse>("/slack/authorize-url", options);
 }
 
+/**
+ * GET /slack/login-url — the "Sign in with Slack" URL for someone with NO
+ * session yet (#406). Unauthenticated by design. Rejects with a 503 `ApiError`
+ * when Slack login is switched off, which callers treat as "hide the button".
+ */
+export async function getSlackLoginUrl(
+  options?: RequestOptions,
+): Promise<SlackAuthorizeUrlResponse> {
+  return getJson<SlackAuthorizeUrlResponse>("/slack/login-url", options);
+}
+
 /** POST /slack/unlink — remove the acting employee's linked Slack account. */
 export function postSlackUnlink(options: RequestOptions = {}): Promise<SlackUnlinkResponse> {
   return postJson<SlackUnlinkResponse>("/slack/unlink", undefined, options);

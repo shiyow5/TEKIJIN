@@ -23,6 +23,24 @@ from tekijin.slack.dedup import SeenEventIds
 logger = logging.getLogger(__name__)
 
 
+def _enforce_slack_login_scope(settings: Settings) -> None:
+    """Refuse to start with Slack login on but no workspace named (#406).
+
+    Deliberately NOT behind ``auth_enforced()``: that gate exists so a dev box can
+    run on known-weak defaults, but this is a contradiction between two settings
+    rather than a weak secret. A blank ``slack_team_id`` means "accept any
+    workspace" (#473 — fine for linking on a demo box); combined with Slack login
+    it means "anyone on Slack may sign in", which is never what the operator meant.
+    """
+
+    if settings.slack_login_enabled and not settings.slack_team_id:
+        raise RuntimeError(
+            "TEKIJIN_SLACK_LOGIN_ENABLED requires TEKIJIN_SLACK_TEAM_ID: without it "
+            "any Slack workspace's member could sign in. Set the workspace id "
+            "(auth.test -> team_id), or turn Slack login off."
+        )
+
+
 def _enforce_secure_auth(settings: Settings) -> None:
     """Refuse to start on the INSECURE default auth secrets when auth is enforced.
 
@@ -66,6 +84,7 @@ def create_app(agent_service: AgentService | None = None) -> FastAPI:
 
     settings = get_settings()
     _enforce_secure_auth(settings)
+    _enforce_slack_login_scope(settings)
     # ``None`` removes the route entirely (404), rather than serving an empty page.
     # ``openapi_url=None`` alone would already disable /docs and /redoc (they have
     # nothing to render without it), but all three are spelled out so the intent

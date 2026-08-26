@@ -7,9 +7,9 @@
  * (自己解決率 / 負荷分散 / 平均解決時間 / 推薦精度) plus load + topic distributions.
  */
 
+import { PageBackLink } from "@/components/PageBackLink";
 import { ApiError, getDashboard } from "@/lib/api-client";
 import type { DashboardResponse } from "@/lib/api-types";
-import { PageBackLink } from "@/components/PageBackLink";
 import { useEffect, useState } from "react";
 
 type Phase = "loading" | "ready" | "error" | "forbidden";

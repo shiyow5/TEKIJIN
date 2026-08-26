@@ -35,6 +35,13 @@ export interface AuthContextValue {
   login: (email: string, password: string) => Promise<void>;
   /** Clear the token and principal (best-effort server logout). */
   logout: () => Promise<void>;
+  /**
+   * Accept a token minted elsewhere — today, by the Slack OAuth callback (#406).
+   * Unlike {@link login} there are no credentials to exchange, so the principal
+   * is fetched from `/auth/me`, which also proves the token is actually valid
+   * before we treat the user as signed in.
+   */
+  adoptToken: (token: string) => Promise<void>;
 }
 
 const INERT: AuthContextValue = {
@@ -42,6 +49,7 @@ const INERT: AuthContextValue = {
   loading: false,
   login: async () => {},
   logout: async () => {},
+  adoptToken: async () => {},
 };
 
 const AuthContext = createContext<AuthContextValue>(INERT);
@@ -85,6 +93,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setPrincipal(result.principal);
   }, []);
 
+  const adoptToken = useCallback(async (token: string) => {
+    setAuthToken(token);
+    try {
+      setPrincipal(await getMe());
+    } catch (err) {
+      // Never leave a rejected token behind: it would be replayed on every
+      // request until it expired, failing each one.
+      setAuthToken(null);
+      setPrincipal(null);
+      throw err;
+    }
+  }, []);
+
   const logout = useCallback(async () => {
     await postLogout();
     setAuthToken(null);
@@ -92,8 +113,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ principal, loading, login, logout }),
-    [principal, loading, login, logout],
+    () => ({ principal, loading, login, logout, adoptToken }),
+    [principal, loading, login, logout, adoptToken],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
