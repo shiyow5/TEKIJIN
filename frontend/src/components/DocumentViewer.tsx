@@ -9,9 +9,9 @@
  * read the relevant material instead of just being told an id.
  */
 
+import { PageBackLink } from "@/components/PageBackLink";
 import { getDocument } from "@/lib/api-client";
 import type { DocumentDetail } from "@/lib/api-types";
-import { PageBackLink } from "@/components/PageBackLink";
 import { useEffect, useState } from "react";
 
 type Phase = "loading" | "ready" | "notfound" | "error";
@@ -45,8 +45,8 @@ export function DocumentViewer({
   // screens leading to two different places. The origin is headed
   // 「回答をお届けします」 whenever this link is shown — a document link only
   // exists on a terminal `message` — so 回答 is what the reader left (#126).
-  const backHref = fromSessionId ? `/session/${fromSessionId}` : "/questions";
-  const backLabel = fromSessionId ? "回答へ戻る" : "質問一覧へ戻る";
+  const backHref = fromSessionId ? `/session/${fromSessionId}` : "/";
+  const backLabel = fromSessionId ? "回答へ戻る" : "ホームへ戻る";
 
   useEffect(() => {
     let active = true;

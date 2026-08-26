@@ -14,7 +14,7 @@ import { useAuth } from "@/components/AuthProvider";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
-function IconChat() {
+function IconHistory() {
   return (
     <svg
       viewBox="0 0 24 24"
@@ -24,8 +24,9 @@ function IconChat() {
       aria-hidden="true"
       className="h-6 w-6"
     >
-      <path d="M4 5h16v11H8l-4 4V5z" strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M8 9h8M8 12h5" strokeLinecap="round" />
+      <path d="M3 12a9 9 0 1 0 3-6.7" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M3 4v4h4" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M12 8v4l3 3" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -89,10 +90,12 @@ interface Action {
 
 const ACTIONS: Action[] = [
   {
-    href: "/questions",
-    label: "質問する",
-    description: "困りごとを書くと、答えられそうな人へAIが取り次ぎます。",
-    icon: <IconChat />,
+    // "質問する" moved into the hero's own question bar (#392) — a link here
+    // would just duplicate it. 質問履歴 fills the slot instead.
+    href: "/history",
+    label: "質問履歴",
+    description: "過去に自分が聞いた質問と、その後のやり取りを振り返れます。",
+    icon: <IconHistory />,
     accent: "bg-primary-container text-on-primary-container",
   },
   {
@@ -100,7 +103,7 @@ const ACTIONS: Action[] = [
     label: "回答する",
     description: "自分に届いた質問を受信箱で確認して答えます。",
     icon: <IconInbox />,
-    accent: "bg-secondary-container text-on-secondary-container",
+    accent: "bg-primary-container text-on-primary-container",
   },
   {
     href: "/dashboard",

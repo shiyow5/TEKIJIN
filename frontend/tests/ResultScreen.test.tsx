@@ -73,10 +73,7 @@ const THREE_CANDIDATES: Recommendation[] = [
 describe("ResultScreen — pending", () => {
   it("shows a preparing placeholder when no data has arrived", () => {
     renderResult(state({}));
-    expect(screen.getByRole("link", { name: "質問一覧へ戻る" })).toHaveAttribute(
-      "href",
-      "/questions",
-    );
+    expect(screen.getByRole("link", { name: "ホームへ戻る" })).toHaveAttribute("href", "/");
     expect(screen.getByText("結果を準備中…")).toBeInTheDocument();
   });
 });
