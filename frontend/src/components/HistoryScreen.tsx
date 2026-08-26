@@ -13,21 +13,13 @@ import { useCurrentUser } from "@/components/CurrentUserProvider";
 import { PageBackLink } from "@/components/PageBackLink";
 import { QuestionDeleteButton } from "@/components/QuestionDeleteButton";
 import { QuestionResolveButton } from "@/components/QuestionResolveButton";
-import { getRecentQuestions } from "@/lib/api-client";
+import { useRecentQuestions } from "@/hooks/useRecentQuestions";
 import type { RecentQuestionItem } from "@/lib/api-types";
 import { formatDateTimeJst } from "@/lib/datetime";
 import Link from "next/link";
-import { useEffect, useState } from "react";
 
 /** The full history pulls far more than the 5-item panel; 200 is the API cap. */
 const HISTORY_LIMIT = 200;
-
-type Phase = "loading" | "ready" | "error";
-
-interface HistoryState {
-  phase: Phase;
-  items?: RecentQuestionItem[];
-}
 
 /** The resolution line: responder name, self / document self-resolve, or pending. */
 function resolutionNote(item: RecentQuestionItem): string {
@@ -66,7 +58,7 @@ function HistoryRow({
         <span>{resolutionNote(item)}</span>
         {item.session_id ? (
           <Link
-            href={`/session/${encodeURIComponent(item.session_id)}`}
+            href={`/session/${encodeURIComponent(item.session_id)}/result`}
             className="text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           >
             結果を見る
@@ -95,26 +87,7 @@ function HistoryRow({
 
 export function HistoryScreen() {
   const { currentUserId } = useCurrentUser();
-  const [state, setState] = useState<HistoryState>({ phase: "loading" });
-
-  useEffect(() => {
-    if (currentUserId === null) {
-      setState({ phase: "loading" });
-      return;
-    }
-    let active = true;
-    setState({ phase: "loading" });
-    getRecentQuestions(currentUserId, { limit: HISTORY_LIMIT })
-      .then((items) => {
-        if (active) setState({ phase: "ready", items });
-      })
-      .catch(() => {
-        if (active) setState({ phase: "error" });
-      });
-    return () => {
-      active = false;
-    };
-  }, [currentUserId]);
+  const [state, setState] = useRecentQuestions(currentUserId, { limit: HISTORY_LIMIT });
 
   /** Drop a just-deleted question from the list without a full re-fetch. */
   function handleDeleted(questionId: string) {

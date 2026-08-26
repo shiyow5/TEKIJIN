@@ -103,14 +103,15 @@ describe("RecentQuestions", () => {
     render(<RecentQuestions />);
 
     await waitFor(() => expect(screen.getByText("UTMの移行時の注意点")).toBeInTheDocument());
-    // q1 / q2 have a session_id -> clickable link to /session/{id}.
+    // q1 / q2 have a session_id -> clickable link to their RESULT screen (#468:
+    // must land on /result, the post-flow view, not the processing screen).
     expect(screen.getByRole("link", { name: /「UTMの移行時の注意点」/ })).toHaveAttribute(
       "href",
-      "/session/sess-q1",
+      "/session/sess-q1/result",
     );
     expect(screen.getByRole("link", { name: /「社内Wi-Fiの申請方法」/ })).toHaveAttribute(
       "href",
-      "/session/sess-q2",
+      "/session/sess-q2/result",
     );
     // q3 has no session_id (seeded history) -> not a link.
     expect(
@@ -125,6 +126,21 @@ describe("RecentQuestions", () => {
     getRecentQuestionsMock.mockResolvedValue([]);
     render(<RecentQuestions />);
     await waitFor(() => expect(screen.getByText("まだ質問はありません。")).toBeInTheDocument());
+  });
+
+  it("refetches on window focus so a question asked elsewhere then returned-to appears (#468)", async () => {
+    useCurrentUserMock.mockReturnValue(asUser("E001"));
+    // Initial mount: only q2 exists yet.
+    getRecentQuestionsMock.mockResolvedValueOnce([ITEMS[1]]);
+    render(<RecentQuestions />);
+    await waitFor(() => expect(screen.getByText("社内Wi-Fiの申請方法")).toBeInTheDocument());
+    expect(screen.queryByText("UTMの移行時の注意点")).not.toBeInTheDocument();
+
+    // A run completed on another route and the user comes back: refetch on focus
+    // now returns the newly-asked q1 too (the mount-only effect never re-ran).
+    getRecentQuestionsMock.mockResolvedValueOnce(ITEMS);
+    fireEvent.focus(window);
+    await waitFor(() => expect(screen.getByText("UTMの移行時の注意点")).toBeInTheDocument());
   });
 
   it("shows an error note when the fetch fails", async () => {
