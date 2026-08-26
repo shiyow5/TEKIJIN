@@ -28,7 +28,7 @@ from tekijin.auth.principal import Principal
 from tekijin.auth.tokens import create_access_token
 from tekijin.config import get_settings
 from tekijin.data.dashboard import dashboard_summary
-from tekijin.data.db import get_sessionmaker
+from tekijin.data.db import get_sessionmaker, session_scope
 from tekijin.models.tables import Answer, Event, Feedback, Message, Question, Recommendation
 
 NOW = dt.datetime(2026, 9, 15, 12, 0, 0)
@@ -124,7 +124,40 @@ def _client(
     self_answer_model=None,
     knowledge_answer_min_similarity=None,
 ) -> TestClient:
-    service = AgentService(
+    return _app_client(
+        _service(
+            engine,
+            embedder,
+            retriever=retriever,
+            scorer=scorer,
+            checkpointer=checkpointer,
+            answerability_model=answerability_model,
+            answerability_threshold=answerability_threshold,
+            self_answer_model=self_answer_model,
+            knowledge_answer_min_similarity=knowledge_answer_min_similarity,
+        )
+    )
+
+
+def _service(
+    engine,
+    embedder,
+    *,
+    retriever=None,
+    scorer=None,
+    checkpointer=None,
+    answerability_model=None,
+    answerability_threshold=40,
+    self_answer_model=None,
+    knowledge_answer_min_similarity=None,
+) -> AgentService:
+    """Same wiring as :func:`_client`, but hands back the service itself.
+
+    Tests that need to poke at durable state (rather than only the HTTP surface)
+    build the service here and wrap it with :func:`_app_client` themselves.
+    """
+
+    return AgentService(
         session_factory=get_sessionmaker(engine),
         checkpointer=checkpointer or MemorySaver(),
         embedder=embedder,
@@ -139,7 +172,6 @@ def _client(
         scorer=scorer,
         now_factory=lambda: NOW,
     )
-    return _app_client(service)
 
 
 class _FixedSelfAnswer:
@@ -1599,6 +1631,164 @@ def test_stale_outcome_recommendation_id_is_rejected(seed_counts, engine, fake_e
         json={"session_id": "stale1", "outcome": "accepted", "recommendation_id": new_rid},
     )
     assert ok.status_code == 200
+
+
+def test_stale_checkpoint_primary_rebinds_to_the_shown_candidate(
+    seed_counts, engine, fake_embedder
+) -> None:
+    # #94-3: `primary_recommendation_id` reaches the checkpoint only at the END of a
+    # stream segment, while the graph checkpoints `recommendations` per node. A
+    # disconnect in between (decline -> reroute -> rows INSERTed -> GeneratorExit)
+    # leaves the id on the DECLINED row while the shown candidate has moved on.
+    # Recording the next outcome there would attribute it to the wrong person AND
+    # wedge the hand-off (that row already carries "declined", so every later submit
+    # returns "already"). The SHOWN person wins.
+    service = _service(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    client = _app_client(service)
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "stale2"})
+    _events(client, "stale2")
+    old_rid = client.get("/handoff/stale2").json()["recommendation_id"]
+
+    client.post("/answer", json={"session_id": "stale2", "outcome": "declined"})
+    _events(client, "stale2")
+    new_rid = client.get("/handoff/stale2").json()["recommendation_id"]
+    assert new_rid != old_rid
+
+    check = get_sessionmaker(engine)()
+    try:
+        question_id = check.get(Recommendation, new_rid).question_id
+    finally:
+        check.close()
+
+    # The state the lost write-back leaves behind: shown person is candidate 2,
+    # the stored id still points at candidate 1's declined row.
+    stale_values = {
+        "question_id": question_id,
+        "primary_recommendation_id": old_rid,
+        "recommendations": [{"person_id": 2}],
+    }
+    with session_scope(service._session_factory) as session:
+        assert service._resolve_primary(session, stale_values) == new_rid
+        # A consistent checkpoint is left alone (no rebind, no surprise).
+        consistent = {
+            "question_id": question_id,
+            "primary_recommendation_id": old_rid,
+            "recommendations": [{"person_id": 1}],
+        }
+        assert service._resolve_primary(session, consistent) == old_rid
+        # A shown candidate with NO persisted row resolves to None rather than to
+        # someone else's row: binding this person's answer to another employee's
+        # recommendation would mis-attribute `answers.responder_id` (#274). The
+        # caller degrades to "no_target" instead.
+        orphan = {
+            "question_id": question_id,
+            "primary_recommendation_id": old_rid,
+            "recommendations": [{"person_id": 39}],  # never recommended here
+        }
+        assert service._resolve_primary(session, orphan) is None
+
+
+def test_stale_checkpoint_outcome_lands_on_the_shown_candidate(
+    seed_counts, engine, fake_embedder
+) -> None:
+    # End-to-end consequence of the above: with a stale id in the checkpoint, the
+    # responder's accept must still (a) be accepted rather than 409'd by its own
+    # generation token, and (b) be recorded on the SHOWN candidate's row.
+    service = _service(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    client = _app_client(service)
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "stale3"})
+    _events(client, "stale3")
+    old_rid = client.get("/handoff/stale3").json()["recommendation_id"]
+    client.post("/answer", json={"session_id": "stale3", "outcome": "declined"})
+    _events(client, "stale3")
+    new_rid = client.get("/handoff/stale3").json()["recommendation_id"]
+
+    # Rewind ONLY the id, exactly as the lost `_persist_run_state` would.
+    db = service._session_factory()
+    try:
+        service._graph(db).update_state(
+            service._config("stale3"), {"primary_recommendation_id": old_rid}
+        )
+    finally:
+        db.close()
+
+    # /handoff must hand out the RESOLVED id, or the responder would echo the
+    # superseded one straight back into the #94-2 guard and 409 their own submit.
+    assert client.get("/handoff/stale3").json()["recommendation_id"] == new_rid
+
+    ok = client.post(
+        "/answer",
+        json={"session_id": "stale3", "outcome": "accepted", "recommendation_id": new_rid},
+    )
+    assert ok.status_code == 200
+
+    check = get_sessionmaker(engine)()
+    try:
+        assert check.get(Recommendation, new_rid).outcome == "accepted"
+        assert check.get(Recommendation, old_rid).outcome == "declined"  # untouched
+    finally:
+        check.close()
+
+
+def test_stale_checkpoint_answer_row_is_attributed_to_the_shown_responder(
+    seed_counts, engine, fake_embedder
+) -> None:
+    # #94-3 x #274: the captured answer must be attributed to the person who
+    # actually answered. Resolving through the stale id would file candidate 2's
+    # answer under candidate 1 — polluting the reuse corpus and lighting the wrong
+    # employee's "回答が届きました".
+    service = _service(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    client = _app_client(service)
+    client.post("/ask", json={"asker_id": 7, "question": GOOD_Q, "session_id": "stale4"})
+    _events(client, "stale4")
+    old_rid = client.get("/handoff/stale4").json()["recommendation_id"]
+    client.post("/answer", json={"session_id": "stale4", "outcome": "declined"})
+    _events(client, "stale4")
+
+    db = service._session_factory()
+    try:
+        service._graph(db).update_state(
+            service._config("stale4"), {"primary_recommendation_id": old_rid}
+        )
+    finally:
+        db.close()
+
+    body = "拠点間はIPsec VPNで設定し、各ルータのSAを揃えてください。"
+    assert (
+        client.post(
+            "/answer", json={"session_id": "stale4", "outcome": "accepted", "answer_body": body}
+        ).status_code
+        == 200
+    )
+
+    check = get_sessionmaker(engine)()
+    try:
+        q = (
+            check.query(Question)
+            .filter(Question.asker_id == 7, Question.body == GOOD_Q)
+            .order_by(Question.created_at.desc())
+            .first()
+        )
+        answers = check.query(Answer).filter(Answer.question_id == q.id).all()
+        assert len(answers) == 1
+        assert answers[0].responder_id == 2  # the SHOWN candidate, not the declined 1
+    finally:
+        check.close()
 
 
 def test_handoff_conflicts_when_awaiting_clarification(seed_counts, engine, fake_embedder) -> None:

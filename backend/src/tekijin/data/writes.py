@@ -318,6 +318,31 @@ def latest_primary_recommendation(session: Session, question_id: str) -> int | N
     return row[0] if row else None
 
 
+def latest_recommendation_for_person(
+    session: Session, question_id: str, employee_id: int
+) -> int | None:
+    """The newest recommendation row for a (question, employee) pair, if any.
+
+    Used to re-bind a hand-off whose checkpointed ``primary_recommendation_id``
+    went stale: a decline+reroute inserts a fresh row set, and a client disconnect
+    between that INSERT and the checkpoint write-back leaves the id pointing at the
+    DECLINED row while the graph already shows the next candidate (#94-3). The
+    person currently shown is the authority; the newest row for them is the one to
+    record the outcome on (a reroute can only add rows, never reorder existing ones).
+    """
+
+    row = session.execute(
+        select(Recommendation.id)
+        .where(
+            Recommendation.question_id == question_id,
+            Recommendation.employee_id == employee_id,
+        )
+        .order_by(Recommendation.id.desc())
+        .limit(1)
+    ).first()
+    return row[0] if row else None
+
+
 def recommendation_employee_id(session: Session, recommendation_id: int) -> int | None:
     """The employee a recommendation points at (``None`` if the id is unknown).
 
