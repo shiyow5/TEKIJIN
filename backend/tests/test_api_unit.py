@@ -835,7 +835,7 @@ class _FakeRetriever:
 
 
 class _FakeScorer:
-    def rank(self, topics, candidates, asker_id, now, *, top_k=3):
+    def rank(self, topics, candidates, asker_id, now, *, top_k=3, question_similarity=None):
         return {"recommendations": []}
 
 

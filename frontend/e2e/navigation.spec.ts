@@ -60,7 +60,9 @@ test.describe("navigation", () => {
     // The brand links home.
     await page.getByRole("link", { name: /TEKIJIN/ }).click();
     await page.waitForURL(/\/$/);
-    await expect(page.getByRole("heading", { level: 1, name: /TEKIJIN/ })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { level: 1, name: "何を知りたいですか？" }),
+    ).toBeVisible();
   });
 
   test("hub cards reach the question and inbox screens", async ({ page }) => {
@@ -101,7 +103,9 @@ test.describe("navigation", () => {
     await expect(page.getByRole("heading", { name: "ページが見つかりません" })).toBeVisible();
     await page.getByRole("link", { name: "ホームへ戻る" }).click();
     await page.waitForURL(/\/$/);
-    await expect(page.getByRole("heading", { level: 1, name: /TEKIJIN/ })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { level: 1, name: "何を知りたいですか？" }),
+    ).toBeVisible();
   });
 
   test("the current-user switcher persists the selection across reloads", async ({ page }) => {
@@ -303,7 +307,9 @@ test.describe("navigation", () => {
     await page.getByRole("combobox", { name: /利用者を切替/ }).selectOption("E002");
 
     await page.waitForURL(/\/$/);
-    await expect(page.getByRole("heading", { level: 1, name: /TEKIJIN/ })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { level: 1, name: "何を知りたいですか？" }),
+    ).toBeVisible();
     await expect(page.getByRole("combobox", { name: /利用者を切替/ })).toHaveValue("E002");
   });
 });

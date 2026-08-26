@@ -58,7 +58,7 @@ class _FakeScorer:
     def __init__(self, recs: list[dict]) -> None:
         self._recs = recs
 
-    def rank(self, topics, candidates, asker_id, now, *, top_k=3) -> dict:
+    def rank(self, topics, candidates, asker_id, now, *, top_k=3, question_similarity=None) -> dict:
         # Honour the decline loop: only recommend candidates still in the pool.
         recs = [r for r in self._recs if r["person_id"] in candidates]
         return {"recommendations": recs[:top_k]}

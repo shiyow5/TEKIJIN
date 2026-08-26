@@ -55,10 +55,10 @@ describe("DocumentViewer", () => {
     expect(back).toHaveAttribute("href", "/session/sess-9");
   });
 
-  it("falls back to the question list when no originating session is known", async () => {
+  it("falls back to the top page when no originating session is known", async () => {
     getDocumentMock.mockResolvedValue(DOC);
     render(<DocumentViewer docId="doc_001" />);
-    const back = await screen.findByRole("link", { name: "質問一覧へ戻る" });
-    expect(back).toHaveAttribute("href", "/questions");
+    const back = await screen.findByRole("link", { name: "ホームへ戻る" });
+    expect(back).toHaveAttribute("href", "/");
   });
 });

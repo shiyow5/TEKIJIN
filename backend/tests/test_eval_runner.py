@@ -474,7 +474,7 @@ def test_pipeline_ranker_pins_responder_on_prior_answer_route() -> None:
     calls: list[list[int]] = []
 
     class _FakeScorer:
-        def rank(self, topics, candidate_ids, asker_id, now, *, top_k=3):  # noqa: ARG002
+        def rank(self, topics, candidate_ids, asker_id, now, *, top_k=3, question_similarity=None):  # noqa: ARG002
             calls.append(list(candidate_ids))
             return {"recommendations": [{"person_id": pid} for pid in candidate_ids]}
 
@@ -501,7 +501,7 @@ class _RecordingScorer:
     def __init__(self):
         self.called = False
 
-    def rank(self, topics, candidate_ids, asker_id, now, *, top_k=3):  # noqa: ARG002
+    def rank(self, topics, candidate_ids, asker_id, now, *, top_k=3, question_similarity=None):  # noqa: ARG002
         self.called = True
         return {"recommendations": [{"person_id": pid} for pid in candidate_ids]}
 

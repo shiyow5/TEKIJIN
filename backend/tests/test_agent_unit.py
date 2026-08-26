@@ -62,6 +62,7 @@ def _retrieval(
         "answer_confidence": answer,
         "document_confidence": document,
         "people_confidence": people_sim,
+        "person_question_similarity": {},
     }
 
 
@@ -331,6 +332,67 @@ def test_c4_retrieve_expansion_folds_topics_and_reembeds() -> None:
     nodes = _nodes_for_retrieve(rec, query_expansion_enabled=True)
     nodes.c4_retrieve({"question": "Q", "topics": ["A", "B"], "query_vector": [0.1]})
     assert rec.calls == [("Q A B", None)]
+
+
+# --------------------------------------------------------------------------- #
+# #405: question-fit wiring — C6 forwards C4's qsim map to the scorer iff enabled
+# --------------------------------------------------------------------------- #
+class _RecordingScorer:
+    """Records the ``question_similarity`` kwarg each ``rank`` call receives."""
+
+    def __init__(self) -> None:
+        self.qsim_seen: list[Any] = []
+        self.kwarg_present: list[bool] = []
+
+    def rank(self, topics, candidates, asker_id, now, *, top_k=3, **kwargs) -> dict:
+        self.kwarg_present.append("question_similarity" in kwargs)
+        self.qsim_seen.append(kwargs.get("question_similarity"))
+        return {"recommendations": []}
+
+
+def _nodes_for_score(scorer: Any, *, question_fit_enabled: bool = False) -> AgentNodes:
+    stub: Any = object()
+    return AgentNodes(
+        intent_model=stub,
+        sufficiency_model=stub,
+        draft_model=stub,
+        embedder=stub,
+        retriever=stub,
+        scorer=scorer,
+        question_fit_enabled=question_fit_enabled,
+    )
+
+
+def _c6_state(qsim: dict[int, float]) -> dict[str, Any]:
+    import datetime as dt
+
+    retrieval = _retrieval(people=[1, 2])
+    retrieval["person_question_similarity"] = qsim
+    return {
+        "topics": ["ネットワーク・VPN"],
+        "retrieval": retrieval,
+        "now": dt.datetime(2026, 8, 22, 0, 0, 0),
+        "asker": {"id": 0},
+    }
+
+
+def test_c6_forwards_question_similarity_when_enabled() -> None:
+    # ON: the scorer receives C4's per-person qsim map so it can add a question-fit
+    # term. (Routing is unaffected — C5 does not read the scorer.)
+    scorer = _RecordingScorer()
+    nodes = _nodes_for_score(scorer, question_fit_enabled=True)
+    nodes.c6_score(_c6_state({1: 0.8, 2: 0.2}))
+    assert scorer.kwarg_present == [True]
+    assert scorer.qsim_seen == [{1: 0.8, 2: 0.2}]
+
+
+def test_c6_omits_question_similarity_when_disabled() -> None:
+    # OFF (default): rank() is called exactly as pre-#405 — the kwarg is not even
+    # passed, so a scorer double that predates #405 keeps working byte-identically.
+    scorer = _RecordingScorer()
+    nodes = _nodes_for_score(scorer, question_fit_enabled=False)
+    nodes.c6_score(_c6_state({1: 0.8, 2: 0.2}))
+    assert scorer.kwarg_present == [False]
 
 
 def test_c4_retrieve_expansion_without_topics_falls_back_to_raw() -> None:
