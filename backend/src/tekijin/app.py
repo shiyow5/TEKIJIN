@@ -66,7 +66,15 @@ def create_app(agent_service: AgentService | None = None) -> FastAPI:
 
     settings = get_settings()
     _enforce_secure_auth(settings)
-    app = FastAPI(title="TEKIJIN", version=__version__, lifespan=_lifespan)
+    # ``None`` removes the route entirely (404), rather than serving an empty page.
+    # ``openapi_url=None`` also disables /docs and /redoc, which have nothing to
+    # render without it — all three are passed explicitly so the intent is readable.
+    docs_urls: dict[str, str | None] = (
+        {}
+        if settings.expose_api_docs
+        else {"docs_url": None, "redoc_url": None, "openapi_url": None}
+    )
+    app = FastAPI(title="TEKIJIN", version=__version__, lifespan=_lifespan, **docs_urls)
 
     # Explicit origins: a wildcard origin combined with allow_credentials=True is
     # rejected by browsers, so the allowed origins come from settings.cors_origins.
