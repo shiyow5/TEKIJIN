@@ -214,6 +214,14 @@ def _apply_schema_upgrades(engine: Engine) -> None:
         # — reseeding would then insert DailyReport(topics=...) and 500. ADD IF NOT
         # EXISTS makes an old DGX DB pick it up on the next deploy/reseed.
         conn.execute(text("ALTER TABLE daily_reports ADD COLUMN IF NOT EXISTS topics TEXT[]"))
+        # #433: daily-report embedding so a report can be a searchable knowledge
+        # source for System 1. daily_reports pre-exists, so create_all never adds
+        # this to a live DB — ADD IF NOT EXISTS gives an old DGX DB the column on
+        # the next deploy/reseed; ``make embed`` then fills it. The width is fixed
+        # up by the widen block below if an older narrower vector already exists.
+        conn.execute(
+            text(f"ALTER TABLE daily_reports ADD COLUMN IF NOT EXISTS embedding vector({dim})")
+        )
         # Widen embedding columns to the current dim when an older DB is narrower.
         # Table/column names are a hard-coded allow-list spliced via format() —
         # never build them from external input (identifiers can't be bound).
@@ -225,7 +233,7 @@ def _apply_schema_upgrades(engine: Engine) -> None:
                 "  cur text;\n"
                 "BEGIN\n"
                 "  FOREACH tbl IN ARRAY ARRAY['employee_profiles','questions',"
-                "'answers','documents'] LOOP\n"
+                "'answers','documents','daily_reports'] LOOP\n"
                 "    SELECT format_type(atttypid, atttypmod) INTO cur\n"
                 "      FROM pg_attribute\n"
                 "      WHERE attrelid = tbl::regclass AND attname = 'embedding'\n"

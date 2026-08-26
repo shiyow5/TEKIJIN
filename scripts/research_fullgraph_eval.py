@@ -177,6 +177,11 @@ def main() -> None:
         help="#413 person経路でも引用付き回答を併記(self_answer composer 配線・routing不変)",
     )
     ap.add_argument(
+        "--daily-knowledge",
+        action="store_true",
+        help="#433 日報を System1 の知識源に(C4 に daily dense channel・routing不変)",
+    )
+    ap.add_argument(
         "--score-all-employees",
         action="store_true",
         help="#87 C6 の候補を C4 の集合でなく全社員にする(経路シグナルは不変)",
@@ -236,6 +241,7 @@ def main() -> None:
         question_fit_enabled=args.question_fit,
         branch_constraint_enabled=args.branch_constraint,
         additive_self_answer_enabled=args.additive,
+        daily_knowledge_enabled=args.daily_knowledge,
         score_all_employees=args.score_all_employees,
     )
     ranker = GraphRanker(graph, critique_wired=ans_model is not None)

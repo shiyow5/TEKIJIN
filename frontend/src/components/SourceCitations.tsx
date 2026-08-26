@@ -25,7 +25,13 @@ export function SourceCitations({
       <ul className="mt-xs flex flex-wrap gap-xs">
         {citations.map((citation) => (
           <li key={`${citation.kind}:${citation.source_id}`}>
-            {citation.kind === "document" ? (
+            {citation.kind === "daily" ? (
+              // #433: a daily report has no detail page — show a non-link label chip.
+              <span className="inline-flex min-h-[44px] items-center gap-xs rounded-full border border-outline-variant bg-surface px-md py-sm text-sm font-bold text-on-surface-variant">
+                <span aria-hidden="true">📝</span>
+                日報より
+              </span>
+            ) : citation.kind === "document" ? (
               <Link
                 href={`/documents/${encodeURIComponent(citation.source_id)}${
                   sessionId ? `?from=${encodeURIComponent(sessionId)}` : ""

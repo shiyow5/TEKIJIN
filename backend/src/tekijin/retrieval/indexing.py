@@ -18,12 +18,18 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from tekijin.models.tables import Answer, Document, EmployeeProfile, Question
+from tekijin.models.tables import Answer, DailyReport, Document, EmployeeProfile, Question
 from tekijin.retrieval.embedding import PASSAGE, Embedder
 
 
 def _document_text(row: Document) -> str:
     return f"{row.title or ''}\n{row.body or ''}".strip()
+
+
+def _daily_text(row: DailyReport) -> str:
+    # #433: index the report's PROBLEM (issue) and ACTIVITY (content) — that is
+    # where a daily report's tacit knowledge lives, so a question can retrieve it.
+    return f"{row.issue or ''}\n{row.content or ''}".strip()
 
 
 # (logical name, model, text extractor). Order is irrelevant; each is independent.
@@ -33,6 +39,8 @@ _SPECS: tuple[tuple[str, Any, Callable[[Any], str | None]], ...] = (
     ("questions", Question, lambda r: r.body),
     ("answers", Answer, lambda r: r.body),
     ("documents", Document, _document_text),
+    # #433: daily reports as a searchable knowledge source for System 1.
+    ("daily_reports", DailyReport, _daily_text),
 )
 
 
