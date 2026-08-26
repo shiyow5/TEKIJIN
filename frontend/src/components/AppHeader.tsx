@@ -389,7 +389,12 @@ export function AppHeader() {
             {/* Transparent-background logo from Next's /public (aspect ≈ 2.8:1).
                 alt carries the brand name so the link's accessible name stays
                 "TEKIJIN". */}
-            <img src="/tekijin-logo.png" alt="TEKIJIN" className="h-10 w-auto" />
+            {/* Bigger than the original h-10: the brand is the only thing anchoring
+                the header now that the nav lives in the drawer (#391). Capped at
+                `h-12` below `md` because the header already wraps to two rows on
+                a phone, and it is sticky (#415) — every pixel is permanently
+                spent. */}
+            <img src="/tekijin-logo.png" alt="TEKIJIN" className="h-12 w-auto md:h-14" />
           </Link>
 
           <div className="flex flex-wrap items-center gap-sm">
