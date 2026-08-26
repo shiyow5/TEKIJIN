@@ -154,6 +154,9 @@ export function ProcessingScreen({
   }, [stream.followup]);
 
   const steps = buildSteps(stream);
+  // #475 Screen 01: reassurance — how many OTHER people asked in this area. Hidden
+  // at 0 (feature off / nobody else). Lowers the "is this a dumb question?" barrier.
+  const similarAskerCount = stream.understood?.similar_asker_count ?? 0;
   const hasRecommendations = (stream.recommend?.recommendations.length ?? 0) > 0;
   // A draft implies a recommendation was produced: on a refresh at the `send`
   // interrupt the reconnect replays only the draft, so treat it as result access.
@@ -286,6 +289,20 @@ export function ProcessingScreen({
             </li>
           ) : null}
         </ol>
+
+        {/* #475 Screen 01: reassurance that the question is not unique — shown only
+            when other askers exist (count ≥ 1), never at 0. */}
+        {similarAskerCount >= 1 ? (
+          <p
+            className={`rounded-xl border border-outline-variant bg-surface-container-low p-md text-on-surface-variant text-sm ${REVEAL_CLASS}`}
+          >
+            <span aria-hidden="true" className="mr-xs">
+              💬
+            </span>
+            同じ分野で、過去に{similarAskerCount}
+            人が質問しています。あなただけではありません。
+          </p>
+        ) : null}
 
         {/* #413: additive cited answer, shown alongside the person hand-off flow. */}
         <ReferenceAnswer reference={stream.reference} sessionId={sessionId} />

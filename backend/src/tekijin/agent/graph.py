@@ -135,6 +135,7 @@ def build_agent(
     additive_self_answer_enabled: bool = False,
     additive_self_answer_floor: float = 0.20,
     score_all_employees: bool = False,
+    similar_askers_enabled: bool = False,
 ):
     """Compile and return the C1-C8 agent graph.
 
@@ -193,6 +194,9 @@ def build_agent(
         # gets a floor when wired (None -> no node added, inert).
         knowledge_session=session if knowledge_answer_min_similarity is not None else None,
         knowledge_answer_min_similarity=knowledge_answer_min_similarity,
+        # #475 Screen 01: c1_intent counts other prior askers in the same topic area
+        # only when this session is wired (None = OFF -> understood byte-identical).
+        similar_asker_session=session if similar_askers_enabled else None,
         # #371: fold C1 topics into the C4 retrieval query (False = OFF, dormant).
         query_expansion_enabled=query_expansion_enabled,
         # #405: add the question↔past-answer term to C6 (False = OFF, dormant).

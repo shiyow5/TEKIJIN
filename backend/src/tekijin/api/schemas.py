@@ -761,6 +761,10 @@ class UnderstoodData(BaseModel):
     situation: str | None = None
     question_type: str | None = None
     confidence: float = 0.0
+    # #475 Screen 01: how many OTHER askers previously asked in the same topic area
+    # (reassurance). 0 when the feature is off or nobody else has — the client hides
+    # the message at 0.
+    similar_asker_count: int = 0
 
 
 class FollowupData(BaseModel):

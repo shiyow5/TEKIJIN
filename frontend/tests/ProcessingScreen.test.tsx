@@ -412,6 +412,48 @@ describe("ProcessingScreen", () => {
     expect(screen.getByText("最適な回答者を探しています…")).toBeInTheDocument();
   });
 
+  describe("similar-asker reassurance (#475 Screen 01)", () => {
+    function understood(count: number) {
+      return state({
+        understood: {
+          topics: ["ネットワーク"],
+          products: [],
+          situation: "",
+          question_type: "how",
+          confidence: 0.8,
+          similar_asker_count: count,
+        },
+      });
+    }
+
+    it("shows how many other people asked in this area when the count is ≥ 1", () => {
+      renderScreen(understood(3));
+      expect(
+        screen.getByText(/同じ分野で、過去に3人が質問しています。あなただけではありません。/),
+      ).toBeInTheDocument();
+    });
+
+    it("hides the reassurance when the count is 0", () => {
+      renderScreen(understood(0));
+      expect(screen.queryByText(/あなただけではありません/)).not.toBeInTheDocument();
+    });
+
+    it("hides the reassurance when the field is absent (feature off / old payload)", () => {
+      renderScreen(
+        state({
+          understood: {
+            topics: ["ネットワーク"],
+            products: [],
+            situation: "",
+            question_type: "how",
+            confidence: 0.8,
+          },
+        }),
+      );
+      expect(screen.queryByText(/あなただけではありません/)).not.toBeInTheDocument();
+    });
+  });
+
   describe("staggered step reveal (#475 Screen 01)", () => {
     it("reveals each thinking step with the reveal animation, disabled under reduced motion", () => {
       renderScreen(

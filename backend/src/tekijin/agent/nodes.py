@@ -35,6 +35,7 @@ from tekijin.agent.stubs import (
     collect_known_values,
     missing_required_slots,
 )
+from tekijin.data.questions import count_similar_prior_askers
 from tekijin.knowledge.answer import answer_from_knowledge
 from tekijin.retrieval.embedding import QUERY, Embedder
 from tekijin.retrieval.fragments import FragmentSource, collect_cited_evidence
@@ -119,6 +120,7 @@ class AgentNodes:
         prior_answer_relevance_floor: float = 0.15,
         knowledge_session: Any | None = None,
         knowledge_answer_min_similarity: float | None = None,
+        similar_asker_session: Any | None = None,
         query_expansion_enabled: bool = False,
         question_fit_enabled: bool = False,
         additive_self_answer_enabled: bool = False,
@@ -148,6 +150,11 @@ class AgentNodes:
         # knowledge units before routing (bypassing the C5 separation problem, #327).
         self._knowledge_session = knowledge_session
         self._knowledge_floor = knowledge_answer_min_similarity
+        # #475 Screen 01: read session used by c1_intent to count OTHER prior askers
+        # in the same topic area. ``None`` (default) -> the count is never computed
+        # and never attached, so ``understood`` is byte-identical when the feature
+        # is off. Wired by build_agent only when ``similar_askers_enabled``.
+        self._similar_asker_session = similar_asker_session
         # #327: corpus-count routing for prior_answer (None = OFF, dormant route).
         self._prior_answer_reuse_min = prior_answer_reuse_min
         self._prior_answer_relevance_floor = prior_answer_relevance_floor
@@ -260,7 +267,7 @@ class AgentNodes:
                 "constraint_branch": None,
             }
         result = self._intent.analyze(state["question"], state.get("asker"))
-        return {
+        update: AgentState = {
             "topics": result.topics,
             "products": result.products,
             "situation": result.situation,
@@ -269,6 +276,19 @@ class AgentNodes:
             "intent_confidence": result.confidence,
             "constraint_branch": result.constraint_branch,
         }
+        # #475 Screen 01: attach the "N other people asked in this area" reassurance
+        # count when wired. Read-only, cheap (GIN-indexed topic-overlap count), and
+        # gated on a session so it stays inert (understood byte-identical) when off.
+        # Never on the out_of_scope short-circuit above (nothing to reassure about).
+        if self._similar_asker_session is not None and result.topics and not result.out_of_scope:
+            asker = state.get("asker")
+            update["similar_asker_count"] = count_similar_prior_askers(
+                self._similar_asker_session,
+                result.topics,
+                exclude_asker_id=asker.get("id") if asker else None,
+                exclude_question_id=state.get("question_id"),
+            )
+        return update
 
     # -- C2: sufficiency check (LLM stub) ---------------------------------
     def c2_sufficiency(self, state: AgentState) -> AgentState:
