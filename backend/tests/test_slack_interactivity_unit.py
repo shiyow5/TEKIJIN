@@ -182,6 +182,35 @@ def test_unlinked_slack_user_is_rejected_without_raising(monkeypatch) -> None:
     assert "権限がありません" in json.loads(response.body)["text"]
 
 
+def test_payload_without_a_slack_user_id_never_queries_the_link_table(monkeypatch) -> None:
+    """A `block_actions` payload with no `user.id` cannot identify a responder.
+
+    Previously that `None` was handed straight to `get_slack_link_by_slack_user_id`.
+    `slack_links.slack_user_id` is NOT NULL so the resulting `IS NULL` lookup could
+    never match — the old code was not unsafe, it just paid a round-trip to learn
+    that, and the rejection depended on a constraint declared far away. Decide it
+    before the DB instead (#441).
+    """
+
+    calls: list[object] = []
+
+    def _spy(session, uid):
+        calls.append(uid)
+        return None
+
+    monkeypatch.setattr(slack_routes, "get_slack_link_by_slack_user_id", _spy)
+    service = _FakeService(responder_id=None, current_responder_id=42)
+
+    response = _handle_interactivity_action(
+        service, _payload("tekijin_accept", "accepted", user_id=None)
+    )
+
+    assert calls == []  # the lookup never ran
+    assert service.submitted == []
+    assert response.status_code == 200
+    assert "権限がありません" in json.loads(response.body)["text"]
+
+
 def test_successful_action_replaces_the_original_message_removing_the_buttons(
     monkeypatch,
 ) -> None:
