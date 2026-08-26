@@ -18,6 +18,7 @@ import { PageBackLink } from "@/components/PageBackLink";
 import type { HandoffAction } from "@/hooks/useHandoff";
 import { getInbox } from "@/lib/api-client";
 import type { InboxItem } from "@/lib/api-types";
+import { formatDateTimeJst } from "@/lib/datetime";
 import { useCallback, useEffect, useState } from "react";
 
 type Phase = "loading" | "ready" | "error";
@@ -25,12 +26,6 @@ type Phase = "loading" | "ready" | "error";
 interface InboxState {
   phase: Phase;
   items?: InboxItem[];
-}
-
-/** ISO 8601 → "YYYY-MM-DD HH:mm" without locale/timezone drift (string slice). */
-function formatReceivedAt(iso: string | null | undefined): string | null {
-  if (!iso || iso.length < 16) return null;
-  return `${iso.slice(0, 10)} ${iso.slice(11, 16)}`;
 }
 
 function InboxListItem({
@@ -42,7 +37,7 @@ function InboxListItem({
   active: boolean;
   onSelect: () => void;
 }) {
-  const received = formatReceivedAt(item.created_at);
+  const received = formatDateTimeJst(item.created_at);
   return (
     <li>
       <button

@@ -1,5 +1,5 @@
-import type { CurrentUserContextValue } from "@/components/CurrentUserProvider";
 import { ChatScreen } from "@/components/ChatScreen";
+import type { CurrentUserContextValue } from "@/components/CurrentUserProvider";
 import type { ChatThreadDetail, ChatThreadSummary } from "@/lib/api-types";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -127,8 +127,9 @@ describe("ChatScreen", () => {
     );
 
     const list = within(screen.getByRole("list", { name: "チャットスレッド一覧" }));
-    expect(list.getByText("2026-08-24 10:00")).toBeInTheDocument(); // THREAD_A's last_message_at
-    expect(list.getByText("2026-08-23 09:00")).toBeInTheDocument(); // THREAD_B's created_at fallback
+    // Timestamps are naive-UTC on the wire; the JST display is +9h (#418).
+    expect(list.getByText("2026-08-24 19:00")).toBeInTheDocument(); // THREAD_A's last_message_at
+    expect(list.getByText("2026-08-23 18:00")).toBeInTheDocument(); // THREAD_B's created_at fallback
     // The title is what tells two threads with the SAME person apart; the
     // message preview stays out (it can carry content the list should not leak).
     expect(list.getByText("VPN移行の相談")).toBeInTheDocument();
