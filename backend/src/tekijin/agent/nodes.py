@@ -622,7 +622,15 @@ class AgentNodes:
         if top_conf < self._additive_self_answer_floor:
             return {}
         evidence = collect_cited_evidence(self._fragment_source, retrieval)
-        result = self._self_answer.compose(state["question"], evidence)
+        # This is a BEST-EFFORT additive step: the hand-off MUST always follow, so a
+        # composer failure (e.g. the LLM returns unparseable structured output ->
+        # ValueError) must degrade to "no citation" rather than crash the person run
+        # and take the hand-off down with it. The whole safety premise of #413 is
+        # that person recall never regresses; swallow and proceed to c6_score.
+        try:
+            result = self._self_answer.compose(state["question"], evidence)
+        except Exception:  # noqa: BLE001 — additive best-effort, never break hand-off
+            return {}
         if not result.grounded:
             return {}
         kind_by_id = {e.source_id: e.kind for e in evidence}

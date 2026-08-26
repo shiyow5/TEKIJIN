@@ -508,6 +508,37 @@ def test_additive_answer_ungrounded_leaves_no_reference(
     assert _is_paused(agent, cfg)
 
 
+def test_additive_answer_compose_failure_still_hands_off(
+    seed_counts, session, fake_embedder
+) -> None:
+    # #413 safety premise: a composer error on the additive path must degrade to a
+    # plain hand-off, NEVER crash the person run (person recall must not regress).
+    class _RaisingComposer:
+        calls: list = []
+
+        def compose(self, question, evidence):
+            self.calls.append((question, list(evidence)))
+            raise ValueError("unparseable structured output")
+
+    for emp in (1, 2, 3):
+        _seed_skill(session, f"sk_add_err_{emp}", emp)
+    composer = _RaisingComposer()
+    agent = build_agent(
+        fake_embedder,
+        session,
+        retriever=_person_retriever_with_data(0.25),
+        self_answer_model=composer,
+        additive_self_answer_enabled=True,
+    )
+    cfg = _cfg("add_err")
+    state = agent.invoke(_init(), cfg)
+
+    assert state["route"] == PERSON
+    assert composer.calls  # it was consulted and raised...
+    assert not state.get("additive_answer_text")  # ...but the run absorbed it
+    assert _is_paused(agent, cfg)  # and the hand-off still happens
+
+
 def test_additive_answer_off_by_default_person_route_unchanged(
     seed_counts, session, fake_embedder
 ) -> None:
