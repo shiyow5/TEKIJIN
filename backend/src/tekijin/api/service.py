@@ -191,6 +191,7 @@ class AgentService:
         daily_evidence: bool = False,
         knowledge_answer_min_similarity: float | None = None,
         query_expansion_enabled: bool = False,
+        question_fit_enabled: bool = False,
         max_concurrent_runs: int = 0,
         now_factory: Any = _default_now,
         clock: Any = time.monotonic,
@@ -230,6 +231,8 @@ class AgentService:
         self._daily_evidence = daily_evidence
         # #371: fold C1 topics into the C4 retrieval query (False = OFF, dormant).
         self._query_expansion_enabled = query_expansion_enabled
+        # #405: add the question↔past-answer term to C6 (False = OFF, dormant).
+        self._question_fit_enabled = question_fit_enabled
         # Backpressure (#180): max graph runs executing at once before /ask sheds new
         # questions with 503. 0 (default) disables it — set from settings via the
         # factory in production. Guarded by its own lock; independent of the per-
@@ -1221,6 +1224,7 @@ class AgentService:
             daily_evidence=self._daily_evidence,
             knowledge_answer_min_similarity=self._knowledge_answer_min_similarity,
             query_expansion_enabled=self._query_expansion_enabled,
+            question_fit_enabled=self._question_fit_enabled,
         )
 
     def _run(

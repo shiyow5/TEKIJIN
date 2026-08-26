@@ -118,6 +118,7 @@ class AgentNodes:
         knowledge_session: Any | None = None,
         knowledge_answer_min_similarity: float | None = None,
         query_expansion_enabled: bool = False,
+        question_fit_enabled: bool = False,
     ) -> None:
         self._intent = intent_model
         self._sufficiency = sufficiency_model
@@ -147,6 +148,11 @@ class AgentNodes:
         # c4_retrieve byte-for-byte the pre-#371 behaviour (raw query + reused C3
         # vector). See c4_retrieve for the multi-facet rationale.
         self._query_expansion_enabled = query_expansion_enabled
+        # #405: pass C4's per-person question↔past-answer similarity to the C6
+        # scorer as an additive question-fit term. False (default) -> the scorer is
+        # never handed the map, so scores are develop-identical. Routing is unchanged
+        # either way (C5 does not read the scorer).
+        self._question_fit_enabled = question_fit_enabled
 
     # -- entry: validate input, reset per-question control fields ---------
     def reset(self, state: AgentState) -> AgentState:
@@ -374,6 +380,16 @@ class AgentNodes:
             # than 3), or [] on a genuinely fresh run with no topics at all.
             return {"recommendations": existing}
 
+        # #405: hand the scorer C4's question↔past-answer similarity so it can add a
+        # question-fit term. When the feature is off, the kwarg is omitted entirely,
+        # so rank() is called exactly as before (develop byte-identical, and any
+        # scorer double that predates #405 keeps working).
+        qsim_kw: dict[str, Any] = (
+            {"question_similarity": retrieval.get("person_question_similarity")}
+            if self._question_fit_enabled
+            else {}
+        )
+
         # prior_answer hands off to the pinned past responder — UNTIL they decline,
         # and never if the pin IS the asker (they cannot answer their own question).
         # In either case drop the pin and rely on the general candidate pool below
@@ -398,7 +414,9 @@ class AgentNodes:
             # cannot fully capture (#159 "fix G"). The remaining slots below are
             # then filled from the general pool so the asker still sees up to 3
             # candidates (#307) instead of dead-ending on this one person.
-            pin_result = self._scorer.rank(topics, [pin_id], asker_id, state["now"], top_k=1)
+            pin_result = self._scorer.rank(
+                topics, [pin_id], asker_id, state["now"], top_k=1, **qsim_kw
+            )
             fresh = cast("list[dict[str, Any]]", pin_result["recommendations"])
             remaining -= len(fresh)
 
@@ -409,7 +427,12 @@ class AgentNodes:
             if candidates:
                 # All topics feed the scorer (aggregated topic_fit), not just topics[0].
                 result = self._scorer.rank(
-                    topics, candidates, asker_id, state["now"], top_k=remaining
+                    topics,
+                    candidates,
+                    asker_id,
+                    state["now"],
+                    top_k=remaining,
+                    **qsim_kw,
                 )
                 # The scorer returns typed ScoredCandidate rows; AgentState keeps the
                 # looser list[dict[str, Any]] (also written as plain dicts elsewhere),
