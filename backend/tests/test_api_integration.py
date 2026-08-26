@@ -2516,6 +2516,36 @@ def test_accumulation_reports_the_recovery_rate_of_handoffs(seed_counts, session
     assert acc["capture_rate"] == pytest.approx(0.5)
 
 
+def test_accumulation_capture_rate_cannot_exceed_one_across_a_month_boundary(
+    seed_counts, session
+) -> None:
+    """A hand-off shown last month and answered this month must not break the rate.
+
+    ``recommendations.created_at`` is when the hand-off was SHOWN — there is no
+    ``accepted_at`` — so counting answers on their own timestamp against hand-offs
+    on theirs puts such a pair in the numerator and not the denominator. Here that
+    arithmetic gives 2/1 = 200% captured while the one hand-off actually shown this
+    month captured nothing. Both halves come from one population instead.
+    """
+
+    last_month = dt.datetime(2026, 8, 28, 9, 0, 0)
+    # Shown this month, nobody wrote anything down: the only row the rate is about.
+    _accepted_handoff(session, qid="q_0001", responder_id=1, created=ACC_NOW)
+    # Shown last month, answered this month — twice.
+    for i, (qid, responder) in enumerate(((("q_0002"), 2), (("q_0003"), 3))):
+        _accepted_handoff(session, qid=qid, responder_id=responder, created=last_month)
+        _captured_answer(
+            session, aid=f"ans_xmonth{i}", qid=qid, responder_id=responder, created=ACC_NOW
+        )
+
+    acc = dashboard_summary(session, now=ACC_NOW)["knowledge_accumulation"]
+    # The knowledge itself WAS created this month — that count stays right.
+    assert acc["captured_answers"] == 2
+    assert acc["accepted_handoffs"] == 1
+    assert acc["capture_rate"] == 0.0, "the hand-off shown this month captured nothing"
+    assert acc["capture_rate"] <= 1.0
+
+
 def test_accumulation_capture_rate_is_zero_not_one_when_nothing_was_handed_off(
     seed_counts, session
 ) -> None:

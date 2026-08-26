@@ -228,20 +228,38 @@ def _knowledge_accumulation(session: Session, now: dt.datetime | None) -> dict[s
             if key in buckets:
                 buckets[key] += 1
 
+    # The rate's two halves must be counted on the SAME clock. `captured_answers`
+    # above is keyed on when the ANSWER was written (right for "knowledge created
+    # this month"), but `recommendations.created_at` is when the hand-off was
+    # SHOWN, not accepted — there is no `accepted_at`. Mixing them lets a hand-off
+    # shown last month and answered this month land in the numerator and not the
+    # denominator, so the rate could read above 100%. So the rate is computed from
+    # one population: hand-offs shown-and-accepted this month, and how many of
+    # THOSE left an answer behind.
+    accepted_stmt = select(Recommendation.id).where(
+        Recommendation.outcome == "accepted",
+        Recommendation.created_at >= this_start,
+    )
     accepted_handoffs = (
+        session.scalar(select(func.count()).select_from(accepted_stmt.subquery())) or 0
+    )
+    captured_from_those = (
         session.scalar(
-            select(func.count())
-            .select_from(Recommendation)
-            .where(
-                Recommendation.outcome == "accepted",
-                Recommendation.created_at >= this_start,
+            select(func.count()).select_from(
+                accepted_stmt.join(
+                    Answer,
+                    and_(
+                        Answer.question_id == Recommendation.question_id,
+                        Answer.responder_id == Recommendation.employee_id,
+                    ),
+                ).subquery()
             )
         )
         or 0
     )
     # 0/0 reads as 0.0, not 1.0: "nothing was handed off" must never render as
     # "everything was captured".
-    capture_rate = (captured_answers / accepted_handoffs) if accepted_handoffs else 0.0
+    capture_rate = (captured_from_those / accepted_handoffs) if accepted_handoffs else 0.0
 
     return {
         "this_month": captured_answers + retrospectives,
