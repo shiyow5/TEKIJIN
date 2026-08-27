@@ -679,6 +679,7 @@ class AgentService:
         outcome: str,
         *,
         expected_recommendation_id: int | None = None,
+        referred_to: int | None = None,
     ) -> tuple[str, str]:
         """Record the responder outcome on the durable primary recommendation.
 
@@ -720,7 +721,7 @@ class AgentService:
             existing = recommendation_outcome(session, primary)
             if existing is not None:
                 return "already", existing
-            set_recommendation_outcome(session, primary, outcome)
+            set_recommendation_outcome(session, primary, outcome, referred_to=referred_to)
             # An accepted hand-off resolves the question — stamp the runtime
             # resolution time (first-wins) for the dashboard's avg-resolution (#97).
             if outcome == "accepted" and question_id is not None:
@@ -1187,6 +1188,87 @@ class AgentService:
                 )
         except Exception:  # noqa: BLE001 - best-effort signal; never fail the queued reroute
             logger.exception("failed to record c6 exclude feedback for session %s", session_id)
+
+    def refer_handoff_target(
+        self, session_id: str, referred_to: int, *, actor_id: int | None = None
+    ) -> None:
+        """Responder refers the hand-off to a person THEY name ("他に適任者がいる → X", #518).
+
+        Records ``outcome="referred"`` (+ the named employee) on the current primary,
+        seats the named person at rank 1 for the reroute via ``referred_responder_id``
+        (c6_score's referral pin), then queues the same reroute a decline drives — so
+        the newly-drafted hand-off to the named person arrives over the open
+        ``/events`` stream and lands in THEIR ``/inbox``. Distinct outcome from a plain
+        decline (``referred`` doesn't skew acceptance rate).
+
+        Validation mirrors :meth:`exclude_handoff_target` (paused at ``send``, not
+        already answered). 422 when the named person is unknown, is the asker (they
+        cannot answer their own question), or is the current responder (a no-op
+        self-referral). Object-level auth (the responder-only rule) is enforced at the
+        route, as for accept/decline.
+        """
+
+        with self._lock(session_id):
+            session = self._session_factory()
+            try:
+                graph = self._graph(session)
+                config = self._config(session_id)
+                snapshot = graph.get_state(config)
+                next_nodes = tuple(snapshot.next)
+                if not next_nodes:
+                    raise HandoffNotFound("no responder handoff for this session")
+                if next_nodes[0] != "send":
+                    raise SessionConflict("session is not awaiting a responder outcome")
+                ctx = self._reg_get(session_id)
+                if ctx is not None and ctx.pending is not None:
+                    raise HandoffNotFound("this handoff has already been answered")
+
+                values = snapshot.values
+                recs = values.get("recommendations") or []
+                primary = recs[0] if recs else None
+                if primary is None:
+                    raise HandoffNotFound("no responder handoff for this session")
+                asker_id = (values.get("asker") or {}).get("id")
+                current_responder_id = primary["person_id"]
+
+                if not employee_exists(session, referred_to):
+                    raise SessionInvalid("referred employee not found")
+                if referred_to == asker_id:
+                    raise SessionInvalid("cannot refer to the asker")
+                if referred_to == current_responder_id:
+                    raise SessionInvalid("cannot refer to the current responder")
+
+                question_id = values.get("question_id")
+
+                # 'referred' (not 'declined') so the referrer's row drops out of their
+                # inbox / pending count without counting against their acceptance rate,
+                # and records WHO they named for the audit trail.
+                self._record_outcome(session_id, values, "referred", referred_to=referred_to)
+                # Seat the named person at rank 1 on the reroute (c6 referral pin).
+                graph.update_state(config, {"referred_responder_id": referred_to})
+                # Queue the reroute exactly as a decline does; the open /events reader
+                # consumes it and re-scores (seating the referral) / re-drafts.
+                ctx = self._reg_ensure(session_id)
+                ctx.pending = Command(resume="declined")
+                ctx.touched_at = self._clock()
+            finally:
+                session.close()
+
+        # Record the referral as a c6 learning signal OUTSIDE the lock — best-effort,
+        # append-only, mirrors the exclude signal above.
+        try:
+            with session_scope(self._session_factory) as fb_session:
+                record_feedback(
+                    fb_session,
+                    stage="c6",
+                    kind="person_referred",
+                    question_id=question_id if isinstance(question_id, str) else None,
+                    session_id=session_id,
+                    target=schemas.format_employee_id(referred_to),
+                    actor_id=actor_id,
+                )
+        except Exception:  # noqa: BLE001 - best-effort signal; never fail the queued reroute
+            logger.exception("failed to record c6 refer feedback for session %s", session_id)
 
     def regenerate_handoff_draft(self, session_id: str, *, actor_id: int | None = None) -> None:
         """Asker asks the AI to regenerate the hand-off draft ("下書きの作り直し", #260).

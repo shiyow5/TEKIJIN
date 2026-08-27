@@ -430,6 +430,48 @@ def handoff_exclude(
     return schemas.AckResponse(session_id=req.session_id, status="reroute_queued")
 
 
+@router.post("/handoff/refer", response_model=schemas.AckResponse)
+def handoff_refer(
+    req: schemas.HandoffReferRequest,
+    request: Request,
+    principal: Principal = Depends(require_principal),
+) -> schemas.AckResponse:
+    """Responder refers the hand-off to a person THEY name ("他に適任者がいる → X", #518).
+
+    Records ``outcome="referred"`` on the current primary and reroutes with the named
+    person seated at rank 1; the new hand-off + draft arrive over the open ``/events``
+    stream, so this only acks. 404 when no hand-off is pending (unknown / finished /
+    already answered); 409 when awaiting a clarification instead; 422 when the named
+    person is unknown, the asker, or the current responder.
+
+    Referring is the RESPONDER's act — like accept/decline (#274), only the session's
+    responder (or admin) may do it, a stricter rule than the asker-side exclude/select:
+    a 403 for any other participant even though they pass the participant check.
+    """
+
+    asker_id, responder_id = _service(request).session_participants(req.session_id)
+    require_session_participant(principal, asker_id, responder_id)
+    if not principal.may_act_as(responder_id or -1):
+        raise HTTPException(
+            status_code=403,
+            detail="取り次ぎ先を推薦できるのは担当者本人のみです。",
+        )
+    try:
+        _service(request).refer_handoff_target(
+            req.session_id, req.person_id, actor_id=principal.employee_id
+        )
+    except HandoffNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except SessionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except SessionInvalid as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:  # unexpected: log detail, return a generic 500
+        logger.exception("POST /handoff/refer failed for session %s", req.session_id)
+        raise HTTPException(status_code=500, detail="内部エラーが発生しました") from exc
+    return schemas.AckResponse(session_id=req.session_id, status="reroute_queued")
+
+
 @router.post("/handoff/redraft", response_model=schemas.AckResponse)
 def handoff_redraft(
     req: schemas.HandoffRedraftRequest,

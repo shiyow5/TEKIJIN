@@ -206,6 +206,15 @@ def _apply_schema_upgrades(engine: Engine) -> None:
                 "ADD COLUMN IF NOT EXISTS declined_seen_at TIMESTAMP"
             )
         )
+        # #518: the employee a responder named on a 'referred' outcome. Nullable;
+        # older DBs (persistent volume) get it here, fresh ones via create_all.
+        conn.execute(
+            text(
+                "ALTER TABLE IF EXISTS recommendations "
+                "ADD COLUMN IF NOT EXISTS referred_to_employee_id INTEGER "
+                "REFERENCES employees(id)"
+            )
+        )
         # Asker's chosen consultation method ("direct" | "chat"); NULL treated
         # as "chat" everywhere.
         conn.execute(

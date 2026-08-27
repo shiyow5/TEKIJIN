@@ -261,6 +261,25 @@ class HandoffExcludeRequest(BaseModel):
         return _coerce_asker_id(value)
 
 
+class HandoffReferRequest(BaseModel):
+    """Responder refers the hand-off to a person THEY name ("他に適任者がいる → X", #518).
+
+    ``person_id`` is any employee (not restricted to the shown candidates): the
+    responder personally vouches for them, so they are seated at rank 1 for the
+    reroute regardless of how they'd score. The new hand-off + draft arrive over the
+    open ``/events`` stream (like a decline), so the POST only acks. Rejected (422)
+    when the named person is the asker or the current responder.
+    """
+
+    session_id: str = Field(pattern=_SESSION_ID_PATTERN)
+    person_id: int
+
+    @field_validator("person_id", mode="before")
+    @classmethod
+    def _accept_e_prefixed_person_id(cls, value: object) -> int:
+        return _coerce_asker_id(value)
+
+
 class HandoffCorrectRequest(BaseModel):
     """Asker corrects the AI's interpretation of their question ("解釈の訂正", #260).
 

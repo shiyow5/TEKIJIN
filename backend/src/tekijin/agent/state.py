@@ -144,6 +144,11 @@ class AgentState(TypedDict, total=False):
     route_confidence: float
     prior_answer_note: str | None  # set on the prior_answer (補助) route
     pinned_responder_id: int | None  # prior_answer: hand off to THIS person
+    # #518: the responder said "他に適任者がいる" and named THIS person. Set by the
+    # refer endpoint just before a reroute; c6_score seats them at rank 1 (over the
+    # general pool), so the hand-off moves to the named person instead of the
+    # scorer's next pick. None (the default) leaves c6 byte-identical.
+    referred_responder_id: int | None
 
     # -- self-answer (#291) ------------------------------------------------
     # Set by the self_answer node (only when a composer is wired) on the

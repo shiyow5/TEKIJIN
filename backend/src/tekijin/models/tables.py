@@ -375,6 +375,13 @@ class Recommendation(Base):
     # NULL means "not yet seen"; only ever set on a rank==1, outcome=='declined'
     # row (the shape a decline notification is derived from).
     declined_seen_at: Mapped[dt.datetime | None] = mapped_column(DateTime)
+    # #518: when this row's outcome is 'referred', the employee the responder named
+    # as more suitable ("他に適任者がいる → この人"). NULL for every other outcome.
+    # Auditable record of the referral relationship (who referred whom); the actual
+    # reroute seats the named person via c6_score's referral pin.
+    referred_to_employee_id: Mapped[int | None] = mapped_column(
+        ForeignKey("employees.id"), nullable=True
+    )
 
 
 class Message(Base):

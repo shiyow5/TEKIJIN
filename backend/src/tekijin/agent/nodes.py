@@ -223,6 +223,7 @@ class AgentNodes:
             "route_confidence": 0.0,
             "prior_answer_note": None,
             "pinned_responder_id": None,
+            "referred_responder_id": None,
             # #291: clear the self-answer verdict so a second question on the same
             # thread_id never inherits a prior grounded answer / citations.
             "self_answer_grounded": False,
@@ -511,7 +512,7 @@ class AgentNodes:
         # the pin exists because that person already answered a near-duplicate question
         # (#159), which is evidence the branch preference does not outweigh; but the
         # asker must be told the condition was not met.
-        pin_id: int | None = (
+        prior_pin: int | None = (
             pinned
             if (
                 state.get("route") == PRIOR_ANSWER
@@ -522,6 +523,24 @@ class AgentNodes:
             )
             else None
         )
+        # #518: a responder's explicit "他に適任者がいる → this person" is seated at
+        # rank 1 the same way, but is NOT gated on the prior_answer route — a referral
+        # happens on the person route. It takes precedence over a prior_answer pin
+        # (the human's explicit choice wins). Dropped once the referred person is
+        # declined / is the asker / is already shown, so it never dead-ends or loops;
+        # None (the default) makes this whole block a no-op — c6 byte-identical.
+        referred = state.get("referred_responder_id")
+        referral_pin: int | None = (
+            referred
+            if (
+                referred is not None
+                and referred not in declined
+                and referred != asker_id
+                and referred not in existing_ids
+            )
+            else None
+        )
+        pin_id: int | None = referral_pin if referral_pin is not None else prior_pin
 
         fresh: list[dict[str, Any]] = []
         if pin_id is not None:
@@ -536,6 +555,14 @@ class AgentNodes:
             )
             fresh = cast("list[dict[str, Any]]", pin_result["recommendations"])
             self._note_unmet_branch(fresh, state)
+            # #518: when this pin is a responder referral, tell the asker WHY this
+            # person is now rank 1 (a human vouched), so the referral is visible
+            # rather than looking like a fresh scorer pick.
+            if referral_pin is not None and fresh:
+                fresh[0]["reasons"] = [
+                    {"type": "referral", "detail": "担当者からの推薦"},
+                    *fresh[0].get("reasons", []),
+                ]
             remaining -= len(fresh)
 
         if remaining > 0:
@@ -645,7 +672,13 @@ class AgentNodes:
         # Keep the already-shown survivors (rank 2/3, unchanged) instead of
         # wiping the whole set: c6_score backfills only the freed slot rather
         # than rescoring everyone from scratch (#D5/#206).
-        kept = recs[1:]
+        #
+        # #518: EXCEPT a responder referral, which must put the NAMED person at rank 1.
+        # c6_score appends the referral pin AFTER any survivors, so keeping rank 2/3
+        # would leave the named person at the bottom. Dropping the survivors makes
+        # ``existing`` empty, so the pin is seated at rank 1 and the pool backfills the
+        # rest. Gated on the referral being set, so a plain decline is unchanged.
+        kept = [] if state.get("referred_responder_id") is not None else recs[1:]
         return {"declined_ids": declined, "outcome": None, "draft": None, "recommendations": kept}
 
     # -- C8: graph update (minimal, deterministic) ------------------------
