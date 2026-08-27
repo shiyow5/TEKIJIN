@@ -98,7 +98,7 @@ def test_authorize_url_503_when_not_configured(
     assert resp.status_code == 503
 
 
-def test_authorize_url_returns_signed_state_for_the_caller(
+def test_authorize_url_state_names_the_employee_who_started_the_link(
     slack_app_configured, seed_counts, engine, fake_embedder
 ) -> None:
     client = _raw_client(engine, fake_embedder)
@@ -110,8 +110,11 @@ def test_authorize_url_returns_signed_state_for_the_caller(
 
     state = dict(pair.split("=", 1) for pair in url.split("?", 1)[1].split("&"))["state"]
     payload = jwt.decode(state, get_settings().auth_secret, algorithms=["HS256"])
-    assert payload["employee_id"] == 5
     assert payload["purpose"] == "slack_link"
+    # The state names who STARTED the link. It never selects a row on its own —
+    # `link_complete` only ever compares it with who FINISHES the link (#494), so
+    # forwarding this URL cannot attach anyone's Slack account to this caller.
+    assert payload["employee_id"] == 5
 
 
 def test_authorize_url_forbidden_for_admin(
@@ -191,18 +194,37 @@ def test_oauth_callback_success_links_and_redirects(
         pair.split("=", 1) for pair in authorize_resp.json()["url"].split("?", 1)[1].split("&")
     )["state"]
 
-    resp = client.get(
-        "/slack/oauth/callback",
-        params={"code": "a-real-looking-code", "state": state},
-        follow_redirects=False,
-    )
+    resp, done = _complete_link(client, state, 8)
     assert resp.status_code in (302, 307)
-    assert "slack=linked" in resp.headers["location"]
+    assert done.status_code == 200
 
     with get_sessionmaker(engine)() as session:
         link = get_slack_link(session, 8)
         assert link is not None
         assert link.slack_user_id == "U_EIGHT"
+
+
+def _complete_link(client, state: str, employee_id: int):
+    """Callback -> pending token -> redeem in the caller's session (#494).
+
+    The callback no longer links on its own: it has no session, so it cannot know
+    which employee. Tests must travel both halves.
+    """
+
+    resp = client.get(
+        "/slack/oauth/callback",
+        params={"code": "a-real-looking-code", "state": state},
+        follow_redirects=False,
+    )
+    location = resp.headers["location"]
+    if "slack_pending=" not in location:
+        return resp, None
+    pending = location.split("slack_pending=", 1)[1]
+    return resp, client.post(
+        "/slack/link/complete",
+        json={"pending_token": pending},
+        headers=_user_headers(employee_id),
+    )
 
 
 def _state_for(client, employee_id: int) -> str:
@@ -256,13 +278,9 @@ def test_oauth_callback_accepts_the_configured_workspace(
     )
     client = _raw_client(engine, fake_embedder)
 
-    resp = client.get(
-        "/slack/oauth/callback",
-        params={"code": "c", "state": _state_for(client, 9)},
-        follow_redirects=False,
-    )
+    _, done = _complete_link(client, _state_for(client, 9), 9)
 
-    assert "slack=linked" in resp.headers["location"]
+    assert done.status_code == 200
     with get_sessionmaker(engine)() as session:
         assert get_slack_link(session, 9).slack_user_id == "U_INSIDER"
 
@@ -282,13 +300,9 @@ def test_oauth_callback_links_any_workspace_when_team_is_unset(
     )
     client = _raw_client(engine, fake_embedder)
 
-    resp = client.get(
-        "/slack/oauth/callback",
-        params={"code": "c", "state": _state_for(client, 11)},
-        follow_redirects=False,
-    )
+    _, done = _complete_link(client, _state_for(client, 11), 11)
 
-    assert "slack=linked" in resp.headers["location"]
+    assert done.status_code == 200
 
 
 def test_a_link_stored_before_the_team_was_configured_is_ignored(
@@ -345,13 +359,12 @@ def test_oauth_callback_redirects_to_error_when_slack_account_already_linked_els
         pair.split("=", 1) for pair in authorize_resp.json()["url"].split("?", 1)[1].split("&")
     )["state"]
 
-    resp = client.get(
-        "/slack/oauth/callback",
-        params={"code": "a-real-looking-code", "state": state},
-        follow_redirects=False,
-    )
+    resp, done = _complete_link(client, state, 30)
     assert resp.status_code in (302, 307)
-    assert "slack=error" in resp.headers["location"]
+    # 409 with a message, not a bare error: the collision is now surfaced at the
+    # authenticated redeem step, where there IS a caller to explain it to.
+    assert done.status_code == 409
+    assert "他の社員" in done.json()["detail"]
 
     with get_sessionmaker(engine)() as session:
         assert get_slack_link(session, 31).slack_user_id == "U_SHARED"  # unchanged

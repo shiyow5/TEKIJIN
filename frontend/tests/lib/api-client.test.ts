@@ -12,6 +12,7 @@ import {
   getRecentQuestions,
   getRetrospectiveContext,
   getSlackAuthorizeUrl,
+  getSlackLoginUrl,
   getSlackStatus,
   postAnswer,
   postAsk,

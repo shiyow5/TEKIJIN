@@ -30,6 +30,13 @@ DGX 上のバックエンド（`:18000`）は Tailscale 経由でしか到達で
 | `GET /slack/oauth/callback` | 署名付き JWT state（`exp` + `purpose` 検証） |
 | `POST /slack/events` | Slack 署名検証（HMAC-SHA256 + ±5分のリプレイ窓） |
 | `POST /slack/interactivity` | 同上 ＋ 担当者本人チェック |
+| `POST /slack/login-url` | なし。開始URLを返すだけで、副作用も秘密も無い |
+| `GET /slack/oauth/start` | なし。nonce Cookie を張って Slack へ 302 するだけ |
+
+> 後ろ2つは Slack ログイン（#406）で追加された。**未認証は意図どおり** —
+> まだセッションを持っていない人が使う口だからである。いずれも情報を返さず、
+> `oauth/start` が張る nonce はサーバ側で毎回ランダム生成されるので、
+> 値を攻撃者が選ぶ（Cookie fixation）ことはできない。
 
 さらに **FastAPI の既定で以下も無認証で公開される**（`app.py` で `docs_url` 等を無効化していないため）。
 2026-08-26 にトンネル越しに実測し、4つとも 200 が返ることを確認した。
@@ -44,7 +51,7 @@ DGX 上のバックエンド（`:18000`）は Tailscale 経由でしか到達で
 `create_app()` の `FastAPI(...)` に `docs_url=None, redoc_url=None, openapi_url=None` を
 渡して塞ぐ（本番だけ塞ぐなら `app_env` で分岐する）。
 
-**実質の攻撃面は `/auth/login` だけ**である。ここが要注意で、リポジトリには
+**実質の攻撃面は `/auth/login`** である（他の無認証の口は情報を返さないか、Slack の署名で守られている）。ここが要注意で、リポジトリには
 **平文の既定パスワードが2つ**あり、どちらも実際に通ってしまう。
 
 | 設定 | 既定値 | 出典 | 影響 |

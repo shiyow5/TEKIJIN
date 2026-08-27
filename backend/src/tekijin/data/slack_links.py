@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import datetime as dt
+import logging
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from tekijin.models.tables import SlackLink
+
+logger = logging.getLogger(__name__)
 
 
 def _matches_team(link: SlackLink | None, expected_team_id: str) -> SlackLink | None:
@@ -22,7 +25,18 @@ def _matches_team(link: SlackLink | None, expected_team_id: str) -> SlackLink | 
 
     if link is None or not expected_team_id:
         return link
-    return link if link.slack_team_id == expected_team_id else None
+    if link.slack_team_id == expected_team_id:
+        return link
+    # Loud on purpose: a typo in TEKIJIN_SLACK_TEAM_ID turns every linked
+    # employee into "not linked" across the whole app, and without this there is
+    # nothing in the log to explain it.
+    logger.warning(
+        "Ignoring Slack link for employee %s: workspace %s != configured %s",
+        link.employee_id,
+        link.slack_team_id,
+        expected_team_id,
+    )
+    return None
 
 
 def get_slack_link(

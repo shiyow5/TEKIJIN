@@ -30,7 +30,14 @@ vi.mock("next/navigation", () => ({
 const USER: Principal = { id: "E001", name: "山田", dept: null, is_admin: false };
 
 function auth(partial: Partial<AuthContextValue>): AuthContextValue {
-  return { principal: null, loading: false, login: vi.fn(), logout: vi.fn(), ...partial };
+  return {
+    principal: null,
+    loading: false,
+    login: vi.fn(),
+    logout: vi.fn(),
+    adoptToken: vi.fn(),
+    ...partial,
+  };
 }
 
 beforeEach(() => {

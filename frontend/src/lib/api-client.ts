@@ -514,6 +514,36 @@ export function getSlackAuthorizeUrl(
   return getJson<SlackAuthorizeUrlResponse>("/slack/authorize-url", options);
 }
 
+/**
+ * POST /slack/login-url — the "Sign in with Slack" start URL for someone with NO
+ * session yet (#406). Unauthenticated by design. Rejects with a 503 `ApiError`
+ * when Slack login is switched off, which callers treat as "hide the button".
+ */
+export async function getSlackLoginUrl(
+  options?: RequestOptions,
+): Promise<SlackAuthorizeUrlResponse> {
+  // POST so a third-party page cannot trigger it with `<img src>` (#494).
+  return postJson<SlackAuthorizeUrlResponse>("/slack/login-url", undefined, options);
+}
+
+/**
+ * POST /slack/link/complete — redeem the pending token the OAuth callback left
+ * in the URL fragment, attaching that Slack account to the CALLER (#494).
+ *
+ * The callback cannot do this itself: it has no session, so it does not know who
+ * is linking. Rejects with 409 when the Slack account already belongs to someone.
+ */
+export async function completeSlackLink(
+  pendingToken: string,
+  options?: RequestOptions,
+): Promise<SlackStatusResponse> {
+  return postJson<SlackStatusResponse>(
+    "/slack/link/complete",
+    { pending_token: pendingToken },
+    options,
+  );
+}
+
 /** POST /slack/unlink — remove the acting employee's linked Slack account. */
 export function postSlackUnlink(options: RequestOptions = {}): Promise<SlackUnlinkResponse> {
   return postJson<SlackUnlinkResponse>("/slack/unlink", undefined, options);
