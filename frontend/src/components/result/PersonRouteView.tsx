@@ -260,7 +260,7 @@ export function PersonRouteView({
         </p>
         <div className="flex justify-center">
           <a
-            href="/questions"
+            href="/"
             className="min-h-[48px] rounded-full bg-primary px-lg py-sm font-bold text-on-primary shadow-md transition-colors hover:bg-primary-container"
           >
             新しい質問をする
