@@ -51,6 +51,16 @@ KNOWLEDGE_KEEP_ACTION = "tekijin_knowledge_keep"
 KNOWLEDGE_DISCARD_ACTION = "tekijin_knowledge_discard"
 KNOWLEDGE_ACTION_IDS = frozenset({KNOWLEDGE_KEEP_ACTION, KNOWLEDGE_DISCARD_ACTION})
 
+#: Posted (utterance path) when an explicit "解決" produces no capturable case, so the
+#: solver is never met with silence (#525). A plain message — NOT the keep/discard
+#: prompt — since there is no draft to keep. The extractor's ``extractable=false`` is a
+#: correct guardrail against noise; this only makes its outcome visible and actionable.
+_NO_CASE_NOTICE = (
+    "「解決」を確認しました。ただ、今回の会話からは知識として残せる具体的な内容"
+    "（手順・判断の理由・結論）が見つからなかったため、ナレッジ化は行いませんでした。"
+    "要点を書き添えて改めてお知らせいただくと、次回から蓄積できます。"
+)
+
 # Conservative solve-utterance markers (substring match). Deliberately RESOLUTION-
 # rooted — NOT generic completion/thanks. Excluded on purpose (#519 review): bare
 # "できました" (資料ができました / 予約ができました — unrelated completion) and
@@ -256,14 +266,24 @@ def capture_and_prompt(
             session, SLACK_THREAD_SOURCE_TYPE, f"slack_thread_{thread_id}"
         )
         if existing is not None:
-            return None  # already captured + prompted for this thread
+            return None  # already captured + prompted for this thread (stay silent)
         extractor = extractor or CaseExtractor(settings=settings)
         stored = _extract_thread_draft(session, thread_id, extractor)
-        if stored is None:
-            return None
 
-    # Best-effort (never raises): if the post fails, the draft still sits in the
-    # review box (unreviewed) for the management UI (#477) — a lost prompt, not data.
+    # Best-effort posts (never raise): a lost post is a lost message, not lost data.
+    if stored is None:
+        # The model declined the thread as not-a-case (#525): an explicit "解決" must
+        # not be met with silence, so tell the solver why nothing was saved. A plain
+        # notice — there is no draft to keep, so no keep/discard prompt.
+        post_message(
+            bot_token=settings.slack_bot_token,
+            channel_id=channel_id,
+            text=_NO_CASE_NOTICE,
+        )
+        return None
+
+    # A draft exists (committed above, so a fast button click always finds it): offer
+    # the in-thread keep/discard prompt for the management review box (#477).
     post_message(
         bot_token=settings.slack_bot_token,
         channel_id=channel_id,

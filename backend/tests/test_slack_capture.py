@@ -542,6 +542,37 @@ def test_capture_and_prompt_dedups_when_draft_exists(_resolved_thread, monkeypat
     assert len(posts) == 1  # only the first prompt
 
 
+def test_capture_and_prompt_notifies_when_no_case(_resolved_thread, monkeypatch) -> None:
+    """#525: an explicit "解決" that yields no capturable case must not be silent.
+
+    The model declines the record (``extractable=false``) so nothing is stored, but
+    the solver still gets a short notice — never dead air — telling them why nothing
+    was saved. It is a plain message, NOT the keep/discard prompt (there is no draft
+    to keep)."""
+
+    from tekijin.slack import capture as capture_mod
+
+    factory, thread_id = _resolved_thread
+    posts: list[dict] = []
+    monkeypatch.setattr(capture_mod, "post_message", lambda **kw: posts.append(kw))
+
+    stored = capture_mod.capture_and_prompt(
+        factory,
+        channel_id=CHANNEL,
+        thread_id=thread_id,
+        extractor=_extractor(extractable=False),
+        settings=_settings(),
+    )
+    assert stored is None
+    with session_scope(factory) as session:
+        unit = get_knowledge_unit_by_source(session, "slack_thread", f"slack_thread_{thread_id}")
+    assert unit is None  # nothing stored
+    # Exactly one message: the plain no-case notice, carrying no keep/discard buttons.
+    assert len(posts) == 1
+    assert not posts[0].get("blocks")
+    assert posts[0]["text"] == capture_mod._NO_CASE_NOTICE
+
+
 def test_knowledge_discard_marks_draft_rejected(_resolved_thread) -> None:
     factory, thread_id = _resolved_thread
     # Seed a draft first.
