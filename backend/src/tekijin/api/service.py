@@ -91,6 +91,7 @@ from tekijin.data.writes import (
     update_question_route,
     update_question_topics,
 )
+from tekijin.knowledge.index import embed_knowledge_units
 from tekijin.retrieval.embedding import PASSAGE, Embedder
 from tekijin.slack.notify import schedule_channel_setup_and_draft
 
@@ -815,6 +816,22 @@ class AgentService:
                 )
         except Exception:  # pragma: no cover - defensive; exercised via logging path
             logger.exception("failed to capture the answer; the hand-off proceeds without it")
+
+    def schedule_knowledge_embed(self) -> None:
+        """Fire-and-forget: fill embeddings for any knowledge units missing one, so a
+        unit just approved in Slack becomes searchable by ``knowledge_answer`` without a
+        manual indexing pass (#531). Runs in a daemon thread — encoding can exceed
+        Slack's interactivity budget — and swallows/logs its own errors (a missing
+        embedding leaves the unit un-searchable, never crashes the approve click)."""
+
+        def _run() -> None:
+            try:
+                with session_scope(self._session_factory) as session:
+                    embed_knowledge_units(session, self._embedder)
+            except Exception:  # noqa: BLE001 - background thread boundary
+                logger.warning("scheduled knowledge embed failed", exc_info=True)
+
+        threading.Thread(target=_run, daemon=True, name="knowledge-embed").start()
 
     def _embed_answer(self, body: str) -> list[float] | None:
         """Embed an answer body for dense reuse, or ``None`` if embedding fails.

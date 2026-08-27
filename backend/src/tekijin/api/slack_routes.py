@@ -818,6 +818,7 @@ def _handle_knowledge_action(
                 )
             return JSONResponse({"text": "この操作を行う権限がありません。"})
 
+        approved = False
         if action_id == KNOWLEDGE_KEEP_ACTION:
             # 残す → show the draft's content in-thread so it can be approved/discarded
             # right here, replacing the keep/discard prompt (the "確認" surface, #527).
@@ -845,6 +846,7 @@ def _handle_knowledge_action(
             unit = get_knowledge_unit_by_source(session, SLACK_THREAD_SOURCE_TYPE, source_id)
             if unit is not None:
                 set_review_status(session, unit.id, "approved")
+                approved = True
                 text = "承認しました。今後の回答でこの知識が活用されます。"
             else:
                 text = "下書きが見つかりませんでした。もう一度お試しください。"
@@ -854,6 +856,11 @@ def _handle_knowledge_action(
         else:  # unreachable: KNOWLEDGE_ACTION_IDS gates entry, but fail closed
             logger.warning("Slack interactivity: unhandled knowledge action_id %s", action_id)
             text = _INTERACTIVITY_FAILURE_TEXT
+
+    if approved:
+        # After the approve commits, embed the unit so knowledge_answer can find it
+        # immediately — nothing else indexes knowledge units in the running app (#531).
+        service.schedule_knowledge_embed()
 
     if response_url:
         kept_blocks = [b for b in original_blocks if b.get("type") != "actions"]
