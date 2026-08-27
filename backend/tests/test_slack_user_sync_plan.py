@@ -369,3 +369,20 @@ def test_a_departure_still_happens_even_when_another_pair_is_ambiguous() -> None
 
     assert plan.link == ()
     assert plan.unlink == (2,)
+
+
+def test_a_departure_listed_twice_is_reported_once() -> None:
+    """The applier tolerates the repeat (the second delete is a no-op), but the
+    COUNT is what an operator reads. "unlinked: 2" for one departure says two
+    colleagues left, which is the sort of number someone acts on."""
+
+    plan = _plan(
+        [
+            _member("U_GONE", "a@x.jp", deleted=True),
+            _member("U_GONE", "a@x.jp", deleted=True),
+        ],
+        linked_slack_user_by_employee={1: "U_GONE"},
+        employee_by_slack_user={"U_GONE": 1},
+    )
+
+    assert plan.unlink == (1,)

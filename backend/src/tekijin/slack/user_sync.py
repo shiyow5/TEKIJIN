@@ -205,7 +205,10 @@ def plan_user_sync(
         candidates.append((employee_id, member.slack_user_id))
 
     link = _drop_ambiguous(candidates, skipped)
-    return SyncPlan(link=link, unlink=tuple(unlink), skipped=dict(skipped))
+    # De-duplicated because the count is what an operator reads: "unlinked: 2"
+    # for one departure listed twice says two colleagues left. The applier
+    # tolerates the repeat, so this is about the report, not the write.
+    return SyncPlan(link=link, unlink=tuple(dict.fromkeys(unlink)), skipped=dict(skipped))
 
 
 def _drop_ambiguous(
