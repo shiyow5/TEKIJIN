@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import {
+  COMPLETED_PERSON_ROUTE_FRAMES,
   API_BASE,
   RECENT_QUESTIONS,
   fulfillJson,
@@ -39,6 +40,31 @@ test.describe("history", () => {
     await expect(page.getByRole("link", { name: "ホームへ戻る" })).toHaveCount(0);
     await back.click();
     await page.waitForURL(/\/history$/);
+  });
+
+  test("a completed hand-off still shows the candidates and why they were picked", async ({
+    page,
+  }) => {
+    // #520 (with #512): the outcome alone does not say WHY this person. Reaching a
+    // finished session from the history list must still answer that — this is the
+    // journey that used to dead-end on 「依頼は送信済みです」.
+    await mockEmployees(page);
+    await mockAuth(page);
+    await mockRecentQuestions(page, RECENT_QUESTIONS);
+    await page.route(`${API_BASE}/events/**`, (route) =>
+      fulfillSse(route, sseBody(COMPLETED_PERSON_ROUTE_FRAMES)),
+    );
+
+    await page.goto("/history");
+    await page.getByText("UTMの移行時の注意点").click();
+    await page.waitForURL(/\/session\/sess-rq1\/result\?from=history$/);
+
+    await expect(page.getByRole("heading", { name: "依頼は送信済みです" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "候補と根拠" })).toBeVisible();
+    await expect(page.getByText("高梨 健太（最有力）")).toBeVisible();
+    await expect(page.getByText("情報処理安全確保支援士を保有")).toBeVisible();
+    // Read-only: a hand-off that already happened cannot be re-targeted.
+    await expect(page.getByRole("button", { name: "選択する" })).toHaveCount(0);
   });
 
   test("a history-only card (no session) stays non-interactive", async ({ page }) => {

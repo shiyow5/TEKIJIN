@@ -85,6 +85,17 @@ export const PERSON_ROUTE_FRAMES: SseFrame[] = [
   { event: "draft", data: { draft: PERSON_ROUTE_DRAFT } },
 ];
 
+/**
+ * A FINISHED person hand-off, as /events replays it on a reconnect (#512): the
+ * whole progress, then the stored terminal. This is what a session reached from
+ * the history list actually receives — the shape #520's read-only candidate view
+ * depends on.
+ */
+export const COMPLETED_PERSON_ROUTE_FRAMES: SseFrame[] = [
+  ...PERSON_ROUTE_FRAMES,
+  { event: "done", data: { status: "sent" } },
+];
+
 /** Non-terminal prior_answer stream (single candidate) → reaches the same
  * PersonRouteView result as the main line, with no intermediate screen (#310). */
 export const PRIOR_ANSWER_FRAMES: SseFrame[] = [

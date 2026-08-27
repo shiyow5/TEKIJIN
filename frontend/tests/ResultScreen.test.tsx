@@ -303,6 +303,59 @@ describe("ResultScreen — thinking progress (#512)", () => {
   });
 });
 
+describe("ResultScreen — candidates after completion (#520)", () => {
+  // The confidence / fit gauge / evidence only ever existed on the live main
+  // line, and a terminal outcome replaces it — so once the request was sent, "why
+  // this person?" became unanswerable. #512 made the data survive a reconnect;
+  // this renders it, read-only, under the outcome.
+  const SENT = {
+    terminal: true as const,
+    done: { status: "sent" },
+    route: { route: "person", reason: "候補となる担当者が見つかりました。", confidence: 0.7 },
+  };
+
+  it("shows the candidates and their evidence under a completed hand-off", () => {
+    renderResult(state({ ...SENT, recommend: { recommendations: THREE_CANDIDATES } }));
+    expect(screen.getByText("依頼は送信済みです")).toBeInTheDocument();
+    expect(screen.getByText("高梨（最有力）")).toBeInTheDocument();
+    expect(screen.getByText("鈴木")).toBeInTheDocument();
+    // The evidence, not just the names — that is the part the outcome screen
+    // could not answer. Regex: the card renders it as 「関連資格：第一種電気工事士」.
+    expect(screen.getByText(/第一種電気工事士/)).toBeInTheDocument();
+    expect(screen.getAllByText("適合度").length).toBe(THREE_CANDIDATES.length);
+  });
+
+  it("is read-only: a completed hand-off cannot be re-targeted", () => {
+    renderResult(state({ ...SENT, recommend: { recommendations: THREE_CANDIDATES } }));
+    expect(screen.queryByRole("button", { name: "選択する" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /聞かない/ })).not.toBeInTheDocument();
+  });
+
+  it("shows nothing extra on a terminal that produced no candidates", () => {
+    // off_topic / no_candidate: an empty section header under the outcome would
+    // read as "the AI found people and is hiding them".
+    renderResult(
+      state({
+        terminal: true,
+        message: { status: "no_candidate", message: "担当者が見つかりませんでした。" },
+      }),
+    );
+    expect(screen.queryByText("候補と根拠")).not.toBeInTheDocument();
+  });
+
+  it("still hands off normally while the run is live (unchanged main line)", () => {
+    // The read-only view must not leak into the live screen, where selecting and
+    // excluding are the whole point.
+    renderResult(
+      state({
+        recommend: { recommendations: THREE_CANDIDATES },
+        draft: { draft: "ご相談です。" },
+      }),
+    );
+    expect(screen.getAllByRole("button", { name: "選択する" }).length).toBeGreaterThan(0);
+  });
+});
+
 describe("ResultScreen — stream error", () => {
   it("surfaces a generic error (no leaked detail) instead of stalling on 準備中", () => {
     renderResult(state({ error: "処理中にエラーが発生しました。" }));
