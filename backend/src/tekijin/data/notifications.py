@@ -158,9 +158,13 @@ def pending_request_notifications_for_responder(
 
     Same "still pending" shape ``data.inbox.pending_handoffs_for_responder``
     lists (``rank == 1``, ``outcome IS NULL``, a live ``session_id``), plus
-    ``request_seen_at IS NULL``. Each item: ``kind`` ("request_received"),
-    ``id`` (ack target), ``question_id``, ``session_id`` (deep-links to the
-    inbox item), ``message``, ``asker_name``, ``created_at``.
+    ``request_seen_at IS NULL`` — including that function's ``session_id``
+    dedup (see its docstring): if a question somehow has more than one
+    pending rank-1 row, only the most recent one is surfaced here, so the
+    bell's count never exceeds what ``/inbox`` would show for the same
+    question. Each item: ``kind`` ("request_received"), ``id`` (ack target),
+    ``question_id``, ``session_id`` (deep-links to the inbox item),
+    ``message``, ``asker_name``, ``created_at``.
     """
 
     stmt = (
@@ -183,8 +187,12 @@ def pending_request_notifications_for_responder(
         .order_by(Recommendation.created_at.desc(), Recommendation.id.desc())
     )
 
+    seen: set[str] = set()
     items: list[dict[str, Any]] = []
     for rec_id, created_at, asker_name, question_id, session_id in session.execute(stmt):
+        if session_id in seen:
+            continue
+        seen.add(session_id)
         items.append(
             {
                 "kind": "request_received",

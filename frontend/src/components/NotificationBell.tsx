@@ -92,22 +92,27 @@ export function NotificationBell() {
     }
     let active = true;
     const userId = currentUserId;
+    // Last known items per scope, kept across polls so a transient failure on
+    // one scope doesn't blank out the other scope's still-good results below.
+    let askerItems: Notification[] = [];
+    let responderItems: Notification[] = [];
 
     function poll() {
       // Every acting user is both an asker and a potential responder, so both
-      // scopes are polled and merged (#509).
-      Promise.all([getNotifications({ askerId: userId }), getNotifications({ employeeId: userId })])
-        .then(([askerItems, responderItems]) => {
-          if (!active) return;
-          const merged = [...askerItems, ...responderItems].sort((a, b) =>
-            (b.created_at ?? "").localeCompare(a.created_at ?? ""),
-          );
-          setItems(merged);
-        })
-        .catch(() => {
-          // Best-effort background signal: a transient failure just means the
-          // badge doesn't update this cycle, never a user-facing error.
-        });
+      // scopes are polled and merged (#509). allSettled (not `.all`): one
+      // scope failing must not discard the other scope's successful fetch.
+      Promise.allSettled([
+        getNotifications({ askerId: userId }),
+        getNotifications({ employeeId: userId }),
+      ]).then(([askerResult, responderResult]) => {
+        if (!active) return;
+        if (askerResult.status === "fulfilled") askerItems = askerResult.value;
+        if (responderResult.status === "fulfilled") responderItems = responderResult.value;
+        const merged = [...askerItems, ...responderItems].sort((a, b) =>
+          (b.created_at ?? "").localeCompare(a.created_at ?? ""),
+        );
+        setItems(merged);
+      });
     }
 
     poll();
