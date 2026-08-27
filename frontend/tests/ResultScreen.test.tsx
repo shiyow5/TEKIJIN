@@ -33,8 +33,10 @@ vi.mock("@/lib/api-client", () => ({
 }));
 
 const routerPushMock = vi.fn();
+let mockSearchParams = new URLSearchParams();
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: routerPushMock }),
+  useSearchParams: () => mockSearchParams,
 }));
 
 beforeEach(() => {
@@ -56,6 +58,7 @@ beforeEach(() => {
     blocker: "詰まっている点",
   });
   routerPushMock.mockReset();
+  mockSearchParams = new URLSearchParams();
 });
 
 // Fixtures use the REAL backend shapes: `confidence` is the Japanese fit signal
@@ -97,6 +100,13 @@ describe("ResultScreen — pending", () => {
     renderResult(state({}));
     expect(screen.getByRole("link", { name: "ホームへ戻る" })).toHaveAttribute("href", "/");
     expect(screen.getByText("結果を準備中…")).toBeInTheDocument();
+  });
+
+  it("sends the user back to their history list when reached via a history card (#397 follow-up)", () => {
+    mockSearchParams = new URLSearchParams("from=history");
+    renderResult(state({}));
+    expect(screen.getByRole("link", { name: "履歴へ戻る" })).toHaveAttribute("href", "/history");
+    expect(screen.queryByRole("link", { name: "ホームへ戻る" })).not.toBeInTheDocument();
   });
 });
 

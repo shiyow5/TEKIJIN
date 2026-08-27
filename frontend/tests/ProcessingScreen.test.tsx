@@ -6,8 +6,10 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const pushMock = vi.fn();
+let mockSearchParams = new URLSearchParams();
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: pushMock }),
+  useSearchParams: () => mockSearchParams,
 }));
 
 const postAnswerMock = vi.fn();
@@ -37,6 +39,7 @@ function renderScreen(stream: EventStreamState) {
 describe("ProcessingScreen", () => {
   beforeEach(() => {
     pushMock.mockReset();
+    mockSearchParams = new URLSearchParams();
     postAnswerMock.mockReset();
     postAnswerMock.mockResolvedValue({ session_id: "abc-123", status: "accepted" });
     requestDocumentFallbackMock.mockReset();
@@ -98,6 +101,24 @@ describe("ProcessingScreen", () => {
     expect(screen.getByText("候補を2名見つけました")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "結果を見る" }));
     expect(pushMock).toHaveBeenCalledWith("/session/abc-123/result");
+  });
+
+  it("sends the user back to their history list when reached via a history card (#397 follow-up)", () => {
+    mockSearchParams = new URLSearchParams("from=history");
+    renderScreen(
+      state({
+        recommend: {
+          recommendations: [
+            { person_id: "E001", name: "高梨", score: 0.9, confidence: "high", reasons: [] },
+          ],
+        },
+      }),
+    );
+    expect(screen.getByRole("link", { name: "履歴へ戻る" })).toHaveAttribute("href", "/history");
+    expect(screen.queryByRole("link", { name: "ホームへ戻る" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "結果を見る" }));
+    expect(pushMock).toHaveBeenCalledWith("/session/abc-123/result?from=history");
   });
 
   it("renders the additive cited answer alongside the live flow (#413)", () => {

@@ -22,6 +22,7 @@ import { SourceCitations } from "@/components/SourceCitations";
 import { ThinkingSteps } from "@/components/ThinkingSteps";
 import { PersonRouteView } from "@/components/result/PersonRouteView";
 import type { EventStreamState } from "@/hooks/useEventStream";
+import { useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
 
 export interface ResultScreenProps {
@@ -49,9 +50,15 @@ function ResultFrame({
   showProgress?: boolean;
   children: ReactNode;
 }) {
+  // `?from=history` (added by HistoryScreen, #397) sends the user back to their
+  // history list instead of the home hub.
+  const fromHistory = useSearchParams().get("from") === "history";
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col py-lg">
-      <PageBackLink href="/" label="ホームへ戻る" />
+      <PageBackLink
+        href={fromHistory ? "/history" : "/"}
+        label={fromHistory ? "履歴へ戻る" : "ホームへ戻る"}
+      />
       {/* #512: the same steps the processing screen shows, from the progress the
           backend replays on reconnect. Without this, a session reached from the
           history list (which links straight here, #470) or reloaded showed the

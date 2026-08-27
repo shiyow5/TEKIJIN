@@ -24,7 +24,7 @@ import { type EventStreamState, useEventStream } from "@/hooks/useEventStream";
 import { ApiError, postAnswer, requestDocumentFallback } from "@/lib/api-client";
 import { REVEAL_CLASS } from "@/lib/motion";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
 export interface ProcessingScreenProps {
@@ -61,6 +61,11 @@ export function ProcessingScreen({
   baseUrl,
 }: ProcessingScreenProps) {
   const router = useRouter();
+  // A history-card click adds `?from=history` (HistoryScreen) so this screen —
+  // and the result screen it forwards to — can send the user back to their
+  // history list instead of the home hub (#397 follow-up).
+  const fromHistory = useSearchParams().get("from") === "history";
+  const resultHref = `/session/${sessionId}/result${fromHistory ? "?from=history" : ""}`;
   const contextStream = useOptionalSessionStream();
   const restartStream = useOptionalSessionStreamRestart();
   // Prefer an injected state (test seam), then the shared provider context
@@ -122,7 +127,7 @@ export function ProcessingScreen({
   }
 
   function goToResult() {
-    router.push(`/session/${sessionId}/result`);
+    router.push(resultHref);
   }
 
   async function handleDocumentFallback() {
@@ -131,7 +136,7 @@ export function ProcessingScreen({
     try {
       await requestDocumentFallback({ session_id: sessionId });
       restartStream?.();
-      router.push(`/session/${sessionId}/result`);
+      router.push(resultHref);
     } catch {
       setFallbackError(FALLBACK_ERROR);
     } finally {
@@ -152,7 +157,11 @@ export function ProcessingScreen({
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-lg py-lg">
-      <PageBackLink href="/" label="ホームへ戻る" className="-mb-sm" />
+      <PageBackLink
+        href={fromHistory ? "/history" : "/"}
+        label={fromHistory ? "履歴へ戻る" : "ホームへ戻る"}
+        className="-mb-sm"
+      />
       <header className="text-center">
         <h1 className="flex items-center justify-center gap-sm font-bold text-2xl text-primary">
           {showActiveStep ? (

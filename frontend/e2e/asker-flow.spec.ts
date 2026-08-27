@@ -72,6 +72,11 @@ test.describe("asker flow", () => {
     await page.keyboard.press("Tab");
     await page.keyboard.press("Tab");
     await expect(page.getByRole("button", { name: "キャンセル" })).toBeFocused();
+    // Tab from the last button wraps — now to the dialog's own corner close
+    // button (ModalDialog, #397 follow-up), the first focusable element in DOM
+    // order, not straight back to the first action button.
+    await page.keyboard.press("Tab");
+    await expect(page.getByRole("button", { name: "ダイアログを閉じる" })).toBeFocused();
     await page.keyboard.press("Tab");
     await expect(page.getByRole("button", { name: "チャットで相談する" })).toBeFocused();
     await page.getByRole("button", { name: "チャットで相談する" }).click();
