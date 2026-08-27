@@ -26,7 +26,9 @@ from tekijin.models.tables import Answer, Message, Question
 SLACK_THREAD_SOURCE_TYPE = "slack_thread"
 
 
-def slack_thread_source(session: Session, thread_id: int) -> ExtractionSource | None:
+def slack_thread_source(
+    session: Session, thread_id: int, *, parties: dict | None = None
+) -> ExtractionSource | None:
     """Assemble a resolved thread into an :class:`ExtractionSource`, or ``None``.
 
     Returns ``None`` when there is nothing to extract — the thread is not an
@@ -35,9 +37,14 @@ def slack_thread_source(session: Session, thread_id: int) -> ExtractionSource | 
     content exists yet. The text is ``質問 …`` + the captured answer bodies (#274),
     falling back to the thread's chat transcript when no answer body was captured,
     so a solved conversation that lives only in chat is still distillable.
+
+    ``parties`` lets a caller that already ran :func:`thread_parties` (e.g. the
+    capture gate) pass the result in to avoid a second identical join; when ``None``
+    it is fetched here, so a standalone caller still works.
     """
 
-    parties = thread_parties(session, thread_id)
+    if parties is None:
+        parties = thread_parties(session, thread_id)
     if parties is None:
         return None
     question_id = parties["question_id"]

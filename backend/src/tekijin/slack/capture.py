@@ -79,7 +79,17 @@ def capture_resolved_thread(
             parties["responder_id"],
         ):
             return None  # a bystander in the channel cannot trigger capture
-        source = slack_thread_source(session, thread_id)
+        # KNOWN LIMITATION (#476 review — resolved in Slice B, MUST fix before
+        # enabling): the thread is taken from the channel's mutable
+        # ``current_thread_id``, NOT from the reacted message's ``item.ts``. A pair
+        # channel is reused across sequential hand-offs, so if the same two people
+        # have a LATER accepted hand-off and someone then reacts ✅ on an OLDER
+        # message, this captures the CURRENT thread, not the one the reaction was on.
+        # Correlating ``item.ts`` to a specific thread needs per-message provenance,
+        # which Slice B introduces (the bot posts an anchor prompt whose ts maps to
+        # the thread). Tolerable while dormant: drafts land ``unreviewed`` and a human
+        # reviews before anything is trusted. Enablement blocker tracked in #508.
+        source = slack_thread_source(session, thread_id, parties=parties)
         if source is None:
             return None
         extractor = extractor or CaseExtractor(settings=settings)

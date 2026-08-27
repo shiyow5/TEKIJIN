@@ -549,6 +549,13 @@ class Settings(BaseSettings):
     # backend (vLLM) is available and the draft quality is verified. Shared
     # pair-channels only (TEKIJIN never creates DMs), so this never reads a DM —
     # the #404 DM-consent question does not arise here by construction.
+    #
+    # ENABLEMENT BLOCKER (#476 review): before flipping this True, resolve the
+    # reaction→thread mis-attribution on reused pair-channels — a ✅ is currently
+    # attributed to the channel's ``current_thread_id``, not the reacted message's
+    # ``item.ts`` (see ``slack.capture.capture_resolved_thread`` and #508). Until
+    # then a draft's provenance can be wrong on a channel that served more than one
+    # hand-off between the same pair.
     slack_solve_capture_enabled: bool = False
 
     def slack_configured(self) -> bool:
