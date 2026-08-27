@@ -215,6 +215,14 @@ def _apply_schema_upgrades(engine: Engine) -> None:
                 "REFERENCES employees(id)"
             )
         )
+        # Indexed to match the table's other FK-to-employees columns (create_all builds
+        # it on a fresh DB; a live DB gets it here).
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_recommendations_referred_to_employee_id "
+                "ON recommendations (referred_to_employee_id)"
+            )
+        )
         # Asker's chosen consultation method ("direct" | "chat"); NULL treated
         # as "chat" everywhere.
         conn.execute(

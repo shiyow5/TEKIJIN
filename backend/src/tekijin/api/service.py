@@ -1237,6 +1237,12 @@ class AgentService:
                     raise SessionInvalid("cannot refer to the asker")
                 if referred_to == current_responder_id:
                     raise SessionInvalid("cannot refer to the current responder")
+                # Someone who already declined this question cannot be re-seated: the
+                # c6 pin would drop them (they're in declined_ids), so the referral
+                # would silently no-op while still recording a misleading
+                # outcome="referred". Reject up front instead (#518 review).
+                if referred_to in (values.get("declined_ids") or []):
+                    raise SessionInvalid("cannot refer to someone who already declined")
 
                 question_id = values.get("question_id")
 

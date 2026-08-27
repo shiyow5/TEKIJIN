@@ -480,12 +480,17 @@ class AgentNodes:
         existing = state.get("recommendations") or []
         existing_ids = {r["person_id"] for r in existing}
 
+        # #518: a referral is CONSUMED by this one scoring pass — clear it (via
+        # ``_scored``) in every return so a LATER, unrelated decline reverts to the
+        # normal keep-survivors reroute (else ``reroute`` would keep wiping rank 2/3
+        # on every subsequent decline for the rest of the question). No-op when no
+        # referral is pending, so the return shape is byte-identical there.
         top_k = 3
         remaining = top_k - len(existing)
         if not topics or remaining <= 0:
             # Nothing to add: keep whatever survived the decline (possibly fewer
             # than 3), or [] on a genuinely fresh run with no topics at all.
-            return {"recommendations": existing}
+            return self._scored(existing, state)
 
         # #405: hand the scorer C4's question↔past-answer similarity so it can add a
         # question-fit term. When the feature is off, the kwarg is omitted entirely,
@@ -616,8 +621,16 @@ class AgentNodes:
                     fresh = fresh + rank(candidates, remaining)
 
         if not fresh:
-            return {"recommendations": existing}
-        return {"recommendations": existing + fresh}
+            return self._scored(existing, state)
+        return self._scored(existing + fresh, state)
+
+    @staticmethod
+    def _scored(recommendations: list[dict[str, Any]], state: AgentState) -> AgentState:
+        """c6 result carrying ``recommendations``, clearing a consumed referral (#518)."""
+        out: AgentState = {"recommendations": recommendations}
+        if state.get("referred_responder_id") is not None:
+            out["referred_responder_id"] = None
+        return out
 
     # -- answerability critic (#70): can the company answer this in-house? -
     def answerability(self, state: AgentState) -> AgentState:

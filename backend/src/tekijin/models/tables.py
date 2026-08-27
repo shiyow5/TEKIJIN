@@ -380,7 +380,7 @@ class Recommendation(Base):
     # Auditable record of the referral relationship (who referred whom); the actual
     # reroute seats the named person via c6_score's referral pin.
     referred_to_employee_id: Mapped[int | None] = mapped_column(
-        ForeignKey("employees.id"), nullable=True
+        ForeignKey("employees.id"), nullable=True, index=True
     )
 
 

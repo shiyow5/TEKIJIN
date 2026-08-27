@@ -465,10 +465,21 @@ def test_c6_seats_a_referred_person_at_rank_1() -> None:
 
 
 def test_c6_referral_pin_is_dormant_when_unset() -> None:
-    # No referral -> byte-identical: just the scored pool, no injected rank-1.
+    # No referral -> byte-identical: just the scored pool, no injected rank-1, and
+    # the result never carries the clear key (return shape unchanged from develop).
     nodes = _nodes_for_score(_ReturningScorer())
-    recs = nodes.c6_score(_c6_referral_state(None))["recommendations"]
-    assert [r["person_id"] for r in recs] == [1, 2]
+    out = nodes.c6_score(_c6_referral_state(None))
+    assert [r["person_id"] for r in out["recommendations"]] == [1, 2]
+    assert "referred_responder_id" not in out
+
+
+def test_c6_consumes_the_referral_after_seating() -> None:
+    # #518 review (HIGH): the referral is cleared once scored, so a later unrelated
+    # decline reverts to the normal keep-survivors reroute instead of wiping again.
+    nodes = _nodes_for_score(_ReturningScorer())
+    out = nodes.c6_score(_c6_referral_state(99))
+    assert out["recommendations"][0]["person_id"] == 99
+    assert out["referred_responder_id"] is None
 
 
 def test_c6_referral_pin_never_seats_the_asker() -> None:

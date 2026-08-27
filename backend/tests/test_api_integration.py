@@ -628,6 +628,24 @@ def test_refer_rejects_asker_and_current_responder(seed_counts, engine, fake_emb
     )
 
 
+def test_refer_rejects_an_already_declined_person(seed_counts, engine, fake_embedder) -> None:
+    # #518 review (MEDIUM): the c6 pin would silently drop an already-declined person,
+    # so referring to them is rejected up front rather than recorded as a no-op.
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2, 3], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2, 3)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "ref5"})
+    _events(client, "ref5")
+    # Decline 1 -> reroute to 2; now 1 is in declined_ids.
+    client.post("/answer", json={"session_id": "ref5", "outcome": "declined"})
+    _events(client, "ref5")
+    resp = client.post("/handoff/refer", json={"session_id": "ref5", "person_id": "E001"})
+    assert resp.status_code == 422
+
+
 def test_refer_is_responder_only(seed_counts, engine, fake_embedder) -> None:
     client = _client(
         engine,
