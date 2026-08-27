@@ -52,13 +52,14 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from tekijin.api import schemas
 from tekijin.api.service import AgentService
-from tekijin.auth.deps import require_principal
+from tekijin.auth.deps import require_admin, require_principal
 from tekijin.auth.principal import Principal
 from tekijin.auth.tokens import create_access_token
 from tekijin.config import Settings, get_settings
 from tekijin.data.db import session_scope
 from tekijin.data.messages import create_message, thread_parties
 from tekijin.data.slack_channel_links import get_channel_link_by_channel_id
+from tekijin.data.slack_directory import apply_sync_plan, load_directory_state
 from tekijin.data.slack_links import (
     delete_slack_link,
     get_slack_link,
@@ -71,8 +72,10 @@ from tekijin.slack.client import (
     SlackIdentity,
     build_authorize_url,
     exchange_code,
+    list_users,
     respond_to_response_url,
 )
+from tekijin.slack.user_sync import parse_members, plan_user_sync
 from tekijin.slack.verify import verify_signature
 
 logger = logging.getLogger(__name__)
@@ -475,6 +478,85 @@ def unlink(
     with session_scope(service.session_factory) as session:
         delete_slack_link(session, employee_id)
     return schemas.SlackUnlinkResponse()
+
+
+@router.post("/sync-users", response_model=schemas.SlackUserSyncResponse)
+def sync_users(
+    request: Request,
+    principal: Principal = Depends(require_admin),
+) -> schemas.SlackUserSyncResponse:
+    """Reconcile ``slack_links`` against the Slack workspace roster (#406 step 3).
+
+    Admin-only and off by default. Run it on a schedule with cron — an hourly
+    poll is enough, and the sync is self-healing, so a missed run costs nothing
+    but a delay. It is an endpoint rather than an in-process timer on purpose:
+    a background thread in this codebase has already swallowed a failure
+    unnoticed, and this one writes the table that decides who can log in.
+
+    Every decision is made by the pure planner in ``tekijin.slack.user_sync``;
+    this handler only supplies the inputs and reports the outcome. In
+    particular it never overwrites an existing link and never re-points a Slack
+    account at a different employee — see that module for why.
+    """
+
+    settings = get_settings()
+    if not settings.slack_user_sync_enabled:
+        raise HTTPException(status_code=503, detail="Slackユーザー同期は現在無効です。")
+    if not settings.slack_notifications_enabled():
+        # The roster comes from the bot token; without one there is nothing to
+        # read. Saying so beats reporting a successful sync of nobody.
+        raise HTTPException(status_code=503, detail="Slackのボットトークンが設定されていません。")
+    if not settings.slack_team_id:
+        # A blank workspace makes the planner match nobody, which would look
+        # exactly like a workspace where nothing needed doing.
+        raise HTTPException(status_code=503, detail="TEKIJIN_SLACK_TEAM_ID が設定されていません。")
+
+    try:
+        raw = list_users(bot_token=settings.slack_bot_token)
+    except Exception as exc:  # noqa: BLE001 - upstream failure, reported as 502
+        logger.warning("Slack users.list failed", exc_info=True)
+        raise HTTPException(
+            status_code=502, detail="Slackのユーザー一覧を取得できませんでした。"
+        ) from exc
+
+    members = parse_members(raw)
+    service = request.app.state.agent_service
+    now = dt.datetime.now(dt.UTC).replace(tzinfo=None)
+    try:
+        with session_scope(service.session_factory) as session:
+            state = load_directory_state(session)
+            plan = plan_user_sync(
+                members,
+                employee_id_by_email=state.employee_id_by_email,
+                linked_slack_user_by_employee=state.linked_slack_user_by_employee,
+                employee_by_slack_user=state.employee_by_slack_user,
+                expected_team_id=settings.slack_team_id,
+                admin_email=settings.admin_email,
+            )
+            applied = apply_sync_plan(session, plan, team_id=settings.slack_team_id, now=now)
+    except (ValueError, IntegrityError) as exc:
+        # The planner refuses ambiguous pairs and the applier refuses a duplicated
+        # plan, so reaching here means the first guard has a hole. The batch is
+        # rolled back whole — including any departure unlinks in it — so this has
+        # to be legible enough that someone goes and looks, not a bare traceback.
+        logger.error("Slack directory sync could not be applied", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Slackユーザー同期を適用できませんでした。管理者に連絡してください。",
+        ) from exc
+
+    logger.info(
+        "Slack directory sync by admin: %s members, linked=%s unlinked=%s skipped=%s",
+        len(members),
+        applied["linked"],
+        applied["unlinked"],
+        plan.skipped,
+    )
+    return schemas.SlackUserSyncResponse(
+        linked=applied["linked"],
+        unlinked=applied["unlinked"],
+        skipped=dict(plan.skipped),
+    )
 
 
 def _handle_message_event(session_factory: sessionmaker[Session], event: dict) -> None:

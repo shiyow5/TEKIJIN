@@ -29,6 +29,14 @@ _OAUTH_ACCESS_URL = "https://slack.com/api/oauth.v2.access"
 _CONVERSATIONS_CREATE_URL = "https://slack.com/api/conversations.create"
 _CONVERSATIONS_INVITE_URL = "https://slack.com/api/conversations.invite"
 _POST_MESSAGE_URL = "https://slack.com/api/chat.postMessage"
+_USERS_LIST_URL = "https://slack.com/api/users.list"
+# Slack's own maximum is 1000, but it recommends far less; 200 keeps each page
+# comfortably inside the Tier-2 rate limit (~20 req/min) for a workspace of
+# any size this product plausibly serves.
+_USERS_LIST_PAGE_SIZE = 200
+# A workspace of 200 * 50 = 10,000 members is far past anything expected here,
+# so hitting this means the cursor is not advancing, not that the org is large.
+_USERS_LIST_MAX_PAGES = 50
 # Identity-only scope: enough to know WHO signed in, not to act as them.
 _USER_SCOPE = "identity.basic"
 _TIMEOUT_SECONDS = 10.0
@@ -186,3 +194,44 @@ def post_message(
             raise SlackApiError(body.get("error", "unknown_error"))
     except Exception:
         logger.warning("Slack channel post failed", exc_info=True)
+
+
+def list_users(*, bot_token: str) -> list[dict]:
+    """Every member of the bot's workspace, following ``users.list`` pagination.
+
+    Raises :class:`SlackApiError` or the underlying HTTP error rather than
+    returning a partial list. Callers use this to decide who exists, so "page 1
+    of 3" must not be mistaken for the whole workspace — a caller that got a
+    short list would simply link fewer people and report success.
+
+    Needs the ``users:read`` scope, plus ``users:read.email`` for the addresses
+    the directory join is keyed on (without it Slack omits ``profile.email`` and
+    nobody matches).
+    """
+
+    headers = {"Authorization": f"Bearer {bot_token}"}
+    members: list[dict] = []
+    cursor: str | None = None
+    seen_cursors: set[str] = set()
+
+    for _ in range(_USERS_LIST_MAX_PAGES):
+        params: dict[str, str | int] = {"limit": _USERS_LIST_PAGE_SIZE}
+        if cursor:
+            params["cursor"] = cursor
+        resp = httpx.get(_USERS_LIST_URL, headers=headers, params=params, timeout=_TIMEOUT_SECONDS)
+        resp.raise_for_status()
+        body = resp.json()
+        if not body.get("ok"):
+            raise SlackApiError(body.get("error", "unknown_error"))
+        page = body.get("members")
+        if isinstance(page, list):
+            members.extend(entry for entry in page if isinstance(entry, dict))
+        cursor = ((body.get("response_metadata") or {}).get("next_cursor") or "").strip()
+        if not cursor:
+            return members
+        # A cursor that repeats would spin here until the rate limiter bites.
+        if cursor in seen_cursors:
+            raise SlackApiError("too_many_pages")
+        seen_cursors.add(cursor)
+
+    raise SlackApiError("too_many_pages")
