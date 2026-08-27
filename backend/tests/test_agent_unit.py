@@ -492,9 +492,9 @@ def test_c6_referral_pin_never_seats_the_asker() -> None:
 def test_c6_referral_pin_takes_precedence_over_prior_answer_pin() -> None:
     # A responder's explicit referral (9) wins over a prior_answer pin (5).
     nodes = _nodes_for_score(_ReturningScorer())
-    recs = nodes.c6_score(
-        _c6_referral_state(9, pinned_responder_id=5, route=PRIOR_ANSWER)
-    )["recommendations"]
+    recs = nodes.c6_score(_c6_referral_state(9, pinned_responder_id=5, route=PRIOR_ANSWER))[
+        "recommendations"
+    ]
     assert recs[0]["person_id"] == 9
 
 

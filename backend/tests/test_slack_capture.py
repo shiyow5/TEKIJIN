@@ -708,8 +708,9 @@ def test_knowledge_keep_shows_review_blocks_in_slack(_resolved_thread, monkeypat
     assert unit.review_status == "unreviewed"  # keep shows; approve is the next step
 
 
-def test_knowledge_approve_marks_draft_approved(_resolved_thread) -> None:
-    """#527: 承認する flips the draft to approved so retrieval/self-answer trust it."""
+def test_knowledge_approve_marks_draft_approved_and_schedules_embed(_resolved_thread) -> None:
+    """#527/#531: 承認する flips the draft to approved AND schedules an embed so the
+    unit is immediately searchable by knowledge_answer (nothing else indexes it)."""
 
     factory, thread_id = _resolved_thread
     with session_scope(factory) as session:
@@ -718,18 +719,39 @@ def test_knowledge_approve_marks_draft_approved(_resolved_thread) -> None:
 
         extract_and_store(session, [slack_thread_source(session, thread_id)], _extractor())
 
+    embeds: list[int] = []
+    service = SimpleNamespace(
+        session_factory=factory, schedule_knowledge_embed=lambda: embeds.append(1)
+    )
     resp = slack_routes._handle_knowledge_action(
-        SimpleNamespace(session_factory=factory),
-        "tekijin_knowledge_approve",
-        {"thread_id": thread_id},
-        "U_RESP",
-        None,
-        [],
+        service, "tekijin_knowledge_approve", {"thread_id": thread_id}, "U_RESP", None, []
     )
     assert resp.status_code == 200
     with session_scope(factory) as session:
         unit = get_knowledge_unit_by_source(session, "slack_thread", f"slack_thread_{thread_id}")
     assert unit is not None and unit.review_status == "approved"
+    assert embeds == [1]  # embed scheduled exactly once on approve
+
+
+def test_knowledge_keep_and_discard_do_not_schedule_embed(_resolved_thread) -> None:
+    """#531: only approve indexes; keep (just shows) and discard must NOT embed."""
+
+    factory, thread_id = _resolved_thread
+    with session_scope(factory) as session:
+        from tekijin.knowledge.extract import extract_and_store
+        from tekijin.knowledge.slack_thread import slack_thread_source
+
+        extract_and_store(session, [slack_thread_source(session, thread_id)], _extractor())
+
+    embeds: list[int] = []
+    service = SimpleNamespace(
+        session_factory=factory, schedule_knowledge_embed=lambda: embeds.append(1)
+    )
+    for action in ("tekijin_knowledge_keep", "tekijin_knowledge_discard"):
+        slack_routes._handle_knowledge_action(
+            service, action, {"thread_id": thread_id}, "U_RESP", None, []
+        )
+    assert embeds == []
 
 
 def test_knowledge_action_rejects_non_party(_resolved_thread) -> None:
