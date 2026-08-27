@@ -63,8 +63,15 @@ export function HistoryRowOptionsMenu({
         setPhase("closed");
       }
     }
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setPhase("closed");
+    }
     document.addEventListener("mousedown", onOutside);
-    return () => document.removeEventListener("mousedown", onOutside);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onOutside);
+      document.removeEventListener("keydown", onKeyDown);
+    };
   }, [phase]);
 
   function openMenu() {
@@ -77,6 +84,7 @@ export function HistoryRowOptionsMenu({
     try {
       await deleteQuestion(questionId);
       onDeleted(questionId);
+      setPhase("closed");
     } catch {
       setPhase("closed");
       setError(DELETE_ERROR);
@@ -88,6 +96,7 @@ export function HistoryRowOptionsMenu({
     try {
       await resolveQuestion(questionId);
       onResolved(questionId);
+      setPhase("closed");
     } catch {
       setPhase("closed");
       setError(RESOLVE_ERROR);
@@ -101,7 +110,7 @@ export function HistoryRowOptionsMenu({
         type="button"
         onClick={openMenu}
         aria-expanded={phase === "open"}
-        aria-haspopup="true"
+        aria-haspopup="menu"
         aria-label={`「${title}」の操作`}
         className="flex h-7 w-7 items-center justify-center rounded-full border border-outline-variant bg-surface-container-highest text-on-surface-variant leading-none hover:bg-surface-container-low"
       >
@@ -150,11 +159,12 @@ export function HistoryRowOptionsMenu({
         />
       ) : null}
 
-      {phase === "confirm-resolve" ? (
+      {phase === "confirm-resolve" || phase === "resolving" ? (
         <QuestionResolveDialog
           title={title}
           onConfirm={handleResolve}
           onCancel={() => setPhase("closed")}
+          disabled={phase === "resolving"}
         />
       ) : null}
     </div>

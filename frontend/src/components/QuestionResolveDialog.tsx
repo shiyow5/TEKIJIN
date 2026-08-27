@@ -18,15 +18,25 @@ export interface QuestionResolveDialogProps {
   title: string;
   onConfirm: () => void;
   onCancel: () => void;
+  disabled?: boolean;
 }
 
 const TITLE_ID = "question-resolve-dialog-title";
 
-export function QuestionResolveDialog({ title, onConfirm, onCancel }: QuestionResolveDialogProps) {
+export function QuestionResolveDialog({
+  title,
+  onConfirm,
+  onCancel,
+  disabled = false,
+}: QuestionResolveDialogProps) {
   const confirmButtonRef = useRef<HTMLButtonElement>(null);
 
+  function handleCancel() {
+    if (!disabled) onCancel();
+  }
+
   return (
-    <ModalDialog titleId={TITLE_ID} onCancel={onCancel} initialFocusRef={confirmButtonRef}>
+    <ModalDialog titleId={TITLE_ID} onCancel={handleCancel} initialFocusRef={confirmButtonRef}>
       <h2 id={TITLE_ID} className="font-bold text-lg text-on-surface">
         自分で解決しましたか？
       </h2>
@@ -34,16 +44,18 @@ export function QuestionResolveDialog({ title, onConfirm, onCancel }: QuestionRe
       <div className="flex justify-end gap-sm">
         <button
           type="button"
+          disabled={disabled}
           onClick={onCancel}
-          className="rounded-md bg-surface-container-high px-md py-sm font-medium text-on-surface text-sm transition-colors hover:bg-surface-container-highest"
+          className="rounded-md bg-surface-container-high px-md py-sm font-medium text-on-surface text-sm transition-colors hover:bg-surface-container-highest disabled:cursor-not-allowed disabled:opacity-50"
         >
           やめる
         </button>
         <button
           ref={confirmButtonRef}
           type="button"
+          disabled={disabled}
           onClick={onConfirm}
-          className="rounded-md bg-primary px-md py-sm font-bold text-on-primary text-sm shadow-sm transition-colors hover:bg-primary-container"
+          className="rounded-md bg-primary px-md py-sm font-bold text-on-primary text-sm shadow-sm transition-colors hover:bg-primary-container disabled:cursor-not-allowed disabled:opacity-50"
         >
           解決済みにする
         </button>

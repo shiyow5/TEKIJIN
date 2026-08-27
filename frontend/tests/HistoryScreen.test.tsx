@@ -191,6 +191,19 @@ describe("HistoryScreen", () => {
     expect(screen.getByRole("menuitem", { name: "削除" })).toBeInTheDocument();
   });
 
+  it("closes the options menu on Escape", async () => {
+    useCurrentUserMock.mockReturnValue(asUser("E001"));
+    getRecentQuestionsMock.mockResolvedValue(ITEMS);
+    render(<HistoryScreen />);
+
+    await waitFor(() => expect(screen.getByText("社内Wi-Fiの申請方法")).toBeInTheDocument());
+    openOptionsMenu("社内Wi-Fiの申請方法");
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
   it("returns focus to the … trigger after cancelling delete or resolve", async () => {
     useCurrentUserMock.mockReturnValue(asUser("E001"));
     getRecentQuestionsMock.mockResolvedValue(ITEMS);
@@ -281,6 +294,35 @@ describe("HistoryScreen", () => {
     expect(screen.queryByText("自分で解決")).not.toBeInTheDocument();
   });
 
+  it("disables the confirm dialog while a self-resolve is in flight, so it cannot be submitted twice", async () => {
+    useCurrentUserMock.mockReturnValue(asUser("E001"));
+    getRecentQuestionsMock.mockResolvedValue(ITEMS);
+    let resolveFirstCall: (() => void) | undefined;
+    resolveQuestionMock.mockReturnValue(
+      new Promise((resolve) => {
+        resolveFirstCall = () => resolve({ question_id: "q2", resolved: true });
+      }),
+    );
+    render(<HistoryScreen />);
+
+    await waitFor(() => expect(screen.getByText("社内Wi-Fiの申請方法")).toBeInTheDocument());
+    openOptionsMenu("社内Wi-Fiの申請方法");
+    fireEvent.click(screen.getByRole("menuitem", { name: "自分で解決した" }));
+    fireEvent.click(screen.getByRole("button", { name: "解決済みにする" }));
+
+    // While the first request is still pending, the dialog stays mounted
+    // (not replaced by the "…" menu again) with its buttons disabled — a
+    // second click must not fire a second request.
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "解決済みにする" })).toBeDisabled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "解決済みにする" }));
+    expect(resolveQuestionMock).toHaveBeenCalledTimes(1);
+
+    resolveFirstCall?.();
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
   it("shows an empty state when there is no history", async () => {
     useCurrentUserMock.mockReturnValue(asUser("E002"));
     getRecentQuestionsMock.mockResolvedValue([]);
@@ -325,6 +367,33 @@ describe("HistoryScreen", () => {
     expect(screen.queryByText("質問1")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "次へ" })).toBeDisabled();
 
+    fireEvent.click(screen.getByRole("button", { name: "前へ" }));
+    expect(screen.getByText("1 / 2")).toBeInTheDocument();
+    expect(screen.getByText("質問1")).toBeInTheDocument();
+  });
+
+  it("clamps the page immediately (one 前へ click, not two) after deleting the last item on the last page", async () => {
+    useCurrentUserMock.mockReturnValue(asUser("E001"));
+    getRecentQuestionsMock.mockResolvedValue(makeManyItems(11));
+    deleteQuestionMock.mockResolvedValue({ question_id: "q11", deleted: true });
+    render(<HistoryScreen />);
+
+    await waitFor(() => expect(screen.getByText("質問1")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "次へ" }));
+    fireEvent.click(screen.getByRole("button", { name: "次へ" }));
+    await waitFor(() => expect(screen.getByText("3 / 3")).toBeInTheDocument());
+    expect(screen.getByText("質問11")).toBeInTheDocument();
+
+    openOptionsMenu("質問11");
+    fireEvent.click(screen.getByRole("menuitem", { name: "削除" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "削除" }));
+    await waitFor(() => expect(screen.queryByText("質問11")).not.toBeInTheDocument());
+    // The view clamps to the new last page (10 items -> 2 pages) on its own.
+    expect(screen.getByText("2 / 2")).toBeInTheDocument();
+
+    // A single 前へ click must move off the clamped page right away — the
+    // underlying page number silently stayed at the pre-clamp value 2 (#397
+    // follow-up), so the first click used to land back on 2 / 2 again.
     fireEvent.click(screen.getByRole("button", { name: "前へ" }));
     expect(screen.getByText("1 / 2")).toBeInTheDocument();
     expect(screen.getByText("質問1")).toBeInTheDocument();

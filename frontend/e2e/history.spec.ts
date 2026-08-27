@@ -12,7 +12,7 @@ import {
 
 /**
  * The /history screen (#397): every card with a session_id is a single click
- * target to `/session/{id}` (no separate "結果を見る" link); delete and
+ * target to `/session/{id}/result` (no separate "結果を見る" link); delete and
  * self-resolve moved from two always-visible buttons into one "…" options
  * menu; the list paginates 5 cards per page.
  */
@@ -21,8 +21,8 @@ test.describe("history", () => {
     await mockEmployees(page);
     await mockAuth(page);
     await mockRecentQuestions(page, RECENT_QUESTIONS);
-    // The destination is /session/{id}; only its URL matters here, so a bare
-    // (never-resolving) SSE connection is enough to avoid a network error.
+    // The destination is /session/{id}/result; only its URL matters here, so a
+    // bare (never-resolving) SSE connection is enough to avoid a network error.
     await page.route(`${API_BASE}/events/**`, (route) => fulfillSse(route, sseBody([])));
 
     await page.goto("/history");
@@ -31,7 +31,7 @@ test.describe("history", () => {
     // No small "結果を見る" text link exists anymore — the whole card is the target.
     await expect(page.getByRole("link", { name: "結果を見る" })).toHaveCount(0);
     await page.getByText("UTMの移行時の注意点").click();
-    await page.waitForURL(/\/session\/sess-rq1\?from=history$/);
+    await page.waitForURL(/\/session\/sess-rq1\/result\?from=history$/);
 
     // Reached from a history card: the back link returns to /history, not home.
     const back = page.getByRole("link", { name: "履歴へ戻る" });

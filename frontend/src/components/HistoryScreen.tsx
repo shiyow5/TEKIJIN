@@ -102,7 +102,7 @@ export function HistoryScreen() {
   const [state, setState] = useRecentQuestions(currentUserId, { limit: HISTORY_LIMIT });
   const [page, setPage] = useState(0);
 
-  // A new fetch (acting user changed) always starts back at page 1.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset only when the acting user changes.
   useEffect(() => {
     setPage(0);
   }, [currentUserId]);
