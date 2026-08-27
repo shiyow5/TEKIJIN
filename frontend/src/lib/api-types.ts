@@ -276,32 +276,57 @@ export interface KnowledgeListResponse {
 }
 
 /**
- * One decline event the asker hasn't acknowledged yet (GET /notifications,
- * schemas.py `DeclineNotification`). Paired with the automatic reroute
- * (#206): by the time this is shown, the system has already moved on to
- * the next candidate — it is informational, not a request to act (#E7).
+ * One not-yet-seen notification (GET /notifications, schemas.py
+ * `Notification`). `kind`-specific fields are only populated for their own
+ * kind:
+ * - "declined" (#E7): paired with the automatic reroute (#206) — by the
+ *   time this is shown, the system has already moved on to the next
+ *   candidate, so it is informational, not a request to act.
+ *   `declined_person_name` is set.
+ * - "accepted" (#509, asker-side): a responder took the request.
+ *   `responder_name` + `consult_method` are set — the latter decides
+ *   whether the bell links to the chat thread or the session directly.
+ * - "request_received" (#509, responder-side): a new request is waiting on
+ *   this employee's decision. `asker_name` is set.
  */
-export interface DeclineNotification {
-  /** the declined Recommendation row's id — also the ack target. */
+export interface Notification {
+  kind: "declined" | "accepted" | "request_received";
+  /** the Recommendation row's id — also the ack target. */
   id: number;
   question_id: string;
   /** deep-link target; null for pre-session-tracking rows. */
   session_id?: string | null;
   message: string;
-  declined_person_name: string;
   created_at?: string | null;
+  declined_person_name?: string | null;
+  responder_name?: string | null;
+  consult_method?: ConsultMethod | null;
+  asker_name?: string | null;
 }
 
 /** GET /notifications payload (schemas.py `NotificationsResponse`). */
 export interface NotificationsResponse {
-  items: DeclineNotification[];
+  items: Notification[];
 }
 
-/** POST /notifications/ack body — mark decline notifications as seen (#E7). */
-export interface NotificationAckRequest {
-  asker_id: EmployeeId;
-  ids: number[];
-}
+/**
+ * POST /notifications/ack body — mark notifications as seen (#E7 declined,
+ * #509 accepted/request_received). `asker_id` is required for
+ * "declined"/"accepted"; `employee_id` is required for "request_received".
+ */
+export type NotificationAckRequest =
+  | {
+      kind: "declined" | "accepted";
+      asker_id: EmployeeId;
+      employee_id?: never;
+      ids: number[];
+    }
+  | {
+      kind: "request_received";
+      employee_id: EmployeeId;
+      asker_id?: never;
+      ids: number[];
+    };
 
 /** POST /notifications/ack response (schemas.py `NotificationAckResponse`). */
 export interface NotificationAckResponse {

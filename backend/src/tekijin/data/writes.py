@@ -15,7 +15,7 @@ from collections.abc import Sequence
 from typing import Any, cast
 
 from sqlalchemy import CursorResult, delete, func, select, update
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from tekijin.models.tables import (
     Answer,
@@ -468,6 +468,8 @@ def ack_decline_notifications(session: Session, asker_id: int, ids: list[int]) -
         update(Recommendation)
         .where(
             Recommendation.id.in_(ids),
+            Recommendation.rank == 1,
+            Recommendation.outcome == "declined",
             Recommendation.declined_seen_at.is_(None),
             Recommendation.question_id.in_(
                 select(Question.id).where(Question.asker_id == asker_id)
@@ -477,6 +479,64 @@ def ack_decline_notifications(session: Session, asker_id: int, ids: list[int]) -
     )
     # ``Session.execute`` is typed as returning ``Result``; a DML statement always
     # yields a ``CursorResult``, which is where ``rowcount`` lives.
+    return cast("CursorResult[Any]", result).rowcount or 0
+
+
+def ack_accepted_notifications(session: Session, asker_id: int, ids: list[int]) -> int:
+    """Mark these accepted notifications seen, scoped to ``asker_id``'s own questions (#509).
+
+    Mirrors ``ack_decline_notifications``; see its docstring for the scoping
+    rationale. Returns the number of rows actually updated.
+    """
+
+    if not ids:
+        return 0
+    result = session.execute(
+        update(Recommendation)
+        .where(
+            Recommendation.id.in_(ids),
+            Recommendation.outcome == "accepted",
+            Recommendation.accepted_seen_at.is_(None),
+            Recommendation.question_id.in_(
+                select(Question.id).where(Question.asker_id == asker_id)
+            ),
+        )
+        .values(accepted_seen_at=func.now())
+    )
+    return cast("CursorResult[Any]", result).rowcount or 0
+
+
+def ack_request_notifications(session: Session, responder_id: int, ids: list[int]) -> int:
+    """Mark these incoming-request notifications seen, scoped to ``responder_id`` (#509).
+
+    The read side deduplicates anomalous multiple pending rank-1 rows for one
+    question. Resolve the selected ids to their eligible question ids first,
+    then acknowledge every matching pending row so an older duplicate cannot
+    reappear on the next poll. Returns the number of rows actually updated
+    (which can exceed ``len(ids)`` only for that duplicate-row anomaly).
+    """
+
+    if not ids:
+        return 0
+    selected = aliased(Recommendation)
+    selected_question_ids = select(selected.question_id).where(
+        selected.id.in_(ids),
+        selected.rank == 1,
+        selected.outcome.is_(None),
+        selected.employee_id == responder_id,
+        selected.question_id.in_(select(Question.id).where(Question.session_id.is_not(None))),
+    )
+    result = session.execute(
+        update(Recommendation)
+        .where(
+            Recommendation.question_id.in_(selected_question_ids),
+            Recommendation.rank == 1,
+            Recommendation.outcome.is_(None),
+            Recommendation.request_seen_at.is_(None),
+            Recommendation.employee_id == responder_id,
+        )
+        .values(request_seen_at=func.now())
+    )
     return cast("CursorResult[Any]", result).rowcount or 0
 
 

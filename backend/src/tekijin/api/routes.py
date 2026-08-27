@@ -21,6 +21,7 @@ import contextlib
 import datetime as dt
 import logging
 from collections.abc import Iterator
+from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from sqlalchemy.exc import IntegrityError
@@ -63,11 +64,16 @@ from tekijin.data.messages import (
     thread_parties,
     threads_for_employee,
 )
-from tekijin.data.notifications import pending_decline_notifications_for_asker
+from tekijin.data.notifications import (
+    notifications_for_asker,
+    pending_request_notifications_for_responder,
+)
 from tekijin.data.repository import Repository
 from tekijin.data.slack_channel_links import get_channel_link
 from tekijin.data.writes import (
+    ack_accepted_notifications,
     ack_decline_notifications,
+    ack_request_notifications,
     delete_question,
     mark_self_resolved,
     record_offline_consult,
@@ -1036,35 +1042,62 @@ def consult_retrospective(
         return schemas.ConsultRetrospectiveAck(status="recorded", consult_id=consult_id)
 
 
+def _normalized_notification(row: dict[str, Any]) -> dict[str, Any]:
+    """Apply the shared "NULL/anything but 'direct' means chat" rule (#509).
+
+    Only "accepted" rows carry a raw ``consult_method`` (see
+    ``data.notifications.pending_accepted_notifications_for_asker``); the
+    normaliser is idempotent on the missing/``None`` case the other kinds pass.
+    """
+
+    if "consult_method" in row:
+        row = {**row, "consult_method": schemas.normalize_consult_method(row["consult_method"])}
+    return row
+
+
 @router.get("/notifications", response_model=schemas.NotificationsResponse)
 def notifications(
     request: Request,
-    asker_id: str = Query(min_length=1),
+    asker_id: str | None = Query(default=None, min_length=1),
+    employee_id: str | None = Query(default=None, min_length=1),
     principal: Principal = Depends(require_principal),
 ) -> schemas.NotificationsResponse:
-    """Decline events the asker hasn't seen yet, newest first (#225).
+    """Notifications the caller hasn't seen yet, newest first.
 
-    Paired with the automatic reroute (#206): the system has already moved on
-    to the next candidate by the time this fires, so it is an informational
-    "here's what happened" surface, not a request for the asker to act.
-    ``asker_id`` accepts an int or the ``"E###"`` form (422 otherwise). A non-admin
-    may only read their own notifications; admin may read anyone's (#241, the same
-    rule as ``/questions``).
+    Exactly one of ``asker_id`` (declined + accepted outcomes on their own
+    questions, #225/#509) or ``employee_id`` (incoming requests still
+    awaiting their decision, #509) must be given — the two audiences never
+    share a query. Declined is paired with the automatic reroute (#206): the
+    system has already moved on to the next candidate by the time it fires,
+    so it is informational, not a request to act. Both params accept an int
+    or the ``"E###"`` form (422 otherwise). A non-admin may only read their
+    own notifications; admin may read anyone's (#241, the same rule as
+    ``/questions``/``/inbox``).
     """
 
-    with _generic_500("GET /notifications"):
-        try:
-            aid = schemas.coerce_employee_id(asker_id)
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=422, detail="asker_id must be an int or 'E###'"
-            ) from exc
-        require_can_act_as(principal, aid)
+    if (asker_id is None) == (employee_id is None):
+        raise HTTPException(
+            status_code=422, detail="specify exactly one of 'asker_id' or 'employee_id'"
+        )
 
-        with _service(request).session_factory() as session:
-            rows = pending_decline_notifications_for_asker(session, aid)
+    with _generic_500("GET /notifications"):
+        if asker_id is not None:
+            aid = _coerce_employee_id_or_422(asker_id, field="asker_id")
+            require_can_act_as(principal, aid)
+            with _service(request).session_factory() as session:
+                rows = notifications_for_asker(session, aid)
+        elif employee_id is not None:
+            eid = _coerce_employee_id_or_422(employee_id, field="employee_id")
+            require_can_act_as(principal, eid)
+            with _service(request).session_factory() as session:
+                rows = pending_request_notifications_for_responder(session, eid)
+        else:
+            # Unreachable: the exactly-one check above guarantees one is set.
+            raise HTTPException(
+                status_code=422, detail="specify exactly one of 'asker_id' or 'employee_id'"
+            )
         return schemas.NotificationsResponse(
-            items=[schemas.DeclineNotification(**row) for row in rows]
+            items=[schemas.Notification(**_normalized_notification(row)) for row in rows]
         )
 
 
@@ -1074,17 +1107,31 @@ def ack_notifications(
     request: Request,
     principal: Principal = Depends(require_principal),
 ) -> schemas.NotificationAckResponse:
-    """Mark decline notifications as seen (#225).
+    """Mark notifications as seen (#225 declined, #509 accepted/request_received).
 
-    Acking is a write on the asker's own rows, so it carries the same
+    Acking is a write on the caller's own rows, so it carries the same
     act-as rule as the read above (#241) — without it any logged-in user could
-    silently clear someone else's unread notifications.
+    silently clear someone else's unread notifications. ``req``'s own
+    validator already enforces that the id matching ``req.kind`` is present.
     """
 
     with _generic_500("POST /notifications/ack"):
-        require_can_act_as(principal, req.asker_id)
-        with session_scope(_service(request).session_factory) as session:
-            count = ack_decline_notifications(session, req.asker_id, req.ids)
+        if req.kind == "declined" and req.asker_id is not None:
+            require_can_act_as(principal, req.asker_id)
+            with session_scope(_service(request).session_factory) as session:
+                count = ack_decline_notifications(session, req.asker_id, req.ids)
+        elif req.kind == "accepted" and req.asker_id is not None:
+            require_can_act_as(principal, req.asker_id)
+            with session_scope(_service(request).session_factory) as session:
+                count = ack_accepted_notifications(session, req.asker_id, req.ids)
+        elif req.kind == "request_received" and req.employee_id is not None:
+            require_can_act_as(principal, req.employee_id)
+            with session_scope(_service(request).session_factory) as session:
+                count = ack_request_notifications(session, req.employee_id, req.ids)
+        else:
+            # Unreachable: NotificationAckRequest's validator enforces the
+            # matching id is present for each kind.
+            raise HTTPException(status_code=500, detail="invalid notification ack request")
         return schemas.NotificationAckResponse(acknowledged=count)
 
 

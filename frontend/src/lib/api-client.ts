@@ -18,7 +18,6 @@ import type {
   ConsultRetrospectiveContext,
   ConsultRetrospectiveRequest,
   DashboardResponse,
-  DeclineNotification,
   DeleteQuestionResponse,
   DocumentDetail,
   DocumentFallbackRequest,
@@ -37,6 +36,7 @@ import type {
   KnowledgeListResponse,
   LoginRequest,
   LoginResponse,
+  Notification,
   NotificationAckRequest,
   NotificationAckResponse,
   NotificationsResponse,
@@ -476,19 +476,26 @@ export function postConsultRetrospective(
 }
 
 /**
- * GET /notifications — decline events the asker hasn't seen yet, newest first
- * (#E7). `askerId` is the external "E###" form. Returns the unwrapped items array.
+ * GET /notifications — notifications the caller hasn't seen yet, newest
+ * first (#E7 declined, #509 accepted/request_received). Exactly one of
+ * `askerId` (declined + accepted, on the caller's own questions) or
+ * `employeeId` (incoming requests still awaiting the caller's decision)
+ * must be given — both are the external "E###" form. Returns the unwrapped
+ * items array.
  */
 export async function getNotifications(
-  askerId: string,
+  params: { askerId: string } | { employeeId: string },
   options: RequestOptions = {},
-): Promise<DeclineNotification[]> {
-  const query = `?asker_id=${encodeURIComponent(askerId)}`;
+): Promise<Notification[]> {
+  const query =
+    "askerId" in params
+      ? `?asker_id=${encodeURIComponent(params.askerId)}`
+      : `?employee_id=${encodeURIComponent(params.employeeId)}`;
   const body = await getJson<NotificationsResponse>(`/notifications${query}`, options);
   return body.items;
 }
 
-/** POST /notifications/ack — mark decline notifications as seen (#E7). */
+/** POST /notifications/ack — mark notifications as seen (#E7 declined, #509 accepted/request_received). */
 export function ackNotifications(
   request: NotificationAckRequest,
   options: RequestOptions = {},

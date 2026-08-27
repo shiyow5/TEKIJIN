@@ -4610,6 +4610,160 @@ def test_notifications_scoped_to_the_owning_asker(seed_counts, engine, fake_embe
 
 
 # --------------------------------------------------------------------------- #
+# GET /notifications, POST /notifications/ack : accepted + request_received (#509)
+# --------------------------------------------------------------------------- #
+def test_notifications_lists_accepted_then_ack_clears_it(
+    seed_counts, engine, fake_embedder
+) -> None:
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "nt3"})
+    _events(client, "nt3")  # pause at send for E001
+    assert client.get("/notifications", params={"asker_id": "E010"}).json()["items"] == []
+
+    client.post("/answer", json={"session_id": "nt3", "outcome": "accepted"})
+    _events(client, "nt3")
+
+    body = client.get("/notifications", params={"asker_id": "E010"}).json()
+    assert len(body["items"]) == 1
+    item = body["items"][0]
+    assert item["kind"] == "accepted"
+    assert item["responder_name"]
+    assert f"{item['responder_name']}さんが依頼を受け取りました" in item["message"]
+    assert item["session_id"] == "nt3"
+    assert item["consult_method"] in ("direct", "chat")
+
+    ack = client.post(
+        "/notifications/ack", json={"kind": "accepted", "asker_id": "E010", "ids": [item["id"]]}
+    )
+    assert ack.status_code == 200
+    assert ack.json()["acknowledged"] == 1
+    assert client.get("/notifications", params={"asker_id": "E010"}).json()["items"] == []
+    # A declined-only ack (default kind) must not clear an accepted row, and
+    # vice versa — the two kinds write to different columns.
+    again = client.post(
+        "/notifications/ack", json={"kind": "accepted", "asker_id": "E010", "ids": [item["id"]]}
+    )
+    assert again.json()["acknowledged"] == 0
+
+
+def test_notifications_cannot_pre_ack_a_future_acceptance(
+    seed_counts, engine, fake_embedder
+) -> None:
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "nt-preack"})
+    _events(client, "nt-preack")
+    recommendation_id = client.get("/handoff/nt-preack").json()["recommendation_id"]
+
+    # The row belongs to this asker's question, but it is not an acceptance
+    # notification yet. Pre-acking it must not suppress the future event.
+    ack = client.post(
+        "/notifications/ack",
+        json={"kind": "accepted", "asker_id": "E010", "ids": [recommendation_id]},
+    )
+    assert ack.status_code == 200
+    assert ack.json()["acknowledged"] == 0
+
+    client.post(
+        "/answer",
+        json={
+            "session_id": "nt-preack",
+            "outcome": "accepted",
+            "recommendation_id": recommendation_id,
+        },
+    )
+    _events(client, "nt-preack")
+    items = client.get("/notifications", params={"asker_id": "E010"}).json()["items"]
+    assert any(item["kind"] == "accepted" and item["id"] == recommendation_id for item in items)
+
+
+def test_notifications_lists_incoming_request_then_ack_clears_it(
+    seed_counts, engine, fake_embedder
+) -> None:
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    assert client.get("/notifications", params={"employee_id": "E001"}).json()["items"] == []
+
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "nt4"})
+    _events(client, "nt4")  # pause at send for E001 — a still-pending handoff
+
+    body = client.get("/notifications", params={"employee_id": "E001"}).json()
+    assert len(body["items"]) == 1
+    item = body["items"][0]
+    assert item["kind"] == "request_received"
+    assert item["asker_name"]
+    assert f"{item['asker_name']}さんから新しい依頼が届きました" in item["message"]
+    assert item["session_id"] == "nt4"
+
+    ack = client.post(
+        "/notifications/ack",
+        json={"kind": "request_received", "employee_id": "E001", "ids": [item["id"]]},
+    )
+    assert ack.status_code == 200
+    assert ack.json()["acknowledged"] == 1
+    assert client.get("/notifications", params={"employee_id": "E001"}).json()["items"] == []
+
+
+def test_notifications_requires_exactly_one_of_asker_or_employee_id(
+    seed_counts, engine, fake_embedder
+) -> None:
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    assert client.get("/notifications").status_code == 422
+    assert (
+        client.get("/notifications", params={"asker_id": "E010", "employee_id": "E001"}).status_code
+        == 422
+    )
+
+
+def test_notification_ack_requires_only_the_owner_id_matching_kind(
+    seed_counts, engine, fake_embedder
+) -> None:
+    client = _client(engine, fake_embedder)
+    assert (
+        client.post(
+            "/notifications/ack",
+            json={
+                "kind": "accepted",
+                "asker_id": "E010",
+                "employee_id": "E001",
+                "ids": [1],
+            },
+        ).status_code
+        == 422
+    )
+    assert (
+        client.post(
+            "/notifications/ack",
+            json={
+                "kind": "request_received",
+                "asker_id": "E010",
+                "employee_id": "E001",
+                "ids": [1],
+            },
+        ).status_code
+        == 422
+    )
+
+
+# --------------------------------------------------------------------------- #
 # #207: delete a past question (and its FK children), owner/admin only
 # --------------------------------------------------------------------------- #
 def _insert_question(engine, qid: str, asker_id: int, *, with_children: bool = False) -> None:

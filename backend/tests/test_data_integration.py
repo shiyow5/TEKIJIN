@@ -18,9 +18,13 @@ from tekijin.data.db import get_engine, get_sessionmaker, session_scope
 from tekijin.data.documents import get_document
 from tekijin.data.history import recent_questions_for_asker
 from tekijin.data.inbox import pending_handoffs_for_responder
+from tekijin.data.notifications import (
+    pending_accepted_notifications_for_asker,
+    pending_request_notifications_for_responder,
+)
 from tekijin.data.repository import Repository
 from tekijin.data.seed import _apply_schema_upgrades, apply_migrations, run_seed
-from tekijin.data.writes import mark_question_resolved
+from tekijin.data.writes import ack_request_notifications, mark_question_resolved
 from tekijin.models.tables import (
     Answer,
     Document,
@@ -212,6 +216,81 @@ def test_pending_handoffs_excludes_declined_and_includes_rerouted(seed_counts, s
 
 def test_pending_handoffs_empty_for_responder_without_handoffs(seed_counts, session) -> None:
     assert pending_handoffs_for_responder(session, 1) == []
+
+
+# --------------------------------------------------------------------------- #
+# notification ordering (#509)
+# --------------------------------------------------------------------------- #
+def test_accepted_notifications_order_by_acceptance_time(seed_counts, session) -> None:
+    asker = 10
+    older_request_newer_accept = Question(
+        id="api_nt_accept_newer",
+        asker_id=asker,
+        body="先に依頼して後から承諾",
+        topics=[],
+        session_id="nt-accept-newer",
+        resolved_at=dt.datetime(2099, 1, 4, 9, 0, 0),
+    )
+    newer_request_older_accept = Question(
+        id="api_nt_accept_older",
+        asker_id=asker,
+        body="後に依頼して先に承諾",
+        topics=[],
+        session_id="nt-accept-older",
+        resolved_at=dt.datetime(2099, 1, 3, 9, 0, 0),
+    )
+    session.add_all([older_request_newer_accept, newer_request_older_accept])
+    session.add_all(
+        [
+            Recommendation(
+                question_id=older_request_newer_accept.id,
+                employee_id=5,
+                rank=1,
+                score=0.9,
+                outcome="accepted",
+                created_at=dt.datetime(2099, 1, 1, 9, 0, 0),
+            ),
+            Recommendation(
+                question_id=newer_request_older_accept.id,
+                employee_id=6,
+                rank=1,
+                score=0.9,
+                outcome="accepted",
+                created_at=dt.datetime(2099, 1, 2, 9, 0, 0),
+            ),
+        ]
+    )
+    session.flush()
+
+    items = pending_accepted_notifications_for_asker(session, asker)
+    assert [item["question_id"] for item in items[:2]] == [
+        older_request_newer_accept.id,
+        newer_request_older_accept.id,
+    ]
+    assert items[0]["created_at"] == older_request_newer_accept.resolved_at.isoformat()
+
+
+def test_request_notification_dedup_ack_clears_every_matching_row(seed_counts, session) -> None:
+    question = Question(
+        id="api_nt_request_dup",
+        asker_id=10,
+        body="重複した依頼",
+        topics=[],
+        session_id="nt-request-dup",
+    )
+    session.add(question)
+    session.add_all(
+        [
+            Recommendation(question_id=question.id, employee_id=7, rank=1, score=0.8),
+            Recommendation(question_id=question.id, employee_id=7, rank=1, score=0.9),
+        ]
+    )
+    session.flush()
+
+    items = pending_request_notifications_for_responder(session, 7)
+    assert len(items) == 1
+    assert ack_request_notifications(session, 7, [items[0]["id"]]) == 2
+    assert pending_request_notifications_for_responder(session, 7) == []
 
 
 # --------------------------------------------------------------------------- #
@@ -658,6 +737,8 @@ def test_apply_schema_upgrades_migrates_old_db(database_url: str) -> None:
                 )
             # employees has no embedding column; it gets password_hash added (#241).
             conn.execute(text("CREATE TABLE employees (id int primary key)"))
+            # Existing recommendations table predating the notification columns.
+            conn.execute(text("CREATE TABLE recommendations (id int primary key)"))
             # #355: pre-existing daily_reports without the new topics column.
             conn.execute(text("CREATE TABLE daily_reports (id int primary key)"))
             # #451: pre-existing chat history without the conversation-scan index.
@@ -697,6 +778,23 @@ def test_apply_schema_upgrades_migrates_old_db(database_url: str) -> None:
                 {"s": schema},
             ).scalar()
             assert has_password_hash == 1
+            notification_columns = {
+                row[0]
+                for row in conn.execute(
+                    text(
+                        "SELECT column_name FROM information_schema.columns "
+                        "WHERE table_schema = :s AND table_name = 'recommendations' "
+                        "AND column_name IN "
+                        "('declined_seen_at', 'accepted_seen_at', 'request_seen_at')"
+                    ),
+                    {"s": schema},
+                )
+            }
+            assert notification_columns == {
+                "declined_seen_at",
+                "accepted_seen_at",
+                "request_seen_at",
+            }
             # #355: daily_reports.topics added to the pre-existing table.
             has_daily_topics = conn.execute(
                 text(

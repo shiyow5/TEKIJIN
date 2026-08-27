@@ -16,8 +16,8 @@
  * that the list is simply empty on a revisit.
  */
 
-import { formatConfidence } from "@/lib/format";
 import type { EventStreamState } from "@/hooks/useEventStream";
+import { formatConfidence } from "@/lib/format";
 import { REVEAL_CLASS, revealStyle } from "@/lib/motion";
 import { routeLabel } from "@/lib/routes";
 

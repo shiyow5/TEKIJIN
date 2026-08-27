@@ -315,15 +315,33 @@ class HandoffRedraftRequest(BaseModel):
 
 
 class NotificationAckRequest(BaseModel):
-    """Mark decline notifications as seen for this asker (#225)."""
+    """Mark notifications as seen (#225 decline, #509 accepted/request_received).
 
-    asker_id: int
+    ``kind`` picks which ``Recommendation.<kind>_seen_at`` column — and which
+    ownership check — the ack applies: "declined"/"accepted" are asker-side
+    (``asker_id``), "request_received" is responder-side (``employee_id``).
+    """
+
+    kind: Literal["declined", "accepted", "request_received"] = "declined"
+    asker_id: int | None = None
+    employee_id: int | None = None
     ids: list[int] = Field(min_length=1)
 
-    @field_validator("asker_id", mode="before")
+    @field_validator("asker_id", "employee_id", mode="before")
     @classmethod
-    def _accept_e_prefixed_asker_id(cls, value: object) -> int:
+    def _accept_e_prefixed_id(cls, value: object) -> int | None:
+        if value is None:
+            return None
         return _coerce_asker_id(value)
+
+    @model_validator(mode="after")
+    def _owner_matches_kind(self) -> NotificationAckRequest:
+        if self.kind in ("declined", "accepted"):
+            if self.asker_id is None or self.employee_id is not None:
+                raise ValueError(f"exactly 'asker_id' is required for kind {self.kind!r}")
+        elif self.employee_id is None or self.asker_id is not None:
+            raise ValueError("exactly 'employee_id' is required for kind 'request_received'")
+        return self
 
 
 # --------------------------------------------------------------------------- #
@@ -692,21 +710,33 @@ class KnowledgeListResponse(BaseModel):
 
 
 # --------------------------------------------------------------------------- #
-# decline notifications (GET /notifications, POST /notifications/ack) (#E7)
+# notification bell (GET /notifications, POST /notifications/ack)
+# (#E7 declined, #509 accepted / request_received)
 # --------------------------------------------------------------------------- #
-class DeclineNotification(BaseModel):
-    """One not-yet-seen decline event for the asker (newest first)."""
+class Notification(BaseModel):
+    """One not-yet-seen notification (newest first).
 
-    id: int  # the declined Recommendation row's id (also the ack target)
+    ``kind``-specific fields are optional and only populated for their own
+    kind: ``declined_person_name`` (declined), ``responder_name`` +
+    ``consult_method`` (accepted — the latter decides whether the frontend
+    links to the chat thread or the session directly), ``asker_name``
+    (request_received).
+    """
+
+    kind: Literal["declined", "accepted", "request_received"]
+    id: int  # the Recommendation row's id (also the ack target)
     question_id: str
     session_id: str | None = None
     message: str
-    declined_person_name: str
     created_at: str | None = None
+    declined_person_name: str | None = None
+    responder_name: str | None = None
+    consult_method: ConsultMethod | None = None
+    asker_name: str | None = None
 
 
 class NotificationsResponse(BaseModel):
-    items: list[DeclineNotification] = Field(default_factory=list)
+    items: list[Notification] = Field(default_factory=list)
 
 
 class NotificationAckResponse(BaseModel):

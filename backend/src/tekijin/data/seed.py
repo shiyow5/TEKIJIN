@@ -222,6 +222,20 @@ def _apply_schema_upgrades(engine: Engine) -> None:
                 "ADD COLUMN IF NOT EXISTS declined_seen_at TIMESTAMP"
             )
         )
+        # #509: when the asker/responder acknowledged an accepted/incoming-request
+        # notification. Same "IF EXISTS on the table" guard as declined_seen_at above.
+        conn.execute(
+            text(
+                "ALTER TABLE IF EXISTS recommendations "
+                "ADD COLUMN IF NOT EXISTS accepted_seen_at TIMESTAMP"
+            )
+        )
+        conn.execute(
+            text(
+                "ALTER TABLE IF EXISTS recommendations "
+                "ADD COLUMN IF NOT EXISTS request_seen_at TIMESTAMP"
+            )
+        )
         # #518: the employee a responder named on a 'referred' outcome. Nullable;
         # older DBs (persistent volume) get it here, fresh ones via create_all.
         conn.execute(

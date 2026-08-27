@@ -23,8 +23,8 @@ import { ThinkingSteps } from "@/components/ThinkingSteps";
 import { CandidateCard } from "@/components/result/CandidateCard";
 import { PersonRouteView } from "@/components/result/PersonRouteView";
 import type { EventStreamState } from "@/hooks/useEventStream";
-import { fitPercents } from "@/lib/fit";
 import type { Recommendation } from "@/lib/api-types";
+import { fitPercents } from "@/lib/fit";
 import { useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
 
