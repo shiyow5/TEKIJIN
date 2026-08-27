@@ -1878,6 +1878,58 @@ def test_slack_events_rejects_an_invalid_signature(engine, fake_embedder) -> Non
     assert resp.status_code == 401
 
 
+def _reaction_event_payload(*, event_id: str = "Ev_react_1") -> dict:
+    return {
+        "type": "event_callback",
+        "event_id": event_id,
+        "event": {
+            "type": "reaction_added",
+            "reaction": "white_check_mark",
+            "user": "U_REACT",
+            "item": {"type": "message", "channel": "C_REACT", "ts": "1.0"},
+        },
+    }
+
+
+def test_slack_events_reaction_added_triggers_solve_capture(
+    monkeypatch, engine, fake_embedder
+) -> None:
+    """#476: a ✅ reaction event_callback routes to the solve-capture scheduler
+    (which the flag gates) — the daemon-thread extraction itself is unit-tested."""
+
+    calls: list[dict] = []
+    monkeypatch.setattr(
+        "tekijin.api.slack_routes.schedule_solve_capture", lambda _sf, **kw: calls.append(kw)
+    )
+    monkeypatch.setenv("TEKIJIN_SLACK_SOLVE_CAPTURE_ENABLED", "true")
+    _slack_configured(monkeypatch)
+    try:
+        client = _client(engine, fake_embedder)
+        resp = _post_slack_event(client, _reaction_event_payload())
+        assert resp.status_code == 200
+        assert calls == [{"channel_id": "C_REACT", "reactor_slack_user_id": "U_REACT"}]
+    finally:
+        get_settings.cache_clear()
+
+
+def test_slack_events_reaction_added_ignored_when_capture_disabled(
+    monkeypatch, engine, fake_embedder
+) -> None:
+    # Flag OFF (default): the reaction is a no-op — the events path is unchanged.
+    calls: list[dict] = []
+    monkeypatch.setattr(
+        "tekijin.api.slack_routes.schedule_solve_capture", lambda _sf, **kw: calls.append(kw)
+    )
+    _slack_configured(monkeypatch)  # signing secret only; capture flag stays OFF
+    try:
+        client = _client(engine, fake_embedder)
+        resp = _post_slack_event(client, _reaction_event_payload(event_id="Ev_react_2"))
+        assert resp.status_code == 200
+        assert calls == []
+    finally:
+        get_settings.cache_clear()
+
+
 def test_slack_events_message_lands_in_the_channels_current_thread(
     monkeypatch, seed_counts, engine, fake_embedder
 ) -> None:
