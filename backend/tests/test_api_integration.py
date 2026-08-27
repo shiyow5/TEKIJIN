@@ -1907,7 +1907,9 @@ def test_slack_events_reaction_added_triggers_solve_capture(
         client = _client(engine, fake_embedder)
         resp = _post_slack_event(client, _reaction_event_payload())
         assert resp.status_code == 200
-        assert calls == [{"channel_id": "C_REACT", "reactor_slack_user_id": "U_REACT"}]
+        assert calls == [
+            {"channel_id": "C_REACT", "message_ts": "1.0", "reactor_slack_user_id": "U_REACT"}
+        ]
     finally:
         get_settings.cache_clear()
 

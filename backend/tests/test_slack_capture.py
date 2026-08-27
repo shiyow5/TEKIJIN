@@ -66,7 +66,9 @@ def test_slack_thread_uses_chat_hardened_extraction_prompt() -> None:
 def test_reaction_schedules_capture_when_enabled(monkeypatch) -> None:
     calls = _capture_calls(monkeypatch, enabled=True)
     slack_routes._handle_reaction_event(object(), _reaction_event())
-    assert calls == [{"channel_id": "C_THREAD", "reactor_slack_user_id": "U_REACTOR"}]
+    assert calls == [
+        {"channel_id": "C_THREAD", "message_ts": "1.0", "reactor_slack_user_id": "U_REACTOR"}
+    ]
 
 
 def test_reaction_is_noop_when_flag_off(monkeypatch) -> None:
@@ -148,11 +150,19 @@ def _resolved_thread(engine, seed_counts):
     yield factory, thread_id
     # Clean up so the committed rows do not leak into other tests on the shared DB.
     with session_scope(factory) as session:
-        from tekijin.models.tables import KnowledgeUnit, SlackChannelLink, SlackLink
+        from tekijin.models.tables import (
+            KnowledgeUnit,
+            Message,
+            SlackChannelLink,
+            SlackLink,
+            SlackMessageAnchor,
+        )
 
         session.query(KnowledgeUnit).filter(
             KnowledgeUnit.source_id == f"slack_thread_{thread_id}"
         ).delete()
+        session.query(SlackMessageAnchor).filter_by(slack_channel_id=CHANNEL).delete()
+        session.query(Message).filter(Message.recommendation_id == thread_id).delete()
         session.query(Answer).filter(Answer.id == "slkcap_a").delete()
         session.query(Recommendation).filter(Recommendation.question_id == "slkcap_q").delete()
         session.query(Question).filter(Question.id == "slkcap_q").delete()
@@ -205,6 +215,7 @@ def test_capture_stores_unreviewed_draft(_resolved_thread) -> None:
     factory, thread_id = _resolved_thread
     stored = capture_resolved_thread(
         factory,
+        message_ts=None,
         channel_id=CHANNEL,
         reactor_slack_user_id="U_RESP",
         extractor=_extractor(),
@@ -224,6 +235,7 @@ def test_capture_noop_when_flag_off(_resolved_thread) -> None:
     disabled = Settings(_env_file=None, slack_solve_capture_enabled=False)  # type: ignore[call-arg]
     stored = capture_resolved_thread(
         factory,
+        message_ts=None,
         channel_id=CHANNEL,
         reactor_slack_user_id="U_RESP",
         extractor=_extractor(),
@@ -242,6 +254,7 @@ def test_capture_rejects_non_participant_reactor(_resolved_thread) -> None:
     # U_BYSTD is a linked employee but not the asker/responder of this thread.
     stored = capture_resolved_thread(
         factory,
+        message_ts=None,
         channel_id=CHANNEL,
         reactor_slack_user_id="U_BYSTD",
         extractor=_extractor(),
@@ -259,6 +272,7 @@ def test_capture_noop_for_unknown_channel(_resolved_thread) -> None:
     factory, _thread_id = _resolved_thread
     stored = capture_resolved_thread(
         factory,
+        message_ts=None,
         channel_id="C_NOT_OURS",
         reactor_slack_user_id="U_RESP",
         extractor=_extractor(),
@@ -271,6 +285,7 @@ def test_capture_skips_when_model_declines(_resolved_thread) -> None:
     factory, thread_id = _resolved_thread
     stored = capture_resolved_thread(
         factory,
+        message_ts=None,
         channel_id=CHANNEL,
         reactor_slack_user_id="U_RESP",
         extractor=_extractor(extractable=False),
@@ -282,3 +297,177 @@ def test_capture_skips_when_model_declines(_resolved_thread) -> None:
             get_knowledge_unit_by_source(session, "slack_thread", f"slack_thread_{thread_id}")
             is None
         )
+
+
+# --------------------------------------------------------------------------- #
+# per-message anchor + #508 reaction→thread attribution (live DB)
+# --------------------------------------------------------------------------- #
+def test_message_anchor_records_and_resolves(session) -> None:
+    from tekijin.data.slack_message_anchors import record_message_anchor, thread_for_message
+
+    assert thread_for_message(session, "C_A", "111.1") is None
+    record_message_anchor(session, slack_channel_id="C_A", slack_ts="111.1", thread_id=7, now=NOW)
+    session.flush()
+    assert thread_for_message(session, "C_A", "111.1") == 7
+    # Idempotent upsert: re-recording the same message updates in place.
+    record_message_anchor(session, slack_channel_id="C_A", slack_ts="111.1", thread_id=9, now=NOW)
+    session.flush()
+    assert thread_for_message(session, "C_A", "111.1") == 9
+    session.query(_anchor_model()).filter_by(slack_channel_id="C_A").delete()
+
+
+def _anchor_model():
+    from tekijin.models.tables import SlackMessageAnchor
+
+    return SlackMessageAnchor
+
+
+# Second pair for the channel-reuse scenario.
+A2, R2 = 940_311, 940_312
+CH2, TEAM2 = "C_SLKREUSE", "T_SLKREUSE"
+
+
+@pytest.fixture
+def _two_threads_one_channel(engine, seed_counts):
+    """Same pair, TWO accepted hand-offs sharing one reused channel. Anchors an old
+    message to thread #1 while current_thread_id points at #2 — the #508 setup.
+    Returns (factory, thread1_id, thread2_id, old_message_ts)."""
+
+    from tekijin.data.slack_channel_links import get_channel_link
+    from tekijin.data.slack_message_anchors import record_message_anchor
+
+    factory = get_sessionmaker(engine)
+    old_ts = "1000.0001"
+    with session_scope(factory) as session:
+        session.add_all(
+            [
+                Employee(id=A2, name="質問者2", email="asker2@slkreuse"),
+                Employee(id=R2, name="回答者2", email="responder2@slkreuse"),
+            ]
+        )
+        # Thread #1 + its answer (the genuinely-resolved conversation).
+        session.add(
+            Question(id="reuse_q1", asker_id=A2, body="質問1: DNSが引けない", topics=TOPICS)
+        )
+        rec1 = Recommendation(question_id="reuse_q1", employee_id=R2, rank=1, outcome="accepted")
+        session.add(rec1)
+        session.flush()
+        t1 = rec1.id
+        session.add(
+            Answer(id="reuse_a1", question_id="reuse_q1", responder_id=R2, body="resolv.confを直す")
+        )
+        # Thread #2 (a LATER hand-off) reuses the channel; current_thread_id -> #2.
+        session.add(
+            Question(id="reuse_q2", asker_id=A2, body="質問2: 証明書が期限切れ", topics=TOPICS)
+        )
+        rec2 = Recommendation(question_id="reuse_q2", employee_id=R2, rank=1, outcome="accepted")
+        session.add(rec2)
+        session.flush()
+        t2 = rec2.id
+        session.add(
+            Answer(id="reuse_a2", question_id="reuse_q2", responder_id=R2, body="証明書を再発行")
+        )
+        create_channel_link(
+            session, A2, R2, thread_id=t1, slack_channel_id=CH2, slack_team_id=TEAM2, now=NOW
+        )
+        # Reuse: the channel now points at thread #2 (the pair's latest hand-off).
+        get_channel_link(session, A2, R2).current_thread_id = t2
+        # But an OLD message from thread #1 was mirrored back then, anchored to #1.
+        record_message_anchor(session, slack_channel_id=CH2, slack_ts=old_ts, thread_id=t1, now=NOW)
+        upsert_slack_link(session, R2, slack_user_id="U_R2", slack_team_id=TEAM2, now=NOW)
+    yield factory, t1, t2, old_ts
+    with session_scope(factory) as session:
+        from tekijin.models.tables import (
+            KnowledgeUnit,
+            SlackChannelLink,
+            SlackLink,
+            SlackMessageAnchor,
+        )
+
+        session.query(KnowledgeUnit).filter(
+            KnowledgeUnit.source_id.in_([f"slack_thread_{t1}", f"slack_thread_{t2}"])
+        ).delete()
+        session.query(SlackMessageAnchor).filter_by(slack_channel_id=CH2).delete()
+        session.query(Answer).filter(Answer.id.in_(["reuse_a1", "reuse_a2"])).delete()
+        session.query(Recommendation).filter(
+            Recommendation.question_id.in_(["reuse_q1", "reuse_q2"])
+        ).delete()
+        session.query(Question).filter(Question.id.in_(["reuse_q1", "reuse_q2"])).delete()
+        session.query(SlackChannelLink).filter(SlackChannelLink.slack_channel_id == CH2).delete()
+        session.query(SlackLink).filter(SlackLink.employee_id == R2).delete()
+        session.query(Employee).filter(Employee.id.in_([A2, R2])).delete()
+
+
+def test_capture_uses_message_anchor_not_current_thread(_two_threads_one_channel) -> None:
+    # #508: reacting ✅ on thread #1's OLD message must capture thread #1, even though
+    # the channel's current_thread_id now points at the later thread #2.
+    factory, t1, t2, old_ts = _two_threads_one_channel
+    stored = capture_resolved_thread(
+        factory,
+        message_ts=old_ts,
+        channel_id=CH2,
+        reactor_slack_user_id="U_R2",
+        extractor=_extractor(),
+        settings=_settings(),
+    )
+    assert stored == f"slack_thread_{t1}"  # the reacted-on thread, NOT t2
+    with session_scope(factory) as session:
+        assert (
+            get_knowledge_unit_by_source(session, "slack_thread", f"slack_thread_{t1}") is not None
+        )
+        assert get_knowledge_unit_by_source(session, "slack_thread", f"slack_thread_{t2}") is None
+
+
+def test_capture_falls_back_to_current_thread_without_anchor(_two_threads_one_channel) -> None:
+    # A ✅ on a message with NO anchor (e.g. posted before capture was on) falls back
+    # to current_thread_id = thread #2 (best-effort) rather than doing nothing.
+    factory, _t1, t2, _old_ts = _two_threads_one_channel
+    stored = capture_resolved_thread(
+        factory,
+        message_ts="9999.0000",  # unknown ts -> no anchor
+        channel_id=CH2,
+        reactor_slack_user_id="U_R2",
+        extractor=_extractor(),
+        settings=_settings(),
+    )
+    assert stored == f"slack_thread_{t2}"
+
+
+# --------------------------------------------------------------------------- #
+# message mirroring records a per-message anchor (wiring, live DB)
+# --------------------------------------------------------------------------- #
+def _message_event(ts: str) -> dict:
+    return {
+        "type": "message",
+        "channel": CHANNEL,
+        "user": "U_RESP",
+        "text": "解決しました、ありがとうございます",
+        "ts": ts,
+    }
+
+
+def test_message_event_records_anchor_when_capture_enabled(_resolved_thread, monkeypatch) -> None:
+    from tekijin.data.slack_message_anchors import thread_for_message
+
+    factory, thread_id = _resolved_thread
+    monkeypatch.setattr(slack_routes, "get_settings", _settings)
+    slack_routes._handle_message_event(factory, _message_event("ts_anchor_on"))
+    with session_scope(factory) as session:
+        assert thread_for_message(session, CHANNEL, "ts_anchor_on") == thread_id
+
+
+def test_message_event_records_no_anchor_when_capture_disabled(
+    _resolved_thread, monkeypatch
+) -> None:
+    from tekijin.data.slack_message_anchors import thread_for_message
+
+    factory, _thread_id = _resolved_thread
+    monkeypatch.setattr(
+        slack_routes,
+        "get_settings",
+        lambda: Settings(_env_file=None, slack_solve_capture_enabled=False),  # type: ignore[call-arg]
+    )
+    slack_routes._handle_message_event(factory, _message_event("ts_anchor_off"))
+    with session_scope(factory) as session:
+        # The message is still mirrored, but no anchor is written (flag-off inert).
+        assert thread_for_message(session, CHANNEL, "ts_anchor_off") is None
