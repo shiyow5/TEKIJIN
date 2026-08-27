@@ -68,7 +68,15 @@ from tekijin.data.slack_links import (
 )
 from tekijin.data.slack_message_anchors import record_message_anchor
 from tekijin.models.tables import Employee
-from tekijin.slack.capture import SOLVE_REACTIONS, schedule_solve_capture
+from tekijin.slack.capture import (
+    KNOWLEDGE_ACTION_IDS,
+    KNOWLEDGE_DISCARD_ACTION,
+    SOLVE_REACTIONS,
+    discard_thread_draft,
+    is_solve_utterance,
+    schedule_solve_capture,
+    schedule_solve_prompt,
+)
 from tekijin.slack.client import (
     SlackIdentity,
     build_authorize_url,
@@ -588,6 +596,7 @@ def _handle_message_event(session_factory: sessionmaker[Session], event: dict) -
     if not channel_id or not slack_user_id or not text or not text.strip():
         return
 
+    prompt_thread_id: int | None = None
     with session_scope(session_factory) as session:
         channel_link = get_channel_link_by_channel_id(session, channel_id)
         if channel_link is None:
@@ -604,18 +613,28 @@ def _handle_message_event(session_factory: sessionmaker[Session], event: dict) -
             return
         now = dt.datetime.now()  # noqa: DTZ005 - naive is intentional, matches created_at elsewhere
         create_message(session, thread_id, sender_id, text, now)
-        # #476/#508: remember which thread THIS message belonged to, so a later ✅
-        # reaction on it is attributed to the right thread even after the channel is
-        # reused for a newer hand-off. Only while solve-capture is on, so the flag-off
-        # path stays byte-identical (no extra write).
-        if message_ts and get_settings().slack_solve_capture_enabled:
-            record_message_anchor(
-                session,
-                slack_channel_id=channel_id,
-                slack_ts=message_ts,
-                thread_id=thread_id,
-                now=now,
-            )
+        if get_settings().slack_solve_capture_enabled:
+            # #476/#508: remember which thread THIS message belonged to, so a later ✅
+            # reaction on it is attributed to the right thread even after the channel
+            # is reused for a newer hand-off. Only while solve-capture is on, so the
+            # flag-off path stays byte-identical (no extra write).
+            if message_ts:
+                record_message_anchor(
+                    session,
+                    slack_channel_id=channel_id,
+                    slack_ts=message_ts,
+                    thread_id=thread_id,
+                    now=now,
+                )
+            # #476 Screen 02: a "解決しました"-style message is a capture trigger — the
+            # sender is already a verified party of this thread. Defer the draft +
+            # in-thread prompt to a daemon thread (LLM + Slack post exceed the ~3s
+            # budget); scheduled AFTER this transaction commits.
+            if is_solve_utterance(text):
+                prompt_thread_id = thread_id
+
+    if prompt_thread_id is not None:
+        schedule_solve_prompt(session_factory, channel_id=channel_id, thread_id=prompt_thread_id)
 
 
 def _handle_reaction_event(session_factory: sessionmaker[Session], event: dict) -> None:
@@ -737,6 +756,69 @@ def _advance_after_resume(service: AgentService, session_id: str) -> None:
         )
 
 
+def _handle_knowledge_action(
+    service: AgentService,
+    action_id: str,
+    value: dict,
+    slack_user_id: str | None,
+    response_url: str | None,
+    original_blocks: list[dict],
+) -> Response:
+    """Apply a "残す / 残さない" click on the in-thread knowledge prompt (#476).
+
+    Authorization: any PARTY of the thread (asker or responder) may keep or discard
+    the shared draft — unlike accept/decline, this is not the responder's sole call.
+    The prompt only exists in the pair's private 2-member channel, so membership is
+    already the gate; the party check is the same belt-and-suspenders the reaction
+    path uses. Discard marks the draft ``rejected`` (durable — a later re-capture
+    never revives it); keep leaves the ``unreviewed`` draft for review (#477).
+    Never raises past a friendly Slack message (same contract as the hand-off path).
+    """
+
+    try:
+        thread_id = int(value["thread_id"])
+    except (KeyError, TypeError, ValueError):
+        if response_url:
+            respond_to_response_url(
+                response_url, {"response_type": "ephemeral", "text": _INTERACTIVITY_FAILURE_TEXT}
+            )
+        return JSONResponse({"text": _INTERACTIVITY_FAILURE_TEXT})
+
+    with session_scope(service.session_factory) as session:
+        parties = thread_parties(session, thread_id)
+        clicker = (
+            get_slack_link_by_slack_user_id(
+                session, str(slack_user_id), expected_team_id=get_settings().slack_team_id
+            )
+            if slack_user_id
+            else None
+        )
+        if (
+            parties is None
+            or clicker is None
+            or clicker.employee_id not in (parties["asker_id"], parties["responder_id"])
+        ):
+            if response_url:
+                respond_to_response_url(
+                    response_url,
+                    {"response_type": "ephemeral", "text": "この操作を行う権限がありません。"},
+                )
+            return JSONResponse({"text": "この操作を行う権限がありません。"})
+        if action_id == KNOWLEDGE_DISCARD_ACTION:
+            discard_thread_draft(session, thread_id)
+            text = "この会話は知識として残しません。"
+        else:
+            text = "知識の下書きを残しました。あとで確認できます。"
+
+    if response_url:
+        kept_blocks = [b for b in original_blocks if b.get("type") != "actions"]
+        kept_blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f"*{text}*"}})
+        respond_to_response_url(
+            response_url, {"replace_original": True, "text": text, "blocks": kept_blocks}
+        )
+    return JSONResponse({"text": text})
+
+
 def _handle_interactivity_action(service: AgentService, raw: str) -> Response:
     """Apply one Slack 承諾/辞退/自分より適任がいる button click.
 
@@ -768,10 +850,18 @@ def _handle_interactivity_action(service: AgentService, raw: str) -> Response:
         action = (payload.get("actions") or [])[0]
         action_id = action.get("action_id")
         value = json.loads(action.get("value", "{}"))
+        slack_user_id = (payload.get("user") or {}).get("id")
+        # #476 Screen 02: the knowledge keep/discard buttons carry {thread_id}, not the
+        # hand-off {session_id, outcome, ...}, so branch BEFORE parsing those. Handled
+        # in its own function (a different auth: any thread party may decide, not only
+        # the assigned responder).
+        if action_id in KNOWLEDGE_ACTION_IDS:
+            return _handle_knowledge_action(
+                service, action_id, value, slack_user_id, response_url, original_blocks
+            )
         session_id = value["session_id"]
         outcome = value["outcome"]
         recommendation_id = int(value["recommendation_id"])
-        slack_user_id = (payload.get("user") or {}).get("id")
         # A payload without `user.id` cannot identify a responder, so decide it here
         # rather than sending the None to SQL. `slack_links.slack_user_id` is
         # NOT NULL, so `WHERE slack_user_id IS NULL` could never have matched — the

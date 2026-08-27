@@ -471,3 +471,199 @@ def test_message_event_records_no_anchor_when_capture_disabled(
     with session_scope(factory) as session:
         # The message is still mirrored, but no anchor is written (flag-off inert).
         assert thread_for_message(session, CHANNEL, "ts_anchor_off") is None
+
+
+# --------------------------------------------------------------------------- #
+# Slice B2: utterance detection + in-thread prompt + keep/discard (live DB)
+# --------------------------------------------------------------------------- #
+def test_is_solve_utterance_matches_resolution_not_generic_completion() -> None:
+    from tekijin.slack.capture import is_solve_utterance
+
+    assert is_solve_utterance("おかげさまで解決しました")
+    assert is_solve_utterance("MTUを下げたら動きました")
+    assert is_solve_utterance("設定を直したらできるようになりました")
+    # Generic completion / thanks must NOT trigger — they'd waste the one-shot prompt
+    # (#519 review): "資料ができました" is unrelated completion, thanks is just closing.
+    assert not is_solve_utterance("資料ができました")
+    assert not is_solve_utterance("ありがとうございました")
+    assert not is_solve_utterance("ありがとうございます")
+    assert not is_solve_utterance("確認してみます")
+    assert not is_solve_utterance("")
+
+
+def test_capture_and_prompt_creates_draft_and_posts_prompt(_resolved_thread, monkeypatch) -> None:
+    from tekijin.slack import capture as capture_mod
+
+    factory, thread_id = _resolved_thread
+    posts: list[dict] = []
+    monkeypatch.setattr(capture_mod, "post_message", lambda **kw: posts.append(kw))
+
+    stored = capture_mod.capture_and_prompt(
+        factory,
+        channel_id=CHANNEL,
+        thread_id=thread_id,
+        extractor=_extractor(),
+        settings=_settings(),
+    )
+    assert stored == f"slack_thread_{thread_id}"
+    with session_scope(factory) as session:
+        unit = get_knowledge_unit_by_source(session, "slack_thread", f"slack_thread_{thread_id}")
+    assert unit is not None and unit.review_status == "unreviewed"
+    # Exactly one prompt, carrying the two keep/discard action ids + the thread_id.
+    assert len(posts) == 1
+    action_ids = [
+        e["action_id"] for b in posts[0]["blocks"] if b["type"] == "actions" for e in b["elements"]
+    ]
+    assert set(action_ids) == {"tekijin_knowledge_keep", "tekijin_knowledge_discard"}
+
+
+def test_capture_and_prompt_dedups_when_draft_exists(_resolved_thread, monkeypatch) -> None:
+    from tekijin.slack import capture as capture_mod
+
+    factory, thread_id = _resolved_thread
+    posts: list[dict] = []
+    monkeypatch.setattr(capture_mod, "post_message", lambda **kw: posts.append(kw))
+    capture_mod.capture_and_prompt(
+        factory,
+        channel_id=CHANNEL,
+        thread_id=thread_id,
+        extractor=_extractor(),
+        settings=_settings(),
+    )
+    # A second solve utterance must NOT re-capture or re-prompt (draft already exists).
+    again = capture_mod.capture_and_prompt(
+        factory,
+        channel_id=CHANNEL,
+        thread_id=thread_id,
+        extractor=_extractor(),
+        settings=_settings(),
+    )
+    assert again is None
+    assert len(posts) == 1  # only the first prompt
+
+
+def test_knowledge_discard_marks_draft_rejected(_resolved_thread) -> None:
+    factory, thread_id = _resolved_thread
+    # Seed a draft first.
+    with session_scope(factory) as session:
+        from tekijin.knowledge.extract import extract_and_store
+        from tekijin.knowledge.slack_thread import slack_thread_source
+
+        extract_and_store(session, [slack_thread_source(session, thread_id)], _extractor())
+
+    resp = slack_routes._handle_knowledge_action(
+        SimpleNamespace(session_factory=factory),
+        "tekijin_knowledge_discard",
+        {"thread_id": thread_id},
+        "U_RESP",  # a party (the responder)
+        None,
+        [],
+    )
+    assert resp.status_code == 200
+    with session_scope(factory) as session:
+        unit = get_knowledge_unit_by_source(session, "slack_thread", f"slack_thread_{thread_id}")
+    assert unit is not None and unit.review_status == "rejected"
+
+
+def test_knowledge_keep_leaves_draft_unreviewed(_resolved_thread) -> None:
+    factory, thread_id = _resolved_thread
+    with session_scope(factory) as session:
+        from tekijin.knowledge.extract import extract_and_store
+        from tekijin.knowledge.slack_thread import slack_thread_source
+
+        extract_and_store(session, [slack_thread_source(session, thread_id)], _extractor())
+
+    slack_routes._handle_knowledge_action(
+        SimpleNamespace(session_factory=factory),
+        "tekijin_knowledge_keep",
+        {"thread_id": thread_id},
+        "U_RESP",
+        None,
+        [],
+    )
+    with session_scope(factory) as session:
+        unit = get_knowledge_unit_by_source(session, "slack_thread", f"slack_thread_{thread_id}")
+    assert unit is not None and unit.review_status == "unreviewed"
+
+
+def test_knowledge_action_rejects_non_party(_resolved_thread) -> None:
+    factory, thread_id = _resolved_thread
+    with session_scope(factory) as session:
+        from tekijin.knowledge.extract import extract_and_store
+        from tekijin.knowledge.slack_thread import slack_thread_source
+
+        extract_and_store(session, [slack_thread_source(session, thread_id)], _extractor())
+
+    # U_BYSTD is linked but not a party of this thread -> refused, draft untouched.
+    resp = slack_routes._handle_knowledge_action(
+        SimpleNamespace(session_factory=factory),
+        "tekijin_knowledge_discard",
+        {"thread_id": thread_id},
+        "U_BYSTD",
+        None,
+        [],
+    )
+    assert resp.status_code == 200
+    with session_scope(factory) as session:
+        unit = get_knowledge_unit_by_source(session, "slack_thread", f"slack_thread_{thread_id}")
+    assert unit is not None and unit.review_status == "unreviewed"  # NOT rejected
+
+
+def test_message_event_solve_utterance_schedules_prompt(_resolved_thread, monkeypatch) -> None:
+    factory, thread_id = _resolved_thread
+    calls: list[dict] = []
+    monkeypatch.setattr(slack_routes, "schedule_solve_prompt", lambda _sf, **kw: calls.append(kw))
+    monkeypatch.setattr(slack_routes, "get_settings", _settings)
+    event = {
+        "type": "message",
+        "channel": CHANNEL,
+        "user": "U_RESP",
+        "text": "おかげさまで解決しました！",
+        "ts": "ts_solve_1",
+    }
+    slack_routes._handle_message_event(factory, event)
+    assert calls == [{"channel_id": CHANNEL, "thread_id": thread_id}]
+
+
+def test_message_event_non_solve_does_not_schedule_prompt(_resolved_thread, monkeypatch) -> None:
+    factory, _thread_id = _resolved_thread
+    calls: list[dict] = []
+    monkeypatch.setattr(slack_routes, "schedule_solve_prompt", lambda _sf, **kw: calls.append(kw))
+    monkeypatch.setattr(slack_routes, "get_settings", _settings)
+    event = {
+        "type": "message",
+        "channel": CHANNEL,
+        "user": "U_RESP",
+        "text": "確認してみます",
+        "ts": "ts_nonsolve_1",
+    }
+    slack_routes._handle_message_event(factory, event)
+    assert calls == []
+
+
+def test_interactivity_dispatch_routes_knowledge_button(_resolved_thread) -> None:
+    import json as _json
+
+    factory, thread_id = _resolved_thread
+    with session_scope(factory) as session:
+        from tekijin.knowledge.extract import extract_and_store
+        from tekijin.knowledge.slack_thread import slack_thread_source
+
+        extract_and_store(session, [slack_thread_source(session, thread_id)], _extractor())
+
+    raw = _json.dumps(
+        {
+            "actions": [
+                {
+                    "action_id": "tekijin_knowledge_discard",
+                    "value": _json.dumps({"thread_id": thread_id}),
+                }
+            ],
+            "user": {"id": "U_RESP"},
+        }
+    )
+    resp = slack_routes._handle_interactivity_action(SimpleNamespace(session_factory=factory), raw)
+    assert resp.status_code == 200
+    with session_scope(factory) as session:
+        unit = get_knowledge_unit_by_source(session, "slack_thread", f"slack_thread_{thread_id}")
+    assert unit is not None and unit.review_status == "rejected"

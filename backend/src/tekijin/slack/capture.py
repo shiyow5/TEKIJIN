@@ -23,24 +23,73 @@ immediately (mirrors ``notify.schedule_pending_handoff``).
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
 
+from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 
 from tekijin.config import Settings, get_settings
 from tekijin.data.db import session_scope
+from tekijin.data.knowledge import get_knowledge_unit_by_source, set_review_status
 from tekijin.data.messages import thread_parties
 from tekijin.data.slack_channel_links import get_channel_link_by_channel_id
 from tekijin.data.slack_links import get_slack_link_by_slack_user_id
 from tekijin.data.slack_message_anchors import thread_for_message
 from tekijin.knowledge.extract import CaseExtractor, extract_and_store
-from tekijin.knowledge.slack_thread import slack_thread_source
+from tekijin.knowledge.slack_thread import SLACK_THREAD_SOURCE_TYPE, slack_thread_source
+from tekijin.slack.client import post_message
 
 logger = logging.getLogger(__name__)
 
 #: Slack reaction names (no colons) that mean "this thread is solved".
 SOLVE_REACTIONS = frozenset({"white_check_mark", "heavy_check_mark", "ok"})
+
+#: Interactivity action ids for the in-thread "keep / discard" knowledge prompt (#476).
+KNOWLEDGE_KEEP_ACTION = "tekijin_knowledge_keep"
+KNOWLEDGE_DISCARD_ACTION = "tekijin_knowledge_discard"
+KNOWLEDGE_ACTION_IDS = frozenset({KNOWLEDGE_KEEP_ACTION, KNOWLEDGE_DISCARD_ACTION})
+
+# Conservative solve-utterance markers (substring match). Deliberately RESOLUTION-
+# rooted — NOT generic completion/thanks. Excluded on purpose (#519 review): bare
+# "できました" (資料ができました / 予約ができました — unrelated completion) and
+# "ありがとうございました" (ordinary formal closing). Since dedup consumes the one
+# prompt per thread, a false trigger would waste it, so a marker must clearly mean
+# "the problem is solved / it works now", not merely "something finished / thanks".
+# Product-sensitive: keep tight, and only fires while the feature flag is on.
+_SOLVE_UTTERANCES: tuple[str, ...] = (
+    "解決しました",
+    "解決した",
+    "解決です",
+    "解決できました",
+    "できるようになりました",
+    "うまくいきました",
+    "直りました",
+    "動きました",
+)
+
+
+def is_solve_utterance(text: str) -> bool:
+    """True when ``text`` reads as "this is resolved" (a capture trigger, #476)."""
+    lowered = text or ""
+    return any(marker in lowered for marker in _SOLVE_UTTERANCES)
+
+
+def _extract_thread_draft(
+    session, thread_id: int, extractor: CaseExtractor, *, parties=None
+) -> str | None:
+    """Distil one resolved thread into a knowledge draft; return its source id or None.
+
+    Shared by the reaction and utterance paths. ``parties`` is threaded through to
+    avoid re-running ``thread_parties`` when the caller already has it.
+    """
+
+    source = slack_thread_source(session, thread_id, parties=parties)
+    if source is None:
+        return None
+    counts = extract_and_store(session, [source], extractor)
+    return source.source_id if counts["stored"] else None
 
 
 def capture_resolved_thread(
@@ -93,12 +142,8 @@ def capture_resolved_thread(
             parties["responder_id"],
         ):
             return None  # a bystander in the channel cannot trigger capture
-        source = slack_thread_source(session, thread_id, parties=parties)
-        if source is None:
-            return None
         extractor = extractor or CaseExtractor(settings=settings)
-        counts = extract_and_store(session, [source], extractor)
-        return source.source_id if counts["stored"] else None
+        return _extract_thread_draft(session, thread_id, extractor, parties=parties)
 
 
 def schedule_solve_capture(
@@ -130,3 +175,133 @@ def schedule_solve_capture(
             logger.warning("Slack solve-capture failed", exc_info=True)
 
     threading.Thread(target=_run, daemon=True, name="slack-solve-capture").start()
+
+
+def _prompt_blocks(thread_id: int) -> list[dict]:
+    """Block Kit for the in-thread "keep / discard" prompt (#476 Screen 02).
+
+    The buttons carry ``thread_id`` in their value, so the interactivity handler
+    attributes the click to the exact thread with no ``current_thread_id`` guess
+    (the same provenance the anchor gives the reaction path).
+    """
+
+    value = json.dumps({"thread_id": thread_id})
+    return [
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": (
+                    "この会話を *知識として残しますか？* 下書きは用意済みです（確認は30秒ほど）。"
+                ),
+            },
+        },
+        {
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "action_id": KNOWLEDGE_KEEP_ACTION,
+                    "text": {"type": "plain_text", "text": "残す"},
+                    "style": "primary",
+                    "value": value,
+                },
+                {
+                    "type": "button",
+                    "action_id": KNOWLEDGE_DISCARD_ACTION,
+                    "text": {"type": "plain_text", "text": "残さない"},
+                    "value": value,
+                },
+            ],
+        },
+    ]
+
+
+def capture_and_prompt(
+    session_factory: sessionmaker,
+    *,
+    channel_id: str,
+    thread_id: int,
+    extractor: CaseExtractor | None = None,
+    settings: Settings | None = None,
+) -> str | None:
+    """Utterance path (#476): eagerly draft the resolved thread + post an in-thread
+    prompt so the asker/responder can keep or discard it.
+
+    ``thread_id`` is already resolved and its sender party-verified by the caller
+    (``_handle_message_event``), so no reactor gate is needed here. Deduped on the
+    draft's provenance: if a draft for the thread already exists (a prior utterance
+    or a ✅ already captured it), this does nothing — so the prompt is posted at most
+    once per thread rather than on every "解決しました". The draft is committed BEFORE
+    the prompt is posted, so a fast button click always finds it.
+
+    The "no draft yet → create + prompt" check-then-act is made atomic per thread by
+    a transaction-scoped advisory lock (#519 review): two solve-utterances landing in
+    the same thread within the extractor's round-trip would otherwise both pass the
+    existence check and post two independent prompts. The second caller blocks on the
+    lock until the first commits, then sees the draft and returns without posting.
+    """
+
+    settings = settings or get_settings()
+    if not settings.slack_solve_capture_enabled:
+        return None
+
+    with session_scope(session_factory) as session:
+        # Namespaced (classid=476) so the per-thread lock cannot collide with any
+        # other advisory-lock user; released automatically at transaction end.
+        session.execute(
+            text("SELECT pg_advisory_xact_lock(:cls, :obj)"), {"cls": 476, "obj": thread_id}
+        )
+        existing = get_knowledge_unit_by_source(
+            session, SLACK_THREAD_SOURCE_TYPE, f"slack_thread_{thread_id}"
+        )
+        if existing is not None:
+            return None  # already captured + prompted for this thread
+        extractor = extractor or CaseExtractor(settings=settings)
+        stored = _extract_thread_draft(session, thread_id, extractor)
+        if stored is None:
+            return None
+
+    # Best-effort (never raises): if the post fails, the draft still sits in the
+    # review box (unreviewed) for the management UI (#477) — a lost prompt, not data.
+    post_message(
+        bot_token=settings.slack_bot_token,
+        channel_id=channel_id,
+        text="この会話を知識として残しますか？",
+        blocks=_prompt_blocks(thread_id),
+    )
+    return stored
+
+
+def schedule_solve_prompt(
+    session_factory: sessionmaker,
+    *,
+    channel_id: str,
+    thread_id: int,
+) -> None:
+    """Fire-and-forget :func:`capture_and_prompt` in a daemon thread (LLM + Slack
+    post both exceed Slack's ~3s event budget)."""
+
+    def _run() -> None:
+        try:
+            stored = capture_and_prompt(session_factory, channel_id=channel_id, thread_id=thread_id)
+            if stored is not None:
+                logger.info("Solve-utterance prompted for knowledge draft %s", stored)
+        except Exception:  # noqa: BLE001 - background thread boundary, must not crash silently
+            logger.warning("Slack solve-prompt failed", exc_info=True)
+
+    threading.Thread(target=_run, daemon=True, name="slack-solve-prompt").start()
+
+
+def discard_thread_draft(session, thread_id: int) -> bool:
+    """Mark a thread's knowledge draft rejected ("残さない"). Returns whether one was
+    found. Rejecting (not deleting) is durable: a later re-capture upserts content
+    but never revives ``review_status``, so a discarded thread stays discarded."""
+
+    unit = get_knowledge_unit_by_source(
+        session, SLACK_THREAD_SOURCE_TYPE, f"slack_thread_{thread_id}"
+    )
+    if unit is None:
+        return False
+    set_review_status(session, unit.id, "rejected")
+    return True
