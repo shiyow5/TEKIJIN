@@ -550,12 +550,11 @@ class Settings(BaseSettings):
     # pair-channels only (TEKIJIN never creates DMs), so this never reads a DM —
     # the #404 DM-consent question does not arise here by construction.
     #
-    # ENABLEMENT BLOCKER (#476 review): before flipping this True, resolve the
-    # reaction→thread mis-attribution on reused pair-channels — a ✅ is currently
-    # attributed to the channel's ``current_thread_id``, not the reacted message's
-    # ``item.ts`` (see ``slack.capture.capture_resolved_thread`` and #508). Until
-    # then a draft's provenance can be wrong on a channel that served more than one
-    # hand-off between the same pair.
+    # Reaction→thread attribution (#508, resolved): a ✅ is attributed to the thread
+    # the reacted MESSAGE belonged to via its recorded per-message anchor
+    # (``slack_message_anchors``), not the channel's mutable ``current_thread_id`` —
+    # correct even on a channel reused across hand-offs. A message with no anchor
+    # (posted before capture was enabled) still falls back to ``current_thread_id``.
     slack_solve_capture_enabled: bool = False
 
     def slack_configured(self) -> bool:

@@ -59,6 +59,7 @@ from tekijin.config import Settings, get_settings
 from tekijin.data.db import session_scope
 from tekijin.data.messages import create_message, thread_parties
 from tekijin.data.slack_channel_links import get_channel_link_by_channel_id
+from tekijin.data.slack_message_anchors import record_message_anchor
 from tekijin.data.slack_links import (
     delete_slack_link,
     get_slack_link,
@@ -501,6 +502,7 @@ def _handle_message_event(session_factory: sessionmaker[Session], event: dict) -
     channel_id = event.get("channel")
     slack_user_id = event.get("user")
     text = event.get("text")
+    message_ts = event.get("ts")
     if not channel_id or not slack_user_id or not text or not text.strip():
         return
 
@@ -520,6 +522,18 @@ def _handle_message_event(session_factory: sessionmaker[Session], event: dict) -
             return
         now = dt.datetime.now()  # noqa: DTZ005 - naive is intentional, matches created_at elsewhere
         create_message(session, thread_id, sender_id, text, now)
+        # #476/#508: remember which thread THIS message belonged to, so a later ✅
+        # reaction on it is attributed to the right thread even after the channel is
+        # reused for a newer hand-off. Only while solve-capture is on, so the flag-off
+        # path stays byte-identical (no extra write).
+        if message_ts and get_settings().slack_solve_capture_enabled:
+            record_message_anchor(
+                session,
+                slack_channel_id=channel_id,
+                slack_ts=message_ts,
+                thread_id=thread_id,
+                now=now,
+            )
 
 
 def _handle_reaction_event(session_factory: sessionmaker[Session], event: dict) -> None:
@@ -543,12 +557,14 @@ def _handle_reaction_event(session_factory: sessionmaker[Session], event: dict) 
         return
     item = event.get("item") or {}
     channel_id = item.get("channel")
+    message_ts = item.get("ts")
     reactor_slack_user_id = event.get("user")
     if not channel_id or not reactor_slack_user_id:
         return
     schedule_solve_capture(
         session_factory,
         channel_id=channel_id,
+        message_ts=message_ts,
         reactor_slack_user_id=reactor_slack_user_id,
     )
 

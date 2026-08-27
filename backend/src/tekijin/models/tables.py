@@ -134,6 +134,27 @@ class SlackChannelLink(Base):
     created_at: Mapped[dt.datetime] = mapped_column(DateTime)
 
 
+class SlackMessageAnchor(Base):
+    """Which TEKIJIN thread a specific Slack message belongs to (#476/#508).
+
+    A pair channel is REUSED across sequential hand-offs (see
+    :class:`SlackChannelLink`), so ``current_thread_id`` only names the pair's most
+    recent thread — it cannot tell which thread an OLD message was part of. Solve
+    capture (#476) is triggered by a ✅ reaction on a specific message, so it needs
+    per-message provenance: this records, at the moment a message is mirrored, the
+    thread that was current then, keyed by ``(channel_id, slack_ts)`` (a Slack ts is
+    unique within a channel). The reaction handler resolves ``item.ts`` here to
+    attribute the capture to the RIGHT thread, not merely the latest one (#508).
+    """
+
+    __tablename__ = "slack_message_anchors"
+
+    slack_channel_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    slack_ts: Mapped[str] = mapped_column(String(32), primary_key=True)
+    thread_id: Mapped[int] = mapped_column(Integer, index=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime)
+
+
 class AiChatHistory(Base):
     """AI <-> employee conversation log (one row per message)."""
 
