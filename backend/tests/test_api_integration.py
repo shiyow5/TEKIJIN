@@ -563,6 +563,114 @@ def test_decline_reroutes_then_accept(seed_counts, engine, fake_embedder) -> Non
 
 
 # --------------------------------------------------------------------------- #
+# POST /handoff/refer : responder names a specific person to refer to (#518)
+# --------------------------------------------------------------------------- #
+def test_refer_seats_the_named_person_and_records_the_referral(
+    seed_counts, engine, fake_embedder
+) -> None:
+    # Referring to employee 5 (a real employee NOT among the shown [1,2,3]) seats
+    # them at rank 1, records outcome=referred + referred_to on the referrer's row,
+    # and puts 5 in 5's inbox.
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2, 3], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2, 3, 5)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "ref1"})
+    first = _events(client, "ref1")
+    assert first[2][1]["recommendations"][0]["person_id"] == "E001"  # drafted for 1
+
+    resp = client.post("/handoff/refer", json={"session_id": "ref1", "person_id": "E005"})
+    assert resp.status_code == 200
+    second = _events(client, "ref1")
+    assert [e for e, _ in second] == ["recommend", "draft"]
+    assert second[0][1]["recommendations"][0]["person_id"] == "E005"  # named person is rank 1
+
+    # The referrer's row records the referral (distinct from a plain decline).
+    qid = _question_id_for_session(engine, "ref1")
+    check = get_sessionmaker(engine)()
+    try:
+        from sqlalchemy import select as _select
+
+        row = check.execute(
+            _select(Recommendation.outcome, Recommendation.referred_to_employee_id).where(
+                Recommendation.question_id == qid, Recommendation.employee_id == 1
+            )
+        ).first()
+        assert row is not None and row[0] == "referred" and row[1] == 5
+    finally:
+        check.close()
+
+    # 5 can now see the hand-off in their inbox.
+    inbox = client.get("/inbox", params={"responder_id": "E005"}).json()
+    assert any(item["question_id"] == qid for item in inbox["items"])
+
+
+def test_refer_rejects_asker_and_current_responder(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "ref2"})
+    _events(client, "ref2")
+    # The asker (10) cannot be referred to (can't answer their own question).
+    assert (
+        client.post("/handoff/refer", json={"session_id": "ref2", "person_id": "E010"}).status_code
+        == 422
+    )
+    # The current responder (1) is a no-op self-referral.
+    assert (
+        client.post("/handoff/refer", json={"session_id": "ref2", "person_id": "E001"}).status_code
+        == 422
+    )
+
+
+def test_refer_rejects_an_already_declined_person(seed_counts, engine, fake_embedder) -> None:
+    # #518 review (MEDIUM): the c6 pin would silently drop an already-declined person,
+    # so referring to them is rejected up front rather than recorded as a no-op.
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2, 3], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2, 3)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "ref5"})
+    _events(client, "ref5")
+    # Decline 1 -> reroute to 2; now 1 is in declined_ids.
+    client.post("/answer", json={"session_id": "ref5", "outcome": "declined"})
+    _events(client, "ref5")
+    resp = client.post("/handoff/refer", json={"session_id": "ref5", "person_id": "E001"})
+    assert resp.status_code == 422
+
+
+def test_refer_is_responder_only(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "ref3"})
+    _events(client, "ref3")
+    # The asker (10) is a participant but NOT the responder -> 403.
+    resp = client.post(
+        "/handoff/refer",
+        json={"session_id": "ref3", "person_id": "E002"},
+        headers=_user_headers(10),
+    )
+    assert resp.status_code == 403
+
+
+def test_refer_404_when_no_handoff(seed_counts, engine, fake_embedder) -> None:
+    client = _client(engine, fake_embedder, retriever=_FakeRetriever(), scorer=_FakeScorer([]))
+    resp = client.post("/handoff/refer", json={"session_id": "nope", "person_id": "E002"})
+    assert resp.status_code == 404
+
+
+# --------------------------------------------------------------------------- #
 # dispatch guards: 409 on busy/paused, 422 on wrong resume kind
 # --------------------------------------------------------------------------- #
 def test_second_ask_while_queued_conflicts(seed_counts, engine, fake_embedder) -> None:

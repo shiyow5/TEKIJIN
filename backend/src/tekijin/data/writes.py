@@ -426,18 +426,31 @@ def recommendation_outcome(session: Session, recommendation_id: int) -> str | No
     ).scalar_one_or_none()
 
 
-def set_recommendation_outcome(session: Session, recommendation_id: int, outcome: str) -> None:
+def set_recommendation_outcome(
+    session: Session,
+    recommendation_id: int,
+    outcome: str,
+    *,
+    referred_to: int | None = None,
+) -> None:
     """Record the responder's accept/decline on a recommendation, once.
 
     The update is guarded on ``outcome IS NULL`` so a duplicate submission — e.g. a
     lost acknowledgement retried after a process restart cleared the in-memory
     dedup guard — cannot overwrite an already-recorded outcome (idempotent write).
+
+    ``referred_to`` (#518): on a ``'referred'`` outcome, the employee the responder
+    named as more suitable, written in the SAME guarded update so the outcome and its
+    target land atomically (or not at all on a duplicate).
     """
 
+    values: dict[str, object] = {"outcome": outcome}
+    if referred_to is not None:
+        values["referred_to_employee_id"] = referred_to
     session.execute(
         update(Recommendation)
         .where(Recommendation.id == recommendation_id, Recommendation.outcome.is_(None))
-        .values(outcome=outcome)
+        .values(**values)
     )
 
 

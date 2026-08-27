@@ -447,6 +447,57 @@ def test_c6_omits_question_similarity_when_disabled() -> None:
     assert scorer.kwarg_present == [False]
 
 
+def _c6_referral_state(referred: int | None, **over: Any) -> dict[str, Any]:
+    state = _c6_state({})
+    state["referred_responder_id"] = referred
+    state.update(over)
+    return state
+
+
+def test_c6_seats_a_referred_person_at_rank_1() -> None:
+    # #518: a responder referral seats the named person (99, not in the C4 pool [1,2])
+    # at rank 1 and annotates why, while the pool fills the remaining slots.
+    nodes = _nodes_for_score(_ReturningScorer())
+    recs = nodes.c6_score(_c6_referral_state(99))["recommendations"]
+    assert recs[0]["person_id"] == 99
+    assert recs[0]["reasons"][0] == {"type": "referral", "detail": "担当者からの推薦"}
+    assert [r["person_id"] for r in recs[1:]] == [1, 2]  # pool fills the rest
+
+
+def test_c6_referral_pin_is_dormant_when_unset() -> None:
+    # No referral -> byte-identical: just the scored pool, no injected rank-1, and
+    # the result never carries the clear key (return shape unchanged from develop).
+    nodes = _nodes_for_score(_ReturningScorer())
+    out = nodes.c6_score(_c6_referral_state(None))
+    assert [r["person_id"] for r in out["recommendations"]] == [1, 2]
+    assert "referred_responder_id" not in out
+
+
+def test_c6_consumes_the_referral_after_seating() -> None:
+    # #518 review (HIGH): the referral is cleared once scored, so a later unrelated
+    # decline reverts to the normal keep-survivors reroute instead of wiping again.
+    nodes = _nodes_for_score(_ReturningScorer())
+    out = nodes.c6_score(_c6_referral_state(99))
+    assert out["recommendations"][0]["person_id"] == 99
+    assert out["referred_responder_id"] is None
+
+
+def test_c6_referral_pin_never_seats_the_asker() -> None:
+    # Referring to the asker (id 0 here) is dropped — they can't answer their own Q.
+    nodes = _nodes_for_score(_ReturningScorer())
+    recs = nodes.c6_score(_c6_referral_state(0))["recommendations"]
+    assert [r["person_id"] for r in recs] == [1, 2]
+
+
+def test_c6_referral_pin_takes_precedence_over_prior_answer_pin() -> None:
+    # A responder's explicit referral (9) wins over a prior_answer pin (5).
+    nodes = _nodes_for_score(_ReturningScorer())
+    recs = nodes.c6_score(
+        _c6_referral_state(9, pinned_responder_id=5, route=PRIOR_ANSWER)
+    )["recommendations"]
+    assert recs[0]["person_id"] == 9
+
+
 def test_c6_ranks_the_requested_branch_first() -> None:
     # #83: an explicitly requested branch is a CONDITION, not a scoring term.
     # `Weights.proximity` is one term in a linear sum, so a stronger candidate

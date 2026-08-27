@@ -222,6 +222,29 @@ def _apply_schema_upgrades(engine: Engine) -> None:
                 "ADD COLUMN IF NOT EXISTS declined_seen_at TIMESTAMP"
             )
         )
+        # #518: the employee a responder named on a 'referred' outcome. Nullable;
+        # older DBs (persistent volume) get it here, fresh ones via create_all.
+        conn.execute(
+            text(
+                "ALTER TABLE IF EXISTS recommendations "
+                "ADD COLUMN IF NOT EXISTS referred_to_employee_id INTEGER "
+                "REFERENCES employees(id)"
+            )
+        )
+        # Indexed to match the table's other FK-to-employees columns (create_all builds
+        # it on a fresh DB; a live DB gets it here). Guarded on the table existing —
+        # `CREATE INDEX IF NOT EXISTS` only guards the INDEX name, not the table, so a
+        # minimal DB without `recommendations` (the schema-upgrade test) would error.
+        conn.execute(
+            text(
+                "DO $$ BEGIN\n"
+                "  IF to_regclass('recommendations') IS NOT NULL THEN\n"
+                "    CREATE INDEX IF NOT EXISTS ix_recommendations_referred_to_employee_id\n"
+                "      ON recommendations (referred_to_employee_id);\n"
+                "  END IF;\n"
+                "END $$;"
+            )
+        )
         # Asker's chosen consultation method ("direct" | "chat"); NULL treated
         # as "chat" everywhere.
         conn.execute(
