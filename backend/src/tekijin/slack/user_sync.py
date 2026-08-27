@@ -86,11 +86,16 @@ class SyncPlan:
 
     link: tuple[tuple[int, str], ...] = ()
     unlink: tuple[int, ...] = ()
+    # (email, display_name, slack_user_id) for colleagues who have no employee
+    # row yet. Separate from ``link`` because the employee id does not exist for
+    # the planner to name — creating the row and attaching the Slack account are
+    # one act, carried out together.
+    create: tuple[tuple[str, str, str], ...] = ()
     skipped: Mapping[str, int] = field(default_factory=dict)
 
     @property
     def is_empty(self) -> bool:
-        return not self.link and not self.unlink
+        return not self.link and not self.unlink and not self.create
 
 
 def parse_members(raw: Iterable[Mapping[str, object]]) -> list[SlackMember]:
@@ -140,6 +145,7 @@ def plan_user_sync(
     employee_by_slack_user: Mapping[str, int],
     expected_team_id: str,
     admin_email: str,
+    create_missing: bool = False,
 ) -> SyncPlan:
     """Work out the links to add and the links to cut. Writes nothing.
 
@@ -157,6 +163,7 @@ def plan_user_sync(
     admin = _normalise(admin_email)
 
     candidates: list[tuple[int, str]] = []
+    new_people: list[tuple[str, str, str]] = []
     unlink: list[int] = []
     skipped: Counter[str] = Counter()
 
@@ -187,7 +194,10 @@ def plan_user_sync(
 
         employee_id = by_email.get(email)
         if employee_id is None:
-            skipped["no_matching_employee"] += 1
+            if create_missing:
+                new_people.append((email, member.display_name, member.slack_user_id))
+            else:
+                skipped["no_matching_employee"] += 1
             continue
 
         owner = employee_by_slack_user.get(member.slack_user_id)
@@ -208,7 +218,12 @@ def plan_user_sync(
     # De-duplicated because the count is what an operator reads: "unlinked: 2"
     # for one departure listed twice says two colleagues left. The applier
     # tolerates the repeat, so this is about the report, not the write.
-    return SyncPlan(link=link, unlink=tuple(dict.fromkeys(unlink)), skipped=dict(skipped))
+    return SyncPlan(
+        link=link,
+        unlink=tuple(dict.fromkeys(unlink)),
+        create=_drop_contested_new_people(new_people, skipped),
+        skipped=dict(skipped),
+    )
 
 
 def _drop_ambiguous(
@@ -235,4 +250,30 @@ def _drop_ambiguous(
             skipped["ambiguous_slack_account"] += 1
         else:
             kept.append((employee_id, slack_user_id))
+    return tuple(kept)
+
+
+def _drop_contested_new_people(
+    new_people: list[tuple[str, str, str]], skipped: Counter[str]
+) -> tuple[tuple[str, str, str], ...]:
+    """Keep only the addresses exactly one Slack account is claiming.
+
+    The same rule as :func:`_drop_ambiguous`, and it matters more here: the
+    employee row does not exist yet, so whichever claimant won would not be
+    taking a share of an existing identity — they would own the new one
+    outright, and the real colleague would arrive to find themselves occupied.
+    """
+
+    unique = list(dict.fromkeys(new_people))
+    per_email = Counter(email for email, _, _ in unique)
+    per_account = Counter(slack_user_id for _, _, slack_user_id in unique)
+
+    kept: list[tuple[str, str, str]] = []
+    for email, display_name, slack_user_id in unique:
+        if per_email[email] > 1:
+            skipped["ambiguous_email"] += 1
+        elif per_account[slack_user_id] > 1:
+            skipped["ambiguous_slack_account"] += 1
+        else:
+            kept.append((email, display_name, slack_user_id))
     return tuple(kept)

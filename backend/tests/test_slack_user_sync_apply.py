@@ -10,6 +10,7 @@ from __future__ import annotations
 import datetime as dt
 
 import pytest
+from sqlalchemy import select
 
 from tekijin.data.db import get_sessionmaker
 from tekijin.data.slack_directory import apply_sync_plan, load_directory_state
@@ -70,7 +71,7 @@ def test_apply_writes_the_links_the_plan_asked_for(seed_counts, engine) -> None:
         applied = apply_sync_plan(session, plan, team_id=TEAM, now=NOW)
         session.commit()
 
-    assert applied == {"linked": 1, "unlinked": 0}
+    assert applied == {"created": 0, "linked": 1, "unlinked": 0}
     with factory() as session:
         link = get_slack_link(session, employee_id, expected_team_id=TEAM)
         assert link is not None
@@ -91,7 +92,7 @@ def test_apply_removes_the_links_the_plan_retired(seed_counts, engine) -> None:
         applied = apply_sync_plan(session, SyncPlan(unlink=(employee_id,)), team_id=TEAM, now=NOW)
         session.commit()
 
-    assert applied == {"linked": 0, "unlinked": 1}
+    assert applied == {"created": 0, "linked": 0, "unlinked": 1}
     with factory() as session:
         assert get_slack_link(session, employee_id, expected_team_id=TEAM) is None
 
@@ -122,6 +123,7 @@ def test_an_empty_plan_touches_nothing(seed_counts, engine) -> None:
     factory = get_sessionmaker(engine)
     with factory() as session:
         assert apply_sync_plan(session, SyncPlan(), team_id=TEAM, now=NOW) == {
+            "created": 0,
             "linked": 0,
             "unlinked": 0,
         }
@@ -172,3 +174,137 @@ def test_a_plan_naming_one_slack_account_twice_is_refused(seed_counts, engine) -
         with pytest.raises(ValueError, match="duplicate"):
             apply_sync_plan(session, plan, team_id=TEAM, now=NOW)
         session.rollback()
+
+
+# --------------------------------------------------------------------------- #
+# Creating a colleague who is in Slack but not yet in TEKIJIN
+# --------------------------------------------------------------------------- #
+def test_a_new_colleague_is_created_and_linked_in_one_go(seed_counts, engine) -> None:
+    factory = get_sessionmaker(engine)
+    plan = SyncPlan(create=(("newhire@sample-tekijin.co.jp", "新人 太郎", "U_NEW"),))
+
+    with factory() as session:
+        applied = apply_sync_plan(session, plan, team_id=TEAM, now=NOW)
+        session.commit()
+
+    assert applied["created"] == 1
+    with factory() as session:
+        from tekijin.data.slack_links import get_slack_link_by_slack_user_id
+
+        link = get_slack_link_by_slack_user_id(session, "U_NEW", expected_team_id=TEAM)
+        assert link is not None
+        created = session.get(Employee, link.employee_id)
+        assert created is not None
+        assert created.email == "newhire@sample-tekijin.co.jp"
+        assert created.name == "新人 太郎"
+        # No password: this account exists to be signed into via Slack. A blank
+        # hash never verifies, so there is no weak credential to guess.
+        assert not created.password_hash
+
+
+def test_the_created_id_does_not_collide_with_the_seeded_roster(seed_counts, engine) -> None:
+    """`make seed` inserts ids 1..40 EXPLICITLY after `TRUNCATE ... RESTART
+    IDENTITY`, so the sequence is left at 1 while `max(id)` is 40. Letting
+    Postgres assign the next value would hand out 1 and collide with the first
+    employee. Verified on the live DGX database before writing this.
+    """
+
+    factory = get_sessionmaker(engine)
+    with factory() as session:
+        before = {e.id for e in session.scalars(select(Employee))}
+
+    with factory() as session:
+        apply_sync_plan(
+            session,
+            SyncPlan(create=(("collide@sample-tekijin.co.jp", "衝突 確認", "U_C"),)),
+            team_id=TEAM,
+            now=NOW,
+        )
+        session.commit()
+
+    with factory() as session:
+        after = {e.id for e in session.scalars(select(Employee))}
+
+    new_ids = after - before
+    assert len(new_ids) == 1
+    assert new_ids.isdisjoint(before)
+
+
+def test_creating_two_colleagues_in_one_run_gives_them_distinct_ids(seed_counts, engine) -> None:
+    factory = get_sessionmaker(engine)
+    plan = SyncPlan(
+        create=(
+            ("a-two@sample-tekijin.co.jp", "A", "U_TWO_A"),
+            ("b-two@sample-tekijin.co.jp", "B", "U_TWO_B"),
+        )
+    )
+
+    with factory() as session:
+        applied = apply_sync_plan(session, plan, team_id=TEAM, now=NOW)
+        session.commit()
+
+    assert applied["created"] == 2
+    with factory() as session:
+        from tekijin.data.slack_links import get_slack_link_by_slack_user_id
+
+        a = get_slack_link_by_slack_user_id(session, "U_TWO_A", expected_team_id=TEAM)
+        b = get_slack_link_by_slack_user_id(session, "U_TWO_B", expected_team_id=TEAM)
+        assert a is not None and b is not None
+        assert a.employee_id != b.employee_id
+
+
+def test_a_plan_creating_one_address_twice_is_refused(seed_counts, engine) -> None:
+    """`employees.email` is unique, so a duplicate would abort the batch."""
+
+    factory = get_sessionmaker(engine)
+    plan = SyncPlan(
+        create=(
+            ("dup@sample-tekijin.co.jp", "A", "U_D1"),
+            ("dup@sample-tekijin.co.jp", "B", "U_D2"),
+        )
+    )
+
+    with factory() as session:
+        with pytest.raises(ValueError, match="duplicate"):
+            apply_sync_plan(session, plan, team_id=TEAM, now=NOW)
+        session.rollback()
+
+
+def test_a_departure_also_takes_them_out_of_the_candidate_pool(seed_counts, engine) -> None:
+    """Unlinking stops the login; it does not stop the recommendation (#506).
+    Both have to happen, or the recommender keeps offering someone whose
+    hand-off can no longer reach them."""
+
+    factory = get_sessionmaker(engine)
+    with factory() as session:
+        employee_id = _employee(session, 8)
+        upsert_slack_link(session, employee_id, slack_user_id="U_LEFT", slack_team_id=TEAM, now=NOW)
+        session.commit()
+
+    with factory() as session:
+        apply_sync_plan(session, SyncPlan(unlink=(employee_id,)), team_id=TEAM, now=NOW)
+        session.commit()
+
+    with factory() as session:
+        gone = session.get(Employee, employee_id)
+        assert gone is not None, "the row must survive — history references it"
+        assert gone.is_active is False
+        assert get_slack_link(session, employee_id, expected_team_id=TEAM) is None
+
+
+def test_a_created_colleague_starts_active(seed_counts, engine) -> None:
+    factory = get_sessionmaker(engine)
+    with factory() as session:
+        apply_sync_plan(
+            session,
+            SyncPlan(create=(("active@sample-tekijin.co.jp", "現役", "U_ACT"),)),
+            team_id=TEAM,
+            now=NOW,
+        )
+        session.commit()
+
+    with factory() as session:
+        row = session.scalars(
+            select(Employee).where(Employee.email == "active@sample-tekijin.co.jp")
+        ).one()
+        assert row.is_active is True

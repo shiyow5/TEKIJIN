@@ -181,6 +181,14 @@ def _apply_schema_upgrades(engine: Engine) -> None:
         conn.execute(
             text("ALTER TABLE employees ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255)")
         )
+        # #506: existing rows must come out ACTIVE, so the default is on the
+        # column itself rather than applied only to new inserts.
+        conn.execute(
+            text(
+                "ALTER TABLE employees ADD COLUMN IF NOT EXISTS "
+                "is_active BOOLEAN NOT NULL DEFAULT true"
+            )
+        )
         conn.execute(text("ALTER TABLE questions ADD COLUMN IF NOT EXISTS route VARCHAR(32)"))
         # Self-resolution UX signal (#159): the asker marked the question solved
         # without a live hand-off. Older DBs get it here; fresh ones via create_all.
