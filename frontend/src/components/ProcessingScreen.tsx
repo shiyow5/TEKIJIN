@@ -19,11 +19,10 @@ import {
   useOptionalSessionStreamRestart,
 } from "@/components/SessionStreamProvider";
 import { SourceCitations } from "@/components/SourceCitations";
+import { ThinkingSteps } from "@/components/ThinkingSteps";
 import { type EventStreamState, useEventStream } from "@/hooks/useEventStream";
 import { ApiError, postAnswer, requestDocumentFallback } from "@/lib/api-client";
-import { formatConfidence } from "@/lib/format";
-import { REVEAL_CLASS, revealStyle } from "@/lib/motion";
-import { routeLabel } from "@/lib/routes";
+import { REVEAL_CLASS } from "@/lib/motion";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -38,74 +37,8 @@ export interface ProcessingScreenProps {
   baseUrl?: string;
 }
 
-interface Step {
-  id: string;
-  title: string;
-  details: string[];
-  confidence?: number;
-}
-
 const FOLLOWUP_ERROR = "回答の送信に失敗しました。もう一度お試しください。";
 const FALLBACK_ERROR = "候補者への取り次ぎを開始できませんでした。もう一度お試しください。";
-
-function joinDomain(topics: string[], products: string[]): string {
-  const parts = [...topics, ...products].filter((p) => p.trim() !== "");
-  return parts.length > 0 ? parts.join(" / ") : "—";
-}
-
-/** Derive the ordered, completed steps from the accumulated stream state. */
-function buildSteps(stream: EventStreamState): Step[] {
-  const steps: Step[] = [];
-
-  if (stream.understood) {
-    const u = stream.understood;
-    steps.push({
-      id: "understood",
-      title: "質問を理解しました",
-      details: [
-        `領域: ${joinDomain(u.topics, u.products)}`,
-        ...(u.situation ? [`状況: ${u.situation}`] : []),
-        ...(u.question_type ? [`種別: ${u.question_type}`] : []),
-      ],
-      confidence: u.confidence,
-    });
-  }
-
-  if (stream.route) {
-    steps.push({
-      id: "route",
-      title: "回答の経路を判断しました",
-      details: [
-        `経路: ${routeLabel(stream.route.route)}`,
-        ...(stream.route.reason ? [stream.route.reason] : []),
-      ],
-      confidence: stream.route.confidence,
-    });
-  }
-
-  // Only surface the recommend step when there is at least one candidate. The
-  // backend emits an empty `recommend` before a terminal `no_candidate` message;
-  // an empty result is left to that terminal message, not shown as a step/CTA.
-  if (stream.recommend && stream.recommend.recommendations.length > 0) {
-    const recs = stream.recommend.recommendations;
-    steps.push({
-      id: "recommend",
-      title: `候補を${recs.length}名見つけました`,
-      details: [recs.map((r) => r.name).join("、")],
-    });
-  }
-
-  // Suppress an empty draft step (no content yet).
-  if (stream.draft?.draft) {
-    steps.push({
-      id: "draft",
-      title: "依頼文を作成しました",
-      details: [stream.draft.draft],
-    });
-  }
-
-  return steps;
-}
 
 /**
  * True once the stream has moved past the most recent `followup` (a later event
@@ -153,7 +86,6 @@ export function ProcessingScreen({
     setFollowupError(null);
   }, [stream.followup]);
 
-  const steps = buildSteps(stream);
   // #475 Screen 01: reassurance — how many OTHER people asked in this area. Hidden
   // at 0 (feature off / nobody else). Lowers the "is this a dumb question?" barrier.
   const similarAskerCount = stream.understood?.similar_asker_count ?? 0;
@@ -243,52 +175,7 @@ export function ProcessingScreen({
         aria-atomic="false"
         className="flex flex-col gap-md"
       >
-        <ol className="flex flex-col gap-sm">
-          {steps.map((step, index) => (
-            <li
-              key={step.id}
-              style={revealStyle(index)}
-              className={`flex items-start gap-sm rounded-xl border border-outline-variant bg-surface-container-lowest p-md ${REVEAL_CLASS}`}
-            >
-              <span
-                aria-label="完了"
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary font-bold text-on-primary text-sm"
-              >
-                ✓
-              </span>
-              <div className="flex flex-col gap-xs">
-                <div className="flex flex-wrap items-center gap-sm">
-                  <h2 className="font-bold text-on-surface">{step.title}</h2>
-                  {step.confidence !== undefined ? (
-                    <span className="rounded-full bg-secondary-container px-sm py-[2px] text-on-secondary-container text-xs">
-                      AIの解釈確信度 {formatConfidence(step.confidence)}
-                    </span>
-                  ) : null}
-                </div>
-                {step.details.map((detail) => (
-                  <p key={detail} className="text-on-surface-variant text-sm">
-                    {detail}
-                  </p>
-                ))}
-              </div>
-            </li>
-          ))}
-
-          {showActiveStep ? (
-            <li
-              data-testid="active-step"
-              className={`flex items-center gap-sm rounded-xl border border-primary-fixed bg-surface-container-low p-md ${REVEAL_CLASS}`}
-            >
-              <span
-                aria-label="進行中"
-                className="animate-spin text-lg text-primary motion-reduce:animate-none"
-              >
-                ⟳
-              </span>
-              <p className="text-on-surface-variant text-sm">分析を続けています…</p>
-            </li>
-          ) : null}
-        </ol>
+        <ThinkingSteps stream={stream} showActiveStep={showActiveStep} />
 
         {/* #475 Screen 01: reassurance that the question is not unique — shown only
             when other askers exist (count ≥ 1), never at 0. */}

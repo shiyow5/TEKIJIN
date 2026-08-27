@@ -353,26 +353,78 @@ def test_reconnect_events_by_pause_node() -> None:
     assert [e.event for e in ask] == ["followup"]
     assert _data(ask[0])["question"] == "?"
 
-    # A ``send`` reconnect replays BOTH the current candidates and the draft, so a
-    # later reconnecting client can fully reconstruct the hand-off (person_id in
-    # the external "E###" form). Without candidates present, only the draft.
-    send = events.reconnect_events(
-        "send",
-        {
-            "draft": "文面",
-            "recommendations": [
-                {"person_id": 1, "name": "高梨", "score": 0.9, "confidence": "高", "reasons": []}
-            ],
-        },
-    )
-    assert [e.event for e in send] == ["recommend", "draft"]
-    assert _data(send[0])["recommendations"][0]["person_id"] == "E001"
-    assert _data(send[1])["draft"] == "文面"
-
-    draft_only = events.reconnect_events("send", {"draft": "文面"})
-    assert [e.event for e in draft_only] == ["draft"]
+    # A ``send`` pause has no interrupt event of its own: the candidates and draft
+    # that reconstruct the hand-off are part of the run's PROGRESS, replayed by
+    # `progress_events` ahead of this (#512). See the progress test below — the
+    # guarantee (a later reconnecting client still receives `recommend`) is
+    # asserted there and end-to-end in test_api_integration.
+    assert events.reconnect_events("send", {"draft": "文面", "recommendations": []}) == []
 
     assert events.reconnect_events("c5_route", {}) == []  # not a pause node
+
+
+PROGRESS_STATE = {
+    "topics": ["ネットワーク"],
+    "products": ["VPN"],
+    "situation": "拠点間接続",
+    "question_type": "howto",
+    "intent_confidence": 0.8,
+    "route": "person",
+    "route_reason": "候補となる担当者が見つかりました。",
+    "route_confidence": 0.7,
+    "recommendations": [
+        {"person_id": 1, "name": "高梨", "score": 0.9, "confidence": "高", "reasons": []}
+    ],
+    "draft": "文面",
+}
+
+
+def test_progress_events_rebuild_the_run_in_graph_order() -> None:
+    out = events.progress_events(PROGRESS_STATE)
+    assert [e.event for e in out] == ["understood", "route", "recommend", "draft"]
+    assert _data(out[0])["topics"] == ["ネットワーク"]
+    # person_id crosses the boundary in the external "E###" form, exactly as the
+    # live `recommend` does — a replay that differs is a replay that drifts.
+    assert _data(out[2])["recommendations"][0]["person_id"] == "E001"
+    assert _data(out[3])["draft"] == "文面"
+
+
+def test_progress_events_omit_the_steps_that_never_ran() -> None:
+    """`reset` seeds route/recommendations/draft BEFORE C1, so presence is not proof.
+
+    A question paused at the clarification has a state carrying `route="person"`,
+    `recommendations=[]` and `draft=None` from `reset` alone. Announcing a route
+    there would tell the user the AI decided something it never decided.
+    """
+    after_reset_only = {
+        **{k: v for k, v in PROGRESS_STATE.items() if k in {"topics", "intent_confidence"}},
+        "route": "person",
+        "route_reason": "",
+        "route_confidence": 0.0,
+        "recommendations": [],
+        "draft": None,
+    }
+    assert [e.event for e in events.progress_events(after_reset_only)] == ["understood"]
+
+
+def test_progress_events_keep_an_empty_draft_the_way_the_live_run_emits_it() -> None:
+    # C7 always writes a string; the live `draft` event fires even when it is
+    # empty. `None` (never ran) is the only case that is dropped.
+    empty = {**PROGRESS_STATE, "draft": ""}
+    assert [e.event for e in events.progress_events(empty)][-1] == "draft"
+    assert _data(events.progress_events(empty)[-1])["draft"] == ""
+
+
+def test_progress_events_replay_the_additive_reference_answer() -> None:
+    # #413: the additive cited answer sits between the route and the candidates.
+    with_reference = {
+        **PROGRESS_STATE,
+        "additive_answer_text": "参考になる過去回答",
+        "additive_citations": [{"source_id": "qa_1", "kind": "qa"}],
+    }
+    out = events.progress_events(with_reference)
+    assert [e.event for e in out] == ["understood", "route", "reference", "recommend", "draft"]
+    assert _data(out[2])["answer"] == "参考になる過去回答"
 
 
 def test_config_rejects_invalid_backends() -> None:
