@@ -5635,6 +5635,25 @@ def test_feedback_with_unknown_question_id_records_without_the_link(
 # documents (NOT scoped to one asker, and NOT admin-only, unlike /dashboard).
 # source_id/kind match a self-answer's citation (#291) for the same entity.
 # --------------------------------------------------------------------------- #
+def _approved_ku_count(engine) -> int:
+    """Approved knowledge units count toward the library's global total (#533). Queried
+    live so the total stays correct even when another test leaves approved units in the
+    shared schema (the seed itself has none)."""
+    from sqlalchemy import func, select
+
+    from tekijin.models.tables import KnowledgeUnit
+
+    with engine.connect() as conn:
+        return (
+            conn.scalar(
+                select(func.count())
+                .select_from(KnowledgeUnit)
+                .where(KnowledgeUnit.review_status == "approved")
+            )
+            or 0
+        )
+
+
 def test_knowledge_lists_seeded_answers_and_documents(seed_counts, engine, fake_embedder) -> None:
     client = _client(engine, fake_embedder)
     resp = client.get("/knowledge")
@@ -5644,7 +5663,7 @@ def test_knowledge_lists_seeded_answers_and_documents(seed_counts, engine, fake_
     # The seed's answers are 1:1 with questions (test_dashboard_route_shape_
     # and_seed_values), so the total is global (both kinds), independent of
     # the default response cap.
-    total = seed_counts["answers"] + seed_counts["documents"]
+    total = seed_counts["answers"] + seed_counts["documents"] + _approved_ku_count(engine)
     assert body["summary"]["total_items"] == total
     assert body["summary"]["self_resolution_rate"] == 0.0  # matches the dashboard's seed baseline
     assert "top_responders" not in body["summary"]  # de-scoped to /dashboard (PR #340 review)
@@ -5652,7 +5671,7 @@ def test_knowledge_lists_seeded_answers_and_documents(seed_counts, engine, fake_
     assert len(body["items"]) > 0
     assert body["total_matching"] == total  # unfiltered: every item matches
     for item in body["items"]:
-        assert item["kind"] in ("qa", "document")
+        assert item["kind"] in ("qa", "document", "knowledge")
         assert item["summary"]  # the item's own text, not just metadata
 
 
@@ -5665,7 +5684,9 @@ def test_knowledge_default_page_mixes_both_kinds(seed_counts, engine, fake_embed
     whenever both exist."""
     client = _client(engine, fake_embedder)
     kinds = {i["kind"] for i in client.get("/knowledge").json()["items"]}
-    assert kinds == {"qa", "document"}
+    # Both seed kinds must reach the front page; a leaked approved knowledge unit (#533)
+    # from another test may add "knowledge", so assert the subset, not exact equality.
+    assert {"qa", "document"} <= kinds
 
 
 def test_knowledge_qa_item_shape(seed_counts, engine, fake_embedder) -> None:
@@ -5730,7 +5751,7 @@ def test_knowledge_available_to_non_admin_user(seed_counts, engine, fake_embedde
     client = _client(engine, fake_embedder)
     resp = client.get("/knowledge", headers=_user_headers(10))
     assert resp.status_code == 200
-    total = seed_counts["answers"] + seed_counts["documents"]
+    total = seed_counts["answers"] + seed_counts["documents"] + _approved_ku_count(engine)
     assert resp.json()["summary"]["total_items"] == total
 
 
@@ -5740,7 +5761,7 @@ def test_knowledge_respects_limit(seed_counts, engine, fake_embedder) -> None:
     body = resp.json()
     assert len(body["items"]) == 1
     # The summary total stays global — it does not shrink with the page limit.
-    total = seed_counts["answers"] + seed_counts["documents"]
+    total = seed_counts["answers"] + seed_counts["documents"] + _approved_ku_count(engine)
     assert body["summary"]["total_items"] == total
     assert body["total_matching"] == total  # unfiltered: still every item
 
@@ -5758,7 +5779,7 @@ def test_knowledge_offset_pages_through_results_without_overlap(
     ids2 = {i["source_id"] for i in page2["items"]}
     assert ids1.isdisjoint(ids2)  # no overlap between pages
     # total_matching is the same on both pages (the count BEFORE paging).
-    total = seed_counts["answers"] + seed_counts["documents"]
+    total = seed_counts["answers"] + seed_counts["documents"] + _approved_ku_count(engine)
     assert page1["total_matching"] == page2["total_matching"] == total
 
     empty = client.get("/knowledge", params={"limit": 15, "offset": total}).json()
