@@ -335,6 +335,34 @@ def handoff_draft(
     return schemas.AckResponse(session_id=req.session_id, status="draft_saved")
 
 
+@router.post("/handoff/structure", response_model=schemas.QuestionStructureResponse)
+def handoff_structure(
+    req: schemas.QuestionStructureRequest,
+    request: Request,
+    principal: Principal = Depends(require_principal),
+) -> schemas.QuestionStructureResponse:
+    """Re-draft the asker's raw question into the four hand-off fields on demand (#475).
+
+    The asker taps "AIに質問を整理してもらう" on the result screen; the model reshapes
+    the already-stored question into 起きていること / 環境 / 試したこと / 詰まっている点,
+    which the asker then edits before sending. Read-only and OUTSIDE the graph — it
+    never advances or persists state, and never runs on the C1 critical path
+    ([[tekijin-latency-and-streaming]]). 404 when the session has no question yet
+    (unknown / not started). Object-level auth (#241): only the session's
+    asker/responder (or admin) may structure it — the same rule as ``/handoff/draft``.
+    """
+
+    asker_id, responder_id = _service(request).session_participants(req.session_id)
+    require_session_participant(principal, asker_id, responder_id)
+    try:
+        return _service(request).structure_question(req.session_id)
+    except HandoffNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:  # unexpected: log detail, return a generic 500
+        logger.exception("POST /handoff/structure failed for session %s", req.session_id)
+        raise HTTPException(status_code=500, detail="内部エラーが発生しました") from exc
+
+
 @router.post("/handoff/select", response_model=schemas.HandoffSelectResponse)
 def handoff_select(
     req: schemas.HandoffSelectRequest,
@@ -611,7 +639,6 @@ def knowledge(
     department: str | None = Query(default=None, min_length=1),
     topic: str | None = Query(default=None, min_length=1),
     since: dt.date | None = None,
-    until: dt.date | None = None,
     offset: int = Query(0, ge=0),
     limit: int = Query(8, ge=1, le=200),
     principal: Principal = Depends(require_principal),
@@ -638,7 +665,6 @@ def knowledge(
                 department=department,
                 topic=topic,
                 since=since,
-                until=until,
                 offset=offset,
                 limit=limit,
             )

@@ -155,6 +155,12 @@ class Settings(BaseSettings):
     additive_self_answer_enabled: bool = True
     additive_self_answer_floor: float = 0.20
 
+    # #475 Screen 01: attach the "N other people asked in this area" reassurance
+    # count to the understood event. Read-only display signal (topic-overlap count
+    # over the questions table, GIN-indexed) with no routing/scoring effect, so it
+    # is enabled by default. The frontend hides it when the count is 0.
+    similar_askers_enabled: bool = True
+
     # #327: corpus-count routing for prior_answer. Nemotron's answer cosine cannot
     # separate this route (PRIOR_ANSWER_SIM sits above the observed max — see
     # route.py / #119), so route on whether the top retrieved past answer is a

@@ -10,12 +10,22 @@ const selectHandoffCandidateMock = vi.fn();
 const excludeHandoffCandidateMock = vi.fn();
 const regenerateHandoffDraftMock = vi.fn();
 const correctInterpretationMock = vi.fn();
+const structureQuestionMock = vi.fn();
 vi.mock("@/lib/api-client", () => ({
   updateHandoffDraft: (...args: unknown[]) => updateHandoffDraftMock(...args),
   selectHandoffCandidate: (...args: unknown[]) => selectHandoffCandidateMock(...args),
   excludeHandoffCandidate: (...args: unknown[]) => excludeHandoffCandidateMock(...args),
   regenerateHandoffDraft: (...args: unknown[]) => regenerateHandoffDraftMock(...args),
   correctInterpretation: (...args: unknown[]) => correctInterpretationMock(...args),
+  // #475: PersonRouteView now mounts QuestionStructurePanel, which imports these.
+  structureQuestion: (...args: unknown[]) => structureQuestionMock(...args),
+  ApiError: class ApiError extends Error {
+    status: number;
+    constructor(status: number, message: string) {
+      super(message);
+      this.status = status;
+    }
+  },
   // #247: the terminal view mounts RetrospectiveLink, which asks whether this was
   // a 直接相談 someone accepted. Rejecting keeps the CTA hidden (its failure path),
   // so these tests keep asserting the terminal view exactly as before.
@@ -37,6 +47,14 @@ beforeEach(() => {
   regenerateHandoffDraftMock.mockResolvedValue({ session_id: "s1", status: "redraft_queued" });
   correctInterpretationMock.mockReset();
   correctInterpretationMock.mockResolvedValue({ session_id: "s1", status: "reinterpret_queued" });
+  structureQuestionMock.mockReset();
+  structureQuestionMock.mockResolvedValue({
+    session_id: "s1",
+    summary: "起きていること",
+    environment: "",
+    tried: "",
+    blocker: "詰まっている点",
+  });
   routerPushMock.mockReset();
 });
 
@@ -240,9 +258,10 @@ describe("ResultScreen — main line (person)", () => {
     // 4th candidate is truncated (max 3)
     expect(screen.queryByText("山田")).not.toBeInTheDocument();
     // fit signal is the score-derived 適合度% in the gauge, with the confidence
-    // label as a separate badge (#240); 高梨's score 0.92 normalises to 100%. The
-    // visible ring number carries no "%" sign (the % lives only in the aria-label).
-    expect(screen.getByRole("img", { name: "適合度 100%・確信度 高" })).toBeInTheDocument();
+    // label as a separate badge (#240); 高梨's score 0.92 normalises to 48% against
+    // the qsim-inclusive 1.9 ceiling (#498, 0.92/1.9). The visible ring number
+    // carries no "%" sign (the % lives only in the aria-label).
+    expect(screen.getByRole("img", { name: "適合度 48%・確信度 高" })).toBeInTheDocument();
     expect(screen.queryByText(/%/)).not.toBeInTheDocument();
     // reason labels (expanded top card shows detail)
     expect(screen.getByText("関連資格")).toBeInTheDocument();

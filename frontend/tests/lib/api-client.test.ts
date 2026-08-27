@@ -21,6 +21,7 @@ import {
   requestDocumentFallback,
   resolveQuestion,
   selectHandoffCandidate,
+  structureQuestion,
 } from "@/lib/api-client";
 import type {
   AskRequest,
@@ -580,6 +581,35 @@ describe("regenerateHandoffDraft", () => {
     await expect(regenerateHandoffDraft({ session_id: "s1" }, { fetchImpl })).rejects.toMatchObject(
       { name: "ApiError", status: 409 },
     );
+  });
+});
+
+describe("structureQuestion", () => {
+  it("POSTs /handoff/structure with session_id and returns the four fields (#475)", async () => {
+    const response = {
+      session_id: "s1",
+      summary: "起きていること",
+      environment: "M2 Mac",
+      tried: "再ビルド",
+      blocker: "原因不明",
+    };
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(response));
+    const result = await structureQuestion({ session_id: "s1" }, { fetchImpl });
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe(`${DEFAULT_API_BASE_URL}/handoff/structure`);
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(init?.body as string)).toEqual({ session_id: "s1" });
+    expect(result).toEqual(response);
+  });
+
+  it("throws ApiError with the 404 status when the session has no question", async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonResponse({ detail: "no question" }, { ok: false, status: 404 }));
+    await expect(structureQuestion({ session_id: "s1" }, { fetchImpl })).rejects.toMatchObject({
+      name: "ApiError",
+      status: 404,
+    });
   });
 });
 

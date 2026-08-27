@@ -23,4 +23,9 @@ ENV PYTHONPATH=/app/src \
 
 EXPOSE 8000
 
-CMD ["python", "-m", "uvicorn", "tekijin.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# `--workers 1` is explicit, not a default: without it uvicorn falls back to
+# $WEB_CONCURRENCY, and Compose passes the repo-root .env into this container
+# wholesale — so a stray WEB_CONCURRENCY would fork the API. The session
+# dispatch registry is in-process (#76), so a second worker loses sessions.
+# `backend/tests/test_single_worker_pin.py` holds this for every launch path.
+CMD ["python", "-m", "uvicorn", "tekijin.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

@@ -13,12 +13,19 @@ import hmac
 import json
 import threading
 import time
+from inspect import signature
 
 import pytest
 from fastapi.testclient import TestClient
 from langgraph.checkpoint.memory import MemorySaver
 
-from tekijin.agent.stubs import KeywordIntentModel, RuleSufficiencyModel, TemplateDraftModel
+from tekijin.agent.stubs import (
+    KeywordIntentModel,
+    RuleSufficiencyModel,
+    TemplateDraftModel,
+    TemplateQuestionStructurer,
+)
+from tekijin.api.routes import knowledge as knowledge_route
 from tekijin.api.service import (
     SESSION_TTL_SECONDS,
     AgentService,
@@ -129,6 +136,7 @@ def _client(
     answerability_threshold=40,
     self_answer_model=None,
     knowledge_answer_min_similarity=None,
+    question_structurer=None,
 ) -> TestClient:
     return _app_client(
         _service(
@@ -141,6 +149,7 @@ def _client(
             answerability_threshold=answerability_threshold,
             self_answer_model=self_answer_model,
             knowledge_answer_min_similarity=knowledge_answer_min_similarity,
+            question_structurer=question_structurer,
         )
     )
 
@@ -156,6 +165,7 @@ def _service(
     answerability_threshold=40,
     self_answer_model=None,
     knowledge_answer_min_similarity=None,
+    question_structurer=None,
 ) -> AgentService:
     """Same wiring as :func:`_client`, but hands back the service itself.
 
@@ -170,6 +180,9 @@ def _service(
         intent_model=KeywordIntentModel(),
         sufficiency_model=RuleSufficiencyModel(),
         draft_model=TemplateDraftModel(),
+        # #475: always wire the on-demand question structurer (stub) so the
+        # /handoff/structure endpoint is exercised; a test can inject its own.
+        question_structurer=question_structurer or TemplateQuestionStructurer(),
         answerability_model=answerability_model,
         answerability_threshold=answerability_threshold,
         self_answer_model=self_answer_model,
@@ -2969,6 +2982,90 @@ def test_handoff_draft_404_after_answered(seed_counts, engine, fake_embedder) ->
     assert resp.status_code == 404
 
 
+# --------------------------------------------------------------------------- #
+# POST /handoff/structure : on-demand question re-draft into the four fields (#475)
+# --------------------------------------------------------------------------- #
+class _RecordingStructurer:
+    """Structurer spy: records the (question, situation, topics) it was called with."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str | None, list[str]]] = []
+
+    def structure(self, question, *, situation=None, topics=None):
+        from tekijin.agent.protocols import QuestionStructureResult
+
+        self.calls.append((question, situation, list(topics or [])))
+        return QuestionStructureResult(
+            summary="起きていること", environment="", tried="", blocker=question
+        )
+
+
+def test_handoff_structure_returns_the_four_fields(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "qs1"})
+    _events(client, "qs1")  # pause at send (a person is offered)
+
+    resp = client.post("/handoff/structure", json={"session_id": "qs1"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["session_id"] == "qs1"
+    # The stub seeds blocker from the raw question and leaves env/tried empty — the
+    # "don't invent a field the asker never gave" contract (the asker fills them in).
+    assert body["blocker"] == GOOD_Q
+    assert body["summary"]  # a one-line 起きていること
+    assert body["environment"] == ""
+    assert body["tried"] == ""
+
+
+def test_handoff_structure_reuses_c1_understanding(seed_counts, engine, fake_embedder) -> None:
+    # The endpoint must feed the STORED question + C1's topics/situation to the
+    # structurer (not re-run C1), so the re-draft reflects what was already parsed.
+    spy = _RecordingStructurer()
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1)),
+        question_structurer=spy,
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "qs2"})
+    _events(client, "qs2")
+
+    resp = client.post("/handoff/structure", json={"session_id": "qs2"})
+    assert resp.status_code == 200
+    assert len(spy.calls) == 1
+    question, _situation, topics = spy.calls[0]
+    assert question == GOOD_Q
+    assert topics == ["ネットワーク・VPN"]  # C1 (KeywordIntentModel) classification
+
+
+def test_handoff_structure_404_when_no_question(seed_counts, engine, fake_embedder) -> None:
+    client = _client(engine, fake_embedder, retriever=_FakeRetriever(), scorer=_FakeScorer([]))
+    resp = client.post("/handoff/structure", json={"session_id": "nope"})
+    assert resp.status_code == 404
+
+
+def test_handoff_structure_forbidden_for_non_participant(
+    seed_counts, engine, fake_embedder
+) -> None:
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "qs3"})
+    _events(client, "qs3")
+    # employee 11 is neither the asker (10) nor the responder (1) nor an admin -> 403.
+    resp = client.post("/handoff/structure", json={"session_id": "qs3"}, headers=_user_headers(11))
+    assert resp.status_code == 403
+
+
 def test_save_handoff_draft_rejects_blank_at_the_service(
     seed_counts, engine, fake_embedder
 ) -> None:
@@ -5482,6 +5579,55 @@ def test_knowledge_filters_by_department(seed_counts, engine, fake_embedder) -> 
     assert all(i["responder_department"] == dept for i in items)
     # department is QA-specific: documents (which carry no department) are excluded.
     assert all(i["kind"] == "qa" for i in items)
+
+
+def test_knowledge_since_includes_items_from_the_start_day_itself(
+    seed_counts, engine, fake_embedder
+) -> None:
+    """`since` is the screen's only period filter and had no test at all (#394).
+
+    The boundary is the whole point: `since` is bound against a TIMESTAMP column,
+    so a bare date becomes that day's 00:00 — inclusive for a start bound. An
+    item answered at 05:24 on the start day must still be listed.
+    """
+    client = _client(engine, fake_embedder)
+    baseline = client.get("/knowledge", params={"limit": 200}).json()["items"]
+    newest = max(baseline, key=lambda i: i["resolved_at"])
+    day = newest["resolved_at"][:10]
+
+    resp = client.get("/knowledge", params={"since": day, "limit": 200})
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    assert any(i["source_id"] == newest["source_id"] for i in items)
+    assert all(i["resolved_at"][:10] >= day for i in items)
+    assert len(items) < len(baseline)  # the filter actually narrows the set
+
+
+def test_knowledge_has_no_end_date_filter(seed_counts, engine, fake_embedder) -> None:
+    """`until` was removed (#394), and re-adding it needs UI + a boundary test.
+
+    It existed on the endpoint, `list_knowledge` and `api-client`, but no screen
+    ever sent it (KnowledgeScreen exposes 「この日以降」 only, by request) and
+    nothing tested it — and it was WRONG: bound against a TIMESTAMP column, a bare
+    date means that day's 00:00, so `until=<day>` silently dropped every item from
+    the end day (measured: an answer at 2026-08-21 05:24 was excluded by
+    `until=2026-08-21`). An inclusive-sounding 「この日まで」 that loses the last
+    day is worse than no filter.
+
+    This pins the removal at the HTTP boundary: an unknown query param is ignored
+    by FastAPI, so `until` must not narrow anything.
+    """
+    client = _client(engine, fake_embedder)
+    baseline = client.get("/knowledge", params={"limit": 200}).json()
+    filtered = client.get("/knowledge", params={"until": "2000-01-01", "limit": 200}).json()
+    assert filtered["total_matching"] == baseline["total_matching"]
+    assert [i["source_id"] for i in filtered["items"]] == [
+        i["source_id"] for i in baseline["items"]
+    ]
+
+    params = signature(knowledge_route).parameters
+    assert "until" not in params
+    assert "since" in params  # the surviving half of the period filter
 
 
 def test_knowledge_detail_returns_full_qa_item(seed_counts, engine, fake_embedder) -> None:
