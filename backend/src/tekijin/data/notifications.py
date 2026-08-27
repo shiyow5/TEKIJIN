@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from tekijin.models.tables import Employee, Question, Recommendation
@@ -89,7 +89,9 @@ def pending_accepted_notifications_for_asker(
     row's id — also the ack target AND the chat thread id, see ``Message``),
     ``question_id``, ``session_id``, ``message``, ``responder_name``,
     ``consult_method`` (raw column value; ``None``/anything but ``"direct"``
-    means chat — see ``schemas.normalize_consult_method``), ``created_at``.
+    means chat — see ``schemas.normalize_consult_method``), ``created_at``
+    (the acceptance time, falling back to the recommendation creation time for
+    legacy rows without ``Question.resolved_at``).
 
     At most one ``Recommendation`` per question ever reaches
     ``outcome == 'accepted'`` (``set_recommendation_outcome`` is a guarded,
@@ -100,7 +102,7 @@ def pending_accepted_notifications_for_asker(
     stmt = (
         select(
             Recommendation.id,
-            Recommendation.created_at,
+            func.coalesce(Question.resolved_at, Recommendation.created_at).label("accepted_at"),
             Employee.name,
             Question.id,
             Question.session_id,
@@ -113,7 +115,10 @@ def pending_accepted_notifications_for_asker(
             Recommendation.outcome == "accepted",
             Recommendation.accepted_seen_at.is_(None),
         )
-        .order_by(Recommendation.created_at.desc(), Recommendation.id.desc())
+        .order_by(
+            func.coalesce(Question.resolved_at, Recommendation.created_at).desc(),
+            Recommendation.id.desc(),
+        )
     )
 
     items: list[dict[str, Any]] = []

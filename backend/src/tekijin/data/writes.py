@@ -468,6 +468,8 @@ def ack_decline_notifications(session: Session, asker_id: int, ids: list[int]) -
         update(Recommendation)
         .where(
             Recommendation.id.in_(ids),
+            Recommendation.rank == 1,
+            Recommendation.outcome == "declined",
             Recommendation.declined_seen_at.is_(None),
             Recommendation.question_id.in_(
                 select(Question.id).where(Question.asker_id == asker_id)
@@ -493,6 +495,7 @@ def ack_accepted_notifications(session: Session, asker_id: int, ids: list[int]) 
         update(Recommendation)
         .where(
             Recommendation.id.in_(ids),
+            Recommendation.outcome == "accepted",
             Recommendation.accepted_seen_at.is_(None),
             Recommendation.question_id.in_(
                 select(Question.id).where(Question.asker_id == asker_id)
@@ -517,8 +520,13 @@ def ack_request_notifications(session: Session, responder_id: int, ids: list[int
         update(Recommendation)
         .where(
             Recommendation.id.in_(ids),
+            Recommendation.rank == 1,
+            Recommendation.outcome.is_(None),
             Recommendation.request_seen_at.is_(None),
             Recommendation.employee_id == responder_id,
+            Recommendation.question_id.in_(
+                select(Question.id).where(Question.session_id.is_not(None))
+            ),
         )
         .values(request_seen_at=func.now())
     )

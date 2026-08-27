@@ -4651,6 +4651,41 @@ def test_notifications_lists_accepted_then_ack_clears_it(
     assert again.json()["acknowledged"] == 0
 
 
+def test_notifications_cannot_pre_ack_a_future_acceptance(
+    seed_counts, engine, fake_embedder
+) -> None:
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "nt-preack"})
+    _events(client, "nt-preack")
+    recommendation_id = client.get("/handoff/nt-preack").json()["recommendation_id"]
+
+    # The row belongs to this asker's question, but it is not an acceptance
+    # notification yet. Pre-acking it must not suppress the future event.
+    ack = client.post(
+        "/notifications/ack",
+        json={"kind": "accepted", "asker_id": "E010", "ids": [recommendation_id]},
+    )
+    assert ack.status_code == 200
+    assert ack.json()["acknowledged"] == 0
+
+    client.post(
+        "/answer",
+        json={
+            "session_id": "nt-preack",
+            "outcome": "accepted",
+            "recommendation_id": recommendation_id,
+        },
+    )
+    _events(client, "nt-preack")
+    items = client.get("/notifications", params={"asker_id": "E010"}).json()["items"]
+    assert any(item["kind"] == "accepted" and item["id"] == recommendation_id for item in items)
+
+
 def test_notifications_lists_incoming_request_then_ack_clears_it(
     seed_counts, engine, fake_embedder
 ) -> None:
@@ -4694,6 +4729,36 @@ def test_notifications_requires_exactly_one_of_asker_or_employee_id(
     assert client.get("/notifications").status_code == 422
     assert (
         client.get("/notifications", params={"asker_id": "E010", "employee_id": "E001"}).status_code
+        == 422
+    )
+
+
+def test_notification_ack_requires_only_the_owner_id_matching_kind(
+    seed_counts, engine, fake_embedder
+) -> None:
+    client = _client(engine, fake_embedder)
+    assert (
+        client.post(
+            "/notifications/ack",
+            json={
+                "kind": "accepted",
+                "asker_id": "E010",
+                "employee_id": "E001",
+                "ids": [1],
+            },
+        ).status_code
+        == 422
+    )
+    assert (
+        client.post(
+            "/notifications/ack",
+            json={
+                "kind": "request_received",
+                "asker_id": "E010",
+                "employee_id": "E001",
+                "ids": [1],
+            },
+        ).status_code
         == 422
     )
 

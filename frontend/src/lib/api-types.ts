@@ -314,12 +314,19 @@ export interface NotificationsResponse {
  * #509 accepted/request_received). `asker_id` is required for
  * "declined"/"accepted"; `employee_id` is required for "request_received".
  */
-export interface NotificationAckRequest {
-  kind: "declined" | "accepted" | "request_received";
-  asker_id?: EmployeeId;
-  employee_id?: EmployeeId;
-  ids: number[];
-}
+export type NotificationAckRequest =
+  | {
+      kind: "declined" | "accepted";
+      asker_id: EmployeeId;
+      employee_id?: never;
+      ids: number[];
+    }
+  | {
+      kind: "request_received";
+      employee_id: EmployeeId;
+      asker_id?: never;
+      ids: number[];
+    };
 
 /** POST /notifications/ack response (schemas.py `NotificationAckResponse`). */
 export interface NotificationAckResponse {

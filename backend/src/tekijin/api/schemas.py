@@ -337,10 +337,10 @@ class NotificationAckRequest(BaseModel):
     @model_validator(mode="after")
     def _owner_matches_kind(self) -> NotificationAckRequest:
         if self.kind in ("declined", "accepted"):
-            if self.asker_id is None:
-                raise ValueError(f"'asker_id' is required for kind {self.kind!r}")
-        elif self.employee_id is None:
-            raise ValueError(f"'employee_id' is required for kind {self.kind!r}")
+            if self.asker_id is None or self.employee_id is not None:
+                raise ValueError(f"exactly 'asker_id' is required for kind {self.kind!r}")
+        elif self.employee_id is None or self.asker_id is not None:
+            raise ValueError("exactly 'employee_id' is required for kind 'request_received'")
         return self
 
 
