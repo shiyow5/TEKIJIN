@@ -215,16 +215,18 @@ def list_knowledge(
     offset: int = 0,
     limit: int = 50,
 ) -> tuple[list[dict[str, Any]], int, dict[str, Any]]:
-    """Answers + documents, round-robin interleaved (each kind newest-first
-    within itself), paged, plus a summary.
+    """Answers + documents + approved knowledge units (#533), round-robin
+    interleaved (each source newest-first within itself), paged, plus a summary.
 
     ``q`` is a case-insensitive substring match (question body for ``"qa"``,
-    title/body for ``"document"``); ``topic``/``department`` are QA-specific
-    (documents carry neither, so either filter excludes them entirely);
-    ``since`` bounds each item's own timestamp (the ANSWER's for ``"qa"``, the
-    document's ``updated_at`` for ``"document"``) and is the ONLY period bound:
-    the matching ``until`` was removed in #394 — no screen ever sent it, nothing
-    tested it, and it compared a TIMESTAMP column against a bare date, so
+    title/body for ``"document"``, problem/action/result for ``"knowledge"``).
+    ``department`` is QA-specific — documents and knowledge units carry no
+    department, so it excludes both. ``topic`` keeps QA and knowledge units
+    (both carry topics) but excludes documents (they have none). ``since`` bounds
+    each item's own timestamp (the ANSWER's for ``"qa"``, ``updated_at`` for
+    ``"document"``, ``created_at`` for ``"knowledge"``) and is the ONLY period
+    bound: the matching ``until`` was removed in #394 — no screen ever sent it,
+    nothing tested it, and it compared a TIMESTAMP column against a bare date, so
     ``until=<day>`` dropped everything answered after that day's 00:00.
     Re-adding an end bound means a half-open ``< until + 1 day`` (or a timestamp)
     plus the UI that sends it.
@@ -233,9 +235,10 @@ def list_knowledge(
     count of items matching the filters above, BEFORE the ``offset``/``limit``
     page cut. ``summary`` reuses the dashboard's self-resolution rate (no new
     aggregation logic for the side panel); ``total_items`` is the GLOBAL count
-    of answers + documents (independent of both the filters and the page),
-    matching the DoD's "蓄積件数" site-wide stat. Per-responder aggregates are
-    deliberately NOT part of this summary — that view belongs to ``/dashboard``,
+    of answers + documents + approved knowledge units (independent of both the
+    filters and the page), matching the DoD's "蓄積件数" site-wide stat.
+    Per-responder aggregates are deliberately NOT part of this summary — that view
+    belongs to ``/dashboard``,
     not a knowledge browser (PR #340 review).
     """
 

@@ -900,6 +900,13 @@ def test_list_knowledge_includes_approved_knowledge_units(seed_counts, session) 
     dept_items, _t, _s = list_knowledge(session, q="CRM", department="営業部")
     assert all(i["kind"] != "knowledge" for i in dept_items)
 
+    # A topic filter KEEPS knowledge units (they carry topics) — the asymmetry with
+    # department, which excludes them. A non-matching topic drops the unit.
+    topic_items, _t2, _s2 = list_knowledge(session, topic="CRM・営業支援")
+    assert any(i["source_id"] == f"ku_{approved.id}" for i in topic_items)
+    other_topic, _t3, _s3 = list_knowledge(session, topic="セキュリティ")
+    assert all(i["source_id"] != f"ku_{approved.id}" for i in other_topic)
+
 
 # --------------------------------------------------------------------------- #
 # runtime resolution tracking (#97)

@@ -89,7 +89,11 @@ function KnowledgeCard({ item }: { item: KnowledgeItem }) {
       ) : null}
       <h3 className="break-words font-bold text-base text-on-surface">{item.title}</h3>
       {item.summary ? (
-        <p className="line-clamp-3 whitespace-pre-line break-words text-on-surface-variant text-sm">
+        <p
+          className={`line-clamp-3 break-words text-on-surface-variant text-sm${
+            item.kind === "knowledge" ? " whitespace-pre-line" : ""
+          }`}
+        >
           {item.summary}
         </p>
       ) : null}
