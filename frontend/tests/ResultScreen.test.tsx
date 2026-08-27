@@ -108,6 +108,11 @@ describe("ResultScreen — terminal-only replay (hard reload)", () => {
     expect(screen.getByText("依頼は送信済みです")).toBeInTheDocument();
     expect(screen.queryByText("結果を準備中…")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "新しい質問をする" })).toBeInTheDocument();
+    // #510: the top back link goes home, not to the ask form — a sent request
+    // is a completed task, so "質問一覧へ戻る"/`/questions` would be the wrong
+    // next step. The bottom "新しい質問をする" CTA above is the intentional,
+    // separate path back into `/questions`.
+    expect(screen.getByRole("link", { name: "ホームへ戻る" })).toHaveAttribute("href", "/");
   });
 
   it("shows a terminal message (off-topic / no candidate) replayed on reload", () => {
