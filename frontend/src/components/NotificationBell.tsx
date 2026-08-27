@@ -72,6 +72,11 @@ export function NotificationBell() {
   const [items, setItems] = useState<Notification[]>([]);
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  // A poll already in flight when an item is acknowledged can return the old
+  // unread row after the optimistic removal. Keep it hidden until this
+  // component switches acting users; a failed ack removes the key so a later
+  // successful poll can surface it again.
+  const acknowledgedRef = useRef<Set<string>>(new Set());
   // Panel left offset (relative to `containerRef`), clamped to the viewport.
   // The bell's on-screen position depends on where the header happens to wrap
   // (driven by real content width, not a fixed breakpoint — #316), so a static
@@ -86,16 +91,13 @@ export function NotificationBell() {
   const [panelWidth, setPanelWidth] = useState(PANEL_WIDTH_PX);
 
   useEffect(() => {
+    acknowledgedRef.current.clear();
     if (currentUserId === null) {
       setItems([]);
       return;
     }
     let active = true;
     const userId = currentUserId;
-    // Last known items per scope, kept across polls so a transient failure on
-    // one scope doesn't blank out the other scope's still-good results below.
-    let askerItems: Notification[] = [];
-    let responderItems: Notification[] = [];
 
     function poll() {
       // Every acting user is both an asker and a potential responder, so both
@@ -106,12 +108,25 @@ export function NotificationBell() {
         getNotifications({ employeeId: userId }),
       ]).then(([askerResult, responderResult]) => {
         if (!active) return;
-        if (askerResult.status === "fulfilled") askerItems = askerResult.value;
-        if (responderResult.status === "fulfilled") responderItems = responderResult.value;
-        const merged = [...askerItems, ...responderItems].sort((a, b) =>
-          (b.created_at ?? "").localeCompare(a.created_at ?? ""),
-        );
-        setItems(merged);
+        setItems((previous) => {
+          const isHidden = (item: Notification) =>
+            acknowledgedRef.current.has(`${item.kind}:${item.id}`);
+          // A fulfilled scope replaces that scope's prior rows. A rejected
+          // scope keeps the CURRENT rendered rows, including any optimistic
+          // ack removal made since the previous poll; caching an older fetch
+          // result here would resurrect an already-clicked item.
+          const askerItems =
+            askerResult.status === "fulfilled"
+              ? askerResult.value.filter((item) => !isHidden(item))
+              : previous.filter((item) => item.kind !== "request_received");
+          const responderItems =
+            responderResult.status === "fulfilled"
+              ? responderResult.value.filter((item) => !isHidden(item))
+              : previous.filter((item) => item.kind === "request_received");
+          return [...askerItems, ...responderItems].sort((a, b) =>
+            (b.created_at ?? "").localeCompare(a.created_at ?? ""),
+          );
+        });
       });
     }
 
@@ -208,6 +223,8 @@ export function NotificationBell() {
   }
 
   function acknowledge(item: Notification) {
+    const key = `${item.kind}:${item.id}`;
+    acknowledgedRef.current.add(key);
     setItems((prev) => prev.filter((i) => i.id !== item.id));
     if (currentUserId === null) return;
     const request: NotificationAckRequest =
@@ -216,6 +233,7 @@ export function NotificationBell() {
         : { kind: item.kind, asker_id: currentUserId, ids: [item.id] };
     ackNotifications(request).catch(() => {
       // Best-effort: a failed ack just means it may reappear on the next poll.
+      acknowledgedRef.current.delete(key);
     });
   }
 

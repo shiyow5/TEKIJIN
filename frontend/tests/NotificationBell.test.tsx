@@ -107,6 +107,18 @@ describe("NotificationBell", () => {
     expect(await screen.findByRole("button", { name: "通知（未読2件）" })).toBeInTheDocument();
   });
 
+  it("still shows one scope when the other notification fetch fails", async () => {
+    useCurrentUserMock.mockReturnValue(asUser("E010"));
+    getNotificationsMock.mockImplementation(
+      (params: { askerId?: string } | { employeeId?: string }) =>
+        "askerId" in params
+          ? Promise.reject(new Error("asker notifications unavailable"))
+          : Promise.resolve([REQUEST_RECEIVED]),
+    );
+    render(<NotificationBell />);
+    expect(await screen.findByRole("button", { name: "通知（未読1件）" })).toBeInTheDocument();
+  });
+
   it("uses the same stroked icon idiom as the other header icons (#346)", async () => {
     // It used to be a literal 🔔 emoji, drawn from a colour-emoji font: it ignores
     // `color` and has no stroke to weight, so it could not match the nav icons at
@@ -192,6 +204,22 @@ describe("NotificationBell", () => {
       }),
     );
     // Optimistically removed -> badge drops to the no-count state.
+    expect(screen.getByRole("button", { name: "通知" })).toBeInTheDocument();
+  });
+
+  it("does not resurrect an acknowledged item from a stale later poll", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    useCurrentUserMock.mockReturnValue(asUser("E010"));
+    // Deliberately keep returning the pre-ack snapshot to model a poll that
+    // started before POST /notifications/ack committed.
+    mockNotifications([DECLINED], []);
+    render(<NotificationBell />);
+    fireEvent.click(await screen.findByRole("button", { name: "通知（未読1件）" }));
+    fireEvent.click(screen.getByRole("link", { name: DECLINED.message }));
+    await waitFor(() => expect(ackNotificationsMock).toHaveBeenCalled());
+    expect(screen.getByRole("button", { name: "通知" })).toBeInTheDocument();
+
+    await vi.advanceTimersByTimeAsync(15_000);
     expect(screen.getByRole("button", { name: "通知" })).toBeInTheDocument();
   });
 

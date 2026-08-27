@@ -15,7 +15,7 @@ from collections.abc import Sequence
 from typing import Any, cast
 
 from sqlalchemy import CursorResult, delete, func, select, update
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from tekijin.models.tables import (
     Answer,
@@ -509,24 +509,31 @@ def ack_accepted_notifications(session: Session, asker_id: int, ids: list[int]) 
 def ack_request_notifications(session: Session, responder_id: int, ids: list[int]) -> int:
     """Mark these incoming-request notifications seen, scoped to ``responder_id`` (#509).
 
-    ``Recommendation.employee_id`` already IS the responder, so unlike the
-    asker-side acks this needs no subquery — the row itself proves ownership.
-    Returns the number of rows actually updated.
+    The read side deduplicates anomalous multiple pending rank-1 rows for one
+    question. Resolve the selected ids to their eligible question ids first,
+    then acknowledge every matching pending row so an older duplicate cannot
+    reappear on the next poll. Returns the number of rows actually updated
+    (which can exceed ``len(ids)`` only for that duplicate-row anomaly).
     """
 
     if not ids:
         return 0
+    selected = aliased(Recommendation)
+    selected_question_ids = select(selected.question_id).where(
+        selected.id.in_(ids),
+        selected.rank == 1,
+        selected.outcome.is_(None),
+        selected.employee_id == responder_id,
+        selected.question_id.in_(select(Question.id).where(Question.session_id.is_not(None))),
+    )
     result = session.execute(
         update(Recommendation)
         .where(
-            Recommendation.id.in_(ids),
+            Recommendation.question_id.in_(selected_question_ids),
             Recommendation.rank == 1,
             Recommendation.outcome.is_(None),
             Recommendation.request_seen_at.is_(None),
             Recommendation.employee_id == responder_id,
-            Recommendation.question_id.in_(
-                select(Question.id).where(Question.session_id.is_not(None))
-            ),
         )
         .values(request_seen_at=func.now())
     )

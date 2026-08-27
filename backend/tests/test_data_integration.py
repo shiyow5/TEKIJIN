@@ -18,10 +18,13 @@ from tekijin.data.db import get_engine, get_sessionmaker, session_scope
 from tekijin.data.documents import get_document
 from tekijin.data.history import recent_questions_for_asker
 from tekijin.data.inbox import pending_handoffs_for_responder
-from tekijin.data.notifications import pending_accepted_notifications_for_asker
+from tekijin.data.notifications import (
+    pending_accepted_notifications_for_asker,
+    pending_request_notifications_for_responder,
+)
 from tekijin.data.repository import Repository
 from tekijin.data.seed import _apply_schema_upgrades, apply_migrations, run_seed
-from tekijin.data.writes import mark_question_resolved
+from tekijin.data.writes import ack_request_notifications, mark_question_resolved
 from tekijin.models.tables import (
     Answer,
     Document,
@@ -265,6 +268,29 @@ def test_accepted_notifications_order_by_acceptance_time(seed_counts, session) -
         newer_request_older_accept.id,
     ]
     assert items[0]["created_at"] == older_request_newer_accept.resolved_at.isoformat()
+
+
+def test_request_notification_dedup_ack_clears_every_matching_row(seed_counts, session) -> None:
+    question = Question(
+        id="api_nt_request_dup",
+        asker_id=10,
+        body="重複した依頼",
+        topics=[],
+        session_id="nt-request-dup",
+    )
+    session.add(question)
+    session.add_all(
+        [
+            Recommendation(question_id=question.id, employee_id=7, rank=1, score=0.8),
+            Recommendation(question_id=question.id, employee_id=7, rank=1, score=0.9),
+        ]
+    )
+    session.flush()
+
+    items = pending_request_notifications_for_responder(session, 7)
+    assert len(items) == 1
+    assert ack_request_notifications(session, 7, [items[0]["id"]]) == 2
+    assert pending_request_notifications_for_responder(session, 7) == []
 
 
 # --------------------------------------------------------------------------- #
