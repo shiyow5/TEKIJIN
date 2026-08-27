@@ -668,6 +668,70 @@ def test_knowledge_keep_leaves_draft_unreviewed(_resolved_thread) -> None:
     assert unit is not None and unit.review_status == "unreviewed"
 
 
+def test_knowledge_keep_shows_review_blocks_in_slack(_resolved_thread, monkeypatch) -> None:
+    """#527: 残す replaces the prompt with the draft's CONTENT + 承認する/破棄する — the
+    review happens in Slack. Keep itself does not approve (status stays unreviewed)."""
+
+    factory, thread_id = _resolved_thread
+    with session_scope(factory) as session:
+        from tekijin.knowledge.extract import extract_and_store
+        from tekijin.knowledge.slack_thread import slack_thread_source
+
+        extract_and_store(session, [slack_thread_source(session, thread_id)], _extractor())
+
+    sent: list[dict] = []
+    monkeypatch.setattr(
+        slack_routes, "respond_to_response_url", lambda _url, payload: sent.append(payload)
+    )
+
+    slack_routes._handle_knowledge_action(
+        SimpleNamespace(session_factory=factory),
+        "tekijin_knowledge_keep",
+        {"thread_id": thread_id},
+        "U_RESP",
+        "https://hooks.slack.test/response",
+        [],
+    )
+    assert len(sent) == 1
+    blocks = sent[0]["blocks"]
+    action_ids = [e["action_id"] for b in blocks if b["type"] == "actions" for e in b["elements"]]
+    assert set(action_ids) == {"tekijin_knowledge_approve", "tekijin_knowledge_discard"}
+    fields_text = " ".join(
+        f["text"]
+        for b in blocks
+        if b.get("type") == "section" and "fields" in b
+        for f in b["fields"]
+    )
+    assert "VPNの拠点間接続が切れる" in fields_text  # the extracted problem is shown
+    with session_scope(factory) as session:
+        unit = get_knowledge_unit_by_source(session, "slack_thread", f"slack_thread_{thread_id}")
+    assert unit.review_status == "unreviewed"  # keep shows; approve is the next step
+
+
+def test_knowledge_approve_marks_draft_approved(_resolved_thread) -> None:
+    """#527: 承認する flips the draft to approved so retrieval/self-answer trust it."""
+
+    factory, thread_id = _resolved_thread
+    with session_scope(factory) as session:
+        from tekijin.knowledge.extract import extract_and_store
+        from tekijin.knowledge.slack_thread import slack_thread_source
+
+        extract_and_store(session, [slack_thread_source(session, thread_id)], _extractor())
+
+    resp = slack_routes._handle_knowledge_action(
+        SimpleNamespace(session_factory=factory),
+        "tekijin_knowledge_approve",
+        {"thread_id": thread_id},
+        "U_RESP",
+        None,
+        [],
+    )
+    assert resp.status_code == 200
+    with session_scope(factory) as session:
+        unit = get_knowledge_unit_by_source(session, "slack_thread", f"slack_thread_{thread_id}")
+    assert unit is not None and unit.review_status == "approved"
+
+
 def test_knowledge_action_rejects_non_party(_resolved_thread) -> None:
     factory, thread_id = _resolved_thread
     with session_scope(factory) as session:
