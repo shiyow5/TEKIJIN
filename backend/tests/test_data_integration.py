@@ -854,6 +854,53 @@ def test_knowledge_units_by_topics_gates_on_review(seed_counts, session) -> None
     assert "9102" in queue and "9101" not in queue
 
 
+def test_list_knowledge_includes_approved_knowledge_units(seed_counts, session) -> None:
+    """#533: an APPROVED knowledge unit is browsable/searchable in the library as a
+    ``kind='knowledge'`` item (source_id ``ku_{id}``); unreviewed/rejected are not."""
+    from tekijin.data import knowledge as kb
+    from tekijin.data.knowledge_library import list_knowledge
+
+    kb.upsert_knowledge_unit(
+        session,
+        kind="case",
+        problem="CRMを導入したが現場が入力せず定着しない",
+        action="入力項目を5つに絞り日報と連携",
+        result="入力率が上がり定着した",
+        topics=["CRM・営業支援"],
+        source_type="slack_thread",
+        source_id="lib_ku_1",
+    )
+    kb.upsert_knowledge_unit(
+        session,
+        kind="case",
+        problem="未承認の課題",
+        action="a",
+        topics=["CRM・営業支援"],
+        source_type="slack_thread",
+        source_id="lib_ku_2",
+    )
+    session.flush()
+    approved = kb.get_knowledge_unit_by_source(session, "slack_thread", "lib_ku_1")
+    kb.set_review_status(session, approved.id, "approved")
+    session.flush()
+
+    # Keyword search on the case text surfaces the approved unit only.
+    items, _total, summary = list_knowledge(session, q="CRM")
+    knowledge = [i for i in items if i["kind"] == "knowledge"]
+    assert len(knowledge) == 1
+    got = knowledge[0]
+    assert got["source_id"] == f"ku_{approved.id}"  # matches a self-answer citation
+    assert got["title"] == "CRMを導入したが現場が入力せず定着しない"
+    assert "打ち手:" in got["summary"] and "結果:" in got["summary"]
+    assert got["topics"] == ["CRM・営業支援"]
+    # The unreviewed unit ("未承認") is never surfaced.
+    assert all("未承認" not in i["title"] for i in items)
+
+    # A department filter (units have no department) excludes knowledge units entirely.
+    dept_items, _t, _s = list_knowledge(session, q="CRM", department="営業部")
+    assert all(i["kind"] != "knowledge" for i in dept_items)
+
+
 # --------------------------------------------------------------------------- #
 # runtime resolution tracking (#97)
 # --------------------------------------------------------------------------- #

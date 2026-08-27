@@ -33,6 +33,18 @@ const ITEMS: KnowledgeItem[] = [
     question_id: null,
     session_id: null,
   },
+  {
+    source_id: "ku_7",
+    kind: "knowledge",
+    title: "CRMを導入したが現場が入力せず定着しない",
+    topics: ["CRM・営業支援"],
+    summary: "打ち手: 入力項目を5つに絞る\n結果: 定着した",
+    responder_name: null,
+    responder_department: null,
+    resolved_at: "2026-08-22T10:00:00",
+    question_id: null,
+    session_id: null,
+  },
 ];
 
 const RESPONSE: KnowledgeListResponse = {
@@ -86,6 +98,19 @@ describe("KnowledgeScreen", () => {
       "href",
       "/documents/doc1",
     );
+  });
+
+  it("renders a knowledge unit (#533) as a non-linked card with a ナレッジ marker", async () => {
+    render(<KnowledgeScreen />);
+
+    await waitFor(() =>
+      expect(screen.getByText("CRMを導入したが現場が入力せず定着しない")).toBeInTheDocument(),
+    );
+    // A distilled knowledge unit is marked and shown non-linked (no per-unit detail viewer).
+    expect(screen.getByText("ナレッジ")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: /CRMを導入したが現場が入力せず定着しない/ }),
+    ).not.toBeInTheDocument();
   });
 
   it("submits the search box as the q param", async () => {

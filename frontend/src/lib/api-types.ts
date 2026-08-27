@@ -241,7 +241,7 @@ export interface RecentQuestionsResponse {
  */
 export interface KnowledgeItem {
   source_id: string;
-  kind: "qa" | "document";
+  kind: "qa" | "document" | "knowledge";
   title: string;
   summary: string;
   topics: string[];
