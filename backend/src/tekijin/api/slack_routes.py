@@ -521,17 +521,28 @@ def sync_users(
     members = parse_members(raw)
     service = request.app.state.agent_service
     now = dt.datetime.now(dt.UTC).replace(tzinfo=None)
-    with session_scope(service.session_factory) as session:
-        state = load_directory_state(session)
-        plan = plan_user_sync(
-            members,
-            employee_id_by_email=state.employee_id_by_email,
-            linked_slack_user_by_employee=state.linked_slack_user_by_employee,
-            employee_by_slack_user=state.employee_by_slack_user,
-            expected_team_id=settings.slack_team_id,
-            admin_email=settings.admin_email,
-        )
-        applied = apply_sync_plan(session, plan, team_id=settings.slack_team_id, now=now)
+    try:
+        with session_scope(service.session_factory) as session:
+            state = load_directory_state(session)
+            plan = plan_user_sync(
+                members,
+                employee_id_by_email=state.employee_id_by_email,
+                linked_slack_user_by_employee=state.linked_slack_user_by_employee,
+                employee_by_slack_user=state.employee_by_slack_user,
+                expected_team_id=settings.slack_team_id,
+                admin_email=settings.admin_email,
+            )
+            applied = apply_sync_plan(session, plan, team_id=settings.slack_team_id, now=now)
+    except (ValueError, IntegrityError) as exc:
+        # The planner refuses ambiguous pairs and the applier refuses a duplicated
+        # plan, so reaching here means the first guard has a hole. The batch is
+        # rolled back whole — including any departure unlinks in it — so this has
+        # to be legible enough that someone goes and looks, not a bare traceback.
+        logger.error("Slack directory sync could not be applied", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Slackユーザー同期を適用できませんでした。管理者に連絡してください。",
+        ) from exc
 
     logger.info(
         "Slack directory sync by admin: %s members, linked=%s unlinked=%s skipped=%s",

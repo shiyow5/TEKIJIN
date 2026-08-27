@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import datetime as dt
 
+import pytest
+
 from tekijin.data.db import get_sessionmaker
 from tekijin.data.slack_directory import apply_sync_plan, load_directory_state
 from tekijin.data.slack_links import get_slack_link, upsert_slack_link
@@ -123,3 +125,50 @@ def test_an_empty_plan_touches_nothing(seed_counts, engine) -> None:
             "linked": 0,
             "unlinked": 0,
         }
+
+
+# --------------------------------------------------------------------------- #
+# Defence in depth: the applier does not trust the plan
+# --------------------------------------------------------------------------- #
+# The planner now refuses an ambiguous pair, so a duplicated plan should be
+# unreachable. These exist because "unreachable" was the assumption that let the
+# same-run collision ship in the first place: `upsert_slack_link` keys on
+# employee_id and overwrites, so a duplicate would silently resolve to whichever
+# entry happened to be last — the quietest possible way to put one person's
+# Slack identity on another person's row.
+def test_a_plan_naming_one_employee_twice_is_refused_before_anything_is_written(
+    seed_counts, engine
+) -> None:
+    factory = get_sessionmaker(engine)
+    with factory() as session:
+        employee_id = _employee(session, 5)
+        session.commit()
+
+    plan = SyncPlan(link=((employee_id, "U_FIRST"), (employee_id, "U_SECOND")))
+
+    with factory() as session:
+        with pytest.raises(ValueError, match="duplicate"):
+            apply_sync_plan(session, plan, team_id=TEAM, now=NOW)
+        session.rollback()
+
+    # Refused BEFORE writing, so not even the first entry landed.
+    with factory() as session:
+        assert get_slack_link(session, employee_id, expected_team_id=TEAM) is None
+
+
+def test_a_plan_naming_one_slack_account_twice_is_refused(seed_counts, engine) -> None:
+    """This one would otherwise hit the unique constraint mid-batch and roll the
+    whole transaction back — losing the departure unlinks queued alongside it."""
+
+    factory = get_sessionmaker(engine)
+    with factory() as session:
+        first = _employee(session, 6)
+        second = _employee(session, 7)
+        session.commit()
+
+    plan = SyncPlan(link=((first, "U_SHARED"), (second, "U_SHARED")))
+
+    with factory() as session:
+        with pytest.raises(ValueError, match="duplicate"):
+            apply_sync_plan(session, plan, team_id=TEAM, now=NOW)
+        session.rollback()

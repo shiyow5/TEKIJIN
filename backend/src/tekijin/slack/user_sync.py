@@ -28,6 +28,17 @@ The rules, and why each one exists:
   matching into an authentication path.
 * **The admin address is never linked.** The admin principal is deliberately not
   an employee row; nothing from Slack may inherit it.
+* **An employee claimed twice in one run is linked to neither.** Every rule above
+  is checked against the database as it was BEFORE the run, which closes the
+  cross-run case and misses the within-run one: two members of the same
+  ``users.list`` response resolving to one employee would both pass "not already
+  linked". Without SSO/SCIM a Slack member sets ``profile.email`` themselves, so
+  that is reachable by putting a colleague's address in your own profile. Taking
+  the first claimant would only mean an attacker has to sort earlier, and nothing
+  here can tell which claimant is genuine — so an ambiguous employee is left
+  alone and reported. The same holds for one Slack account claiming two
+  employees, which would additionally violate the unique constraint on
+  ``slack_user_id`` and abort the batch, delaying the departure unlinks in it.
 """
 
 from __future__ import annotations
@@ -145,7 +156,7 @@ def plan_user_sync(
     }
     admin = _normalise(admin_email)
 
-    link: list[tuple[int, str]] = []
+    candidates: list[tuple[int, str]] = []
     unlink: list[int] = []
     skipped: Counter[str] = Counter()
 
@@ -191,6 +202,34 @@ def plan_user_sync(
             skipped["already_linked_to_another_slack_account"] += 1
             continue
 
-        link.append((employee_id, member.slack_user_id))
+        candidates.append((employee_id, member.slack_user_id))
 
-    return SyncPlan(link=tuple(link), unlink=tuple(unlink), skipped=dict(skipped))
+    link = _drop_ambiguous(candidates, skipped)
+    return SyncPlan(link=link, unlink=tuple(unlink), skipped=dict(skipped))
+
+
+def _drop_ambiguous(
+    candidates: list[tuple[int, str]], skipped: Counter[str]
+) -> tuple[tuple[int, str], ...]:
+    """Keep only the pairs where both halves are claimed exactly once this run.
+
+    An identical pair listed twice is a quirk of the payload, not two claimants,
+    so it collapses to one rather than disqualifying a legitimate link. Anything
+    genuinely contested is dropped and counted — one ambiguous pair must not cost
+    the rest of the workspace its sync, and it must never hold up an unlink,
+    which is the half that cuts off login.
+    """
+
+    unique = list(dict.fromkeys(candidates))
+    employees = Counter(employee_id for employee_id, _ in unique)
+    slack_users = Counter(slack_user_id for _, slack_user_id in unique)
+
+    kept: list[tuple[int, str]] = []
+    for employee_id, slack_user_id in unique:
+        if employees[employee_id] > 1:
+            skipped["ambiguous_email"] += 1
+        elif slack_users[slack_user_id] > 1:
+            skipped["ambiguous_slack_account"] += 1
+        else:
+            kept.append((employee_id, slack_user_id))
+    return tuple(kept)

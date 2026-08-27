@@ -66,7 +66,19 @@ def apply_sync_plan(
     ``team_id`` is the CONFIGURED workspace, not one taken from a Slack payload:
     the read-time workspace filter in ``slack_links`` is only as trustworthy as
     the value that was written here.
+
+    Raises ``ValueError`` if the plan names an employee — or a Slack account —
+    more than once, before writing anything. The planner already refuses those,
+    so this should be unreachable; it is here because "unreachable" is exactly
+    the assumption that let a same-run collision through once already.
+    ``upsert_slack_link`` keys on ``employee_id`` and overwrites, so a duplicate
+    would resolve silently to whichever entry came last — the quietest possible
+    way to put one person's Slack identity on another person's row. A duplicated
+    ``slack_user_id`` would instead violate the unique index halfway through and
+    roll back the whole batch, taking the departure unlinks with it.
     """
+
+    _reject_duplicates(plan)
 
     for employee_id, slack_user_id in plan.link:
         upsert_slack_link(
@@ -86,3 +98,13 @@ def apply_sync_plan(
         )
 
     return {"linked": len(plan.link), "unlinked": len(plan.unlink)}
+
+
+def _reject_duplicates(plan: SyncPlan) -> None:
+    """Refuse a plan whose links are not one-to-one, before any write happens."""
+
+    employees = [employee_id for employee_id, _ in plan.link]
+    slack_users = [slack_user_id for _, slack_user_id in plan.link]
+    for label, values in (("employee", employees), ("slack account", slack_users)):
+        if len(set(values)) != len(values):
+            raise ValueError(f"refusing a Slack sync plan with a duplicate {label}: {plan.link}")

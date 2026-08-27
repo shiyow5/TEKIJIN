@@ -272,3 +272,100 @@ def test_parse_members_tolerates_a_missing_profile_block() -> None:
 
 def test_parse_members_drops_an_entry_with_no_id() -> None:
     assert parse_members([{"team_id": TEAM, "profile": {"email": "a@x.jp"}}]) == []
+
+
+# --------------------------------------------------------------------------- #
+# The same class, a fourth time: both halves inside ONE run
+# --------------------------------------------------------------------------- #
+# The rules above all consult the database snapshot taken before the run. That
+# closes the cross-run case and misses the within-run one: two members of the
+# same `users.list` response resolving to the same employee both pass "not
+# already linked", because nothing recorded the first one's claim.
+#
+# In a workspace without SSO/SCIM, `profile.email` is free text the member sets
+# themselves. So this is reachable: put a colleague's address in your own Slack
+# profile and wait for the next sync.
+#
+# The policy is to link NEITHER. Taking the first would just mean an attacker
+# has to sort earlier, and there is no way from here to tell which of two
+# claimants is the real one — that is a question for a human.
+def test_two_slack_accounts_claiming_one_employee_link_neither() -> None:
+    plan = _plan([_member("U_VICTIM", "a@x.jp"), _member("U_ATTACKER", "a@x.jp")])
+
+    assert plan.link == ()
+    assert plan.skipped["ambiguous_email"] == 2
+
+
+def test_the_collision_is_caught_through_case_and_whitespace_variants() -> None:
+    """`_normalise` folds case and strips space, so the two must collide AFTER
+    normalisation — checking the raw strings would miss `A@X.JP `."""
+
+    plan = _plan([_member("U_VICTIM", "a@x.jp"), _member("U_ATTACKER", "  A@X.JP ")])
+
+    assert plan.link == ()
+    assert plan.skipped["ambiguous_email"] == 2
+
+
+def test_a_third_claimant_does_not_rescue_the_first_two() -> None:
+    plan = _plan([_member("U_1", "a@x.jp"), _member("U_2", "a@x.jp"), _member("U_3", "a@x.jp")])
+
+    assert plan.link == ()
+    assert plan.skipped["ambiguous_email"] == 3
+
+
+def test_one_slack_account_listed_twice_is_not_treated_as_a_conflict() -> None:
+    """A duplicated entry for the SAME account is a quirk of the payload, not two
+    claimants — collapse it rather than refusing the legitimate link."""
+
+    plan = _plan([_member("U_A", "a@x.jp"), _member("U_A", "a@x.jp")])
+
+    assert plan.link == ((1, "U_A"),)
+
+
+def test_one_slack_account_claiming_two_employees_links_neither() -> None:
+    """The mirror: the same Slack id arriving twice under different addresses.
+    Applying both would hit the unique constraint on `slack_user_id` and abort
+    the whole batch — including departure unlinks that must not be delayed."""
+
+    plan = _plan(
+        [_member("U_A", "a@x.jp"), _member("U_A", "b@x.jp")],
+        employee_id_by_email={"a@x.jp": 1, "b@x.jp": 2},
+    )
+
+    assert plan.link == ()
+    assert plan.skipped["ambiguous_slack_account"] == 2
+
+
+def test_an_unrelated_colleague_in_the_same_run_is_still_linked() -> None:
+    """One ambiguous pair must not cost everyone else their sync."""
+
+    plan = _plan(
+        [
+            _member("U_VICTIM", "a@x.jp"),
+            _member("U_ATTACKER", "a@x.jp"),
+            _member("U_FINE", "c@x.jp"),
+        ],
+        employee_id_by_email={"a@x.jp": 1, "c@x.jp": 2},
+    )
+
+    assert plan.link == ((2, "U_FINE"),)
+    assert plan.skipped["ambiguous_email"] == 2
+
+
+def test_a_departure_still_happens_even_when_another_pair_is_ambiguous() -> None:
+    """Unlinks are the security-relevant half: they cut off login. An ambiguous
+    link elsewhere in the payload must not hold them up."""
+
+    plan = _plan(
+        [
+            _member("U_1", "a@x.jp"),
+            _member("U_2", "a@x.jp"),
+            _member("U_GONE", "c@x.jp", deleted=True),
+        ],
+        employee_id_by_email={"a@x.jp": 1, "c@x.jp": 2},
+        linked_slack_user_by_employee={2: "U_GONE"},
+        employee_by_slack_user={"U_GONE": 2},
+    )
+
+    assert plan.link == ()
+    assert plan.unlink == (2,)

@@ -190,3 +190,28 @@ def test_the_sync_refuses_to_run_without_a_configured_workspace(
         assert resp.status_code == 503
     finally:
         get_settings.cache_clear()
+
+
+def test_an_unapplyable_plan_is_reported_not_a_bare_500(
+    seed_counts, engine, fake_embedder, sync_on, monkeypatch
+) -> None:
+    """The planner refuses ambiguous pairs, and the applier refuses a duplicated
+    plan on top of that. If the second guard ever fires it means the first one
+    has a hole, so it must arrive as a legible failure an operator can act on
+    rather than an unhandled traceback — and the transaction must leave nothing
+    half-written behind.
+    """
+
+    monkeypatch.setattr(
+        "tekijin.api.slack_routes.list_users",
+        lambda **kw: [{"id": "U_X", "team_id": TEAM, "profile": {"email": "a@x.jp"}}],
+    )
+    monkeypatch.setattr(
+        "tekijin.api.slack_routes.apply_sync_plan",
+        lambda *a, **kw: (_ for _ in ()).throw(ValueError("duplicate employee")),
+    )
+
+    resp = _client(engine, fake_embedder).post("/slack/sync-users", headers=_headers(is_admin=True))
+
+    assert resp.status_code == 500
+    assert "同期" in resp.json()["detail"]
