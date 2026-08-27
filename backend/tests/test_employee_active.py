@@ -14,11 +14,29 @@ a default of false would empty the recommender and take the eval numbers with it
 
 from __future__ import annotations
 
-from sqlalchemy import func, select
+import pytest
+from sqlalchemy import func, select, update
 
 from tekijin.data.db import get_sessionmaker
 from tekijin.data.repository import Repository
 from tekijin.models.tables import Employee
+
+
+@pytest.fixture(autouse=True)
+def _reactivate_everyone(engine):
+    """Put `is_active` back after each test in this module.
+
+    These tests deactivate a SEEDED colleague and commit, and the database is
+    shared across the whole run — so without this the person stays missing from
+    the candidate pool and unrelated retrieval tests start failing depending on
+    collection order. (They did: `test_hybrid_retriever_end_to_end` and two
+    others, only when this module ran first.)
+    """
+
+    yield
+    with get_sessionmaker(engine)() as session:
+        session.execute(update(Employee).values(is_active=True))
+        session.commit()
 
 
 def test_no_colleague_is_left_without_an_answer(seed_counts, engine) -> None:

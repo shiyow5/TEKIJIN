@@ -13,7 +13,7 @@ import datetime as dt
 import logging
 from dataclasses import dataclass
 
-from sqlalchemy import func, select, text
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from tekijin.data.slack_links import delete_slack_link, upsert_slack_link
@@ -149,25 +149,21 @@ def _reject_duplicates(plan: SyncPlan) -> None:
 def _create_employee(session: Session, *, email: str, name: str) -> int:
     """Insert a colleague who exists in Slack but not yet here, and return the id.
 
-    The id is NOT left to the column's default. ``make seed`` inserts ids 1..40
-    explicitly after ``TRUNCATE ... RESTART IDENTITY``, which leaves the sequence
-    sitting at 1 while ``max(id)`` is 40 — verified on the live database, where
-    ``last_value`` was 1 against a roster of 40. Letting Postgres assign the next
-    value would hand out 1 and collide with the first employee. Realigning the
-    sequence first fixes that at the source and is idempotent, so a database that
-    was never seeded this way is unaffected.
+    The id comes from the identity sequence. That is only safe because the seed
+    realigns the sequence once it has finished inserting its explicit ids (see
+    ``seed.realign_identity_sequences``) — without that the sequence sits at 1
+    while ``max(id)`` is 40, measured on the live database, and the first
+    auto-assigned employee collides with employee 1.
+
+    Realigning per insert instead, which is what this did first, is NOT
+    concurrency-safe: two overlapping syncs read the same ``max(id)``, both
+    ``setval`` to it and both receive the same id (reproduced: both got 41, and
+    the second INSERT then blocked on the first's uncommitted row). ``nextval``
+    on its own is atomic, so leaving the sequence alone is the fix.
 
     No ``password_hash`` is set. The account exists to be signed into via Slack;
     a NULL hash never verifies, so this creates no guessable credential.
     """
-
-    sequence = session.scalar(text("SELECT pg_get_serial_sequence('employees', 'id')"))
-    if sequence:
-        highest = session.scalar(select(func.max(Employee.id))) or 0
-        session.execute(
-            text("SELECT setval(:seq, :value, true)"),
-            {"seq": sequence, "value": max(highest, 1)},
-        )
 
     employee = Employee(name=name, email=email)
     session.add(employee)

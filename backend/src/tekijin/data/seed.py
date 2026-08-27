@@ -119,6 +119,8 @@ def apply_migrations(
     ensure_pgvector(eng)
     create_all(eng)
     _apply_schema_upgrades(eng)
+    # Repairs a database seeded before the realignment above existed.
+    realign_identity_sequences(eng)
 
 
 def run_seed(
@@ -147,6 +149,12 @@ def run_seed(
     factory = get_sessionmaker(eng)
     with session_scope(factory) as session:
         counts = seed_session(session, fixtures)
+    # AFTER the fixtures, not before: the rows above are inserted with explicit
+    # ids, which does not advance the identity sequence. Leaving it behind means
+    # the next insert that omits an id is handed one that already exists (on the
+    # live database the sequence sat at 1 against a roster of 40 — so the first
+    # auto-assigned employee would have collided with employee 1).
+    realign_identity_sequences(eng)
     return counts
 
 
@@ -296,3 +304,34 @@ def main() -> int:
 
 if __name__ == "__main__":  # pragma: no cover - exercised via CLI
     sys.exit(main())
+
+
+def realign_identity_sequences(engine: Engine) -> None:
+    """Move each identity sequence past the largest id its table already holds.
+
+    Rows loaded from fixtures carry explicit ids, and an explicit id does not
+    advance the sequence — so straight after a seed the sequence still points at
+    1 while the table holds 40 rows. The next insert that lets the database pick
+    an id then collides with an existing row.
+
+    Doing this ONCE, here, is what lets every insert afterwards simply use the
+    sequence. Realigning inside each insert instead is not concurrency-safe: two
+    overlapping transactions read the same ``max(id)``, both ``setval`` to it,
+    and both receive the same value — reproduced, both were handed 41. Left
+    alone, ``nextval`` is atomic and two callers cannot collide.
+
+    Idempotent, and a no-op on an empty table.
+    """
+
+    with engine.begin() as conn:
+        for table in ("employees",):
+            conn.execute(
+                text(
+                    "SELECT setval("
+                    "  pg_get_serial_sequence(:table, 'id'),"
+                    "  COALESCE((SELECT MAX(id) FROM employees), 1),"
+                    "  (SELECT COUNT(*) FROM employees) > 0"
+                    ")"
+                ),
+                {"table": table},
+            )

@@ -44,7 +44,7 @@ The rules, and why each one exists:
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 
 _SLACKBOT_ID = "USLACKBOT"
@@ -146,6 +146,7 @@ def plan_user_sync(
     expected_team_id: str,
     admin_email: str,
     create_missing: bool = False,
+    allowed_create_domains: Sequence[str] = (),
 ) -> SyncPlan:
     """Work out the links to add and the links to cut. Writes nothing.
 
@@ -195,6 +196,9 @@ def plan_user_sync(
         employee_id = by_email.get(email)
         if employee_id is None:
             if create_missing:
+                if not _domain_allowed(email, allowed_create_domains):
+                    skipped["email_domain_not_allowed"] += 1
+                    continue
                 new_people.append((email, member.display_name, member.slack_user_id))
             else:
                 skipped["no_matching_employee"] += 1
@@ -277,3 +281,25 @@ def _drop_contested_new_people(
         else:
             kept.append((email, display_name, slack_user_id))
     return tuple(kept)
+
+
+def _domain_allowed(email: str, allowed: Sequence[str]) -> bool:
+    """Whether ``email`` sits in one of the configured company domains.
+
+    Creation mints an identity, so the address it is keyed on should look like a
+    company address — otherwise any workspace member (a contractor, a partner,
+    anyone invited once) becomes an employee by virtue of the address on their
+    profile. An empty list allows everything, matching every other switch here:
+    restricting is opt-in, so enabling creation does not silently start refusing
+    people.
+
+    Compared on the part after the LAST ``@`` and anchored, not by ``endswith``
+    on the whole address — ``endswith("corp.jp")`` would accept both
+    ``someone@corp.jp.evil.com`` and ``someone@notcorp.jp``.
+    """
+
+    if not allowed:
+        return True
+    _, _, domain = email.rpartition("@")
+    domain = domain.strip().lower()
+    return any(domain == candidate.strip().lower().lstrip("@") for candidate in allowed)

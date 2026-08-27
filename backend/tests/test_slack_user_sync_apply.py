@@ -10,7 +10,7 @@ from __future__ import annotations
 import datetime as dt
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from tekijin.data.db import get_sessionmaker
 from tekijin.data.slack_directory import apply_sync_plan, load_directory_state
@@ -308,3 +308,42 @@ def test_a_created_colleague_starts_active(seed_counts, engine) -> None:
             select(Employee).where(Employee.email == "active@sample-tekijin.co.jp")
         ).one()
         assert row.is_active is True
+
+
+def test_the_identity_sequence_is_aligned_after_seeding(seed_counts, engine) -> None:
+    """`make seed` inserts ids explicitly after `TRUNCATE ... RESTART IDENTITY`,
+    which leaves the sequence behind the data (measured on the live database:
+    `last_value` 1 against `max(id)` 40).
+
+    Realigning it once, where the seed leaves it broken, is what lets every
+    insert afterwards just use the sequence. The first attempt realigned it
+    inside each create instead, and that is NOT concurrency-safe: two overlapping
+    syncs both read the same `max(id)`, both `setval` to it, and both are handed
+    the same id — reproduced, both got 41. A sequence left alone does not have
+    that problem, because `nextval` is atomic.
+    """
+
+    with get_sessionmaker(engine)() as session:
+        taken = set(session.scalars(select(Employee.id)))
+        upcoming = session.scalar(text("SELECT nextval(pg_get_serial_sequence('employees', 'id'))"))
+
+    # "Not already taken" rather than "greater than max(id)": other tests in this
+    # file insert explicit ids in the 9100s, which the sequence has no reason to
+    # jump past. Freedom from collision is the property that matters, and it does
+    # not depend on what else has run.
+    assert upcoming not in taken
+
+
+def test_an_insert_without_an_id_lands_past_the_seeded_roster(seed_counts, engine) -> None:
+    """The consequence that actually matters: no collision with employee 1."""
+
+    factory = get_sessionmaker(engine)
+    with factory() as session:
+        taken = set(session.scalars(select(Employee.id)))
+        fresh = Employee(name="採番確認", email="sequence-check@sample-tekijin.co.jp")
+        session.add(fresh)
+        session.flush()
+        assigned = fresh.id
+        session.commit()
+
+    assert assigned not in taken

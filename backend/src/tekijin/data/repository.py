@@ -66,6 +66,16 @@ class Repository:
         ).all()
         return [EmployeeDTO.from_row(r) for r in rows]
 
+    def active_employee_ids(self) -> set[int]:
+        """Ids of everyone who may still be recommended (#506).
+
+        The retriever needs this rather than :meth:`list_employees` because it
+        builds its candidate list out of answers and profiles, not out of the
+        roster — filtering the roster alone left the real pool untouched.
+        """
+
+        return set(self._session.scalars(select(Employee.id).where(Employee.is_active.is_(True))))
+
     def get_employee(self, employee_id: int) -> EmployeeDTO | None:
         row = self._session.get(Employee, employee_id)
         return EmployeeDTO.from_row(row) if row is not None else None

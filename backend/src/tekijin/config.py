@@ -514,6 +514,14 @@ class Settings(BaseSettings):
     # reachable; #404 (evidence from Slack) is what makes them recommendable.
     slack_user_sync_create_employees: bool = False
 
+    # Company email domains a Slack member must be in before the sync will CREATE
+    # an employee for them. Empty allows any address, matching the other switches
+    # here (restricting is opt-in). Narrows, but does not close, the squatting
+    # risk documented in ``docs/slack-user-sync.md``: an address inside the
+    # company domain that nobody holds yet can still be claimed by whoever puts
+    # it on their Slack profile first.
+    slack_user_sync_allowed_domains: tuple[str, ...] = ()
+
     # FastAPI's auto-docs (``/docs``, ``/redoc``, ``/openapi.json``). Default OFF:
     # ``/openapi.json`` publishes every endpoint's path, parameters and types, which
     # is a map of the protected surface even though no data leaks. It was reachable

@@ -300,7 +300,24 @@ class HybridRetriever:
         fused_people = self._fused_ids(
             [dense_people], sparse_people, dense_confidence=people_confidence
         )
-        candidate_people = self._aggregate_people(past_answers, fused_people)
+        # Departed colleagues are dropped HERE rather than from the answer and
+        # profile corpora (#506). Their answers stay searchable — the knowledge
+        # in them outlives the employment — but they stop being offered as
+        # someone to ask, because the hand-off has nowhere to go: the Slack link
+        # that would have delivered it was removed by the same departure.
+        active = self._repo.active_employee_ids()
+        departed_people = sorted(
+            {
+                responder
+                for answer in past_answers
+                if (responder := answer.get("responder_id")) is not None and responder not in active
+            }
+        )
+        candidate_people = [
+            person
+            for person in self._aggregate_people(past_answers, fused_people)
+            if person in active
+        ]
 
         # --- daily reports (#433) ------------------------------------------ #
         # A question↔daily-report dense search, so System 1 can cite a report's
@@ -317,6 +334,7 @@ class HybridRetriever:
             "past_answers": past_answers,
             "documents": documents_out,
             "candidate_people": candidate_people,
+            "departed_people": departed_people,
             "answer_confidence": answer_confidence,
             "document_confidence": document_confidence,
             "people_confidence": people_confidence,

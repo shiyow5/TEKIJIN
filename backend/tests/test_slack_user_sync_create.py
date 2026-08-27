@@ -50,6 +50,7 @@ def _plan(members, *, create=True, **kwargs):
         expected_team_id=kwargs.get("expected_team_id", TEAM),
         admin_email=kwargs.get("admin_email", "admin@tekijin.local"),
         create_missing=create,
+        allowed_create_domains=kwargs.get("allowed_domains", ()),
     )
 
 
@@ -153,3 +154,50 @@ def test_a_creation_does_not_block_an_unrelated_link() -> None:
 
     assert plan.create == (("new@x.jp", "U_NEW", "U_NEW"),)
     assert plan.link == ((5, "U_OLD"),)
+
+
+# --------------------------------------------------------------------------- #
+# Narrowing who may be brought into existence
+# --------------------------------------------------------------------------- #
+def test_only_the_configured_domains_may_be_created() -> None:
+    """Creation mints an identity, so the address it is keyed on should look like
+    a company address. Without this, any workspace member — a contractor, a
+    partner, anyone invited once — can be turned into an employee by the address
+    on their profile."""
+
+    plan = _plan(
+        [
+            _member("U_IN", "someone@sample-tekijin.co.jp"),
+            _member("U_OUT", "someone@gmail.com"),
+        ],
+        allowed_domains=("sample-tekijin.co.jp",),
+    )
+
+    assert plan.create == (("someone@sample-tekijin.co.jp", "U_IN", "U_IN"),)
+    assert plan.skipped["email_domain_not_allowed"] == 1
+
+
+def test_the_domain_check_is_case_insensitive_and_anchored() -> None:
+    """`endswith` on a bare domain would accept `sample-tekijin.co.jp.evil.com`
+    — and, worse, `notsample-tekijin.co.jp`."""
+
+    plan = _plan(
+        [
+            _member("U_A", "a@SAMPLE-TEKIJIN.CO.JP"),
+            _member("U_B", "b@sample-tekijin.co.jp.evil.com"),
+            _member("U_C", "c@notsample-tekijin.co.jp"),
+        ],
+        allowed_domains=("sample-tekijin.co.jp",),
+    )
+
+    assert [slack_user_id for _, _, slack_user_id in plan.create] == ["U_A"]
+    assert plan.skipped["email_domain_not_allowed"] == 2
+
+
+def test_an_empty_domain_list_allows_any_address() -> None:
+    """The default. Restricting is opt-in, like every other switch here, so
+    turning creation on does not silently start refusing people."""
+
+    plan = _plan([_member("U_ANY", "someone@anywhere.example")], allowed_domains=())
+
+    assert len(plan.create) == 1

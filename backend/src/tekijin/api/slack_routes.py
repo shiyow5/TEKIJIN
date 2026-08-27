@@ -533,6 +533,7 @@ def sync_users(
                 expected_team_id=settings.slack_team_id,
                 admin_email=settings.admin_email,
                 create_missing=settings.slack_user_sync_create_employees,
+                allowed_create_domains=settings.slack_user_sync_allowed_domains,
             )
             applied = apply_sync_plan(session, plan, team_id=settings.slack_team_id, now=now)
     except (ValueError, IntegrityError) as exc:

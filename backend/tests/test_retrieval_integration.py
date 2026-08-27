@@ -193,6 +193,10 @@ def test_hybrid_retriever_end_to_end(seed_counts, session, fake_embedder) -> Non
         "people_confidence",
         "person_question_similarity",
         "daily_reports",
+        # #506: responders of past_answers who have left, so the prior_answer pin
+        # can refuse them without consulting the candidate pool it is allowed to
+        # reach past.
+        "departed_people",
     }
     # #433: daily channel is OFF by default -> the key is present but empty.
     assert result["daily_reports"] == []
