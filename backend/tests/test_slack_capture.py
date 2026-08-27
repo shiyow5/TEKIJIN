@@ -553,6 +553,7 @@ def test_capture_and_prompt_notifies_when_no_case(_resolved_thread, monkeypatch)
     from tekijin.slack import capture as capture_mod
 
     factory, thread_id = _resolved_thread
+    capture_mod._no_case_notified.discard(thread_id)  # isolate from other tests' state
     posts: list[dict] = []
     monkeypatch.setattr(capture_mod, "post_message", lambda **kw: posts.append(kw))
 
@@ -571,6 +572,56 @@ def test_capture_and_prompt_notifies_when_no_case(_resolved_thread, monkeypatch)
     assert len(posts) == 1
     assert not posts[0].get("blocks")
     assert posts[0]["text"] == capture_mod._NO_CASE_NOTICE
+
+
+def test_capture_and_prompt_no_case_notice_dedups_per_thread(_resolved_thread, monkeypatch) -> None:
+    """#525 review: repeated solve-utterances on a thread that never yields a case must
+    not spam the no-case notice — at most one per thread, like the success prompt."""
+
+    from tekijin.slack import capture as capture_mod
+
+    factory, thread_id = _resolved_thread
+    capture_mod._no_case_notified.discard(thread_id)
+    posts: list[dict] = []
+    monkeypatch.setattr(capture_mod, "post_message", lambda **kw: posts.append(kw))
+
+    for _ in range(3):
+        again = capture_mod.capture_and_prompt(
+            factory,
+            channel_id=CHANNEL,
+            thread_id=thread_id,
+            extractor=_extractor(extractable=False),
+            settings=_settings(),
+        )
+        assert again is None
+    assert len(posts) == 1  # notified once, then silent
+
+
+def test_capture_and_prompt_silent_on_extraction_error(_resolved_thread, monkeypatch) -> None:
+    """#525 review: a transient extraction ERROR (not a "not a case" decision) must not
+    post the no-case notice — its "見つからなかった" reason would be factually wrong."""
+
+    from tekijin.slack import capture as capture_mod
+
+    factory, thread_id = _resolved_thread
+    capture_mod._no_case_notified.discard(thread_id)
+    posts: list[dict] = []
+    monkeypatch.setattr(capture_mod, "post_message", lambda **kw: posts.append(kw))
+
+    class _EmptyOutputModel:  # empty structured output -> extract() raises -> errored
+        def invoke(self, _prompt):
+            return None
+
+    stored = capture_mod.capture_and_prompt(
+        factory,
+        channel_id=CHANNEL,
+        thread_id=thread_id,
+        extractor=CaseExtractor(model=_EmptyOutputModel()),
+        settings=_settings(),
+    )
+    assert stored is None
+    assert posts == []  # silent on error; the next utterance can retry
+    assert thread_id not in capture_mod._no_case_notified  # not consumed by an error
 
 
 def test_knowledge_discard_marks_draft_rejected(_resolved_thread) -> None:

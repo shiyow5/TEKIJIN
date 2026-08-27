@@ -61,6 +61,29 @@ _NO_CASE_NOTICE = (
     "要点を書き添えて改めてお知らせいただくと、次回から蓄積できます。"
 )
 
+# Threads already given a no-case notice, so repeated solve-utterances on a thread that
+# never yields a case don't spam it (#525 review). The success path dedups on its
+# persisted draft; the no-case path has no draft to check, and a persisted "declined"
+# marker would wrongly block a LATER genuine capture once the thread gains real content —
+# so the notice is deduped in-process instead. Reset on restart (a restart may re-notify
+# once — acceptable for a UX message). The lock makes claim-then-post atomic so two
+# concurrent utterances on the same thread post at most one notice.
+_no_case_notified: set[int] = set()
+_no_case_notified_lock = threading.Lock()
+
+
+def _claim_no_case_notice(thread_id: int) -> bool:
+    """True the first time a no-case notice is owed for ``thread_id`` this process, else
+    False. Gates only the notice — never extraction — so a later utterance that adds real
+    content still re-extracts and can succeed via the (independent) draft path."""
+
+    with _no_case_notified_lock:
+        if thread_id in _no_case_notified:
+            return False
+        _no_case_notified.add(thread_id)
+        return True
+
+
 # Conservative solve-utterance markers (substring match). Deliberately RESOLUTION-
 # rooted — NOT generic completion/thanks. Excluded on purpose (#519 review): bare
 # "できました" (資料ができました / 予約ができました — unrelated completion) and
@@ -88,8 +111,13 @@ def is_solve_utterance(text: str) -> bool:
 
 def _extract_thread_draft(
     session, thread_id: int, extractor: CaseExtractor, *, parties=None
-) -> str | None:
-    """Distil one resolved thread into a knowledge draft; return its source id or None.
+) -> tuple[str | None, dict[str, int] | None]:
+    """Distil one resolved thread into a knowledge draft.
+
+    Returns ``(source_id, counts)``: ``source_id`` is the stored draft's id, or ``None``
+    when nothing was stored; ``counts`` is ``extract_and_store``'s tally (so a caller can
+    tell a genuine "not a case" decision — ``skipped`` — from a transient extraction
+    error — ``errored``), or ``None`` when the thread could not even be assembled.
 
     Shared by the reaction and utterance paths. ``parties`` is threaded through to
     avoid re-running ``thread_parties`` when the caller already has it.
@@ -97,9 +125,9 @@ def _extract_thread_draft(
 
     source = slack_thread_source(session, thread_id, parties=parties)
     if source is None:
-        return None
+        return None, None
     counts = extract_and_store(session, [source], extractor)
-    return source.source_id if counts["stored"] else None
+    return (source.source_id if counts["stored"] else None), counts
 
 
 def capture_resolved_thread(
@@ -153,7 +181,10 @@ def capture_resolved_thread(
         ):
             return None  # a bystander in the channel cannot trigger capture
         extractor = extractor or CaseExtractor(settings=settings)
-        return _extract_thread_draft(session, thread_id, extractor, parties=parties)
+        # Reaction path stores silently (a ✅ is itself the "keep" gesture — no prompt,
+        # and no no-case notice); only the stored id matters here.
+        stored, _counts = _extract_thread_draft(session, thread_id, extractor, parties=parties)
+        return stored
 
 
 def schedule_solve_capture(
@@ -250,6 +281,12 @@ def capture_and_prompt(
     the same thread within the extractor's round-trip would otherwise both pass the
     existence check and post two independent prompts. The second caller blocks on the
     lock until the first commits, then sees the draft and returns without posting.
+
+    When the model declines the thread as not-a-case (#525), no draft is created but the
+    solver still gets one short notice — never silence — deduped per thread in-process
+    (:func:`_claim_no_case_notice`) since there is no persisted draft to dedup on. A
+    transient extraction *error* (not a decision) stays silent so the next utterance can
+    retry. The flag-off and existing-draft paths remain silent, exactly as before.
     """
 
     settings = settings or get_settings()
@@ -268,18 +305,22 @@ def capture_and_prompt(
         if existing is not None:
             return None  # already captured + prompted for this thread (stay silent)
         extractor = extractor or CaseExtractor(settings=settings)
-        stored = _extract_thread_draft(session, thread_id, extractor)
+        stored, counts = _extract_thread_draft(session, thread_id, extractor)
 
     # Best-effort posts (never raise): a lost post is a lost message, not lost data.
     if stored is None:
         # The model declined the thread as not-a-case (#525): an explicit "解決" must
         # not be met with silence, so tell the solver why nothing was saved. A plain
-        # notice — there is no draft to keep, so no keep/discard prompt.
-        post_message(
-            bot_token=settings.slack_bot_token,
-            channel_id=channel_id,
-            text=_NO_CASE_NOTICE,
-        )
+        # notice — there is no draft to keep, so no keep/discard prompt. Only for a
+        # genuine decision (skipped), at most once per thread; a transient error
+        # (errored) or an unassemblable thread (counts is None) stays silent so the
+        # next utterance retries rather than showing a wrong "見つからなかった" reason.
+        if counts is not None and counts.get("skipped") and _claim_no_case_notice(thread_id):
+            post_message(
+                bot_token=settings.slack_bot_token,
+                channel_id=channel_id,
+                text=_NO_CASE_NOTICE,
+            )
         return None
 
     # A draft exists (committed above, so a fast button click always finds it): offer
