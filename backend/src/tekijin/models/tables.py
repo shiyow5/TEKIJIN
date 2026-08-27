@@ -151,7 +151,9 @@ class SlackMessageAnchor(Base):
 
     slack_channel_id: Mapped[str] = mapped_column(String(32), primary_key=True)
     slack_ts: Mapped[str] = mapped_column(String(32), primary_key=True)
-    thread_id: Mapped[int] = mapped_column(Integer, index=True)
+    # No index: every read goes through the composite PK (channel, ts). Add one only
+    # when a by-thread query exists (e.g. bulk-purging a thread's anchors) (#511 review).
+    thread_id: Mapped[int] = mapped_column(Integer)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime)
 
 

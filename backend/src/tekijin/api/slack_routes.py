@@ -59,13 +59,13 @@ from tekijin.config import Settings, get_settings
 from tekijin.data.db import session_scope
 from tekijin.data.messages import create_message, thread_parties
 from tekijin.data.slack_channel_links import get_channel_link_by_channel_id
-from tekijin.data.slack_message_anchors import record_message_anchor
 from tekijin.data.slack_links import (
     delete_slack_link,
     get_slack_link,
     get_slack_link_by_slack_user_id,
     upsert_slack_link,
 )
+from tekijin.data.slack_message_anchors import record_message_anchor
 from tekijin.models.tables import Employee
 from tekijin.slack.capture import SOLVE_REACTIONS, schedule_solve_capture
 from tekijin.slack.client import (
