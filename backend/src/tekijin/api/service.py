@@ -62,6 +62,7 @@ from tekijin.api.events import (
     TERMINAL_NODES,
     interrupt_event,
     node_event,
+    progress_events,
     reconnect_events,
     replay_terminal,
 )
@@ -1385,10 +1386,17 @@ class AgentService:
             # still receive done / message (codex#3). Unknown session → nothing.
             replay = replay_terminal(state.values)
             if replay is not None:
+                # #512: the progress FIRST, then the terminal — the same order the
+                # live run produced, so a session revisited from the history list
+                # renders the identical thinking steps instead of a bare outcome.
+                # Gated on there being a terminal at all: without one this is not a
+                # finished run but an unknown session, which must stay empty.
+                yield from progress_events(state.values)
                 yield replay
             return
         node = state.next[0]
         if node in _INTERRUPT_NODES:
+            yield from progress_events(state.values)
             yield from reconnect_events(node, state.values)
         else:
             # codex#6: a client disconnected mid-run (before ask/send). The run is

@@ -233,6 +233,76 @@ describe("ResultScreen — terminal-only replay (hard reload)", () => {
   });
 });
 
+describe("ResultScreen — thinking progress (#512)", () => {
+  // The steps used to live only on ProcessingScreen, so a session revisited from
+  // the history list (which links straight to /result, #470) showed the outcome
+  // with no progress above it and read as a different screen. The backend now
+  // replays understood/route/recommend/draft on reconnect; this screen has to
+  // render them, with the SAME component the processing screen uses.
+  const PROGRESS: Partial<EventStreamState> = {
+    understood: {
+      topics: ["ネットワーク"],
+      products: ["VPN"],
+      situation: "拠点間接続を検討中",
+      question_type: "howto",
+      confidence: 0.82,
+      similar_asker_count: 0,
+    },
+    route: { route: "person", reason: "候補となる担当者が見つかりました。", confidence: 0.7 },
+    recommend: { recommendations: [rec({ person_id: "E001", name: "高梨" })] },
+  };
+
+  it("shows the same steps as the processing screen on a replayed completed session", () => {
+    renderResult(state({ ...PROGRESS, terminal: true, done: { status: "sent" } }));
+    expect(screen.getByText("質問を理解しました")).toBeInTheDocument();
+    expect(screen.getByText("回答の経路を判断しました")).toBeInTheDocument();
+    expect(screen.getByText("候補を1名見つけました")).toBeInTheDocument();
+    // The outcome still wins the main line — the steps sit above it, not instead.
+    expect(screen.getByText("依頼は送信済みです")).toBeInTheDocument();
+  });
+
+  it("renders the interpretation detail and confidence, not just the step title", () => {
+    renderResult(state({ ...PROGRESS, terminal: true, done: { status: "sent" } }));
+    expect(screen.getByText("領域: ネットワーク / VPN")).toBeInTheDocument();
+    expect(screen.getByText("状況: 拠点間接続を検討中")).toBeInTheDocument();
+    // Both the interpretation and the route step carry a confidence badge.
+    expect(screen.getAllByText(/AIの解釈確信度/)).toHaveLength(2);
+  });
+
+  it("shows no progress block at all when nothing was replayed", () => {
+    // A session whose progress the backend could not rebuild must look exactly as
+    // it did before — an empty bordered list box would be worse than none.
+    renderResult(state({ terminal: true, done: { status: "sent" } }));
+    expect(screen.queryByText("質問を理解しました")).not.toBeInTheDocument();
+    expect(screen.queryByRole("list")).not.toBeInTheDocument();
+  });
+
+  it("never shows the live spinner row on the result screen", () => {
+    // "分析を続けています…" belongs to a run in flight; this screen is reached
+    // after one. Terminal state so the steps ARE rendered — otherwise this would
+    // pass for the wrong reason (nothing rendered at all).
+    renderResult(state({ ...PROGRESS, terminal: true, done: { status: "sent" } }));
+    expect(screen.getByText("質問を理解しました")).toBeInTheDocument();
+    expect(screen.queryByTestId("active-step")).not.toBeInTheDocument();
+  });
+
+  it("does not repeat the steps on the hand-off main line", () => {
+    // `PersonRouteView` already shows the route reason and an EDITABLE draft, so
+    // the step list there would render the draft twice — once uneditable above the
+    // real one. The steps are for the screens that would otherwise show nothing.
+    renderResult(
+      state({
+        ...PROGRESS,
+        draft: { draft: "高梨さん、拠点間接続の件でご相談です。" },
+      }),
+    );
+    expect(screen.queryByText("質問を理解しました")).not.toBeInTheDocument();
+    expect(screen.queryByText("依頼文を作成しました")).not.toBeInTheDocument();
+    // ...and the main line itself is unchanged.
+    expect(screen.getByDisplayValue("高梨さん、拠点間接続の件でご相談です。")).toBeInTheDocument();
+  });
+});
+
 describe("ResultScreen — stream error", () => {
   it("surfaces a generic error (no leaked detail) instead of stalling on 準備中", () => {
     renderResult(state({ error: "処理中にエラーが発生しました。" }));

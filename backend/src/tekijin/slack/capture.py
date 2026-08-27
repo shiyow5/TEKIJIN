@@ -33,6 +33,7 @@ from tekijin.data.db import session_scope
 from tekijin.data.messages import thread_parties
 from tekijin.data.slack_channel_links import get_channel_link_by_channel_id
 from tekijin.data.slack_links import get_slack_link_by_slack_user_id
+from tekijin.data.slack_message_anchors import thread_for_message
 from tekijin.knowledge.extract import CaseExtractor, extract_and_store
 from tekijin.knowledge.slack_thread import slack_thread_source
 
@@ -46,11 +47,19 @@ def capture_resolved_thread(
     session_factory: sessionmaker,
     *,
     channel_id: str,
+    message_ts: str | None,
     reactor_slack_user_id: str,
     extractor: CaseExtractor | None = None,
     settings: Settings | None = None,
 ) -> str | None:
-    """Distil the resolved thread behind ``channel_id`` into a knowledge draft.
+    """Distil the reacted-on thread into a knowledge draft.
+
+    ``message_ts`` is the Slack ts of the message the ✅ was placed on. The thread is
+    resolved from its recorded per-message anchor (#508) so a reaction on an OLDER
+    message on a reused pair channel is attributed to the thread that message
+    actually belonged to — not merely the channel's most recent thread. Only when
+    the message has no anchor (never mirrored — a bot post, or a message from before
+    capture was enabled) does it fall back to ``current_thread_id`` (best-effort).
 
     Returns the stored source id when a unit was upserted, else ``None`` (any gate
     failed, or the model declined the record as not-a-case). Read-safe and
@@ -67,7 +76,12 @@ def capture_resolved_thread(
         link = get_channel_link_by_channel_id(session, channel_id)
         if link is None:
             return None  # not a TEKIJIN pair-channel (also excludes every DM)
-        thread_id = link.current_thread_id
+        # #508: attribute the ✅ to the thread the reacted MESSAGE belonged to (its
+        # anchor), not the channel's latest thread; fall back to current only when
+        # the message has no anchor.
+        thread_id = thread_for_message(session, channel_id, message_ts) if message_ts else None
+        if thread_id is None:
+            thread_id = link.current_thread_id
         if thread_id is None:
             return None
         reactor = get_slack_link_by_slack_user_id(session, reactor_slack_user_id)
@@ -79,16 +93,6 @@ def capture_resolved_thread(
             parties["responder_id"],
         ):
             return None  # a bystander in the channel cannot trigger capture
-        # KNOWN LIMITATION (#476 review — resolved in Slice B, MUST fix before
-        # enabling): the thread is taken from the channel's mutable
-        # ``current_thread_id``, NOT from the reacted message's ``item.ts``. A pair
-        # channel is reused across sequential hand-offs, so if the same two people
-        # have a LATER accepted hand-off and someone then reacts ✅ on an OLDER
-        # message, this captures the CURRENT thread, not the one the reaction was on.
-        # Correlating ``item.ts`` to a specific thread needs per-message provenance,
-        # which Slice B introduces (the bot posts an anchor prompt whose ts maps to
-        # the thread). Tolerable while dormant: drafts land ``unreviewed`` and a human
-        # reviews before anything is trusted. Enablement blocker tracked in #508.
         source = slack_thread_source(session, thread_id, parties=parties)
         if source is None:
             return None
@@ -101,6 +105,7 @@ def schedule_solve_capture(
     session_factory: sessionmaker,
     *,
     channel_id: str,
+    message_ts: str | None,
     reactor_slack_user_id: str,
 ) -> None:
     """Fire-and-forget :func:`capture_resolved_thread` in a daemon thread.
@@ -115,6 +120,7 @@ def schedule_solve_capture(
         try:
             stored = capture_resolved_thread(
                 session_factory,
+                message_ts=message_ts,
                 channel_id=channel_id,
                 reactor_slack_user_id=reactor_slack_user_id,
             )
