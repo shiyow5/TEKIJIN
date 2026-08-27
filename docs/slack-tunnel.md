@@ -169,7 +169,19 @@ TEKIJIN_SLACK_CLIENT_SECRET=...
 TEKIJIN_SLACK_SIGNING_SECRET=...
 TEKIJIN_SLACK_BOT_TOKEN=xoxb-...
 TEKIJIN_SLACK_FRONTEND_URL=http://100.118.131.67:13000
+TEKIJIN_SLACK_TEAM_ID=T...
 ```
+
+> **`TEKIJIN_SLACK_TEAM_ID` を空のままにしないこと**（#406）。Slack の OAuth は
+> 「このクライアントIDに対して」**どのワークスペースの人でも**認証を通すので、
+> これが空だと**コールバックURLを知った他ワークスペースの人が連携できる**。
+> `.env` は `deploy/deploy.sh` の rsync 除外なので、**コードを更新しても自動では入らない**。
+> ここで手で入れること。値の取り方:
+>
+> ```bash
+> curl -s -H "Authorization: Bearer $TEKIJIN_SLACK_BOT_TOKEN" \
+>   https://slack.com/api/auth.test | python3 -c 'import json,sys; print(json.load(sys.stdin)["team_id"])'
+> ```
 
 > `docker-compose.yml` の `env_file` 設定は**このホストには効かない**。
 > DGX のバックエンドは compose ではなく `deploy/start_backend.sh` の uvicorn で動いており、

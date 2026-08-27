@@ -143,6 +143,15 @@ def oauth_callback(
             redirect_uri=settings.slack_redirect_uri,
             code=code,
         )
+        if settings.slack_team_id and identity.slack_team_id != settings.slack_team_id:
+            # Same redirect as any other failure — the person is not one of ours,
+            # so telling them WHICH workspace we expect would leak it.
+            logger.warning(
+                "Slack OAuth from unexpected workspace %s (expected %s)",
+                identity.slack_team_id,
+                settings.slack_team_id,
+            )
+            return RedirectResponse(f"{frontend_chat_url}?slack=error")
         service = request.app.state.agent_service
         with session_scope(service.session_factory) as session:
             # Also covers the DB write: `slack_user_id` is unique, so a Slack
@@ -172,7 +181,9 @@ def status(
         return schemas.SlackStatusResponse(linked=False)
     service = request.app.state.agent_service
     with service.session_factory() as session:
-        link = get_slack_link(session, principal.employee_id)
+        link = get_slack_link(
+            session, principal.employee_id, expected_team_id=get_settings().slack_team_id
+        )
     return schemas.SlackStatusResponse(linked=link is not None)
 
 
@@ -219,7 +230,9 @@ def _handle_message_event(session_factory: sessionmaker[Session], event: dict) -
         channel_link = get_channel_link_by_channel_id(session, channel_id)
         if channel_link is None:
             return  # not a channel TEKIJIN created — ignore
-        sender_link = get_slack_link_by_slack_user_id(session, slack_user_id)
+        sender_link = get_slack_link_by_slack_user_id(
+            session, slack_user_id, expected_team_id=get_settings().slack_team_id
+        )
         if sender_link is None:
             return
         thread_id = channel_link.current_thread_id
@@ -354,7 +367,9 @@ def _handle_interactivity_action(service: AgentService, raw: str) -> Response:
         responder_id = None
         if slack_user_id:
             with service.session_factory() as session:
-                link = get_slack_link_by_slack_user_id(session, str(slack_user_id))
+                link = get_slack_link_by_slack_user_id(
+                    session, str(slack_user_id), expected_team_id=get_settings().slack_team_id
+                )
                 responder_id = link.employee_id if link else None
         _, current_responder_id = service.session_participants(session_id)
         if responder_id is None or responder_id != current_responder_id:
