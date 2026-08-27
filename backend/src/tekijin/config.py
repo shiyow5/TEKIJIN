@@ -542,6 +542,14 @@ class Settings(BaseSettings):
     slack_signing_secret: str = ""
     # Where the OAuth callback sends the browser back to once linking finishes.
     slack_frontend_url: str = "http://localhost:3000"
+    # #476 Screen 02: capture a resolved hand-off as a knowledge draft when a
+    # participant reacts ✅ on the pair-channel thread. OFF (dormant) by default:
+    # when False, the reaction handler is a no-op and no extraction runs, so the
+    # Slack events path is byte-identical to today. Enable only once the extraction
+    # backend (vLLM) is available and the draft quality is verified. Shared
+    # pair-channels only (TEKIJIN never creates DMs), so this never reads a DM —
+    # the #404 DM-consent question does not arise here by construction.
+    slack_solve_capture_enabled: bool = False
 
     def slack_configured(self) -> bool:
         """True once the OAuth app credentials needed to start linking exist.

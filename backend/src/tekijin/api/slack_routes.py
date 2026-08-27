@@ -66,6 +66,7 @@ from tekijin.data.slack_links import (
     upsert_slack_link,
 )
 from tekijin.models.tables import Employee
+from tekijin.slack.capture import SOLVE_REACTIONS, schedule_solve_capture
 from tekijin.slack.client import (
     SlackIdentity,
     build_authorize_url,
@@ -521,6 +522,37 @@ def _handle_message_event(session_factory: sessionmaker[Session], event: dict) -
         create_message(session, thread_id, sender_id, text, now)
 
 
+def _handle_reaction_event(session_factory: sessionmaker[Session], event: dict) -> None:
+    """Solve-capture (#476): a ✅ reaction on a pair-channel thread queues a
+    knowledge draft of the resolved Q&A.
+
+    Cheap, synchronous gating only (event shape + the feature flag); the actual
+    channel/party resolution and the LLM extraction happen in
+    :func:`schedule_solve_capture`'s daemon thread so the webhook still acks within
+    Slack's ~3s budget. A no-op — never an error — for anything it should not act
+    on (wrong reaction, flag off, missing ids), so Slack never sees a 5xx and never
+    retries. When the flag is OFF (default) this returns before touching anything,
+    keeping the events path byte-identical to before #476.
+    """
+
+    if event.get("type") != "reaction_added":
+        return
+    if event.get("reaction") not in SOLVE_REACTIONS:
+        return
+    if not get_settings().slack_solve_capture_enabled:
+        return
+    item = event.get("item") or {}
+    channel_id = item.get("channel")
+    reactor_slack_user_id = event.get("user")
+    if not channel_id or not reactor_slack_user_id:
+        return
+    schedule_solve_capture(
+        session_factory,
+        channel_id=channel_id,
+        reactor_slack_user_id=reactor_slack_user_id,
+    )
+
+
 @router.post("/events")
 async def events(request: Request) -> Response:
     """Slack Events API endpoint: the URL-verification handshake, plus inbound
@@ -560,7 +592,15 @@ async def events(request: Request) -> Response:
         if event_id is None or not seen_events.seen_before(event_id):
             event = payload.get("event") or {}
             service = request.app.state.agent_service
-            await run_in_threadpool(_handle_message_event, service.session_factory, event)
+            event_type = event.get("type")
+            if event_type == "reaction_added":
+                # Solve-capture (#476): cheap gating on the loop, then a daemon
+                # thread does the DB resolution + LLM extraction (never blocks ack).
+                _handle_reaction_event(service.session_factory, event)
+            else:
+                # Message mirroring (#388): a quick DB write, safe to run in the
+                # threadpool while the request awaits it.
+                await run_in_threadpool(_handle_message_event, service.session_factory, event)
 
     return JSONResponse({"ok": True})
 
