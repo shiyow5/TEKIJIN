@@ -71,8 +71,17 @@ _CHAT_SYSTEM_PROMPT = (
 )
 
 # System prompt per source kind; daily reports keep the tag-faithful prompt, chat
-# uses the case-from-conversation prompt above.
-_SYSTEM_PROMPTS: dict[str, str] = {"chat": _CHAT_SYSTEM_PROMPT}
+# uses the case-from-conversation prompt above. A resolved Slack thread (#476) is
+# also free-form conversational text (a question + its answer / chat follow-up), so
+# it uses the SAME chat-hardened prompt — which leans hard on extractable=false —
+# rather than the daily-report prompt tuned for clean records. The key is the literal
+# ``SLACK_THREAD_SOURCE_TYPE`` value from ``knowledge.slack_thread``; it is inlined
+# (not imported) because that module imports ``ExtractionSource`` from here, and an
+# import back would be circular.
+_SYSTEM_PROMPTS: dict[str, str] = {
+    "chat": _CHAT_SYSTEM_PROMPT,
+    "slack_thread": _CHAT_SYSTEM_PROMPT,
+}
 
 
 @dataclass(frozen=True, slots=True)

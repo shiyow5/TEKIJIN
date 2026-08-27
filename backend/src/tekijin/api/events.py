@@ -74,6 +74,7 @@ def node_event(
                 situation=update.get("situation"),
                 question_type=update.get("question_type"),
                 confidence=update.get("intent_confidence", 0.0),
+                similar_asker_count=update.get("similar_asker_count", 0),
             ),
         )
     if node == "c5_route":

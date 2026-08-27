@@ -14,6 +14,9 @@ import type {
   ChatThreadDetail,
   ChatThreadListResponse,
   ChatThreadSummary,
+  ConsultRetrospectiveAck,
+  ConsultRetrospectiveContext,
+  ConsultRetrospectiveRequest,
   DashboardResponse,
   DeclineNotification,
   DeleteQuestionResponse,
@@ -38,6 +41,8 @@ import type {
   NotificationAckResponse,
   NotificationsResponse,
   Principal,
+  QuestionStructureRequest,
+  QuestionStructureResponse,
   RecentQuestionItem,
   RecentQuestionsResponse,
   ResolveQuestionResponse,
@@ -46,6 +51,7 @@ import type {
   SlackAuthorizeUrlResponse,
   SlackStatusResponse,
   SlackUnlinkResponse,
+  TopicVocabularyResponse,
 } from "@/lib/api-types";
 import { getAuthToken } from "@/lib/auth-token";
 import { getApiBaseUrl } from "@/lib/config";
@@ -277,6 +283,20 @@ export function regenerateHandoffDraft(
 }
 
 /**
+ * POST /handoff/structure — the asker asks the AI to tidy their raw question into
+ * the four hand-off fields (起きていること / 環境 / 試したこと / 詰まっている点, #475).
+ * On-demand and read-only: it reshapes the already-stored question OUTSIDE the
+ * graph (never on the C1 critical path) and returns the fields synchronously.
+ * Throws {@link ApiError} with 404 when the session has no question yet.
+ */
+export function structureQuestion(
+  request: QuestionStructureRequest,
+  options: RequestOptions = {},
+): Promise<QuestionStructureResponse> {
+  return postJson<QuestionStructureResponse>("/handoff/structure", request, options);
+}
+
+/**
  * GET /handoff/{session_id} — the responder-facing view of a session paused at
  * the `send` interrupt (product-spec 画面4). Read-only: it does not advance the
  * graph. Throws {@link ApiError} with status 404 (no handoff pending) or 409
@@ -342,6 +362,10 @@ export async function getRecentQuestions(
  * GET /knowledge — the company-wide list of resolved-by-a-person questions
  * (#293, #301), with optional search/filter and a side-panel summary. Unlike
  * {@link getRecentQuestions}, this is NOT scoped to one asker.
+ *
+ * The period filter is a start bound only (`since`). The endpoint's matching
+ * `until` was removed in #394: nothing sent it, nothing tested it, and it cut
+ * the end day off (see `knowledge_library.list_knowledge`).
  */
 export async function getKnowledgeList(
   options: RequestOptions & {
@@ -349,18 +373,16 @@ export async function getKnowledgeList(
     department?: string;
     topic?: string;
     since?: string;
-    until?: string;
     offset?: number;
     limit?: number;
   } = {},
 ): Promise<KnowledgeListResponse> {
-  const { q, department, topic, since, until, offset, limit, ...requestOptions } = options;
+  const { q, department, topic, since, offset, limit, ...requestOptions } = options;
   const params = new URLSearchParams();
   if (q) params.set("q", q);
   if (department) params.set("department", department);
   if (topic) params.set("topic", topic);
   if (since) params.set("since", since);
-  if (until) params.set("until", until);
   if (offset !== undefined) params.set("offset", String(offset));
   if (limit !== undefined) params.set("limit", String(limit));
   const query = params.size > 0 ? `?${params.toString()}` : "";
@@ -412,6 +434,48 @@ export async function resolveQuestion(
 }
 
 /**
+ * GET /topics — the closed topic vocabulary the C6 scorer joins on (#247).
+ * Served rather than duplicated here: a hard-coded copy would drift from
+ * `scorer/topics.py`, and a topic the scorer does not know matches no evidence.
+ */
+export async function getTopics(options: RequestOptions = {}): Promise<string[]> {
+  const body = await getJson<TopicVocabularyResponse>("/topics", options);
+  return body.topics;
+}
+
+/**
+ * GET /consult-retrospective/{session_id} — the durable context for the write-up
+ * form (#247): the question, how it was handed off, and who accepted it.
+ *
+ * Deliberately not {@link getHandoff}: that endpoint 404s once the responder
+ * records an outcome, so a form built on it could only be reached BEFORE the
+ * consultation it documents had happened.
+ */
+export function getRetrospectiveContext(
+  sessionId: string,
+  options: RequestOptions = {},
+): Promise<ConsultRetrospectiveContext> {
+  return getJson<ConsultRetrospectiveContext>(
+    `/consult-retrospective/${encodeURIComponent(sessionId)}`,
+    options,
+  );
+}
+
+/**
+ * POST /consult-retrospective — record the asker's write-up of a face-to-face
+ * 直接相談 (#247). Only the question's own asker may (403 otherwise, 404 for an
+ * unknown question, 422 for a topic outside the vocabulary, for a consultation
+ * nobody accepted, or for a responder other than the one who accepted it, 409 if
+ * this question has already been written up, 503 if the feature is switched off).
+ */
+export function postConsultRetrospective(
+  request: ConsultRetrospectiveRequest,
+  options: RequestOptions = {},
+): Promise<ConsultRetrospectiveAck> {
+  return postJson<ConsultRetrospectiveAck>("/consult-retrospective", request, options);
+}
+
+/**
  * GET /notifications — decline events the asker hasn't seen yet, newest first
  * (#E7). `askerId` is the external "E###" form. Returns the unwrapped items array.
  */
@@ -448,6 +512,36 @@ export function getSlackAuthorizeUrl(
   options: RequestOptions = {},
 ): Promise<SlackAuthorizeUrlResponse> {
   return getJson<SlackAuthorizeUrlResponse>("/slack/authorize-url", options);
+}
+
+/**
+ * POST /slack/login-url — the "Sign in with Slack" start URL for someone with NO
+ * session yet (#406). Unauthenticated by design. Rejects with a 503 `ApiError`
+ * when Slack login is switched off, which callers treat as "hide the button".
+ */
+export async function getSlackLoginUrl(
+  options?: RequestOptions,
+): Promise<SlackAuthorizeUrlResponse> {
+  // POST so a third-party page cannot trigger it with `<img src>` (#494).
+  return postJson<SlackAuthorizeUrlResponse>("/slack/login-url", undefined, options);
+}
+
+/**
+ * POST /slack/link/complete — redeem the pending token the OAuth callback left
+ * in the URL fragment, attaching that Slack account to the CALLER (#494).
+ *
+ * The callback cannot do this itself: it has no session, so it does not know who
+ * is linking. Rejects with 409 when the Slack account already belongs to someone.
+ */
+export async function completeSlackLink(
+  pendingToken: string,
+  options?: RequestOptions,
+): Promise<SlackStatusResponse> {
+  return postJson<SlackStatusResponse>(
+    "/slack/link/complete",
+    { pending_token: pendingToken },
+    options,
+  );
 }
 
 /** POST /slack/unlink — remove the acting employee's linked Slack account. */

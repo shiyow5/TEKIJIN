@@ -155,6 +155,12 @@ class Settings(BaseSettings):
     additive_self_answer_enabled: bool = True
     additive_self_answer_floor: float = 0.20
 
+    # #475 Screen 01: attach the "N other people asked in this area" reassurance
+    # count to the understood event. Read-only display signal (topic-overlap count
+    # over the questions table, GIN-indexed) with no routing/scoring effect, so it
+    # is enabled by default. The frontend hides it when the count is 0.
+    similar_askers_enabled: bool = True
+
     # #327: corpus-count routing for prior_answer. Nemotron's answer cosine cannot
     # separate this route (PRIOR_ANSWER_SIM sits above the observed max — see
     # route.py / #119), so route on whether the top retrieved past answer is a
@@ -255,6 +261,17 @@ class Settings(BaseSettings):
     # 並べる」 at the SAME 0.9333/0.7727 (`robustness_results.json`), so a one-line
     # `proximity` weight bump may buy the same thing as this new code path.
     branch_constraint_enabled: bool = False
+
+    # #247: the 直接相談 retrospective. ENABLED by default — this is a kill switch,
+    # not a rollout gate: the feature is the only durable record a face-to-face
+    # consultation leaves, so shipping it OFF would ship nothing. It exists because
+    # this is the one UI-reachable write that feeds C6 expertise evidence; if the
+    # write-ups ever turn out to be noisy (or abused despite the accepted-hand-off
+    # check), the scoring input has to be stoppable without a rollback. Read-only
+    # ``GET /consult-retrospective/{session_id}`` stays up when this is off, so the
+    # screen still renders and the form's 503 branch can say the feature is
+    # switched off rather than "retry" something that cannot succeed.
+    consult_retrospective_enabled: bool = True
 
     # #357: knowledge framework. When the knowledge layer is wired into retrieval,
     # answer a question from structured knowledge units (problem → action → result,
@@ -456,6 +473,34 @@ class Settings(BaseSettings):
     feedback_max_per_window: int = 60
     feedback_window_seconds: float = 60.0
 
+    # The ONE Slack workspace this deployment belongs to (``T...``), from
+    # ``auth.test`` or the App's Basic Information. Slack's OAuth authenticates
+    # any workspace's user against our client id, so the team the token comes
+    # back with is the only thing separating a colleague from a stranger who
+    # found the callback URL.
+    #
+    # Blank = accept any workspace, which is the pre-#406 behaviour kept for
+    # local/demo setups that have no real workspace to name. Anything that turns
+    # workspace membership into an AUTHORISATION decision must require it
+    # explicitly rather than inherit this permissive default.
+    slack_team_id: str = ""
+
+    # Accept "Sign in with Slack" as a way to OBTAIN a session, not just to attach
+    # a Slack identity to an existing one (#406 案A). Off by default: turning it on
+    # makes workspace membership an authorisation boundary, which is only sound
+    # once ``slack_team_id`` names the workspace — ``_enforce_secure_auth`` refuses
+    # to boot on the combination rather than trusting an operator to notice.
+    slack_login_enabled: bool = False
+
+    # Treat the Slack workspace as the roster and reconcile `slack_links` against
+    # it on a schedule (#406 step 3). OFF by default, and not merely out of
+    # caution: #406 documents that registering everyone BEFORE evidence
+    # extraction (#404) lands gives each new colleague ``topic_fit = 0``, so the
+    # candidate list grows while the recommendation behind it does not — the
+    # screen gets busier and the answers get worse. Turn this on only once there
+    # is evidence for the people it would add.
+    slack_user_sync_enabled: bool = False
+
     # FastAPI's auto-docs (``/docs``, ``/redoc``, ``/openapi.json``). Default OFF:
     # ``/openapi.json`` publishes every endpoint's path, parameters and types, which
     # is a map of the protected surface even though no data leaks. It was reachable
@@ -506,6 +551,21 @@ class Settings(BaseSettings):
     slack_signing_secret: str = ""
     # Where the OAuth callback sends the browser back to once linking finishes.
     slack_frontend_url: str = "http://localhost:3000"
+    # #476 Screen 02: capture a resolved hand-off as a knowledge draft when a
+    # participant reacts ✅ on the pair-channel thread. OFF (dormant) by default:
+    # when False, the reaction handler is a no-op and no extraction runs, so the
+    # Slack events path is byte-identical to today. Enable only once the extraction
+    # backend (vLLM) is available and the draft quality is verified. Shared
+    # pair-channels only (TEKIJIN never creates DMs), so this never reads a DM —
+    # the #404 DM-consent question does not arise here by construction.
+    #
+    # ENABLEMENT BLOCKER (#476 review): before flipping this True, resolve the
+    # reaction→thread mis-attribution on reused pair-channels — a ✅ is currently
+    # attributed to the channel's ``current_thread_id``, not the reacted message's
+    # ``item.ts`` (see ``slack.capture.capture_resolved_thread`` and #508). Until
+    # then a draft's provenance can be wrong on a channel that served more than one
+    # hand-off between the same pair.
+    slack_solve_capture_enabled: bool = False
 
     def slack_configured(self) -> bool:
         """True once the OAuth app credentials needed to start linking exist.

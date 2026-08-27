@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 from tekijin.agent.protocols import (
     AnswerabilityResult,
     IntentResult,
+    QuestionStructureResult,
     SelfAnswerResult,
     SufficiencyResult,
 )
@@ -367,4 +368,32 @@ class TemplateSelfAnswerModel:
             answer=answer,
             cited_source_ids=[e.source_id for e in items],
             grounded=True,
+        )
+
+
+class TemplateQuestionStructurer:
+    """Question re-drafter stub (#475): deterministic, network-free scaffolding.
+
+    The real reshaping is the vLLM model's job; this stub proves the contract so the
+    on-demand endpoint runs LLM-free in tests. It seeds ``summary`` from C1's
+    ``situation`` (falling back to the raw question) and ``blocker`` from the question
+    itself, and leaves ``environment``/``tried`` EMPTY — exactly the "don't invent a
+    field the asker never gave" rule the real model must follow. It never fabricates
+    an environment or a tried-step it has no evidence for.
+    """
+
+    def structure(
+        self,
+        question: str,
+        *,
+        situation: str | None = None,
+        topics: list[str] | None = None,
+    ) -> QuestionStructureResult:
+        text = (question or "").strip()
+        summary = (situation or "").strip() or text
+        return QuestionStructureResult(
+            summary=summary,
+            environment="",
+            tried="",
+            blocker=text,
         )

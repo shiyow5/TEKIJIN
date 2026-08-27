@@ -112,9 +112,10 @@ describe("HistoryScreen", () => {
     // separate "結果を見る" text link exists anymore (#397).
     expect(screen.queryByText("結果を見る")).not.toBeInTheDocument();
     const sessionLink = screen.getByText("UTMの移行時の注意点").closest("a");
-    // `?from=history` (#397 follow-up) lets the destination send the user back
-    // to their history list instead of the home hub.
-    expect(sessionLink).toHaveAttribute("href", "/session/sess-q1?from=history");
+    // The result page (not the processing screen, #468/#470) is the destination;
+    // `?from=history` (#397 follow-up) lets it send the user back to their
+    // history list instead of the home hub.
+    expect(sessionLink).toHaveAttribute("href", "/session/sess-q1/result?from=history");
 
     // A history-only row (no session_id) stays non-interactive and is marked as such.
     expect(screen.getByText("社内Wi-Fiの申請方法").closest("a")).toBeNull();

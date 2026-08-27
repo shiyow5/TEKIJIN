@@ -15,7 +15,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 function auth(login: AuthContextValue["login"]): AuthContextValue {
-  return { principal: null, loading: false, login, logout: vi.fn() };
+  return { principal: null, loading: false, login, logout: vi.fn(), adoptToken: vi.fn() };
 }
 
 beforeEach(() => {

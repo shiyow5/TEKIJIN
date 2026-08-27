@@ -38,7 +38,7 @@ const ADMIN: Principal = { id: null, name: "管理者", dept: null, is_admin: tr
 const USER: Principal = { id: "E001", name: "山田 太郎", dept: "営業部", is_admin: false };
 
 function auth(principal: Principal): AuthContextValue {
-  return { principal, loading: false, login: vi.fn(), logout: vi.fn() };
+  return { principal, loading: false, login: vi.fn(), logout: vi.fn(), adoptToken: vi.fn() };
 }
 
 function ctx(partial: Partial<CurrentUserContextValue>): CurrentUserContextValue {
@@ -83,6 +83,16 @@ afterEach(() => {
 });
 
 describe("AppHeader", () => {
+  function switcher(partial: Partial<CurrentUserContextValue>): CurrentUserContextValue {
+    return ctx({
+      employees: EMPLOYEES,
+      currentUserId: "E001",
+      currentUser: EMPLOYEES[0],
+      canSwitch: true,
+      ...partial,
+    });
+  }
+
   it("renders the brand logo", () => {
     useCurrentUserMock.mockReturnValue(ADMIN_READY);
     render(<AppHeader />);
@@ -111,24 +121,117 @@ describe("AppHeader", () => {
     expect(screen.getByText("山田 太郎（営業部）")).toBeInTheDocument();
   });
 
-  it("calls setCurrentUserId and navigates home when a different user is selected (admin, #210)", () => {
+  it("does not switch or navigate while the select is only being browsed (#231)", () => {
+    // A native <select> fires `change` for every arrow key with the popup closed —
+    // it does not wait for Enter. Switching there meant walking the list threw the
+    // admin home on each keypress, discarding an unsent draft they never left.
     const setCurrentUserId = vi.fn();
-    useCurrentUserMock.mockReturnValue(
-      ctx({
-        employees: EMPLOYEES,
-        currentUserId: "E001",
-        currentUser: EMPLOYEES[0],
-        setCurrentUserId,
-        canSwitch: true,
-      }),
-    );
+    useCurrentUserMock.mockReturnValue(switcher({ setCurrentUserId }));
+    pathnameMock.mockReturnValue("/answer/s1");
+    render(<AppHeader />);
+    const select = screen.getByRole("combobox", { name: /利用者を切替/ }) as HTMLSelectElement;
+
+    fireEvent.change(select, { target: { value: "E002" } });
+
+    expect(setCurrentUserId).not.toHaveBeenCalled();
+    expect(pushMock).not.toHaveBeenCalled();
+    // The browsed value is still SHOWN — the user must see what they are pointing at.
+    expect(select.value).toBe("E002");
+  });
+
+  it("switches and navigates home only when 切替 is pressed (#210, #231)", () => {
+    const setCurrentUserId = vi.fn();
+    useCurrentUserMock.mockReturnValue(switcher({ setCurrentUserId }));
     pathnameMock.mockReturnValue("/inbox");
     render(<AppHeader />);
+
     fireEvent.change(screen.getByRole("combobox", { name: /利用者を切替/ }), {
       target: { value: "E002" },
     });
+    fireEvent.click(screen.getByRole("button", { name: "切替" }));
+
     expect(setCurrentUserId).toHaveBeenCalledWith("E002");
     expect(pushMock).toHaveBeenCalledWith("/");
+  });
+
+  it("applies on Enter so a keyboard user need not reach for the button (#231)", () => {
+    const setCurrentUserId = vi.fn();
+    useCurrentUserMock.mockReturnValue(switcher({ setCurrentUserId }));
+    render(<AppHeader />);
+    const select = screen.getByRole("combobox", { name: /利用者を切替/ });
+
+    fireEvent.change(select, { target: { value: "E002" } });
+    fireEvent.keyDown(select, { key: "Enter" });
+
+    expect(setCurrentUserId).toHaveBeenCalledWith("E002");
+    expect(pushMock).toHaveBeenCalledWith("/");
+  });
+
+  it("does not switch when focus simply leaves the select (#231)", () => {
+    // The whole point: clicking back into your own textarea after peeking at the
+    // list must NOT switch identity and throw you home. Committing on blur would
+    // reintroduce exactly the draft loss this issue is about.
+    const setCurrentUserId = vi.fn();
+    useCurrentUserMock.mockReturnValue(switcher({ setCurrentUserId }));
+    pathnameMock.mockReturnValue("/answer/s1");
+    render(<AppHeader />);
+    const select = screen.getByRole("combobox", { name: /利用者を切替/ });
+
+    fireEvent.change(select, { target: { value: "E002" } });
+    fireEvent.blur(select);
+
+    expect(setCurrentUserId).not.toHaveBeenCalled();
+    expect(pushMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps 切替 disabled until the selection differs from the current user (#231)", () => {
+    useCurrentUserMock.mockReturnValue(switcher({}));
+    render(<AppHeader />);
+    const select = screen.getByRole("combobox", { name: /利用者を切替/ });
+    expect(screen.getByRole("button", { name: "切替" })).toBeDisabled();
+
+    fireEvent.change(select, { target: { value: "E002" } });
+    expect(screen.getByRole("button", { name: "切替" })).toBeEnabled();
+
+    fireEvent.change(select, { target: { value: "E001" } });
+    expect(screen.getByRole("button", { name: "切替" })).toBeDisabled();
+  });
+
+  it("does not switch when the browsing ends back on the current user (#231)", () => {
+    const setCurrentUserId = vi.fn();
+    useCurrentUserMock.mockReturnValue(switcher({ setCurrentUserId }));
+    render(<AppHeader />);
+    const select = screen.getByRole("combobox", { name: /利用者を切替/ });
+
+    fireEvent.change(select, { target: { value: "E002" } });
+    fireEvent.change(select, { target: { value: "E001" } });
+    fireEvent.keyDown(select, { key: "Enter" });
+
+    expect(setCurrentUserId).not.toHaveBeenCalled();
+    expect(pushMock).not.toHaveBeenCalled();
+  });
+
+  it("drops a stale selection when the acting user changes from elsewhere (#231)", () => {
+    // A reload restoring the default, or another tab. The pending value must not
+    // outlive it: the header would show E002 while the app acts as E003, and the
+    // next apply would silently revert a change the admin never made.
+    const THIRD = { id: "E003", name: "鈴木 次郎", dept: "総務部" };
+    const all = [...EMPLOYEES, THIRD];
+    useCurrentUserMock.mockReturnValue(switcher({ employees: all }));
+    const { rerender } = render(<AppHeader />);
+    const select = screen.getByRole("combobox", { name: /利用者を切替/ }) as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: "E002" } });
+    expect(select.value).toBe("E002");
+
+    useCurrentUserMock.mockReturnValue(
+      switcher({ employees: all, currentUserId: "E003", currentUser: THIRD }),
+    );
+    rerender(<AppHeader />);
+
+    expect(
+      (screen.getByRole("combobox", { name: /利用者を切替/ }) as HTMLSelectElement).value,
+    ).toBe("E003");
+    expect(screen.getByRole("button", { name: "切替" })).toBeDisabled();
   });
 
   it("shows a disabled placeholder while the directory is loading (admin)", () => {

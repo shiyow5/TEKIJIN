@@ -22,6 +22,7 @@ import { SourceCitations } from "@/components/SourceCitations";
 import { type EventStreamState, useEventStream } from "@/hooks/useEventStream";
 import { ApiError, postAnswer, requestDocumentFallback } from "@/lib/api-client";
 import { formatConfidence } from "@/lib/format";
+import { REVEAL_CLASS, revealStyle } from "@/lib/motion";
 import { routeLabel } from "@/lib/routes";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -158,6 +159,9 @@ export function ProcessingScreen({
   }, [stream.followup]);
 
   const steps = buildSteps(stream);
+  // #475 Screen 01: reassurance — how many OTHER people asked in this area. Hidden
+  // at 0 (feature off / nobody else). Lowers the "is this a dumb question?" barrier.
+  const similarAskerCount = stream.understood?.similar_asker_count ?? 0;
   const hasRecommendations = (stream.recommend?.recommendations.length ?? 0) > 0;
   // A draft implies a recommendation was produced: on a refresh at the `send`
   // interrupt the reconnect replays only the draft, so treat it as result access.
@@ -249,10 +253,11 @@ export function ProcessingScreen({
         className="flex flex-col gap-md"
       >
         <ol className="flex flex-col gap-sm">
-          {steps.map((step) => (
+          {steps.map((step, index) => (
             <li
               key={step.id}
-              className="flex items-start gap-sm rounded-xl border border-outline-variant bg-surface-container-lowest p-md"
+              style={revealStyle(index)}
+              className={`flex items-start gap-sm rounded-xl border border-outline-variant bg-surface-container-lowest p-md ${REVEAL_CLASS}`}
             >
               <span
                 aria-label="完了"
@@ -281,7 +286,7 @@ export function ProcessingScreen({
           {showActiveStep ? (
             <li
               data-testid="active-step"
-              className="flex items-center gap-sm rounded-xl border border-primary-fixed bg-surface-container-low p-md"
+              className={`flex items-center gap-sm rounded-xl border border-primary-fixed bg-surface-container-low p-md ${REVEAL_CLASS}`}
             >
               <span
                 aria-label="進行中"
@@ -293,6 +298,20 @@ export function ProcessingScreen({
             </li>
           ) : null}
         </ol>
+
+        {/* #475 Screen 01: reassurance that the question is not unique — shown only
+            when other askers exist (count ≥ 1), never at 0. */}
+        {similarAskerCount >= 1 ? (
+          <p
+            className={`rounded-xl border border-outline-variant bg-surface-container-low p-md text-on-surface-variant text-sm ${REVEAL_CLASS}`}
+          >
+            <span aria-hidden="true" className="mr-xs">
+              💬
+            </span>
+            同じ分野で、過去に{similarAskerCount}
+            人が質問しています。あなただけではありません。
+          </p>
+        ) : null}
 
         {/* #413: additive cited answer, shown alongside the person hand-off flow. */}
         <ReferenceAnswer reference={stream.reference} sessionId={sessionId} />

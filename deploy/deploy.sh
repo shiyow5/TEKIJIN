@@ -15,16 +15,24 @@
 # Everything is overridable via env (defaults match the DGX):
 #   TEKIJIN_DEPLOY_DIR         live deploy dir           (/home/team_a/TEKIJIN)
 #   TEKIJIN_VENV_PY            backend venv python       (…/tekijin-bench/.venv/bin/python)
-#   TEKIJIN_API_BASE_URL       baked into the frontend   (http://100.118.131.67:18000)
+#   TEKIJIN_API_BASE_URL       baked into the frontend   (http://internship-dgx1.tail349bcd.ts.net:18000)
 #   TEKIJIN_FRONTEND_CONTAINER frontend container name   (tekijin_frontend)
 #   TEKIJIN_PORT               backend port              (18000)
 #   TEKIJIN_FRONTEND_PORT      frontend port             (13000)
+#
+# The default API URL is the host's Tailscale MagicDNS name, not its 100.x address
+# (#484): Tailscale can reassign the IP, the name is tied to the hostname and does
+# not move. It resolves inside the tailnet only, which is where this frontend is
+# reachable anyway. NOTE: the origin the browser loads the page FROM must be listed
+# in `TEKIJIN_CORS_ORIGINS` in the deployed `.env` — opening the frontend by an
+# address that is not listed blocks every API call. Keep both names there while
+# people still have the numeric one bookmarked.
 set -euo pipefail
 
 SRC="${GITHUB_WORKSPACE:-$(pwd)}"
 DEPLOY_DIR="${TEKIJIN_DEPLOY_DIR:-/home/team_a/TEKIJIN}"
 VENV_PY="${TEKIJIN_VENV_PY:-python3}"
-API_BASE_URL="${TEKIJIN_API_BASE_URL:-http://100.118.131.67:18000}"
+API_BASE_URL="${TEKIJIN_API_BASE_URL:-http://internship-dgx1.tail349bcd.ts.net:18000}"
 FRONTEND_CONTAINER="${TEKIJIN_FRONTEND_CONTAINER:-tekijin_frontend}"
 PORT="${TEKIJIN_PORT:-18000}"
 FRONTEND_PORT="${TEKIJIN_FRONTEND_PORT:-13000}"

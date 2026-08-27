@@ -11,11 +11,17 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from tekijin.scorer.topics import TOPIC_VOCABULARY
+
 Outcome = Literal["accepted", "declined"]
 
 # The asker's chosen consultation method. "chat" is the implicit default: an
 # unset/legacy value is coalesced to it everywhere it is read.
 ConsultMethod = Literal["direct", "chat"]
+
+# #247: how far the 直接相談 got. "unresolved" is recorded but is NOT expertise
+# evidence and never subtracts (断り≠非専門) — see collect_topic_evidence.
+ConsultResolution = Literal["resolved", "partial", "unresolved"]
 
 
 def normalize_consult_method(value: str | None) -> ConsultMethod:
@@ -197,6 +203,30 @@ class HandoffDraftRequest(BaseModel):
         return trimmed
 
 
+class QuestionStructureRequest(BaseModel):
+    """Ask the AI to tidy the session's raw question into the four hand-off fields
+    (#475 Screen 01). On-demand and read-only — it reshapes the already-stored
+    question, so the client only needs to name the session."""
+
+    session_id: str = Field(pattern=_SESSION_ID_PATTERN)
+
+
+class QuestionStructureResponse(BaseModel):
+    """The re-drafted question (#475): 起きていること / 環境 / 試したこと / 詰まっている点.
+
+    Every field can be empty — the model leaves a field blank rather than inventing
+    what the question never stated (an invented 環境 would mislead the responder), and
+    the asker fills or edits it before sending. Purely presentational: nothing here is
+    persisted or fed back into routing.
+    """
+
+    session_id: str
+    summary: str
+    environment: str
+    tried: str
+    blocker: str
+
+
 class HandoffSelectRequest(BaseModel):
     """Asker picks a different (of the currently shown) candidate as the
     hand-off target, reordering it to primary and regenerating the draft for
@@ -331,6 +361,106 @@ class FeedbackRequest(BaseModel):
         return value
 
 
+class TopicVocabularyResponse(BaseModel):
+    """The closed topic list the scorer joins on (#247).
+
+    Served rather than duplicated in the frontend: the retrospective form makes the
+    asker pick from this vocabulary, and a hard-coded copy would drift from
+    ``scorer/topics.py`` silently — a topic that no longer exists matches no
+    evidence and does nothing (#116).
+    """
+
+    topics: list[str]
+
+
+class ConsultRetrospectiveRequest(BaseModel):
+    """The asker's write-up of a face-to-face 直接相談 (#247).
+
+    A "direct" consultation leaves no text behind, so F-10 (回答を索引に追加し
+    専門性の推定を更新) has nothing to work with. This is that record.
+
+    ``asker_id`` is NOT accepted from the body — it comes from the authenticated
+    principal, the same rule as :class:`FeedbackRequest`. That matters more here
+    than for feedback: this row becomes expertise EVIDENCE for ``responder_id``,
+    so an attributable author is what stops it being a way to fabricate someone's
+    standing.
+
+    ``responder_id`` IS accepted from the body, but it is not trusted: the route
+    requires it to equal the employee who ACCEPTED this question's hand-off. It is
+    a confirmation of what the client was shown, not a choice — an author-only
+    check ("who may write") would still have left "whom may they write about" open,
+    which is a way to grant anyone up to ``OFFLINE_CONSULT_EVIDENCE_CAP`` × the
+    offline-consult base score on any topic.
+
+    ``topics`` is validated against ``TOPIC_VOCABULARY`` because the scorer JOINS
+    on these strings — a free-text topic would match no evidence and silently do
+    nothing (#116). ``asked`` is optional (#247 の項目2); the rest are required.
+    """
+
+    question_id: str = Field(min_length=1, max_length=64)
+    responder_id: str = Field(min_length=1, max_length=32)
+    # At most 3 of the 22-topic vocabulary. One consultation is about one thing;
+    # a wide list would spread a single conversation's evidence across most of the
+    # vocabulary, which is how the offline-consult cap gets reached without the
+    # consultations behind it.
+    topics: list[str] = Field(min_length=1, max_length=3)
+    asked: str | None = Field(default=None, max_length=2000)
+    answer_body: str = Field(min_length=1, max_length=4000)
+    resolution: ConsultResolution
+
+    @field_validator("topics")
+    @classmethod
+    def _topics_in_vocabulary(cls, value: list[str]) -> list[str]:
+        unknown = [t for t in value if t not in TOPIC_VOCABULARY]
+        if unknown:
+            raise ValueError(f"未知のトピックです: {', '.join(unknown)}")
+        # De-duplicate, keeping order: the same topic twice must not count twice.
+        return list(dict.fromkeys(value))
+
+    @field_validator("answer_body")
+    @classmethod
+    def _answer_not_blank(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("得られた回答は必須です")
+        return stripped
+
+
+class ConsultResponder(BaseModel):
+    """The person a retrospective may be written about (#247)."""
+
+    person_id: str
+    name: str
+
+
+class ConsultRetrospectiveContext(BaseModel):
+    """What GET /consult-retrospective/{session_id} tells the write-up form (#247).
+
+    Deliberately NOT ``HandoffResponse``: that payload is the pending hand-off view
+    and 404s as soon as the responder records an outcome — i.e. it stops existing
+    exactly when the face-to-face consultation becomes possible. This one is read
+    from SQL and stays valid afterwards.
+
+    ``responder`` is ``None`` until someone accepts, ``already_recorded`` flips once
+    a write-up exists; between them the client can tell "not yet consulted", "ready
+    to write" and "already written" apart without guessing from error codes.
+    """
+
+    session_id: str
+    question_id: str
+    question: str
+    consult_method: ConsultMethod
+    responder: ConsultResponder | None = None
+    already_recorded: bool = False
+
+
+class ConsultRetrospectiveAck(BaseModel):
+    """Acknowledgement for POST /consult-retrospective (#247)."""
+
+    status: str
+    consult_id: int
+
+
 class FeedbackAck(BaseModel):
     """Acknowledgement for POST /feedback (#237)."""
 
@@ -395,6 +525,10 @@ class HandoffResponse(BaseModel):
 
     session_id: str
     question: str
+    # #247: the durable question id. The retrospective form needs it to attribute
+    # the write-up, and it is the only identifier the asker's client can reach from
+    # a session — the checkpoint carries it, so this is a projection, not a lookup.
+    question_id: str | None = None
     asker: HandoffAsker
     topics: list[str] = Field(default_factory=list)
     products: list[str] = Field(default_factory=list)
@@ -651,6 +785,10 @@ class UnderstoodData(BaseModel):
     situation: str | None = None
     question_type: str | None = None
     confidence: float = 0.0
+    # #475 Screen 01: how many OTHER askers previously asked in the same topic area
+    # (reassurance). 0 when the feature is off or nobody else has — the client hides
+    # the message at 0.
+    similar_asker_count: int = 0
 
 
 class FollowupData(BaseModel):
@@ -681,10 +819,18 @@ class DoneData(BaseModel):
 
 
 class SourceCitation(BaseModel):
-    """One source a self-answer (#291) drew from, so the chat can link to it."""
+    """One source a self-answer (#291) drew from, so the chat can show where it came from.
+
+    The frontend branches on ``kind``, and its fallback branch reads 「過去の回答」 —
+    so an unlisted kind is not merely unstyled, it is MISLABELLED as a past answer
+    (#366). Keep this comment and ``SourceCitation.kind`` in
+    ``frontend/src/lib/api-types.ts`` in step.
+    """
 
     source_id: str
-    kind: str  # "qa" (past Q&A) | "document" (internal doc)
+    # "qa" (past Q&A) | "document" (internal doc) | "daily" (daily report, #433)
+    # | "knowledge" (structured knowledge unit, #357 — emitted by `knowledge_answer`)
+    kind: str
 
 
 class ReferenceData(BaseModel):
@@ -770,6 +916,34 @@ class FeedbackByStage(BaseModel):
     total: int = 0
 
 
+class MonthlyCount(BaseModel):
+    """One point of the accumulation trend (``"2026-09"``, count)."""
+
+    month: str
+    count: int
+
+
+class KnowledgeAccumulation(BaseModel):
+    """How much tacit knowledge became explicit, and whether the loop is closing (#294).
+
+    Counts only what the RUNTIME produced — captured answers (#274) and 直接相談
+    retrospectives (#247) — never the seeded corpus, so a freshly seeded database
+    reads 0 rather than flattering itself with fixture rows.
+
+    ``capture_rate`` is the recovery rate (暗黙知の回収率): of the hand-offs accepted
+    this month, the share that left knowledge behind. Raw counts only ever grow;
+    this is the one that can fall, which is what makes it worth showing.
+    """
+
+    this_month: int = 0
+    last_month: int = 0
+    captured_answers: int = 0
+    consult_retrospectives: int = 0
+    accepted_handoffs: int = 0
+    capture_rate: float = 0.0
+    monthly: list[MonthlyCount] = Field(default_factory=list)
+
+
 class DashboardResponse(BaseModel):
     """Aggregate-only view (counts / distributions / ratios).
 
@@ -793,6 +967,8 @@ class DashboardResponse(BaseModel):
     answers_per_responder: list[ResponderLoad] = Field(default_factory=list)
     topic_distribution: list[TopicCount] = Field(default_factory=list)
     feedback_by_stage: FeedbackByStage = Field(default_factory=FeedbackByStage)  # #237 段別ズレ件数
+    # #294: 蓄積メトリクス（形式知化された量と、取次ぎからの回収率）
+    knowledge_accumulation: KnowledgeAccumulation = Field(default_factory=KnowledgeAccumulation)
 
 
 # --------------------------------------------------------------------------- #
@@ -832,6 +1008,12 @@ class SlackAuthorizeUrlResponse(BaseModel):
     url: str
 
 
+class SlackLinkCompleteRequest(BaseModel):
+    """The short-lived token the OAuth callback handed to the frontend (#494)."""
+
+    pending_token: str = Field(min_length=1, max_length=4096)
+
+
 class SlackStatusResponse(BaseModel):
     """Whether the acting employee currently has a linked Slack account."""
 
@@ -842,3 +1024,18 @@ class SlackUnlinkResponse(BaseModel):
     """Ack for ``POST /slack/unlink``."""
 
     ok: bool = True
+
+
+class SlackUserSyncResponse(BaseModel):
+    """What one run of the Slack directory sync did (``POST /slack/sync-users``).
+
+    ``skipped`` is deliberately part of the response rather than log-only: most
+    runs of a healthy sync change nothing, so "0 linked" is the normal answer and
+    carries no information on its own. The reasons are what tell an operator
+    whether nobody needed linking, or whether `users:read.email` is missing and
+    every single member arrived without an address.
+    """
+
+    linked: int
+    unlinked: int
+    skipped: dict[str, int] = Field(default_factory=dict)

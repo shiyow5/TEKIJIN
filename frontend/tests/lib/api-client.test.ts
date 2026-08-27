@@ -10,7 +10,9 @@ import {
   getHandoff,
   getInbox,
   getRecentQuestions,
+  getRetrospectiveContext,
   getSlackAuthorizeUrl,
+  getSlackLoginUrl,
   getSlackStatus,
   postAnswer,
   postAsk,
@@ -19,8 +21,14 @@ import {
   requestDocumentFallback,
   resolveQuestion,
   selectHandoffCandidate,
+  structureQuestion,
 } from "@/lib/api-client";
-import type { AskRequest, HandoffResponse, ResumeRequest } from "@/lib/api-types";
+import type {
+  AskRequest,
+  ConsultRetrospectiveContext,
+  HandoffResponse,
+  ResumeRequest,
+} from "@/lib/api-types";
 import { DEFAULT_API_BASE_URL } from "@/lib/config";
 import { describe, expect, it, vi } from "vitest";
 
@@ -212,6 +220,38 @@ describe("getHandoff", () => {
       name: "ApiError",
       status: 404,
     });
+  });
+});
+
+describe("getRetrospectiveContext", () => {
+  const CONTEXT: ConsultRetrospectiveContext = {
+    session_id: "abc-123",
+    question_id: "q_0001",
+    question: "拠点間VPNが不安定です",
+    consult_method: "direct",
+    responder: { person_id: "E001", name: "高梨 健太" },
+    already_recorded: false,
+  };
+
+  it("GETs {base}/consult-retrospective/{id} and returns the payload", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(CONTEXT));
+
+    const result = await getRetrospectiveContext("abc-123", { fetchImpl });
+
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe(`${DEFAULT_API_BASE_URL}/consult-retrospective/abc-123`);
+    expect(init?.method).toBe("GET");
+    expect(result).toEqual(CONTEXT);
+  });
+
+  it("url-encodes the session id path segment", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(CONTEXT));
+
+    await getRetrospectiveContext("a b/c", { fetchImpl });
+
+    expect(fetchImpl.mock.calls[0][0]).toBe(
+      `${DEFAULT_API_BASE_URL}/consult-retrospective/a%20b%2Fc`,
+    );
   });
 });
 
@@ -541,6 +581,35 @@ describe("regenerateHandoffDraft", () => {
     await expect(regenerateHandoffDraft({ session_id: "s1" }, { fetchImpl })).rejects.toMatchObject(
       { name: "ApiError", status: 409 },
     );
+  });
+});
+
+describe("structureQuestion", () => {
+  it("POSTs /handoff/structure with session_id and returns the four fields (#475)", async () => {
+    const response = {
+      session_id: "s1",
+      summary: "起きていること",
+      environment: "M2 Mac",
+      tried: "再ビルド",
+      blocker: "原因不明",
+    };
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(response));
+    const result = await structureQuestion({ session_id: "s1" }, { fetchImpl });
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe(`${DEFAULT_API_BASE_URL}/handoff/structure`);
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(init?.body as string)).toEqual({ session_id: "s1" });
+    expect(result).toEqual(response);
+  });
+
+  it("throws ApiError with the 404 status when the session has no question", async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonResponse({ detail: "no question" }, { ok: false, status: 404 }));
+    await expect(structureQuestion({ session_id: "s1" }, { fetchImpl })).rejects.toMatchObject({
+      name: "ApiError",
+      status: 404,
+    });
   });
 });
 

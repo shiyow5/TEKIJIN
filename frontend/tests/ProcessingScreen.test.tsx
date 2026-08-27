@@ -432,4 +432,85 @@ describe("ProcessingScreen", () => {
     expect(urls).toEqual(["http://api.test/events/abc-123"]);
     expect(screen.getByText("最適な回答者を探しています…")).toBeInTheDocument();
   });
+
+  describe("similar-asker reassurance (#475 Screen 01)", () => {
+    function understood(count: number) {
+      return state({
+        understood: {
+          topics: ["ネットワーク"],
+          products: [],
+          situation: "",
+          question_type: "how",
+          confidence: 0.8,
+          similar_asker_count: count,
+        },
+      });
+    }
+
+    it("shows how many other people asked in this area when the count is ≥ 1", () => {
+      renderScreen(understood(3));
+      expect(
+        screen.getByText(/同じ分野で、過去に3人が質問しています。あなただけではありません。/),
+      ).toBeInTheDocument();
+    });
+
+    it("hides the reassurance when the count is 0", () => {
+      renderScreen(understood(0));
+      expect(screen.queryByText(/あなただけではありません/)).not.toBeInTheDocument();
+    });
+
+    it("hides the reassurance when the field is absent (feature off / old payload)", () => {
+      renderScreen(
+        state({
+          understood: {
+            topics: ["ネットワーク"],
+            products: [],
+            situation: "",
+            question_type: "how",
+            confidence: 0.8,
+          },
+        }),
+      );
+      expect(screen.queryByText(/あなただけではありません/)).not.toBeInTheDocument();
+    });
+  });
+
+  describe("staggered step reveal (#475 Screen 01)", () => {
+    it("reveals each thinking step with the reveal animation, disabled under reduced motion", () => {
+      renderScreen(
+        state({
+          understood: {
+            topics: ["ネットワーク"],
+            products: [],
+            situation: "",
+            question_type: "how",
+            confidence: 0.8,
+          },
+        }),
+      );
+      // The step content is still present (reveal is opacity/transform only).
+      const step = screen.getByText("質問を理解しました").closest("li");
+      expect(step).not.toBeNull();
+      expect(step).toHaveClass("animate-reveal");
+      expect(step).toHaveClass("motion-reduce:animate-none");
+      expect(step).toHaveStyle({ animationDelay: "0ms" });
+    });
+
+    it("staggers a later step so it slides in after the earlier one", () => {
+      renderScreen(
+        state({
+          understood: {
+            topics: ["ネットワーク"],
+            products: [],
+            situation: "",
+            question_type: "how",
+            confidence: 0.8,
+          },
+          route: { route: "person", reason: "詳しい人がいます", confidence: 0.7 },
+        }),
+      );
+      const routeStep = screen.getByText("回答の経路を判断しました").closest("li");
+      expect(routeStep).toHaveStyle({ animationDelay: "70ms" });
+    });
+  });
 });

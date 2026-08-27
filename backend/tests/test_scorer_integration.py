@@ -232,6 +232,73 @@ def test_declined_recommendations_count_as_load(seed_counts, session) -> None:
     assert result["recommendations"][0]["person_id"] == 2
 
 
+def test_a_decline_never_costs_expertise_only_availability(seed_counts, session) -> None:
+    """断り≠非専門, locked from the other side (#261).
+
+    ``test_declined_recommendations_count_as_load`` fixes that a decline DOES cost
+    availability. Nothing fixed the half that actually protects people: that it
+    costs no EXPERTISE. Hold the load window identical and vary only the outcome —
+    eight declines against eight accepts — and the scores must come out equal.
+
+    Without this, a future "declines are a negative signal" change would pass the
+    whole suite: the existing test only asserts a decline is not FREE.
+    """
+
+    _add_question(session, "q_decl_sym")
+    for emp in (1, 2):
+        _add_skill(session, f"sk_decl_sym_{emp}", emp)
+    # Same count, same window, same everything — only `outcome` differs.
+    for emp, outcome in ((1, "declined"), (2, "accepted")):
+        for _ in range(8):
+            _add_recommendation(
+                session,
+                emp,
+                created=NOW - dt.timedelta(days=1),
+                outcome=outcome,
+                qid="q_decl_sym",
+            )
+
+    scorer = ExpertiseScorer(Repository(session))
+    scores = _scores_by_person(scorer.rank(TOPIC, [1, 2], asker_id=None, now=NOW, top_k=3))
+
+    assert scores[1] == scores[2], (
+        "a decline cost expertise: declining is a statement about availability, "
+        "not about what the person knows"
+    )
+
+
+def test_declining_does_not_erase_the_answers_a_person_already_gave(seed_counts, session) -> None:
+    """The evidence a decline must not touch is the strongest kind there is.
+
+    Structurally this cannot regress by accident — ``collect_topic_evidence`` takes
+    no recommendations at all — but that IS the guarantee, so it is worth pinning:
+    an expert who declines eight times still outranks a novice with none.
+    """
+
+    _add_question(session, "q_decl_ans")
+    _add_answer(
+        session,
+        "a_decl_ans",
+        "q_decl_ans",
+        1,
+        helpful=True,
+        reuse=3,
+        created=NOW - dt.timedelta(days=30),  # outside the 7-day load window
+    )
+    for _ in range(8):
+        _add_recommendation(
+            session, 1, created=NOW - dt.timedelta(days=1), outcome="declined", qid="q_decl_ans"
+        )
+
+    scorer = ExpertiseScorer(Repository(session))
+    result = scorer.rank(TOPIC, [1, 2], asker_id=None, now=NOW, top_k=3)
+    scores = _scores_by_person(result)
+
+    assert scores[1] > scores[2], "declines outweighed a helpful answer"
+    expert = next(r for r in result["recommendations"] if r["person_id"] == 1)
+    assert any(r["type"] == "answers" for r in expert["reasons"])
+
+
 def test_old_recommendations_outside_window_ignored(seed_counts, session) -> None:
     _add_question(session, "q_old")
     for emp in (1, 2):

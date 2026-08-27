@@ -52,6 +52,7 @@ from tekijin.agent.protocols import (
     AnswerabilityModel,
     DraftModel,
     IntentModel,
+    QuestionStructurer,
     SelfAnswerModel,
     SufficiencyModel,
 )
@@ -182,6 +183,7 @@ class AgentService:
         intent_model: IntentModel,
         sufficiency_model: SufficiencyModel,
         draft_model: DraftModel,
+        question_structurer: QuestionStructurer | None = None,
         answerability_model: AnswerabilityModel | None = None,
         answerability_threshold: int = 40,
         self_answer_model: SelfAnswerModel | None = None,
@@ -199,6 +201,7 @@ class AgentService:
         additive_self_answer_enabled: bool = False,
         additive_self_answer_floor: float = 0.20,
         score_all_employees: bool = False,
+        similar_askers_enabled: bool = False,
         max_concurrent_runs: int = 0,
         now_factory: Any = _default_now,
         clock: Any = time.monotonic,
@@ -209,6 +212,11 @@ class AgentService:
         self._intent = intent_model
         self._sufficiency = sufficiency_model
         self._draft = draft_model
+        # #475 Screen 01: on-demand question re-drafter. Runs OUTSIDE the graph via
+        # ``structure_question`` (result-screen endpoint), never on the C1 critical
+        # path. None -> the feature is unavailable (503); the factory always supplies
+        # one (stub or vLLM), so it is only None in tests that don't exercise it.
+        self._structurer = question_structurer
         # #70: evidence-sufficiency critic. None (default) compiles the pre-#70
         # graph (no critique node); when set, the SSE/persist layer defers the
         # recommend event + rows until the critic accepts (see ``_run``), so a
@@ -247,6 +255,9 @@ class AgentService:
         self._additive_self_answer_enabled = additive_self_answer_enabled
         self._additive_self_answer_floor = additive_self_answer_floor
         self._score_all_employees = score_all_employees
+        # #475 Screen 01: attach the "N other askers in this area" reassurance count
+        # to understood (False = OFF -> understood byte-identical). Read-only display.
+        self._similar_askers_enabled = similar_askers_enabled
         # Backpressure (#180): max graph runs executing at once before /ask sheds new
         # questions with 503. 0 (default) disables it — set from settings via the
         # factory in production. Guarded by its own lock; independent of the per-
@@ -884,6 +895,7 @@ class AgentService:
         return schemas.HandoffResponse(
             session_id=session_id,
             question=values.get("question") or "",
+            question_id=values.get("question_id"),
             asker=schemas.HandoffAsker(
                 id=schemas.format_employee_id(asker_id) if asker_id is not None else "",
                 name=asker_name,
@@ -899,6 +911,41 @@ class AgentService:
             helpful_answer_count=reuse["helpful_answer_count"],
             recommendation_id=recommendation_id,
             consult_method=consult_method,
+        )
+
+    def structure_question(self, session_id: str) -> schemas.QuestionStructureResponse:
+        """Re-draft the asker's raw question into the four hand-off fields (#475).
+
+        On-demand and READ-ONLY: called from the result screen when the asker asks
+        the AI to tidy their question before sending. It reads the durable snapshot
+        (the raw question + C1's ``situation``/``topics``) and runs the structurer
+        OUTSIDE the graph, so it never touches the C1 critical path
+        ([[tekijin-latency-and-streaming]]) and never advances or persists any state.
+
+        Raises :class:`HandoffNotFound` (404) when the session has no question yet
+        (unknown / not started). The structurer is always wired by the factory, so a
+        missing one is a programming error surfaced as a 500 by the route, not a
+        user-facing state.
+        """
+
+        if self._structurer is None:  # pragma: no cover - always wired by the factory
+            raise RuntimeError("question structurer is not configured")
+        snapshot = self._snapshot(session_id)
+        values = getattr(snapshot, "values", None) or {}
+        question = (values.get("question") or "").strip()
+        if not question:
+            raise HandoffNotFound("no question to structure for this session")
+        result = self._structurer.structure(
+            question,
+            situation=values.get("situation"),
+            topics=values.get("topics") or [],
+        )
+        return schemas.QuestionStructureResponse(
+            session_id=session_id,
+            summary=result.summary,
+            environment=result.environment,
+            tried=result.tried,
+            blocker=result.blocker,
         )
 
     def save_handoff_draft(
@@ -1374,6 +1421,7 @@ class AgentService:
             additive_self_answer_enabled=self._additive_self_answer_enabled,
             additive_self_answer_floor=self._additive_self_answer_floor,
             score_all_employees=self._score_all_employees,
+            similar_askers_enabled=self._similar_askers_enabled,
         )
 
     def _run(

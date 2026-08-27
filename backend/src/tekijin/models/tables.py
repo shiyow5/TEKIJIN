@@ -33,6 +33,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
@@ -156,6 +157,48 @@ class EmployeeChatHistory(Base):
     channel: Mapped[str | None] = mapped_column(Text)
     message: Mapped[str | None] = mapped_column(Text)
     sent_at: Mapped[dt.datetime | None] = mapped_column(DateTime)
+
+
+class OfflineConsult(Base):
+    """One retrospective the ASKER wrote after a 直接相談 (#247).
+
+    A "direct" consultation (#245) happens face to face, so unlike a chat hand-off
+    it leaves no text behind and F-10 (回答を索引に追加し専門性の推定を更新) has
+    nothing to work with. This table is that missing record, written by the asker.
+
+    Deliberately HEARSAY: ``answer_body`` is the asker's paraphrase of what the
+    responder said, so the scorer weights it below a self-declared skill
+    (``BASE_SCORE_OFFLINE_CONSULT``). ``topics`` comes from ``TOPIC_VOCABULARY``,
+    validated at the API boundary, so the scorer can join on it without a runtime
+    keyword vocabulary — the same contract as ``daily_reports.topics`` (#355).
+
+    ``resolution`` is ``resolved`` / ``partial`` / ``unresolved``. ``unresolved``
+    is stored but contributes NO expertise evidence and never subtracts — the same
+    rule as a decline (db-schema.md: 断り≠非専門).
+
+    ONE row per question, enforced by a unique constraint: exactly one hand-off per
+    question is ever accepted, so "the consultation" is singular. Without it the
+    asker could write the same consultation up ``OFFLINE_CONSULT_EVIDENCE_CAP``
+    times and reach the full cap from a single real conversation.
+    """
+
+    __tablename__ = "offline_consults"
+    __table_args__ = (UniqueConstraint("question_id", name="uq_offline_consults_question"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    # NOT NULL: a write-up with no question is not weaker evidence, it is
+    # unverifiable evidence, so there is nothing to record (the route answers 404).
+    # It also makes the unique constraint above bite — Postgres allows any number
+    # of NULLs in a unique column.
+    question_id: Mapped[str] = mapped_column(ForeignKey("questions.id"), index=True)
+    # Who answered (the person this becomes evidence for) and who is reporting it.
+    responder_id: Mapped[int] = mapped_column(ForeignKey("employees.id"), index=True)
+    asker_id: Mapped[int | None] = mapped_column(ForeignKey("employees.id"), index=True)
+    topics: Mapped[list[str] | None] = mapped_column(ARRAY(Text))
+    asked: Mapped[str | None] = mapped_column(Text)
+    answer_body: Mapped[str | None] = mapped_column(Text)
+    resolution: Mapped[str] = mapped_column(String(16))
+    created_at: Mapped[dt.datetime | None] = mapped_column(DateTime, server_default=func.now())
 
 
 class DailyReport(Base):

@@ -18,6 +18,7 @@ from tekijin.data.dto import (
     AnswerDTO,
     CertificationDTO,
     DailyReportDTO,
+    OfflineConsultDTO,
     ProjectMembershipDTO,
     SkillDTO,
 )
@@ -28,10 +29,13 @@ from tekijin.scorer.weights import (
     BASE_SCORE_CERTIFICATION,
     BASE_SCORE_DAILY,
     BASE_SCORE_HELPFUL_ANSWER,
+    BASE_SCORE_OFFLINE_CONSULT,
     BASE_SCORE_PROJECT_LEAD,
     BASE_SCORE_PROJECT_MEMBER,
     BASE_SCORE_SKILL,
     DAILY_EVIDENCE_CAP,
+    OFFLINE_CONSULT_EVIDENCE_CAP,
+    OFFLINE_CONSULT_POSITIVE_RESOLUTIONS,
 )
 
 
@@ -46,7 +50,7 @@ class Evidence:
     an ongoing project as current work for recency; see ``_recency_moments``).
     """
 
-    source_type: str  # cert | self | inferred | project | answer
+    source_type: str  # cert | self | inferred | project | answer | daily | offline_consult
     base_score: float
     timestamp: dt.date | dt.datetime | None
     detail: str
@@ -59,6 +63,7 @@ def collect_topic_evidence(
     memberships: Sequence[ProjectMembershipDTO],
     on_topic_answers: Sequence[AnswerDTO],
     daily_reports: Sequence[DailyReportDTO] = (),
+    offline_consults: Sequence[OfflineConsultDTO] = (),
 ) -> list[Evidence]:
     """Assemble every piece of evidence a person has for ``topics``.
 
@@ -79,6 +84,16 @@ def collect_topic_evidence(
     mirrors the eval gold, which sums daily activity at the same weight
     (``build_eval_v2.build_gold_evidence``); before #355 the scorer was blind to
     the very daily signal the gold rewards.
+
+    ``offline_consults`` (#247) are 直接相談 retrospectives written by the ASKER
+    about this person. Hearsay, so ``BASE_SCORE_OFFLINE_CONSULT`` sits below a
+    self-declared skill; capped at ``OFFLINE_CONSULT_EVIDENCE_CAP`` for the same
+    reason as daily reports. A retrospective whose ``resolution`` is not in
+    ``OFFLINE_CONSULT_POSITIVE_RESOLUTIONS`` (i.e. 「解決しなかった」) contributes
+    nothing and never subtracts — the decline rule (断り≠非専門) applied to
+    consultations. Unlike daily reports this is NOT flag-gated: the rows only ever
+    come from runtime submissions, so there is nothing in the fixtures to measure
+    against and a dormant flag would just make the feature dead on arrival.
     """
 
     topic_set = {topics} if isinstance(topics, str) else set(topics)
@@ -122,6 +137,23 @@ def collect_topic_evidence(
         if topic_set & set(report.topics):
             daily_used += 1
             evidence.append(Evidence("daily", BASE_SCORE_DAILY, report.report_date, "日報での活動"))
+
+    # #247: 直接相談のふりかえり. The resolution filter comes BEFORE the cap so an
+    # unresolved consultation cannot consume a slot a helpful one would have used.
+    consult_used = 0
+    for consult in offline_consults:
+        if consult_used >= OFFLINE_CONSULT_EVIDENCE_CAP:
+            break
+        if consult.resolution not in OFFLINE_CONSULT_POSITIVE_RESOLUTIONS:
+            continue
+        if topic_set & set(consult.topics):
+            consult_used += 1
+            detail = (
+                "直接相談で解決" if consult.resolution == "resolved" else "直接相談で部分的に解決"
+            )
+            evidence.append(
+                Evidence("offline_consult", BASE_SCORE_OFFLINE_CONSULT, consult.created_at, detail)
+            )
 
     return evidence
 

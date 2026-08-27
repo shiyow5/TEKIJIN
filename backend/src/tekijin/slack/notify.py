@@ -62,12 +62,28 @@ def ensure_pair_channel(session: Session, *, thread_id: int, parties: dict) -> s
 
     asker_id, responder_id = parties["asker_id"], parties["responder_id"]
     existing = get_channel_link(session, asker_id, responder_id)
+    # Same reasoning as the link filter (#494/#473): a channel created before the
+    # workspace was pinned — or under a different one — must not be reused, or we
+    # post into a channel our bot may not even be in.
+    if (
+        existing is not None
+        and settings.slack_team_id
+        and existing.slack_team_id != settings.slack_team_id
+    ):
+        logger.warning(
+            "Ignoring pair channel %s: workspace %s != configured %s",
+            existing.slack_channel_id,
+            existing.slack_team_id,
+            settings.slack_team_id,
+        )
+        existing = None
     if existing is not None:
         existing.current_thread_id = thread_id
         return existing.slack_channel_id
 
-    asker_link = get_slack_link(session, asker_id)
-    responder_link = get_slack_link(session, responder_id)
+    team = settings.slack_team_id
+    asker_link = get_slack_link(session, asker_id, expected_team_id=team)
+    responder_link = get_slack_link(session, responder_id, expected_team_id=team)
     if asker_link is None or responder_link is None:
         return None
 

@@ -130,8 +130,10 @@ def _payload(
 
 def _link_lookup(monkeypatch, employee_id: int | None) -> None:
     resolved = None if employee_id is None else _FakeLink(employee_id=employee_id)
+    # ``**_`` absorbs expected_team_id (#406) — and anything else the real
+    # signature grows — so a double here cannot silently diverge from it again.
     monkeypatch.setattr(
-        slack_routes, "get_slack_link_by_slack_user_id", lambda session, uid: resolved
+        slack_routes, "get_slack_link_by_slack_user_id", lambda session, uid, **_: resolved
     )
 
 

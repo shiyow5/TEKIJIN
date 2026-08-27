@@ -44,6 +44,8 @@ _TRUNCATE_ORDER: tuple[str, ...] = (
     "person_topic_edges",
     "events",
     "eval_runs",
+    # #247: runtime-only (no fixture writes it), FKs questions + employees.
+    "offline_consults",
     "messages",
     "recommendations",
     "answers",
@@ -221,6 +223,20 @@ def _apply_schema_upgrades(engine: Engine) -> None:
         # up by the widen block below if an older narrower vector already exists.
         conn.execute(
             text(f"ALTER TABLE daily_reports ADD COLUMN IF NOT EXISTS embedding vector({dim})")
+        )
+        # #451: the chat-extraction batch (knowledge/chat.py) reads the ENTIRE
+        # history ordered by (channel, sent_at, id), filtered to rows that actually
+        # carry a message and a timestamp. Without a matching index that is a Seq
+        # Scan plus an external merge sort on every run, growing with the real
+        # corpus. Partial, so it stays proportional to the rows the batch can use
+        # rather than to the whole log. `create_all` builds the table but not this
+        # index, so a live DB only ever gets it here.
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_chat_history_channel_sent_at_id "
+                "ON employee_chat_history (channel, sent_at, id) "
+                "WHERE message IS NOT NULL AND sent_at IS NOT NULL"
+            )
         )
         # Widen embedding columns to the current dim when an older DB is narrower.
         # Table/column names are a hard-coded allow-list spliced via format() —

@@ -135,6 +135,29 @@ export interface HandoffRedraftRequest {
   session_id: string;
 }
 
+/**
+ * POST /handoff/structure body — the asker asks the AI to tidy their raw question
+ * into the four hand-off fields (#475 Screen 01). On-demand and read-only: it
+ * reshapes the already-stored question, so only the session is named.
+ */
+export interface QuestionStructureRequest {
+  session_id: string;
+}
+
+/**
+ * POST /handoff/structure response (schemas.py `QuestionStructureResponse`) — the
+ * re-drafted question: 起きていること / 環境 / 試したこと / 詰まっている点 (#475).
+ * Any field may be empty — the model leaves a field blank rather than inventing
+ * what the question never stated, and the asker fills or edits it before sending.
+ */
+export interface QuestionStructureResponse {
+  session_id: string;
+  summary: string;
+  environment: string;
+  tried: string;
+  blocker: string;
+}
+
 /** POST /handoff/select response (schemas.py `HandoffSelectResponse`). */
 export interface HandoffSelectResponse {
   session_id: string;
@@ -339,6 +362,8 @@ export interface HandoffAsker {
 export interface HandoffResponse {
   session_id: string;
   question: string;
+  /** The durable question id — what the #247 retrospective is attributed to. */
+  question_id?: string | null;
   asker: HandoffAsker;
   topics: string[];
   products: string[];
@@ -455,6 +480,30 @@ export interface FeedbackByStage {
   total: number;
 }
 
+/** One point of the accumulation trend (#294): `"2026-09"` and its count. */
+export interface MonthlyCount {
+  month: string;
+  count: number;
+}
+
+/**
+ * GET /dashboard `knowledge_accumulation` (#294) — how much tacit knowledge became
+ * explicit, and whether the loop is closing.
+ *
+ * Counts only what the runtime produced (captured answers #274, 直接相談
+ * retrospectives #247), never the seeded corpus. `capture_rate` is the recovery
+ * rate: of the hand-offs accepted this month, the share that left knowledge behind.
+ */
+export interface KnowledgeAccumulation {
+  this_month: number;
+  last_month: number;
+  captured_answers: number;
+  consult_retrospectives: number;
+  accepted_handoffs: number;
+  capture_rate: number;
+  monthly: MonthlyCount[];
+}
+
 export interface DashboardResponse {
   total_employees: number;
   total_questions: number;
@@ -476,6 +525,7 @@ export interface DashboardResponse {
   topic_distribution: TopicCount[];
   /** #237: how often the asking side corrected each stage (c1/c6/c7). */
   feedback_by_stage: FeedbackByStage;
+  knowledge_accumulation: KnowledgeAccumulation;
 }
 
 // --------------------------------------------------------------------------- //
@@ -488,6 +538,12 @@ export interface UnderstoodData {
   situation?: string | null;
   question_type?: string | null;
   confidence: number;
+  /**
+   * #475 Screen 01: how many OTHER people previously asked in the same topic area
+   * (reassurance — "you are not the only one"). 0 when the feature is off or nobody
+   * else has; the UI hides the message at 0. Optional so older payloads still parse.
+   */
+  similar_asker_count?: number;
 }
 
 export interface FollowupData {
@@ -517,18 +573,23 @@ export interface DoneData {
 }
 
 /**
- * One source a self-answer (#291) cited, shown in chat as a link (schemas.py
- * `SourceCitation`). `kind` is "document" (internal doc → GET /documents/{id})
- * or "qa" (a past Q&A).
+ * One source a self-answer (#291) cited, shown in chat as a link or a label chip
+ * (schemas.py `SourceCitation`).
  */
 export interface SourceCitation {
   source_id: string;
   /**
    * Closed set from the backend contract (fragments.py): a past Q&A, an internal
-   * doc, or a daily report (#433). "daily" has no detail page, so the UI shows it
-   * as a label chip rather than a link.
+   * doc, a daily report (#433), or a structured knowledge unit (#357). "daily" and
+   * "knowledge" have no detail page yet, so the UI shows them as label chips
+   * rather than links.
+   *
+   * Adding "knowledge" here is the enablement gate for #357 (#366): the renderer's
+   * final branch is a catch-all that reads 「過去の回答」, so a `ku_*` citation would
+   * be mislabelled as a past answer the moment `knowledge_retrieval_enabled` went
+   * true.
    */
-  kind: "qa" | "document" | "daily";
+  kind: "qa" | "document" | "daily" | "knowledge";
 }
 
 /**
@@ -612,4 +673,59 @@ export interface LoginResponse {
   access_token: string;
   token_type: "bearer";
   principal: Principal;
+}
+
+/** GET /topics — the closed topic vocabulary the C6 scorer joins on (#247). */
+export interface TopicVocabularyResponse {
+  topics: string[];
+}
+
+/** How far a 直接相談 got (#247). `unresolved` is recorded but is not evidence. */
+export type ConsultResolution = "resolved" | "partial" | "unresolved";
+
+/** The person a retrospective may be written about (#247). */
+export interface ConsultResponder {
+  person_id: string;
+  name: string;
+}
+
+/**
+ * GET /consult-retrospective/{session_id} — what the write-up form is built from
+ * (#247).
+ *
+ * NOT `HandoffResponse`: that is the pending hand-off view and 404s the moment the
+ * responder records an outcome, which is exactly when the face-to-face
+ * consultation can finally have taken place. This one is read from the database
+ * and stays valid afterwards.
+ *
+ * `responder` is null until someone accepts; `already_recorded` flips once a
+ * write-up exists.
+ */
+export interface ConsultRetrospectiveContext {
+  session_id: string;
+  question_id: string;
+  question: string;
+  consult_method: ConsultMethod;
+  responder: ConsultResponder | null;
+  already_recorded: boolean;
+}
+
+/**
+ * POST /consult-retrospective — the asker's write-up of a face-to-face 直接相談
+ * (#247). `asker_id` is deliberately absent: the backend takes it from the token,
+ * never the body, because this row becomes expertise evidence for `responder_id`.
+ */
+export interface ConsultRetrospectiveRequest {
+  question_id: string;
+  responder_id: string;
+  topics: string[];
+  asked?: string | null;
+  answer_body: string;
+  resolution: ConsultResolution;
+}
+
+/** POST /consult-retrospective response. */
+export interface ConsultRetrospectiveAck {
+  status: string;
+  consult_id: number;
 }

@@ -1,10 +1,11 @@
 # DBスキーマ（ER図） — TEKIJIN
 
-TEKIJIN のデータベース設計。**3層**で構成する。
+TEKIJIN のデータベース設計。**4層**で構成する。
 
 - **A. 入力データ層** … 合成データ（PR #19）が埋める、社員・プロフィール・案件・チャット・日報。PR #18 の ER をベースとし、本ドキュメントを正とする。
 - **B. アプリ実行時テーブル** … 質問・回答・推薦・計測など、アプリ稼働で溜まるデータ（技術仕様 §4 準拠）。
 - **C. 専門性グラフ** … 行動痕跡から推定した「人×トピック」の重み付きエッジ（doc15＝新規性の中核）。
+- **D. 形式知層** … 生データから抽出した構造化ケース知識 `knowledge_units`（#357/#448＝蓄積＝主軸）。
 
 他テーブルはすべて `EMPLOYEES` の「誰」を FK で指す。永続化は PostgreSQL 16 + pgvector 1本（LangGraph の checkpoints は PostgresSaver が自動管理し、本図には含めない）。
 
@@ -61,6 +62,8 @@ erDiagram
     text content
     text issue
     timestamp created_at
+    text_array topics
+    vector embedding
   }
   PROJECTS {
     uuid id PK
@@ -140,6 +143,38 @@ erDiagram
 | `message` | メッセージ本文 |
 | `sent_at` | 送信日時 |
 
+### OFFLINE_CONSULTS（直接相談のふりかえり・#247）
+
+「直接相談」（#245）は対面で行われるためチャットのような発言記録が残らず、F-10（回答を索引に
+追加し専門性の推定を更新）が使える材料が無い。この表がその欠けた記録で、**質問者が書く**。
+
+| カラム | 説明 |
+|---|---|
+| `question_id` | どの質問についての相談か（FK・NOT NULL・**質問ごとに1件（UNIQUE）**）。受諾される取次ぎは質問につき1件なので「その相談」は単数。重ねて書けると1回の実相談で上限（4件）を埋められる |
+| `responder_id` | 相談に応じた人。**この行が専門性の証拠になる対象**。リクエスト本文で送るが信用しない——**その質問の取次ぎを受諾した本人**（`recommendations.outcome='accepted'`）と一致することを API が要求する |
+| `asker_id` | 書いた人。認証済みプリンシパルから取り、リクエスト本文からは受け取らない |
+| `topics[]` | `TOPIC_VOCABULARY` から選択（API 境界で検証）。スコアラーはこの文字列で join する |
+| `asked` | 何を聞いたか（任意） |
+| `answer_body` | 得られた回答・アドバイス（必須） |
+| `resolution` | `resolved` / `partial` / `unresolved` |
+| `created_at` | 記録日時（DB 既定 `now()`） |
+
+**伝聞であることを重みに反映する**: 「質問者が、相談相手の発言を要約して書いたもの」なので、
+自己申告（0.3）より低い **0.25**。件数で `topic_fit` を飽和させないよう、日報と同じく上限
+（`OFFLINE_CONSULT_EVIDENCE_CAP` = 4）を設ける。
+
+**「誰が書けるか」と「誰について書けるか」は別の制約**: 質問の所有者だけが書ける（前者）と
+しても、質問は自分で作れるので、それだけでは任意の社員に上限いっぱいの証拠を付けられる。
+後者を締めるのが `responder_id` = 受諾者の照合で、これが実際にスコアを守っている側。
+受諾行が唯一の「この人に実際に相談した」という永続記録なので、権限の根拠としても正しい。
+
+**書く時点で読める情報源が要る**: `GET /handoff` は保留中の取次ぎビューで、対応者が結末を
+記録した瞬間に 404 する——対面で相談できるようになる、まさにその瞬間に消える。ふりかえり
+画面は `GET /consult-retrospective/{session_id}`（`questions` + `recommendations` +
+`offline_consults` を直接読む）を使う。
+
+---
+
 ### DAILY_REPORTS（日報）
 社員が日々提出する日報。業務内容（`content`）と課題（`issue`）を分けて記録する。
 
@@ -150,6 +185,8 @@ erDiagram
 | `content` | その日行った業務内容 |
 | `issue` | その日感じた課題・困りごと |
 | `created_at` | 日報が登録された日時 |
+| `topics` | **#355**: C6 スコアラーの証拠源に使う事前トピックタグ（`text[]`・seed 時付与） |
+| `embedding` | **#433**: 自己回答（System1）の知識源。日報を dense 検索チャネルに載せ、出典 `kind="daily"` で引用（`daily_knowledge_enabled=true`・既定ON）。`migrate` が `ADD COLUMN IF NOT EXISTS`、`deploy.sh` の `embed_missing` が NULL 行を埋める |
 
 ---
 
@@ -245,6 +282,7 @@ erDiagram
 | `EVENTS` | 各ステージの計測（**p50/p95 レイテンシKPI**） | `question_id` FK, `stage`, `started_at`, `ended_at`, `meta` |
 | `PROJECT_MEMBERS` | 案件の担当（**lead/member を区別**。base_score が lead 0.8 / member 0.5） | `project_id` FK, `employee_id` FK, `role`(lead/member) |
 | `DOCUMENTS` | 社内文書（格下げ経路用・優先度低） | `title`, `body`, `source`, `embedding` |
+| `OFFLINE_CONSULTS` | **直接相談のふりかえり**（#247。対面相談は記録が残らないため、質問者が書き起こす。伝聞なので base_score 0.25 = 自己申告 0.3 未満） | `question_id` FK, `responder_id` FK, `asker_id` FK, `topics[]`, `asked`, `answer_body`, `resolution`(resolved/partial/unresolved), `created_at` |
 
 > `ANSWERS.reuse_count`/`was_helpful` は `answer_quality` スコアと C8 グラフ更新に、`RECOMMENDATIONS.outcome` は `load`（負荷）減点と「使うほど育つ」学習に、`EVENTS` はレイテンシ計測に直結する（技術仕様 §5・§7）。`RECOMMENDATIONS.created_at`（DB 既定 `now()`）は `load` を**直近7日**の推薦数で数えるための時刻窓に使う（技術仕様 §5）。実装では `ANSWERS.created_at` も同様に DB 既定 `now()` を持ち、実行時に生成される回答へ確実に時刻が入る。
 
@@ -283,7 +321,52 @@ erDiagram
 | `PERSON_TOPIC_EDGES` | 人×トピックの専門性エッジ | `person_id` FK, `topic_id`, `weight`, `confidence`, `evidence_count`, `last_updated` |
 | `EVIDENCE` | エッジの根拠（積み上げ） | `person_id` FK, `topic_id`, `source_type`(cert/project/answer/self/redirect), `base_score`, `weight_contrib`, `ts` |
 
-> `base_score`: 有用回答 1.0 > 案件リード 0.8 > 過去回答 0.7 > 資格 0.6 > 案件メンバー 0.5 > 自己申告 0.3（doc15）。断り(declined)は専門性を下げず余裕度のみ下げる。
+> `base_score`: 有用回答 1.0 > 案件リード 0.8 > 過去回答 0.7 > 資格 0.6 > 案件メンバー 0.5 > 自己申告 0.3（doc15）> **直接相談のふりかえり 0.25**（#247・伝聞）> 日報 0.15（#355）。断り(declined)は専門性を下げず余裕度のみ下げる。
+>
+> **同じ規則をふりかえりにも適用する**: `resolution=unresolved`（解決しなかった）は記録は残るが
+> 専門性の証拠にならず、**下げもしない**。一度うまくいかなかったことが、その人が実際に知っている
+> トピックでの評価を損なってはいけない。
+
+---
+
+## D. 形式知層（#357/#448＝蓄積＝主軸の実体）
+
+生データ（日報・社員間チャット）から LLM で蒸留した**構造化ケース知識**。graph からは呼ばない
+オフライン抽出バッチ（`knowledge/extract.py` 日報／`knowledge/chat.py` チャット）が upsert し、
+埋め込み索引を張れば C4／自己回答（System1）が再利用する。承認（`review_status`）まで検索経路に出さない（#354）。
+
+```mermaid
+erDiagram
+  KNOWLEDGE_UNITS {
+    uuid id PK
+    string kind
+    text problem
+    text action
+    text result
+    text_array topics
+    string industry
+    string source_type
+    string source_id
+    float confidence
+    string review_status
+    vector embedding
+    timestamp created_at
+  }
+```
+
+| カラム | 説明 |
+|---|---|
+| `kind` | `case`（問題→打ち手→結果）/ `procedure` / `decision`（CHECK 制約） |
+| `problem` / `action` / `result` | ケースの中身（`result` は未確定なら NULL） |
+| `topics` | 正規22語彙のトピック（日報はタグ継承、チャットは LLM 提案を `normalize_topics` でスナップ） |
+| `industry` | 業種（明示があるときのみ） |
+| `source_type` / `source_id` | 出典（`daily_report`/`chat` 等）。**`UNIQUE(source_type, source_id)`** で冪等 upsert |
+| `confidence` | 抽出の確信度（0.0–1.0） |
+| `review_status` | `unreviewed` / `approved` / `rejected`（CHECK）。既定は検索で `approved` のみ露出 |
+| `embedding` | ケーステキスト（problem+action+result）の dense ベクトル。索引後に検索で再利用 |
+
+> **索引**: `GIN(topics)`。**measure-first の結果（#448）**: 合成チャットは抽出0件（ケース不在＝データの限界・手法は正）、
+> 日報は 25/30 抽出（陽性対照）。実データ（解決済スレッド）で価値が出る。
 
 ---
 
@@ -293,7 +376,7 @@ PR #18 の ER（A層）に、仕様上あと少し不足がある。実データ
 
 | 対象 | 追加/変更 | 理由 |
 |---|---|---|
-| `EMPLOYEES` | `branch`(拠点) を追加 | `proximity`（同支店>同エリア>全社）の計算に必要（技術仕様 §5 `w4·proximity`） |
-| `EMPLOYEES` | `role` を追加（`position` と別に職種） | 職種比率・スコアの説明に使用 |
+| `EMPLOYEES` | ~~`branch`(拠点) を追加~~ **実装済**（`models/tables.py`） | `proximity`（同支店>同エリア>全社）の計算に必要（技術仕様 §5 `w4·proximity`） |
+| `EMPLOYEES` | ~~`role` を追加~~ **実装済**（`department_history` / `password_hash` も追加済） | 職種比率・スコアの説明に使用 |
 | `PROJECTS` | `employees uuid[]` は **`PROJECT_MEMBERS`（役割つき）を正**とする | 配列では lead/member を区別できず base_score(0.8/0.5)を割り当てられない |
 | （算出でよい） | `years`(在籍年数) は `hire_date` から算出 | 冗長カラムにしない |

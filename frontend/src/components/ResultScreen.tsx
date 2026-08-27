@@ -16,6 +16,7 @@
  */
 
 import { PageBackLink } from "@/components/PageBackLink";
+import { RetrospectiveLink } from "@/components/RetrospectiveLink";
 import { useOptionalSessionId, useOptionalSessionStream } from "@/components/SessionStreamProvider";
 import { SourceCitations } from "@/components/SourceCitations";
 import { PersonRouteView } from "@/components/result/PersonRouteView";
@@ -106,6 +107,10 @@ function ResultTerminal({
       <div className="mx-auto w-full max-w-md text-left">
         <SourceCitations citations={message?.citations} sessionId={sessionId} />
       </div>
+      {/* #247: a 直接相談 leaves no transcript, so the only record of what was
+          learned is what the asker writes down. Renders itself away for a chat
+          hand-off (and on any lookup failure). */}
+      <RetrospectiveLink sessionId={sessionId} />
       <div className="flex justify-center">
         <a
           href="/questions"

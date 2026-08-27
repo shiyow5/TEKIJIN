@@ -20,6 +20,7 @@ from tekijin.data.dto import (
     AnswerDTO,
     CertificationDTO,
     DailyReportDTO,
+    OfflineConsultDTO,
     ProjectMembershipDTO,
     SkillDTO,
 )
@@ -163,6 +164,11 @@ class ExpertiseScorer:
         daily_by_person = (
             self._repo.daily_reports_for_many(candidates) if self._daily_evidence else {}
         )
+        # #247: 直接相談のふりかえり. NOT flag-gated — these rows only ever come from
+        # runtime submissions, so the fixtures contain none and the query returns {}
+        # on every eval/CI run (byte-identical scores). Gating it would make the
+        # feature dead on arrival with nothing to measure against.
+        consults_by_person = self._repo.offline_consults_for_many(candidates)
 
         scored: list[tuple[float, int, ScoredCandidate]] = []
         for person_id in candidates:
@@ -180,6 +186,7 @@ class ExpertiseScorer:
                 memberships=memberships_by_person.get(person_id, []),
                 answers=answers_by_person.get(person_id, []),
                 daily_reports=daily_by_person.get(person_id, []),
+                offline_consults=consults_by_person.get(person_id, []),
                 load_count=rec_counts.get(person_id, 0) + ans_counts.get(person_id, 0),
                 asker_branch=asker_branch,
                 now=now,
@@ -211,6 +218,7 @@ class ExpertiseScorer:
         memberships: Sequence[ProjectMembershipDTO],
         answers: Sequence[AnswerDTO],
         daily_reports: Sequence[DailyReportDTO] = (),
+        offline_consults: Sequence[OfflineConsultDTO] = (),
         load_count: int,
         asker_branch: str | None,
         now: dt.datetime,
@@ -218,7 +226,7 @@ class ExpertiseScorer:
     ) -> tuple[ScoredCandidate, float]:
         # Evidence is pre-fetched in a batch by ``rank`` (no per-candidate query, #58).
         evidence = collect_topic_evidence(
-            topics, certifications, skills, memberships, answers, daily_reports
+            topics, certifications, skills, memberships, answers, daily_reports, offline_consults
         )
         weights = self._weights
 

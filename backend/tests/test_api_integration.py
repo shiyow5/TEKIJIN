@@ -11,13 +11,21 @@ import datetime as dt
 import hashlib
 import hmac
 import json
+import threading
 import time
+from inspect import signature
 
 import pytest
 from fastapi.testclient import TestClient
 from langgraph.checkpoint.memory import MemorySaver
 
-from tekijin.agent.stubs import KeywordIntentModel, RuleSufficiencyModel, TemplateDraftModel
+from tekijin.agent.stubs import (
+    KeywordIntentModel,
+    RuleSufficiencyModel,
+    TemplateDraftModel,
+    TemplateQuestionStructurer,
+)
+from tekijin.api.routes import knowledge as knowledge_route
 from tekijin.api.service import (
     SESSION_TTL_SECONDS,
     AgentService,
@@ -128,6 +136,7 @@ def _client(
     answerability_threshold=40,
     self_answer_model=None,
     knowledge_answer_min_similarity=None,
+    question_structurer=None,
 ) -> TestClient:
     return _app_client(
         _service(
@@ -140,6 +149,7 @@ def _client(
             answerability_threshold=answerability_threshold,
             self_answer_model=self_answer_model,
             knowledge_answer_min_similarity=knowledge_answer_min_similarity,
+            question_structurer=question_structurer,
         )
     )
 
@@ -155,6 +165,7 @@ def _service(
     answerability_threshold=40,
     self_answer_model=None,
     knowledge_answer_min_similarity=None,
+    question_structurer=None,
 ) -> AgentService:
     """Same wiring as :func:`_client`, but hands back the service itself.
 
@@ -169,6 +180,9 @@ def _service(
         intent_model=KeywordIntentModel(),
         sufficiency_model=RuleSufficiencyModel(),
         draft_model=TemplateDraftModel(),
+        # #475: always wire the on-demand question structurer (stub) so the
+        # /handoff/structure endpoint is exercised; a test can inject its own.
+        question_structurer=question_structurer or TemplateQuestionStructurer(),
         answerability_model=answerability_model,
         answerability_threshold=answerability_threshold,
         self_answer_model=self_answer_model,
@@ -237,6 +251,82 @@ def _events(client: TestClient, session_id: str) -> list[tuple[str, dict]]:
     return _parse_sse(resp.text)
 
 
+# Slack's request handlers finish the slow part AFTER responding, in daemon
+# threads (its interactivity budget is ~3s, a graph advance is not). Those
+# threads write to the DB, so a test that returns while one is still running
+# races the cleanup below: it deletes events, then questions, and the thread
+# inserts a fresh event in between -> events_question_id_fkey (#460).
+_ASYNC_SLACK_THREADS = (
+    "slack-interactivity-advance",
+    "slack-pending-handoff-setup",
+    "slack-handoff-channel-setup",
+)
+
+
+def _join_async_slack_work(timeout: float = 15.0) -> None:
+    """Block until no Slack background thread is still touching the DB.
+
+    Waiting on ``ctx.pending is None`` is NOT enough: ``_dispatch_stream`` clears
+    that when it STARTS the queued Command, while the event rows are written at
+    the end of the run.
+    """
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        alive = [
+            t for t in threading.enumerate() if t.name in _ASYNC_SLACK_THREADS and t.is_alive()
+        ]
+        if not alive:
+            return
+        time.sleep(0.02)
+    raise AssertionError(
+        f"Slack background threads still running after {timeout}s: "
+        f"{[t.name for t in threading.enumerate() if t.name in _ASYNC_SLACK_THREADS]}"
+    )
+
+
+def test_join_async_slack_work_waits_for_a_running_thread() -> None:
+    """The guard for #460: if this join is ever dropped, the FK error comes back
+    as an intermittent teardown failure that reruns hide. Test the mechanism
+    directly rather than by racing the graph, so it is fast and deterministic.
+    """
+
+    released = threading.Event()
+    finished: list[float] = []
+
+    def _work() -> None:
+        released.wait(timeout=5.0)
+        finished.append(time.monotonic())
+
+    worker = threading.Thread(target=_work, name="slack-interactivity-advance")
+    worker.start()
+    try:
+        threading.Timer(0.2, released.set).start()
+        _join_async_slack_work(timeout=5.0)
+        returned = time.monotonic()
+        assert finished, "join returned while the thread was still running"
+        assert returned >= finished[0]
+    finally:
+        released.set()
+        worker.join(timeout=5.0)
+
+
+def test_join_async_slack_work_raises_rather_than_deleting_under_a_live_writer() -> None:
+    # Timing out must FAIL loudly. Returning quietly would drop straight into the
+    # deletes with a writer still live — the exact condition being guarded against.
+    released = threading.Event()
+    worker = threading.Thread(
+        target=lambda: released.wait(timeout=5.0), name="slack-pending-handoff-setup"
+    )
+    worker.start()
+    try:
+        with pytest.raises(AssertionError, match="still running"):
+            _join_async_slack_work(timeout=0.3)
+    finally:
+        released.set()
+        worker.join(timeout=5.0)
+
+
 @pytest.fixture(autouse=True)
 def _cleanup_api_rows(engine):
     # The API COMMITS questions/recommendations (id prefix "api_"). Remove them
@@ -244,6 +334,9 @@ def _cleanup_api_rows(engine):
     from sqlalchemy import text
 
     yield
+    # BEFORE any delete: see _join_async_slack_work. Ordering the deletes by FK
+    # is not enough on its own when a writer is still running.
+    _join_async_slack_work()
     session = get_sessionmaker(engine)()
     try:
         # messages FK-reference recommendations (no ON DELETE CASCADE), so chat
@@ -257,6 +350,9 @@ def _cleanup_api_rows(engine):
         # feedback (#237) is runtime-only (seed writes none) and FKs questions, so
         # clear it first — before the questions it may reference are deleted.
         session.execute(text("DELETE FROM feedback"))
+        # offline_consults (#247) is likewise runtime-only and FKs questions +
+        # employees, so it must be cleared before the questions it references.
+        session.execute(text("DELETE FROM offline_consults"))
         session.execute(
             text(r"DELETE FROM recommendations WHERE question_id LIKE 'api\_%' ESCAPE '\'")
         )
@@ -1782,6 +1878,58 @@ def test_slack_events_rejects_an_invalid_signature(engine, fake_embedder) -> Non
     assert resp.status_code == 401
 
 
+def _reaction_event_payload(*, event_id: str = "Ev_react_1") -> dict:
+    return {
+        "type": "event_callback",
+        "event_id": event_id,
+        "event": {
+            "type": "reaction_added",
+            "reaction": "white_check_mark",
+            "user": "U_REACT",
+            "item": {"type": "message", "channel": "C_REACT", "ts": "1.0"},
+        },
+    }
+
+
+def test_slack_events_reaction_added_triggers_solve_capture(
+    monkeypatch, engine, fake_embedder
+) -> None:
+    """#476: a ✅ reaction event_callback routes to the solve-capture scheduler
+    (which the flag gates) — the daemon-thread extraction itself is unit-tested."""
+
+    calls: list[dict] = []
+    monkeypatch.setattr(
+        "tekijin.api.slack_routes.schedule_solve_capture", lambda _sf, **kw: calls.append(kw)
+    )
+    monkeypatch.setenv("TEKIJIN_SLACK_SOLVE_CAPTURE_ENABLED", "true")
+    _slack_configured(monkeypatch)
+    try:
+        client = _client(engine, fake_embedder)
+        resp = _post_slack_event(client, _reaction_event_payload())
+        assert resp.status_code == 200
+        assert calls == [{"channel_id": "C_REACT", "reactor_slack_user_id": "U_REACT"}]
+    finally:
+        get_settings.cache_clear()
+
+
+def test_slack_events_reaction_added_ignored_when_capture_disabled(
+    monkeypatch, engine, fake_embedder
+) -> None:
+    # Flag OFF (default): the reaction is a no-op — the events path is unchanged.
+    calls: list[dict] = []
+    monkeypatch.setattr(
+        "tekijin.api.slack_routes.schedule_solve_capture", lambda _sf, **kw: calls.append(kw)
+    )
+    _slack_configured(monkeypatch)  # signing secret only; capture flag stays OFF
+    try:
+        client = _client(engine, fake_embedder)
+        resp = _post_slack_event(client, _reaction_event_payload(event_id="Ev_react_2"))
+        assert resp.status_code == 200
+        assert calls == []
+    finally:
+        get_settings.cache_clear()
+
+
 def test_slack_events_message_lands_in_the_channels_current_thread(
     monkeypatch, seed_counts, engine, fake_embedder
 ) -> None:
@@ -2322,6 +2470,233 @@ def test_dashboard_summary_aggregates_outcomes(seed_counts, session) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# #294: 蓄積メトリクス (knowledge accumulation on the admin dashboard)
+# --------------------------------------------------------------------------- #
+# Deliberately inside a month the FIXTURES populate: `answers.json` has 16 rows
+# dated 2026-08. With a September `now` the "counts only runtime rows" test passes
+# even for an implementation that counts the whole table, because the seed has
+# nothing in September — the guard would be green for the wrong reason.
+ACC_NOW = dt.datetime(2026, 8, 25, 12, 0, 0)
+
+
+def _accepted_handoff(session, *, qid: str, responder_id: int, created: dt.datetime) -> None:
+    """One accepted hand-off. Fixtures write NO recommendations, so a row here is
+    unambiguously runtime — that is what makes the accumulation count meaningful."""
+
+    session.add(
+        Recommendation(
+            question_id=qid,
+            employee_id=responder_id,
+            rank=1,
+            score=0.9,
+            outcome="accepted",
+            created_at=created,
+        )
+    )
+    session.flush()
+
+
+def _captured_answer(session, *, aid: str, qid: str, responder_id: int, created: dt.datetime):
+    from tekijin.models.tables import Answer
+
+    session.add(
+        Answer(
+            id=aid,
+            question_id=qid,
+            responder_id=responder_id,
+            body="教わった内容",
+            topic="ネットワーク・VPN",
+            created_at=created,
+            reuse_count=0,
+        )
+    )
+    session.flush()
+
+
+def _consult(session, *, qid: str, responder_id: int, created: dt.datetime) -> None:
+    from tekijin.models.tables import OfflineConsult
+
+    session.add(
+        OfflineConsult(
+            question_id=qid,
+            responder_id=responder_id,
+            asker_id=33,
+            topics=["ネットワーク・VPN"],
+            answer_body="対面で聞いた内容",
+            resolution="resolved",
+            created_at=created,
+        )
+    )
+    session.flush()
+
+
+def test_accumulation_counts_only_what_the_runtime_produced(seed_counts, session) -> None:
+    """The seed ships 150 answers, 16 of them dated in the current month.
+
+    Counting every ``answers`` row would make "今月の形式化知識量" read 16 on a
+    freshly seeded database, before anyone has used the product — a headline KPI
+    that is wrong in the flattering direction. Runtime origin is knowable: a
+    captured answer has an ACCEPTED recommendation behind it, and fixtures write
+    no ``recommendations`` at all (``seed.py`` TRUNCATEs them, never inserts).
+    """
+
+    summary = dashboard_summary(session, now=ACC_NOW)
+    assert summary["knowledge_accumulation"]["this_month"] == 0
+
+
+def test_accumulation_counts_captured_answers_and_retrospectives(seed_counts, session) -> None:
+    _accepted_handoff(session, qid="q_0001", responder_id=1, created=ACC_NOW)
+    _captured_answer(session, aid="ans_acc1", qid="q_0001", responder_id=1, created=ACC_NOW)
+    # A 直接相談 write-up (#247) is the other half of the loop: no chat transcript
+    # exists, so this row IS the knowledge. Fixtures write none of these either.
+    _consult(session, qid="q_0002", responder_id=2, created=ACC_NOW)
+
+    acc = dashboard_summary(session, now=ACC_NOW)["knowledge_accumulation"]
+    assert acc["captured_answers"] == 1
+    assert acc["consult_retrospectives"] == 1
+    assert acc["this_month"] == 2
+
+
+def test_accumulation_separates_this_month_from_last(seed_counts, session) -> None:
+    last_month = dt.datetime(2026, 7, 20, 9, 0, 0)
+    _accepted_handoff(session, qid="q_0001", responder_id=1, created=last_month)
+    _captured_answer(session, aid="ans_acc_old", qid="q_0001", responder_id=1, created=last_month)
+    _accepted_handoff(session, qid="q_0002", responder_id=2, created=ACC_NOW)
+    _captured_answer(session, aid="ans_acc_new", qid="q_0002", responder_id=2, created=ACC_NOW)
+
+    acc = dashboard_summary(session, now=ACC_NOW)["knowledge_accumulation"]
+    assert acc["this_month"] == 1
+    assert acc["last_month"] == 1
+
+
+def test_accumulation_reports_the_recovery_rate_of_handoffs(seed_counts, session) -> None:
+    """暗黙知の回収率: of the hand-offs someone accepted, how many left knowledge behind.
+
+    This is the number that says whether the loop is actually closing. Two accepted
+    hand-offs, one of which produced an answer row -> 0.5.
+    """
+
+    _accepted_handoff(session, qid="q_0001", responder_id=1, created=ACC_NOW)
+    _captured_answer(session, aid="ans_rec1", qid="q_0001", responder_id=1, created=ACC_NOW)
+    _accepted_handoff(session, qid="q_0002", responder_id=2, created=ACC_NOW)
+
+    acc = dashboard_summary(session, now=ACC_NOW)["knowledge_accumulation"]
+    assert acc["accepted_handoffs"] == 2
+    assert acc["capture_rate"] == pytest.approx(0.5)
+
+
+def test_accumulation_capture_rate_cannot_exceed_one_across_a_month_boundary(
+    seed_counts, session
+) -> None:
+    """A hand-off shown last month and answered this month must not break the rate.
+
+    ``recommendations.created_at`` is when the hand-off was SHOWN — there is no
+    ``accepted_at`` — so counting answers on their own timestamp against hand-offs
+    on theirs puts such a pair in the numerator and not the denominator. Here that
+    arithmetic gives 2/1 = 200% captured while the one hand-off actually shown this
+    month captured nothing. Both halves come from one population instead.
+    """
+
+    last_month = dt.datetime(2026, 7, 28, 9, 0, 0)
+    # Shown this month, nobody wrote anything down: the only row the rate is about.
+    _accepted_handoff(session, qid="q_0001", responder_id=1, created=ACC_NOW)
+    # Shown last month, answered this month — twice.
+    for i, (qid, responder) in enumerate(((("q_0002"), 2), (("q_0003"), 3))):
+        _accepted_handoff(session, qid=qid, responder_id=responder, created=last_month)
+        _captured_answer(
+            session, aid=f"ans_xmonth{i}", qid=qid, responder_id=responder, created=ACC_NOW
+        )
+
+    acc = dashboard_summary(session, now=ACC_NOW)["knowledge_accumulation"]
+    # The knowledge itself WAS created this month — that count stays right.
+    assert acc["captured_answers"] == 2
+    assert acc["accepted_handoffs"] == 1
+    assert acc["capture_rate"] == 0.0, "the hand-off shown this month captured nothing"
+    assert acc["capture_rate"] <= 1.0
+
+
+def test_a_direct_consultation_counts_as_captured_not_as_a_miss(seed_counts, session) -> None:
+    """A 直接相談 leaves no ``answers`` row — that is what it IS (#247).
+
+    Counting only ``answers`` scored every properly-written-up direct consult as an
+    uncaptured hand-off: the same function called the retrospective knowledge in
+    ``this_month`` and a failure in ``capture_rate``. The loop closes perfectly and
+    the KPI read 0%.
+    """
+
+    _accepted_handoff(session, qid="q_0001", responder_id=1, created=ACC_NOW)
+    _consult(session, qid="q_0001", responder_id=1, created=ACC_NOW)
+
+    acc = dashboard_summary(session, now=ACC_NOW)["knowledge_accumulation"]
+    assert acc["consult_retrospectives"] == 1
+    assert acc["accepted_handoffs"] == 1
+    assert acc["capture_rate"] == 1.0, "a written-up direct consult is captured knowledge"
+
+
+def test_an_unresolved_retrospective_is_not_counted_as_formalized_knowledge(
+    seed_counts, session
+) -> None:
+    """「聞いたが分からなかった」 is stored, but it is not knowledge.
+
+    Everywhere else an ``unresolved`` consult is inert (断り≠非専門). Counting it
+    here would inflate the headline in the flattering direction — the exact failure
+    this metric is otherwise built to avoid.
+    """
+
+    from tekijin.models.tables import OfflineConsult
+
+    _accepted_handoff(session, qid="q_0001", responder_id=1, created=ACC_NOW)
+    session.add(
+        OfflineConsult(
+            question_id="q_0001",
+            responder_id=1,
+            asker_id=33,
+            topics=["ネットワーク・VPN"],
+            answer_body="聞いたが解決しなかった",
+            resolution="unresolved",
+            created_at=ACC_NOW,
+        )
+    )
+    session.flush()
+
+    acc = dashboard_summary(session, now=ACC_NOW)["knowledge_accumulation"]
+    assert acc["consult_retrospectives"] == 0
+    assert acc["this_month"] == 0
+
+
+def test_accumulation_capture_rate_is_zero_not_one_when_nothing_was_handed_off(
+    seed_counts, session
+) -> None:
+    """An empty numerator over an empty denominator must not read as "100% captured"."""
+
+    acc = dashboard_summary(session, now=ACC_NOW)["knowledge_accumulation"]
+    assert acc["accepted_handoffs"] == 0
+    assert acc["capture_rate"] == 0.0
+
+
+def test_accumulation_monthly_trend_is_dense_and_oldest_first(seed_counts, session) -> None:
+    """A month with nothing accumulated must appear as 0, not be missing.
+
+    A sparse series silently rescales the chart and turns a gap into a slope.
+    """
+
+    _accepted_handoff(session, qid="q_0001", responder_id=1, created=ACC_NOW)
+    _captured_answer(session, aid="ans_tr", qid="q_0001", responder_id=1, created=ACC_NOW)
+
+    monthly = dashboard_summary(session, now=ACC_NOW)["knowledge_accumulation"]["monthly"]
+    assert [m["month"] for m in monthly] == [
+        "2026-03",
+        "2026-04",
+        "2026-05",
+        "2026-06",
+        "2026-07",
+        "2026-08",
+    ]
+    assert monthly[-1]["count"] == 1
+    assert all(m["count"] == 0 for m in monthly[:-1])
+
+
+# --------------------------------------------------------------------------- #
 # GET /handoff : responder-facing payload for a session paused at ``send`` (#38)
 # --------------------------------------------------------------------------- #
 def test_handoff_returns_responder_payload(seed_counts, engine, fake_embedder) -> None:
@@ -2659,6 +3034,90 @@ def test_handoff_draft_404_after_answered(seed_counts, engine, fake_embedder) ->
     assert resp.status_code == 404
 
 
+# --------------------------------------------------------------------------- #
+# POST /handoff/structure : on-demand question re-draft into the four fields (#475)
+# --------------------------------------------------------------------------- #
+class _RecordingStructurer:
+    """Structurer spy: records the (question, situation, topics) it was called with."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str | None, list[str]]] = []
+
+    def structure(self, question, *, situation=None, topics=None):
+        from tekijin.agent.protocols import QuestionStructureResult
+
+        self.calls.append((question, situation, list(topics or [])))
+        return QuestionStructureResult(
+            summary="起きていること", environment="", tried="", blocker=question
+        )
+
+
+def test_handoff_structure_returns_the_four_fields(seed_counts, engine, fake_embedder) -> None:
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "qs1"})
+    _events(client, "qs1")  # pause at send (a person is offered)
+
+    resp = client.post("/handoff/structure", json={"session_id": "qs1"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["session_id"] == "qs1"
+    # The stub seeds blocker from the raw question and leaves env/tried empty — the
+    # "don't invent a field the asker never gave" contract (the asker fills them in).
+    assert body["blocker"] == GOOD_Q
+    assert body["summary"]  # a one-line 起きていること
+    assert body["environment"] == ""
+    assert body["tried"] == ""
+
+
+def test_handoff_structure_reuses_c1_understanding(seed_counts, engine, fake_embedder) -> None:
+    # The endpoint must feed the STORED question + C1's topics/situation to the
+    # structurer (not re-run C1), so the re-draft reflects what was already parsed.
+    spy = _RecordingStructurer()
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1)),
+        question_structurer=spy,
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "qs2"})
+    _events(client, "qs2")
+
+    resp = client.post("/handoff/structure", json={"session_id": "qs2"})
+    assert resp.status_code == 200
+    assert len(spy.calls) == 1
+    question, _situation, topics = spy.calls[0]
+    assert question == GOOD_Q
+    assert topics == ["ネットワーク・VPN"]  # C1 (KeywordIntentModel) classification
+
+
+def test_handoff_structure_404_when_no_question(seed_counts, engine, fake_embedder) -> None:
+    client = _client(engine, fake_embedder, retriever=_FakeRetriever(), scorer=_FakeScorer([]))
+    resp = client.post("/handoff/structure", json={"session_id": "nope"})
+    assert resp.status_code == 404
+
+
+def test_handoff_structure_forbidden_for_non_participant(
+    seed_counts, engine, fake_embedder
+) -> None:
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "qs3"})
+    _events(client, "qs3")
+    # employee 11 is neither the asker (10) nor the responder (1) nor an admin -> 403.
+    resp = client.post("/handoff/structure", json={"session_id": "qs3"}, headers=_user_headers(11))
+    assert resp.status_code == 403
+
+
 def test_save_handoff_draft_rejects_blank_at_the_service(
     seed_counts, engine, fake_embedder
 ) -> None:
@@ -2845,9 +3304,16 @@ def test_handoff_exclude_reroutes_to_next_candidate(seed_counts, engine, fake_em
     finally:
         check.close()
 
-    # The rerouted hand-off still completes normally.
+    # The rerouted hand-off still completes normally — accepted by E002, the person
+    # it was rerouted TO. The client is authenticated as the asker for the exclusion
+    # above, and an asker may not record an outcome in the responder's name.
     assert (
-        client.post("/answer", json={"session_id": "hx1", "outcome": "accepted"}).status_code == 200
+        client.post(
+            "/answer",
+            json={"session_id": "hx1", "outcome": "accepted"},
+            headers=_user_headers(2),
+        ).status_code
+        == 200
     )
 
 
@@ -2962,9 +3428,15 @@ def test_handoff_redraft_regenerates_draft(seed_counts, engine, fake_embedder) -
     finally:
         check.close()
 
-    # The regenerated hand-off still completes normally.
+    # The regenerated hand-off still completes normally — accepted by E001, the
+    # person it is drafted for (the client is authenticated as the asker).
     assert (
-        client.post("/answer", json={"session_id": "rd1", "outcome": "accepted"}).status_code == 200
+        client.post(
+            "/answer",
+            json={"session_id": "rd1", "outcome": "accepted"},
+            headers=_user_headers(1),
+        ).status_code
+        == 200
     )
 
 
@@ -3058,9 +3530,15 @@ def test_handoff_correct_reruns_pipeline_from_c1(seed_counts, engine, fake_embed
     finally:
         check.close()
 
-    # The re-interpreted hand-off still completes normally.
+    # The re-interpreted hand-off still completes normally — accepted by E001, the
+    # person the re-run drafted for (the client is authenticated as the asker).
     assert (
-        client.post("/answer", json={"session_id": "hc1", "outcome": "accepted"}).status_code == 200
+        client.post(
+            "/answer",
+            json={"session_id": "hc1", "outcome": "accepted"},
+            headers=_user_headers(1),
+        ).status_code
+        == 200
     )
 
 
@@ -4229,6 +4707,539 @@ def _feedback_rows(engine) -> list[Feedback]:
         return s.query(Feedback).order_by(Feedback.id).all()
 
 
+# --------------------------------------------------------------------------- #
+# #247: 直接相談のふりかえり (offline consult retrospective)
+# --------------------------------------------------------------------------- #
+def _consult_rows(engine):
+    from tekijin.models.tables import OfflineConsult
+
+    with session_scope(get_sessionmaker(engine)) as session:
+        return session.query(OfflineConsult).order_by(OfflineConsult.id).all()
+
+
+def _question_id_for_session(engine, session_id: str) -> str:
+    from sqlalchemy import select
+
+    with session_scope(get_sessionmaker(engine)) as session:
+        return session.execute(
+            select(Question.id).where(Question.session_id == session_id)
+        ).scalar_one()
+
+
+def _direct_consultation(
+    engine,
+    fake_embedder,
+    *,
+    session_id: str,
+    asker_id: int = 10,
+    consult_method: str = "direct",
+    accept: bool = True,
+) -> tuple[TestClient, str]:
+    """Drive a REAL hand-off up to the point a 直接相談 could have happened.
+
+    The retrospective is only writable about the person who actually accepted, so
+    every test here has to produce a genuine ``recommendations`` row — the seeded
+    fixtures carry none (that is exactly why the first version of this endpoint
+    could be pointed at any employee at all).
+    """
+
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2, 3], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2, 3)),
+    )
+    client.post("/ask", json={"asker_id": asker_id, "question": GOOD_Q, "session_id": session_id})
+    _events(client, session_id)
+    client.post(
+        "/handoff/draft",
+        json={"session_id": session_id, "draft": "本文", "consult_method": consult_method},
+    )
+    if accept:
+        client.post("/answer", json={"session_id": session_id, "outcome": "accepted"})
+        _events(client, session_id)
+    return client, _question_id_for_session(engine, session_id)
+
+
+def _retro_body(question_id: str, **over):
+    body = {
+        "question_id": question_id,
+        "responder_id": "E001",
+        "topics": ["ネットワーク・VPN"],
+        "asked": "拠点間VPNが不安定な件",
+        "answer_body": "MTU を下げると直る、という話でした",
+        "resolution": "resolved",
+    }
+    body.update(over)
+    return body
+
+
+def test_topics_endpoint_serves_the_scorer_vocabulary(seed_counts, engine, fake_embedder) -> None:
+    """The form must offer exactly what the scorer joins on — no frontend copy (#116)."""
+
+    from tekijin.scorer.topics import TOPIC_VOCABULARY
+
+    client = _client(engine, fake_embedder)
+    resp = client.get("/topics", headers=_user_headers(33))
+    assert resp.status_code == 200
+    assert resp.json()["topics"] == list(TOPIC_VOCABULARY)
+
+
+# --- the read side: what the form is built from ----------------------------- #
+def test_retrospective_context_survives_the_acceptance(seed_counts, engine, fake_embedder) -> None:
+    """The write-up happens AFTER the consultation, so the read must outlive it.
+
+    The first version of #247 built the form from ``GET /handoff``, which 404s the
+    moment the responder records an outcome — i.e. it was readable only during the
+    window where the consultation had not happened yet.
+    """
+
+    client, question_id = _direct_consultation(engine, fake_embedder, session_id="retro-ctx1")
+
+    # The regression this endpoint exists for: the pending-hand-off view is gone.
+    assert client.get("/handoff/retro-ctx1", headers=_user_headers(10)).status_code == 404
+
+    resp = client.get("/consult-retrospective/retro-ctx1", headers=_user_headers(10))
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["question_id"] == question_id
+    assert body["consult_method"] == "direct"
+    assert body["question"] == GOOD_Q
+    assert body["responder"]["person_id"] == "E001"
+    assert body["responder"]["name"]
+    assert body["already_recorded"] is False
+
+
+def test_retrospective_context_reports_a_chat_handoff_as_chat(
+    seed_counts, engine, fake_embedder
+) -> None:
+    """A chat consultation already leaves a transcript; the form must not appear."""
+
+    client, _ = _direct_consultation(
+        engine, fake_embedder, session_id="retro-ctx2", consult_method="chat"
+    )
+    body = client.get("/consult-retrospective/retro-ctx2", headers=_user_headers(10)).json()
+    assert body["consult_method"] == "chat"
+
+
+def test_retrospective_context_reports_an_already_written_write_up(
+    seed_counts, engine, fake_embedder
+) -> None:
+    client, question_id = _direct_consultation(engine, fake_embedder, session_id="retro-ctx3")
+    client.post("/consult-retrospective", json=_retro_body(question_id), headers=_user_headers(10))
+    body = client.get("/consult-retrospective/retro-ctx3", headers=_user_headers(10)).json()
+    assert body["already_recorded"] is True
+
+
+def test_retrospective_context_from_a_stranger_is_403(seed_counts, engine, fake_embedder) -> None:
+    client, _ = _direct_consultation(engine, fake_embedder, session_id="retro-ctx4")
+    assert (
+        client.get("/consult-retrospective/retro-ctx4", headers=_user_headers(44)).status_code
+        == 403
+    )
+
+
+def test_retrospective_context_for_an_unknown_session_is_404(
+    seed_counts, engine, fake_embedder
+) -> None:
+    client = _client(engine, fake_embedder)
+    assert client.get("/consult-retrospective/nope", headers=_user_headers(33)).status_code == 404
+
+
+# --- the write side --------------------------------------------------------- #
+def test_retrospective_is_recorded_for_the_questions_own_asker(
+    seed_counts, engine, fake_embedder
+) -> None:
+    client, question_id = _direct_consultation(engine, fake_embedder, session_id="retro-w1")
+    resp = client.post(
+        "/consult-retrospective", json=_retro_body(question_id), headers=_user_headers(10)
+    )
+    assert resp.status_code == 200 and resp.json()["status"] == "recorded"
+
+    rows = _consult_rows(engine)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.question_id == question_id
+    assert row.responder_id == 1
+    assert row.topics == ["ネットワーク・VPN"]
+    assert row.resolution == "resolved"
+    # asker_id comes from the TOKEN, never the body — the same rule as /feedback.
+    assert row.asker_id == 10
+
+
+def test_a_second_retrospective_for_the_same_question_is_409(
+    seed_counts, engine, fake_embedder
+) -> None:
+    """One accepted hand-off = one consultation = one write-up.
+
+    Without this the asker could write the SAME real conversation up
+    ``OFFLINE_CONSULT_EVIDENCE_CAP`` times and reach the full 1.0 of evidence from
+    it — the accepted-responder check alone does not bound how OFTEN they write.
+    """
+
+    client, question_id = _direct_consultation(engine, fake_embedder, session_id="retro-w14")
+    first = client.post(
+        "/consult-retrospective", json=_retro_body(question_id), headers=_user_headers(10)
+    )
+    assert first.status_code == 200
+    second = client.post(
+        "/consult-retrospective",
+        json=_retro_body(question_id, answer_body="別の書き方でもう一度"),
+        headers=_user_headers(10),
+    )
+    assert second.status_code == 409
+    assert "すでに記録" in second.json()["detail"]
+    assert len(_consult_rows(engine)) == 1
+
+
+def test_the_database_itself_rejects_a_second_write_up(seed_counts, engine, fake_embedder) -> None:
+    """The 409 above is the polite answer; this is the constraint behind it.
+
+    Written against the table rather than the route so a future caller that skips
+    the API check still cannot double-count one consultation.
+    """
+
+    from sqlalchemy.exc import IntegrityError
+
+    from tekijin.models.tables import OfflineConsult
+
+    client, question_id = _direct_consultation(engine, fake_embedder, session_id="retro-w15")
+    assert (
+        client.post(
+            "/consult-retrospective", json=_retro_body(question_id), headers=_user_headers(10)
+        ).status_code
+        == 200
+    )
+
+    with pytest.raises(IntegrityError), session_scope(get_sessionmaker(engine)) as session:
+        session.add(
+            OfflineConsult(
+                question_id=question_id,
+                responder_id=1,
+                asker_id=10,
+                topics=["ネットワーク・VPN"],
+                asked=None,
+                answer_body="直接 INSERT した2件目",
+                resolution="resolved",
+            )
+        )
+        session.flush()
+    assert len(_consult_rows(engine)) == 1
+
+
+def test_the_asker_cannot_record_the_responders_acceptance(
+    seed_counts, engine, fake_embedder
+) -> None:
+    """An outcome is the RESPONDER's act; the asker must not be able to forge it.
+
+    The asker is a legitimate session participant (they own the clarification
+    reply), so ``require_session_participant`` alone let them POST
+    ``outcome="accepted"`` for their own question. That forges the one durable
+    record of "this person took the hand-off" — which the dashboard's acceptance
+    rate reads, the inbox is filtered by, and #247 uses to decide whom a
+    retrospective may credit.
+    """
+
+    client = _client(
+        engine,
+        fake_embedder,
+        retriever=_FakeRetriever(people=[1, 2, 3], people_confidence=0.2),
+        scorer=_FakeScorer(_recs(1, 2, 3)),
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "self-accept"})
+    _events(client, "self-accept")
+    client.post(
+        "/handoff/draft",
+        json={"session_id": "self-accept", "draft": "本文", "consult_method": "direct"},
+    )
+
+    forged = client.post(
+        "/answer",
+        json={"session_id": "self-accept", "outcome": "accepted"},
+        headers=_user_headers(10),
+    )
+    assert forged.status_code == 403
+    question_id = _question_id_for_session(engine, "self-accept")
+    from sqlalchemy import select
+
+    with session_scope(get_sessionmaker(engine)) as session:
+        outcomes = (
+            session.execute(
+                select(Recommendation.outcome).where(Recommendation.question_id == question_id)
+            )
+            .scalars()
+            .all()
+        )
+    assert all(o is None for o in outcomes)
+
+    # ...and with no acceptance on record, there is nothing to write up.
+    refused = client.post(
+        "/consult-retrospective", json=_retro_body(question_id), headers=_user_headers(10)
+    )
+    assert refused.status_code == 422
+    assert "まだ受諾されていない" in refused.json()["detail"]
+    assert _consult_rows(engine) == []
+
+
+def test_the_asker_can_still_decline_nothing_and_reply_to_a_clarification(
+    seed_counts, engine, fake_embedder
+) -> None:
+    """The outcome restriction must not take the asker's own resume path with it."""
+
+    client = _client(engine, fake_embedder)
+    client.post("/ask", json={"asker_id": 10, "question": VAGUE_Q, "session_id": "asker-reply"})
+    _events(client, "asker-reply")
+    replied = client.post(
+        "/answer",
+        json={"session_id": "asker-reply", "reply": "UTMの移行です"},
+        headers=_user_headers(10),
+    )
+    assert replied.status_code == 200
+
+
+def test_deleting_a_question_takes_its_retrospective_with_it(
+    seed_counts, engine, fake_embedder
+) -> None:
+    """``offline_consults`` FKs ``questions`` with no CASCADE — the same shape that
+    made #207's delete 500 when ``feedback`` was forgotten."""
+
+    client, question_id = _direct_consultation(engine, fake_embedder, session_id="retro-del")
+    assert (
+        client.post(
+            "/consult-retrospective", json=_retro_body(question_id), headers=_user_headers(10)
+        ).status_code
+        == 200
+    )
+    deleted = client.delete(f"/questions/{question_id}", headers=_user_headers(10))
+    assert deleted.status_code == 200
+    assert _consult_rows(engine) == []
+
+
+def test_retrospective_from_a_stranger_is_403(seed_counts, engine, fake_embedder) -> None:
+    # The retrospective becomes expertise evidence for the responder, so letting a
+    # non-owner write one would be a way to inflate (or fabricate) someone's standing.
+    client, question_id = _direct_consultation(engine, fake_embedder, session_id="retro-w2")
+    resp = client.post(
+        "/consult-retrospective", json=_retro_body(question_id), headers=_user_headers(44)
+    )
+    assert resp.status_code == 403
+    assert _consult_rows(engine) == []
+
+
+def test_retrospective_for_an_unknown_question_is_404(seed_counts, engine, fake_embedder) -> None:
+    client = _client(engine, fake_embedder)
+    resp = client.post(
+        "/consult-retrospective",
+        json=_retro_body("q_does_not_exist"),
+        headers=_user_headers(33),
+    )
+    assert resp.status_code == 404
+    assert _consult_rows(engine) == []
+
+
+def test_retrospective_cannot_name_yourself_as_the_responder(
+    seed_counts, engine, fake_embedder
+) -> None:
+    """Self-attribution: the whole point of the row is that SOMEONE ELSE helped."""
+
+    client, question_id = _direct_consultation(engine, fake_embedder, session_id="retro-w3")
+    resp = client.post(
+        "/consult-retrospective",
+        json=_retro_body(question_id, responder_id="E010"),
+        headers=_user_headers(10),
+    )
+    assert resp.status_code == 422
+    # the guard that fired, not just "some 422"
+    assert "自分自身を相談相手として" in resp.json()["detail"]
+    assert _consult_rows(engine) == []
+
+
+def test_retrospective_cannot_name_someone_never_recommended_for_the_question(
+    seed_counts, engine, fake_embedder
+) -> None:
+    """Fabrication: naming an arbitrary colleague must not become their evidence."""
+
+    client, question_id = _direct_consultation(engine, fake_embedder, session_id="retro-w4")
+    resp = client.post(
+        "/consult-retrospective",
+        json=_retro_body(question_id, responder_id="E033"),
+        headers=_user_headers(10),
+    )
+    assert resp.status_code == 422
+    # the guard that fired, not just "some 422"
+    assert "実際に相談を受けた相手" in resp.json()["detail"]
+    assert _consult_rows(engine) == []
+
+
+def test_retrospective_cannot_name_a_shown_but_unaccepted_candidate(
+    seed_counts, engine, fake_embedder
+) -> None:
+    """Even a recommended person is not evidence unless they took the hand-off.
+
+    Employees 1/2/3 are all shown for this question; only 1 accepted. Allowing any
+    of the three would hand the asker a free choice of whom to credit.
+    """
+
+    client, question_id = _direct_consultation(engine, fake_embedder, session_id="retro-w5")
+    resp = client.post(
+        "/consult-retrospective",
+        json=_retro_body(question_id, responder_id="E002"),
+        headers=_user_headers(10),
+    )
+    assert resp.status_code == 422
+    # the guard that fired, not just "some 422"
+    assert "実際に相談を受けた相手" in resp.json()["detail"]
+    assert _consult_rows(engine) == []
+
+
+def test_retrospective_for_a_nonexistent_employee_is_422_not_500(
+    seed_counts, engine, fake_embedder
+) -> None:
+    """A bad id must not reach the FK constraint and surface as a 500 (cf. #263)."""
+
+    client, question_id = _direct_consultation(engine, fake_embedder, session_id="retro-w6")
+    resp = client.post(
+        "/consult-retrospective",
+        json=_retro_body(question_id, responder_id="E999999"),
+        headers=_user_headers(10),
+    )
+    assert resp.status_code == 422
+    # the guard that fired, not just "some 422"
+    assert "実際に相談を受けた相手" in resp.json()["detail"]
+    assert _consult_rows(engine) == []
+
+
+def test_retrospective_before_the_handoff_was_accepted_is_422(
+    seed_counts, engine, fake_embedder
+) -> None:
+    """Nothing was consulted yet, so there is nothing to write up."""
+
+    client, question_id = _direct_consultation(
+        engine, fake_embedder, session_id="retro-w7", accept=False
+    )
+    resp = client.post(
+        "/consult-retrospective", json=_retro_body(question_id), headers=_user_headers(10)
+    )
+    assert resp.status_code == 422
+    # the guard that fired, not just "some 422"
+    assert "まだ受諾されていない" in resp.json()["detail"]
+    assert _consult_rows(engine) == []
+
+
+def test_retrospective_on_a_chat_consultation_is_422(seed_counts, engine, fake_embedder) -> None:
+    """The transcript already exists; a hearsay summary on top of it is a weaker copy."""
+
+    client, question_id = _direct_consultation(
+        engine, fake_embedder, session_id="retro-w8", consult_method="chat"
+    )
+    resp = client.post(
+        "/consult-retrospective", json=_retro_body(question_id), headers=_user_headers(10)
+    )
+    assert resp.status_code == 422
+    # the guard that fired, not just "some 422"
+    assert "直接相談ではない" in resp.json()["detail"]
+    assert _consult_rows(engine) == []
+
+
+def test_retrospective_can_be_switched_off(seed_counts, engine, fake_embedder, monkeypatch) -> None:
+    """Kill switch (#247): the only write path that mutates expertise from the UI."""
+
+    client, question_id = _direct_consultation(engine, fake_embedder, session_id="retro-w9")
+    monkeypatch.setenv("TEKIJIN_CONSULT_RETROSPECTIVE_ENABLED", "false")
+    get_settings.cache_clear()
+    try:
+        resp = client.post(
+            "/consult-retrospective", json=_retro_body(question_id), headers=_user_headers(10)
+        )
+        assert resp.status_code == 503
+        assert _consult_rows(engine) == []
+        # The read side stays up: an in-flight form must be able to explain itself.
+        assert (
+            client.get("/consult-retrospective/retro-w9", headers=_user_headers(10)).status_code
+            == 200
+        )
+    finally:
+        monkeypatch.delenv("TEKIJIN_CONSULT_RETROSPECTIVE_ENABLED", raising=False)
+        get_settings.cache_clear()
+
+
+def test_retrospective_rejects_a_topic_outside_the_vocabulary(
+    seed_counts, engine, fake_embedder
+) -> None:
+    # The scorer joins on these strings; a free-text topic matches NO evidence and
+    # would silently do nothing (#116). Reject at the boundary instead.
+    client, question_id = _direct_consultation(engine, fake_embedder, session_id="retro-w10")
+    resp = client.post(
+        "/consult-retrospective",
+        json=_retro_body(question_id, topics=["まったく新しいトピック"]),
+        headers=_user_headers(10),
+    )
+    assert resp.status_code == 422
+    assert _consult_rows(engine) == []
+
+
+def test_retrospective_requires_topics_answer_and_resolution(
+    seed_counts, engine, fake_embedder
+) -> None:
+    client, question_id = _direct_consultation(engine, fake_embedder, session_id="retro-w11")
+    for over in ({"topics": []}, {"answer_body": "  "}, {"resolution": "まあまあ"}):
+        resp = client.post(
+            "/consult-retrospective",
+            json=_retro_body(question_id, **over),
+            headers=_user_headers(10),
+        )
+        assert resp.status_code == 422, over
+    # `asked` is optional (#247 の項目2は任意).
+    ok = client.post(
+        "/consult-retrospective",
+        json=_retro_body(question_id, asked=None),
+        headers=_user_headers(10),
+    )
+    assert ok.status_code == 200
+
+
+def _topic_score(engine, person_id: int, topic: str) -> float:
+    from tekijin.data.repository import Repository
+    from tekijin.scorer.scorer import ExpertiseScorer
+
+    with session_scope(get_sessionmaker(engine)) as session:
+        scorer = ExpertiseScorer(Repository(session))
+        result = scorer.rank(
+            topic, [person_id], asker_id=None, now=dt.datetime(2026, 8, 26), top_k=1
+        )
+        return result["recommendations"][0]["score"]
+
+
+def test_retrospective_becomes_expertise_evidence_for_the_responder(
+    seed_counts, engine, fake_embedder
+) -> None:
+    """The point of #247: the record must actually reach C6, not just sit in a table."""
+
+    topic = "ネットワーク・VPN"
+    client, question_id = _direct_consultation(engine, fake_embedder, session_id="retro-w12")
+    before = _topic_score(engine, 1, topic)
+    client.post("/consult-retrospective", json=_retro_body(question_id), headers=_user_headers(10))
+    assert _topic_score(engine, 1, topic) > before
+
+
+def test_unresolved_retrospective_is_stored_but_is_not_evidence(
+    seed_counts, engine, fake_embedder
+) -> None:
+    """断り≠非専門 applied to consultations: recorded, but neither adds nor subtracts."""
+
+    topic = "ネットワーク・VPN"
+    client, question_id = _direct_consultation(engine, fake_embedder, session_id="retro-w13")
+    before = _topic_score(engine, 1, topic)
+    resp = client.post(
+        "/consult-retrospective",
+        json=_retro_body(question_id, resolution="unresolved"),
+        headers=_user_headers(10),
+    )
+    assert resp.status_code == 200
+    assert len(_consult_rows(engine)) == 1  # stored
+    assert _topic_score(engine, 1, topic) == before  # but not evidence, in EITHER direction
+
+
 def test_feedback_endpoint_records_with_actor_from_principal(
     seed_counts, engine, fake_embedder
 ) -> None:
@@ -4620,6 +5631,55 @@ def test_knowledge_filters_by_department(seed_counts, engine, fake_embedder) -> 
     assert all(i["responder_department"] == dept for i in items)
     # department is QA-specific: documents (which carry no department) are excluded.
     assert all(i["kind"] == "qa" for i in items)
+
+
+def test_knowledge_since_includes_items_from_the_start_day_itself(
+    seed_counts, engine, fake_embedder
+) -> None:
+    """`since` is the screen's only period filter and had no test at all (#394).
+
+    The boundary is the whole point: `since` is bound against a TIMESTAMP column,
+    so a bare date becomes that day's 00:00 — inclusive for a start bound. An
+    item answered at 05:24 on the start day must still be listed.
+    """
+    client = _client(engine, fake_embedder)
+    baseline = client.get("/knowledge", params={"limit": 200}).json()["items"]
+    newest = max(baseline, key=lambda i: i["resolved_at"])
+    day = newest["resolved_at"][:10]
+
+    resp = client.get("/knowledge", params={"since": day, "limit": 200})
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    assert any(i["source_id"] == newest["source_id"] for i in items)
+    assert all(i["resolved_at"][:10] >= day for i in items)
+    assert len(items) < len(baseline)  # the filter actually narrows the set
+
+
+def test_knowledge_has_no_end_date_filter(seed_counts, engine, fake_embedder) -> None:
+    """`until` was removed (#394), and re-adding it needs UI + a boundary test.
+
+    It existed on the endpoint, `list_knowledge` and `api-client`, but no screen
+    ever sent it (KnowledgeScreen exposes 「この日以降」 only, by request) and
+    nothing tested it — and it was WRONG: bound against a TIMESTAMP column, a bare
+    date means that day's 00:00, so `until=<day>` silently dropped every item from
+    the end day (measured: an answer at 2026-08-21 05:24 was excluded by
+    `until=2026-08-21`). An inclusive-sounding 「この日まで」 that loses the last
+    day is worse than no filter.
+
+    This pins the removal at the HTTP boundary: an unknown query param is ignored
+    by FastAPI, so `until` must not narrow anything.
+    """
+    client = _client(engine, fake_embedder)
+    baseline = client.get("/knowledge", params={"limit": 200}).json()
+    filtered = client.get("/knowledge", params={"until": "2000-01-01", "limit": 200}).json()
+    assert filtered["total_matching"] == baseline["total_matching"]
+    assert [i["source_id"] for i in filtered["items"]] == [
+        i["source_id"] for i in baseline["items"]
+    ]
+
+    params = signature(knowledge_route).parameters
+    assert "until" not in params
+    assert "since" in params  # the surviving half of the period filter
 
 
 def test_knowledge_detail_returns_full_qa_item(seed_counts, engine, fake_embedder) -> None:

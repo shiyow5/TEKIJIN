@@ -12,7 +12,7 @@
 ## 全体像
 
 ```
-[GPUホスト internship-dgx1 / Tailscale 100.118.131.67]
+[GPUホスト internship-dgx1.tail349bcd.ts.net（= 100.118.131.67）]
   ├─ 共有Postgres  tekijin_app_pg :15432   ← 管理者が1回準備（seed+embed済み）
   ├─ 共有vLLM      tekijin_vllm   :18080   ← 管理者が1回準備（GPUを使うのはこれだけ）
   ├─ メンバーA: backend :18000 / frontend :13000
@@ -22,6 +22,22 @@
 
 ポートは 13000 番台（frontend）／ 18000 番台（backend）／ 15432（PG）／ 18080（vLLM）で、
 **メンバー間で衝突させない**こと。
+
+### ホストの呼び方（数値アドレスではなく名前を使う）
+
+このホストは Tailscale の MagicDNS で**固定の名前**を持つ。**URL には名前を使う**（#484）。
+
+```
+internship-dgx1.tail349bcd.ts.net      ← 正。テイルネット内でのみ引ける
+100.118.131.67                    ← 同じホスト。Tailscale が再割り当てし得る
+```
+
+IP は Tailscale が振り直す可能性があるが、**名前はホスト名に紐づくので変わらない**。
+見た目の問題ではなく、**壊れにくさの問題**として名前を使う。
+
+> **DB 接続文字列（`TEKIJIN_DATABASE_URL`）だけは IP のままにしてある。**
+> ここは MagicDNS の解決に失敗した瞬間にアプリが起動しなくなる経路なので、
+> 名前解決を挟まない。HTTP で叩く口（frontend / backend / vLLM）は名前でよい。
 
 ---
 
@@ -39,7 +55,7 @@
 
 - Tailscale 管理コンソールで各メンバーを**同じ Tailnet に招待**する。
 - 必要なら ACL で `internship-dgx1` の 13000–13010 / 18000–18010 番台への到達を許可。
-- これで各メンバーは `http://100.118.131.67:<port>` に到達できる（**外部インターネットには
+- これで各メンバーは `http://internship-dgx1.tail349bcd.ts.net:<port>` に到達できる（**外部インターネットには
   出ない**）。
 
 ### Step 2. 共有 Postgres を用意（seed＋embed 済みの 1 台）
@@ -47,7 +63,7 @@
 ```bash
 docker run -d --name tekijin_app_pg --restart unless-stopped \
   -e POSTGRES_USER=tekijin -e POSTGRES_PASSWORD=tekijin -e POSTGRES_DB=tekijin \
-  -p 15432:5432 pgvector/pgvector:pg16
+  -p 15432:5432 pgvector/pgvector:0.8.6-pg16
 
 cd ~/TEKIJIN
 export TEKIJIN_DATABASE_URL=postgresql+psycopg://tekijin:tekijin@localhost:15432/tekijin
@@ -105,11 +121,11 @@ GPU を食う vLLM は立てない。共有の `:18080` を指すだけ。
 TEKIJIN_APP_ENV=development                 # プロトタイプなので development が正（#108/#173）
 TEKIJIN_STRICT_DURABILITY=true              # 本番想定の耐久性ガードを有効化（#180）
 TEKIJIN_LLM_BACKEND=vllm
-TEKIJIN_LLM_BASE_URL=http://100.118.131.67:18080/v1        # ← 共有 vLLM
+TEKIJIN_LLM_BASE_URL=http://internship-dgx1.tail349bcd.ts.net:18080/v1        # ← 共有 vLLM
 TEKIJIN_CHECKPOINTER_BACKEND=postgres
 TEKIJIN_DATABASE_URL=postgresql+psycopg://tekijin:tekijin@100.118.131.67:15432/tekijin
 TEKIJIN_MAX_CONCURRENT_RUNS=8               # バックプレッシャ（vLLM max-num-seqs と揃える）
-TEKIJIN_CORS_ORIGINS=["http://100.118.131.67:13001"]      # ← 自分のフロントの URL
+TEKIJIN_CORS_ORIGINS=["http://internship-dgx1.tail349bcd.ts.net:13001"]      # ← 自分のフロントの URL
 ```
 
 - `TEKIJIN_STRICT_DURABILITY=true` は、`app_env=development` のままでも「memory チェックポインタ
@@ -151,7 +167,7 @@ curl -s http://localhost:18001/health        # {"status":"ok",...} を確認
 ```bash
 # node:20-slim コンテナでビルド（自分の backend URL を焼き込む）
 docker run --rm -v ~/TEKIJIN/frontend:/app -w /app \
-  -e NEXT_PUBLIC_API_BASE_URL=http://100.118.131.67:18001 \
+  -e NEXT_PUBLIC_API_BASE_URL=http://internship-dgx1.tail349bcd.ts.net:18001 \
   node:20-slim bash -c "npm ci && npm run build"
 
 # 別名・別ポートで起動
@@ -162,7 +178,7 @@ docker run -d --name tekijin_frontend_b --restart unless-stopped \
 
 ### Step 8. アクセス
 
-ブラウザで **`http://100.118.131.67:13001`**（Tailnet に入っているメンバーなら誰でも）。
+ブラウザで **`http://internship-dgx1.tail349bcd.ts.net:13001`**（Tailnet に入っているメンバーなら誰でも）。
 
 ---
 
@@ -188,7 +204,7 @@ docker run -d --name tekijin_frontend_b --restart unless-stopped \
 | C1 で 400（tool_choice 系エラー） | vLLM に `--tool-call-parser hermes --enable-auto-tool-choice` が無い |
 | backend が起動直後に落ちる | `tail -30 ~/backend_*.log` で import/設定エラーを確認。`app_env` と `STRICT_DURABILITY` の整合（#180）／DB 接続を確認 |
 | フロントは開くが API が全部失敗 | backend の `TEKIJIN_CORS_ORIGINS` に自分のフロント URL が入っているか。frontend のビルド時 `NEXT_PUBLIC_API_BASE_URL` が自分の backend を指しているか |
-| `http://100.118.131.67:130xx` に繋がらない | Tailnet に入っているか（ACL 含む）。ポート衝突していないか（`docker ps` / `ss -ltnp`） |
+| `http://internship-dgx1.tail349bcd.ts.net:130xx` に繋がらない | Tailnet に入っているか（ACL 含む）。ポート衝突していないか（`docker ps` / `ss -ltnp`） |
 | 応答が遅い | 共有 vLLM が混雑（`max-num-seqs=8`）。落ちてはいない。順番待ち |
 
 ## 自動デプロイ（develop マージ → DGX、#203）

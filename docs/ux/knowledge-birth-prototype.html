@@ -1,0 +1,928 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tekijin — 動くプロトタイプ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=Noto+Serif+JP:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --navy:#141D26;--paper:#EAEDE7;--surface:#FFF;--surface2:#F7F9F5;
+  --ink:#131A15;--ink2:#5A645C;--ink3:#8B938C;
+  --line:#D6DBD3;--line2:#E8EBE5;
+  --ai:#2B4C7E;--ai-soft:#E9EEF6;--ai-lit:#7BA5DC;
+  --moss:#4A7548;--moss-soft:#E9F0E7;
+  --amber:#8F6B1E;--amber-soft:#F5EFDF;
+  --enji:#9C3B4B;--enji-soft:#F6E9EB;
+  --seal:#BE3A2B;
+  --sans:'Noto Sans JP',-apple-system,'Hiragino Sans',sans-serif;
+  --serif:'Noto Serif JP','Hiragino Mincho ProN',serif;
+  --mono:'JetBrains Mono',ui-monospace,monospace;
+  --sh1:0 1px 2px rgba(19,26,21,.05);
+  --sh2:0 2px 6px rgba(19,26,21,.05),0 12px 30px rgba(19,26,21,.07);
+  --ease:cubic-bezier(.2,.75,.3,1);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--sans);background:var(--navy);color:var(--ink);line-height:1.7;-webkit-font-smoothing:antialiased}
+:focus-visible{outline:2px solid var(--ai-lit);outline-offset:2px;border-radius:3px}
+button,input,textarea{font-family:inherit}
+.app{display:grid;grid-template-columns:248px 1fr;min-height:100vh}
+
+/* ---- generic reveal ---- */
+.rv{opacity:0;transform:translateY(10px)}
+.rv.in{opacity:1;transform:none;transition:opacity .45s var(--ease),transform .45s var(--ease)}
+.pop{opacity:0;transform:scale(.9)}
+.pop.in{opacity:1;transform:none;transition:opacity .3s,transform .35s var(--ease)}
+
+/* rail */
+.rail{background:var(--navy);color:#fff;padding:28px 22px;position:sticky;top:0;height:100vh;overflow:auto;border-right:1px solid rgba(255,255,255,.07)}
+.logo{font-family:var(--serif);font-size:24px;font-weight:700;letter-spacing:.14em}
+.logo i{font-style:normal;color:var(--ai-lit)}
+.logo-sub{font-family:var(--mono);font-size:9px;letter-spacing:.2em;color:rgba(255,255,255,.35);margin-top:10px}
+.steps{margin-top:36px;position:relative}
+.steps::before{content:'';position:absolute;left:13px;top:14px;bottom:22px;width:1px;background:rgba(255,255,255,.11)}
+.progress{position:absolute;left:13px;top:14px;width:1px;background:var(--ai-lit);height:0;transition:height .55s var(--ease)}
+.step{display:flex;gap:14px;align-items:flex-start;width:100%;background:none;border:none;color:inherit;text-align:left;padding:8px 0 20px;cursor:pointer;position:relative}
+.step .num{width:27px;height:27px;border-radius:50%;flex:0 0 27px;background:var(--navy);border:1px solid rgba(255,255,255,.2);display:grid;place-items:center;font-family:var(--mono);font-size:10px;color:rgba(255,255,255,.45);transition:all .35s var(--ease);z-index:1}
+.step .lbl{font-size:13px;color:rgba(255,255,255,.44);transition:color .25s;padding-top:3px}
+.step .lbl b{display:block;font-weight:500;font-size:13px}
+.step .lbl span{font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;opacity:.6}
+.step:hover .lbl{color:rgba(255,255,255,.72)}
+.step.done .num{border-color:var(--ai-lit);color:var(--ai-lit)}
+.step.on .num{background:var(--ai-lit);border-color:var(--ai-lit);color:var(--navy);transform:scale(1.12)}
+.step.on .lbl{color:#fff}
+.rail-foot{margin-top:26px;padding-top:20px;border-top:1px solid rgba(255,255,255,.09);font-size:11px;color:rgba(255,255,255,.34);line-height:1.8}
+.rail-foot b{color:rgba(255,255,255,.6);font-weight:500}
+
+/* stage */
+.stage{background:var(--paper);padding:38px 40px 54px;background-image:radial-gradient(rgba(19,26,21,.04) 1px,transparent 1px);background-size:22px 22px}
+.scene{display:none}
+.scene.on{display:block;animation:rise .5s var(--ease)}
+@keyframes rise{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
+.eyebrow{font-family:var(--mono);font-size:10px;letter-spacing:.2em;color:var(--ai)}
+.scene h2{font-family:var(--serif);font-weight:600;font-size:26px;line-height:1.5;margin-top:8px}
+.scene .why{margin-top:10px;max-width:46em;font-size:13.5px;color:var(--ink2)}
+.card{margin-top:24px;background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:var(--sh2)}
+.card-bar{display:flex;align-items:center;gap:11px;padding:12px 18px;border-bottom:1px solid var(--line2);background:var(--surface2)}
+.card-bar .dot{width:7px;height:7px;border-radius:50%;background:var(--moss);box-shadow:0 0 0 3px rgba(74,117,72,.14)}
+.card-bar .ch{font-family:var(--mono);font-size:11px;color:var(--ink3)}
+.card-bar .right{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--ink3);transition:color .3s}
+.card-bar .right.flash{color:var(--ai);font-weight:500}
+.card-body{padding:22px}
+.btns{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
+.btn{font-size:13px;font-weight:500;padding:9px 16px;border-radius:7px;border:1px solid var(--ai);background:var(--ai);color:#fff;cursor:pointer;transition:transform .12s,box-shadow .18s,opacity .2s;box-shadow:var(--sh1)}
+.btn:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(43,76,126,.22)}
+.btn.ghost{background:transparent;color:var(--ink2);border-color:var(--line);box-shadow:none}
+.btn.ghost:hover{border-color:var(--ink3);box-shadow:none;transform:none}
+.btn.sm{font-size:12px;padding:7px 13px}
+.btn:disabled{opacity:.35;cursor:not-allowed;transform:none;box-shadow:none}
+.btn.wake{animation:wake 1.1s var(--ease)}
+@keyframes wake{0%{box-shadow:0 0 0 0 rgba(43,76,126,.45)}70%{box-shadow:0 0 0 12px rgba(43,76,126,0)}100%{box-shadow:0 0 0 0 rgba(43,76,126,0)}}
+.lbl{font-family:var(--mono);font-size:10px;color:var(--ink3);letter-spacing:.1em;margin-bottom:9px}
+.note{margin-top:22px;padding:15px 19px;border-left:2px solid var(--ai);background:rgba(255,255,255,.55);border-radius:0 9px 9px 0;font-size:13px;color:var(--ink2);max-width:54em}
+.note b{color:var(--ink);font-weight:500}
+.pager{display:flex;gap:10px;margin-top:28px;align-items:center}
+.pager .sp{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--ink3)}
+.replay{background:none;border:1px solid var(--line);border-radius:6px;font-family:var(--mono);font-size:10px;color:var(--ink3);padding:5px 10px;cursor:pointer;letter-spacing:.08em}
+.replay:hover{border-color:var(--ai);color:var(--ai)}
+
+/* ===== 01 ===== */
+.askbox textarea{width:100%;border:1px solid var(--line);border-radius:9px;padding:13px 15px;font-size:14px;resize:none;min-height:74px;line-height:1.65;background:var(--surface);color:var(--ink)}
+.askbox textarea:focus{border-color:var(--ai);outline:none;box-shadow:0 0 0 3px rgba(43,76,126,.1)}
+.samples{display:flex;gap:7px;flex-wrap:wrap;margin-top:11px}
+.samp{font-size:11.5px;background:var(--surface2);border:1px solid var(--line);border-radius:14px;padding:5px 11px;cursor:pointer;color:var(--ink2);transition:all .18s}
+.samp:hover{border-color:var(--ai);color:var(--ai);transform:translateY(-1px)}
+.pipe{margin-top:20px;border-top:1px solid var(--line2);padding-top:18px}
+.prow{display:flex;align-items:center;gap:11px;font-size:12.5px;color:var(--ink3);padding:5px 0;opacity:.3;transition:opacity .35s,color .35s}
+.prow.act{opacity:1;color:var(--ink2)}
+.prow.act .pi{border-color:var(--ai);color:var(--ai)}
+.prow.ok .pi{background:var(--moss);border-color:var(--moss);color:#fff;transform:scale(1.1)}
+.prow.miss .pi{background:var(--amber);border-color:var(--amber);color:#fff}
+.pi{width:19px;height:19px;border-radius:50%;border:1px solid var(--line);display:grid;place-items:center;font-size:10px;flex:0 0 19px;font-family:var(--mono);transition:all .3s var(--ease)}
+.pcount{margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--ink3)}
+.spin{width:11px;height:11px;border:1.5px solid var(--line);border-top-color:var(--ai);border-radius:50%;animation:sp .7s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+.nearmiss{margin-top:14px;background:var(--surface2);border:1px solid var(--line2);border-radius:9px;padding:13px 15px}
+.nm-row{display:flex;align-items:center;gap:12px;font-size:12.5px;padding:5px 0}
+.nm-row .pct{font-family:var(--mono);font-size:11px;color:var(--amber);flex:0 0 38px}
+.nm-row .t{font-family:var(--serif);font-weight:500;flex:1}
+.nm-row .r{font-size:11.5px;color:var(--ink3)}
+.people{display:grid;gap:11px;margin-top:16px}
+.person{border:1px solid var(--line);border-radius:10px;padding:15px;transition:border-color .18s,box-shadow .18s,transform .18s;background:var(--surface)}
+.person:hover{border-color:var(--ai-lit);box-shadow:0 5px 16px rgba(43,76,126,.1);transform:translateY(-2px)}
+.person.best{border-color:var(--ai);box-shadow:0 0 0 1px var(--ai)}
+.p-top{display:flex;align-items:center;gap:12px}
+.p-av{width:38px;height:38px;border-radius:9px;flex:0 0 38px;display:grid;place-items:center;color:#fff;font-weight:700;font-size:14px;background:linear-gradient(140deg,#3A4A57,#222E38)}
+.p-name{font-size:14px;font-weight:700}
+.p-role{font-family:var(--mono);font-size:10px;color:var(--ink3)}
+.p-fit{margin-left:auto;text-align:right}
+.p-fit .n{font-family:var(--mono);font-size:18px;color:var(--ai);font-weight:500;line-height:1}
+.p-fit .k{font-family:var(--mono);font-size:9px;color:var(--ink3);letter-spacing:.1em}
+.fitbar{height:3px;background:var(--line2);border-radius:2px;margin-top:11px;overflow:hidden}
+.fitbar i{display:block;height:100%;background:var(--ai);width:0;transition:width .9s var(--ease)}
+.evid{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}
+.ev{font-size:11px;background:var(--ai-soft);color:var(--ai);border-radius:4px;padding:3px 8px;opacity:0;transform:translateY(4px)}
+.ev.in{opacity:1;transform:none;transition:opacity .3s,transform .3s}
+.ev.load{background:var(--amber-soft);color:var(--amber)}
+.ev.free{background:var(--moss-soft);color:var(--moss)}
+.p-act{display:flex;align-items:center;gap:9px;margin-top:12px;padding-top:12px;border-top:1px solid var(--line2)}
+.p-act .st{font-size:11.5px;color:var(--ink3);margin-right:auto}
+.draft{margin-top:16px;border:1px solid var(--ai);border-radius:10px;overflow:hidden}
+.draft-h{background:var(--ai-soft);padding:11px 15px;font-size:12.5px;color:var(--ai);display:flex;align-items:center;gap:9px}
+.draft-b{padding:15px}
+.raw{font-size:12.5px;color:var(--ink3);background:var(--surface2);border-radius:7px;padding:10px 13px;margin-bottom:13px;transition:opacity .6s,transform .6s}
+.raw.shrink{opacity:.45;transform:scale(.97)}
+.raw .k{font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;display:block;margin-bottom:4px}
+.dfield{display:grid;grid-template-columns:96px 1fr;gap:12px;padding:6px 0;font-size:13.5px}
+.dfield .k{font-family:var(--mono);font-size:10px;color:var(--ai);padding-top:4px}
+.dfield .v{font-family:var(--serif);font-weight:500;min-height:1.6em}
+.hint{font-family:var(--mono);font-size:10px;color:var(--ink3);margin-top:12px}
+
+/* ===== 02 ===== */
+.thread{position:relative}
+.msg{display:flex;gap:13px;padding:9px 0;opacity:0;transform:translateY(9px)}
+.msg.in{opacity:1;transform:none;transition:opacity .45s var(--ease),transform .45s var(--ease)}
+.av{width:32px;height:32px;border-radius:8px;flex:0 0 32px;display:grid;place-items:center;font-size:12px;font-weight:700;color:#fff}
+.av.n{background:linear-gradient(140deg,#8794A1,#6B7883)}
+.av.t{background:linear-gradient(140deg,#3A4A57,#222E38)}
+.nm2{font-size:12.5px;font-weight:700}
+.nm2 em{font-style:normal;font-family:var(--mono);font-size:10px;color:var(--ink3);margin-left:9px;font-weight:400}
+.tx{font-size:14px;margin-top:2px}
+.tx code{font-family:var(--mono);font-size:12.5px;background:#F0F2EE;padding:1px 6px;border-radius:4px;border:1px solid var(--line2)}
+.typing{display:none;align-items:center;gap:5px;padding:11px 0 11px 45px}
+.typing.on{display:flex}
+.typing i{width:5px;height:5px;border-radius:50%;background:var(--ink3);animation:bob 1.1s infinite}
+.typing i:nth-child(2){animation-delay:.16s}.typing i:nth-child(3){animation-delay:.32s}
+@keyframes bob{0%,60%,100%{opacity:.25;transform:translateY(0)}30%{opacity:.9;transform:translateY(-4px)}}
+.rx{margin-top:7px}
+.rx span{display:inline-flex;align-items:center;gap:5px;font-family:var(--mono);font-size:11px;background:var(--ai-soft);border:1px solid #D3DEEE;color:var(--ai);padding:2px 8px;border-radius:11px}
+.scan{position:absolute;left:-22px;right:-22px;height:70px;pointer-events:none;opacity:0;background:linear-gradient(180deg,transparent,rgba(123,165,220,.2),transparent)}
+.scan.go{animation:scan 1.2s cubic-bezier(.4,0,.4,1)}
+@keyframes scan{0%{opacity:1;top:0}100%{opacity:0;top:80%}}
+.prompt{margin-top:17px;border-left:2px solid var(--ai);background:linear-gradient(100deg,var(--ai-soft),#F4F7FB);border-radius:0 10px 10px 0;padding:16px 18px}
+.sig{font-family:var(--mono);font-size:10px;letter-spacing:.16em;color:var(--ai);display:flex;align-items:center;gap:8px}
+.pulse{width:6px;height:6px;border-radius:50%;background:var(--ai);animation:pl 2.4s ease-in-out infinite}
+@keyframes pl{0%,100%{opacity:.3;box-shadow:0 0 0 0 rgba(43,76,126,.4)}50%{opacity:1;box-shadow:0 0 0 5px rgba(43,76,126,0)}}
+
+/* ===== 03 ===== */
+.extract{display:grid;grid-template-columns:1fr 1.1fr;position:relative}
+#wires{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:3}
+#wires path{fill:none;stroke:var(--ai-lit);stroke-width:1.5}
+.src{padding:20px;border-right:1px solid var(--line2);background:var(--surface2)}
+.dst{padding:20px}
+.colhead{font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--ink3);margin-bottom:14px;display:flex;align-items:center;gap:10px}
+.meter{flex:1;height:2px;background:var(--line);border-radius:2px;overflow:hidden}
+.meter i{display:block;height:100%;width:0;background:var(--ai);transition:width .5s var(--ease)}
+.srcline{font-size:12.5px;color:var(--ink2);padding:6px 9px;margin:0 -9px;border-radius:5px;transition:background .3s,box-shadow .3s,color .3s;line-height:1.65}
+.srcline.hi{background:#fff;box-shadow:0 0 0 1px var(--ai-lit),0 3px 10px rgba(43,76,126,.12);color:var(--ink)}
+.srcline.used{color:#B9BFB9}
+.record{border:1px solid var(--line);border-radius:10px}
+.record-top{display:flex;justify-content:space-between;align-items:center;padding:11px 15px;border-bottom:1px solid var(--line2);background:var(--surface2);border-radius:10px 10px 0 0}
+.rid{font-family:var(--mono);font-size:10px;color:var(--ink3);letter-spacing:.1em}
+.rstate{font-family:var(--mono);font-size:9.5px;color:var(--amber);background:var(--amber-soft);padding:3px 8px;border-radius:4px}
+.record-in{padding:12px 15px 15px}
+.field{display:grid;grid-template-columns:58px 1fr;gap:12px;padding:7px 0;align-items:start;border-radius:6px;transition:background .2s}
+.field:hover{background:#FAFBF9}
+.field-k{font-family:var(--mono);font-size:10px;color:var(--ink3);letter-spacing:.1em;padding-top:5px;transition:color .3s}
+.field.filled .field-k{color:var(--ai)}
+.field-v{font-family:var(--serif);font-weight:500;font-size:14px;line-height:1.7;min-height:1.7em;border-radius:5px;padding:1px 5px;margin-left:-5px;cursor:text;transition:box-shadow .18s,background .18s;display:inline-block}
+.field-v:hover{background:#F1F4F0}
+.field-v:focus{outline:none;background:#fff;box-shadow:0 0 0 2px var(--ai-lit)}
+.caret{display:inline-block;width:6px;height:15px;background:var(--ai);vertical-align:-2px;animation:blink .85s steps(2) infinite}
+@keyframes blink{0%,50%{opacity:1}51%,100%{opacity:0}}
+.flag{font-family:var(--mono);font-size:9.5px;color:var(--amber);background:var(--amber-soft);border:1px solid #E6DBC0;border-radius:4px;padding:2px 7px;cursor:pointer;margin-left:7px;vertical-align:2px;opacity:0}
+.flag.in{opacity:1;transition:opacity .4s;animation:nudge 1.6s var(--ease) 2}
+@keyframes nudge{0%,100%{transform:none}12%{transform:translateX(-2px)}24%{transform:translateX(2px)}36%{transform:none}}
+.alts{margin-top:7px;border:1px solid var(--line);border-radius:7px;overflow:hidden;max-height:0;opacity:0;transition:max-height .35s var(--ease),opacity .25s}
+.alts.open{max-height:260px;opacity:1}
+.alt{padding:8px 12px;font-family:var(--serif);font-size:13px;cursor:pointer;border-bottom:1px solid var(--line2);background:#fff}
+.alt:last-child{border-bottom:none}
+.alt:hover{background:var(--ai-soft)}
+.alt .m{font-family:var(--mono);font-size:9.5px;color:var(--ink3);display:block;margin-top:2px}
+.chips{display:flex;gap:7px;flex-wrap:wrap;padding-top:4px}
+.chip{font-family:var(--mono);font-size:11px;background:#F1F3EF;color:var(--ink2);border:1px solid var(--line2);padding:3px 9px;border-radius:13px;display:inline-flex;align-items:center;gap:7px;opacity:0;transform:translateY(4px) scale(.94)}
+.chip.in{opacity:1;transform:none;transition:opacity .3s,transform .35s var(--ease)}
+.chip button{border:none;background:none;color:var(--ink3);cursor:pointer;font-size:13px;line-height:1;padding:0}
+.chip button:hover{color:var(--enji)}
+.chip.add{cursor:pointer;border-style:dashed;color:var(--ink3)}
+.chip.add:hover{color:var(--ai);border-color:var(--ai)}
+.editnote{font-size:11.5px;color:var(--ink3);margin-top:14px;padding-top:12px;border-top:1px dashed var(--line)}
+.foot-act{padding:13px 20px;border-top:1px solid var(--line2);background:var(--surface2);display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.foot-act .st{font-size:11.5px;color:var(--ink3);margin-right:auto}
+
+/* ===== 04 ===== */
+.verdict{border:1px solid var(--line);border-radius:10px;margin-bottom:12px;overflow:hidden;box-shadow:var(--sh1);opacity:0;transform:translateY(12px)}
+.verdict.in{opacity:1;transform:none;transition:opacity .45s var(--ease),transform .45s var(--ease)}
+.vhead{display:flex;align-items:center;gap:11px;padding:12px 15px;font-size:13.5px;font-weight:500}
+.tag{font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;padding:4px 9px;border-radius:5px;color:#fff;flex:0 0 auto}
+.vconf{margin-left:auto;font-family:var(--mono);font-size:10px;display:flex;align-items:center;gap:6px}
+.bars{display:flex;gap:2px}
+.bars i{width:3px;height:10px;background:var(--line);border-radius:1px;transition:background .3s}
+.bars i.f{background:currentColor}
+.v-new .vhead{background:var(--moss-soft);color:var(--moss)} .v-new .tag{background:var(--moss)}
+.v-upd .vhead{background:var(--amber-soft);color:var(--amber)} .v-upd .tag{background:var(--amber)}
+.v-con .vhead{background:var(--enji-soft);color:var(--enji)} .v-con .tag{background:var(--enji)}
+.v-con.alert{animation:alert 1.4s var(--ease) 1 .6s}
+@keyframes alert{0%,100%{box-shadow:var(--sh1)}40%{box-shadow:0 0 0 4px rgba(156,59,75,.16)}}
+.v-done .vhead{background:var(--surface2);color:var(--ink3)} .v-done .tag{background:var(--ink3)}
+.vbody{padding:15px;border-top:1px solid var(--line2);font-size:13.5px;overflow:hidden}
+.vbody.collapse{max-height:0;padding-top:0;padding-bottom:0;opacity:0;transition:all .45s var(--ease)}
+.srcdoc{font-family:var(--mono);font-size:10px;color:var(--ink3);margin-bottom:10px}
+.dline{font-family:var(--serif);font-size:13.5px;padding:8px 12px;border-radius:6px;margin-bottom:5px;line-height:1.65}
+.dline.old{background:var(--enji-soft);color:var(--ink2);text-decoration:line-through;text-decoration-color:rgba(156,59,75,.35)}
+.dline.newl{background:var(--moss-soft)}
+.dline .mk{font-family:var(--mono);font-size:10.5px;margin-right:10px;opacity:.55}
+.ask2{margin-top:14px;padding-top:14px;border-top:1px dashed var(--line)}
+.resolved{padding:12px 15px;font-size:12.5px;color:var(--moss);background:var(--moss-soft);display:flex;align-items:center;gap:10px}
+.tick{width:17px;height:17px;flex:0 0 17px}
+.tick path{fill:none;stroke:var(--moss);stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:26;stroke-dashoffset:26;animation:draw .5s var(--ease) forwards}
+@keyframes draw{to{stroke-dashoffset:0}}
+
+/* ===== 05 ===== */
+.sealwrap{display:flex;gap:24px;align-items:center;padding:22px;border-bottom:1px solid var(--line2);background:var(--surface2)}
+.doc{flex:1;background:#fff;border:1px solid var(--line);border-radius:9px;padding:16px 18px;box-shadow:var(--sh1)}
+.doc .dt{font-family:var(--serif);font-weight:600;font-size:15px}
+.doc .dm{font-family:var(--mono);font-size:10px;color:var(--ink3);margin-top:7px}
+.doc dl{margin-top:12px;padding-top:12px;border-top:1px solid var(--line2);display:grid;grid-template-columns:54px 1fr;gap:6px 12px;font-size:13px}
+.doc dt{font-family:var(--mono);font-size:9.5px;color:var(--ink3);padding-top:4px}
+.doc dd{font-family:var(--serif);font-weight:500}
+.sealbox{position:relative;width:72px;height:72px;flex:0 0 72px}
+.seal{width:72px;height:72px;opacity:0}
+.seal.go{animation:stamp .5s cubic-bezier(.2,1.55,.4,1) forwards}
+@keyframes stamp{0%{opacity:0;transform:scale(1.8) rotate(-15deg)}60%{opacity:1;transform:scale(.93) rotate(-6deg)}100%{opacity:.92;transform:scale(1) rotate(-7deg)}}
+.ripple{position:absolute;inset:0;border-radius:12px;border:2px solid var(--seal);opacity:0;pointer-events:none}
+.ripple.go{animation:rip .7s ease-out}
+@keyframes rip{0%{opacity:.55;transform:scale(1)}100%{opacity:0;transform:scale(2.1)}}
+.two{display:grid;grid-template-columns:1fr 1fr}
+.two>div{padding:20px}
+.two>div:first-child{border-right:1px solid var(--line2)}
+.role{font-family:var(--mono);font-size:10px;letter-spacing:.14em;color:var(--ink3);margin-bottom:15px}
+.ok{display:flex;gap:12px;align-items:flex-start;background:var(--moss-soft);border-radius:9px;padding:14px}
+.mk2{width:21px;height:21px;border-radius:50%;background:var(--moss);color:#fff;display:grid;place-items:center;font-size:11px;flex:0 0 21px;margin-top:2px}
+.ok strong{font-size:13.5px;display:block}
+.ok p{font-size:12.5px;color:var(--ink2);margin-top:4px}
+.echo{font-size:12.5px;color:var(--ink2);margin-top:12px}
+.contrib{margin-top:14px;font-family:var(--serif);font-size:14px;font-weight:500;padding:13px;background:var(--ai-soft);border-radius:8px;color:var(--ai)}
+.contrib b{font-family:var(--mono);font-size:19px;font-weight:500}
+.optout{font-size:12px;color:var(--ink3);margin-top:12px}
+.skillrow{margin-top:14px;padding-top:14px;border-top:1px solid var(--line2)}
+.graph{padding:18px 20px;border-top:1px solid var(--line2);background:var(--surface2)}
+#gsvg{width:100%;height:120px;display:block}
+#gsvg line{stroke:var(--line);stroke-width:1}
+#gsvg line.newe{stroke:var(--ai-lit);stroke-width:1.7}
+#gsvg circle{fill:#C6CDC5}
+#gsvg circle.newn{fill:var(--seal)}
+#gsvg text{font-family:var(--mono);font-size:8.5px;fill:var(--ink3)}
+
+@media (max-width:940px){
+  .app{grid-template-columns:1fr}
+  .rail{position:static;height:auto;padding:18px}
+  .steps{margin-top:14px;display:flex;gap:4px;overflow:auto}
+  .steps::before,.progress{display:none}
+  .step{padding:0;flex-direction:column;gap:5px;align-items:center;flex:1}
+  .step .lbl b{font-size:10.5px;text-align:center}
+  .step .lbl span{display:none}
+  .rail-foot{display:none}
+  .stage{padding:24px 16px 40px}
+  .extract,.two{grid-template-columns:1fr}
+  #wires{display:none}
+  .src{border-right:none;border-bottom:1px solid var(--line2)}
+  .two>div:first-child{border-right:none;border-bottom:1px solid var(--line2)}
+  .sealwrap{flex-direction:column-reverse;align-items:flex-start}
+  .scene h2{font-size:20px}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div class="app">
+
+<nav class="rail" aria-label="画面">
+  <div class="logo">適<i>人</i></div>
+  <div class="logo-sub">TEKIJIN / WORKING PROTOTYPE</div>
+  <div class="steps">
+    <div class="progress" id="prog"></div>
+    <button class="step on" data-go="0"><span class="num">01</span><span class="lbl"><b>誰に聞くか</b><span>ROUTE</span></span></button>
+    <button class="step" data-go="1"><span class="num">02</span><span class="lbl"><b>解決の検知</b><span>DETECT</span></span></button>
+    <button class="step" data-go="2"><span class="num">03</span><span class="lbl"><b>抽出と修正</b><span>EXTRACT</span></span></button>
+    <button class="step" data-go="3"><span class="num">04</span><span class="lbl"><b>突き合わせ</b><span>RECONCILE</span></span></button>
+    <button class="step" data-go="4"><span class="num">05</span><span class="lbl"><b>確定と還元</b><span>COMMIT</span></span></button>
+  </div>
+  <div class="rail-foot">
+    各画面は入ると<b>自動で再生</b>されます。<br>
+    03で直した内容は05の記録に反映されます。<br><br>
+    会話＝ゴシック体／記録＝明朝体
+  </div>
+</nav>
+
+<main class="stage">
+
+<!-- ============ 01 ============ -->
+<section class="scene on" data-s="0">
+  <div class="eyebrow">01 — 誰に聞くか</div>
+  <h2>質問を、答えられる人と、聞きやすい形に変える</h2>
+  <p class="why">新人の障壁は宛先不明よりも「こんなことを聞いていいのか」です。Tekijinは宛先を決めると同時に、質問文そのものを整えます。</p>
+
+  <div class="card">
+    <div class="card-bar"><span class="dot"></span><span class="ch">質問する</span><span class="right" id="r-status">待機中</span></div>
+    <div class="card-body">
+      <div class="askbox"><textarea id="q" placeholder="困っていることを、そのまま書いてください">dockerが動かないです たすけて</textarea></div>
+      <div class="samples">
+        <button class="samp">経費精算の締め日っていつですか</button>
+        <button class="samp">ステージング環境のURLがわからない</button>
+        <button class="samp">dockerが動かないです たすけて</button>
+      </div>
+      <div class="btns"><button class="btn" id="ask">聞いてみる</button></div>
+
+      <div class="pipe" id="pipe" style="display:none">
+        <div class="prow" id="p1"><span class="pi">–</span><span class="ptx">既存の知識を検索</span><span class="pcount" id="pc">0</span></div>
+        <div class="prow" id="p2"><span class="pi">–</span><span class="ptx">回答できる記事を判定</span></div>
+        <div class="prow" id="p3"><span class="pi">–</span><span class="ptx">答えられる人を推定</span></div>
+      </div>
+
+      <div id="near" style="display:none">
+        <div class="nearmiss">
+          <div class="lbl" style="margin-bottom:6px">近い記事はありましたが、答えにはなりません</div>
+          <div class="nm-row rv"><span class="pct" data-pct="48">0%</span><span class="t">Docker開発環境セットアップ手順</span><span class="r">Intel Mac前提の記述のみ</span></div>
+          <div class="nm-row rv"><span class="pct" data-pct="41">0%</span><span class="t">CIビルドが失敗する場合の確認項目</span><span class="r">ローカル環境の話が含まれない</span></div>
+        </div>
+      </div>
+
+      <div id="people-wrap" style="display:none">
+        <div class="lbl" style="margin-top:20px">答えられそうな人</div>
+        <div class="people" id="people"></div>
+      </div>
+      <div id="draft-wrap"></div>
+    </div>
+  </div>
+  <p class="note"><b>設計の意図：</b>推薦の1位を「最も詳しい人」で固定しません。手が空いていて心理的に聞きやすい相手を候補に混ぜ、根拠（過去の回答・コミット履歴・現在の負荷）を必ず開示します。ブラックボックスな推薦は、新人も回答者も納得しません。</p>
+</section>
+
+<!-- ============ 02 ============ -->
+<section class="scene" data-s="1">
+  <div class="eyebrow">02 — 解決の検知</div>
+  <h2>ボタンは押されない前提で、会話の中から拾う</h2>
+  <p class="why">解決した瞬間、人はもう次の仕事に移っています。専用画面へ飛ばさず、スレッドの流れの中で聞く。</p>
+
+  <div class="card">
+    <div class="card-bar"><span class="dot"></span><span class="ch">#dev-help / スレッド</span>
+      <button class="replay" data-replay="1" style="margin-left:auto">↻ 再生</button></div>
+    <div class="card-body">
+      <div class="thread" id="thread">
+        <div class="scan" id="scan"></div>
+        <div class="msg" data-m="0"><div class="av n">佐</div><div>
+          <div class="nm2">佐藤（新人）<em>14:02</em></div>
+          <div class="tx">docker compose up が失敗します。CIでは通るのにローカルだけ失敗する理由がわかりません。</div>
+        </div></div>
+        <div class="typing" id="typing"><i></i><i></i><i></i></div>
+        <div class="msg" data-m="1"><div class="av t">田</div><div>
+          <div class="nm2">田中<em>14:09</em></div>
+          <div class="tx">M1 Mac？ ベースイメージがarm64に対応してないので <code>platform: linux/amd64</code> を足してみて</div>
+        </div></div>
+        <div class="msg" data-m="2"><div class="av n">佐</div><div>
+          <div class="nm2">佐藤（新人）<em>14:15</em></div>
+          <div class="tx">通りました！ありがとうございます 🙏</div>
+          <div class="rx pop" id="rx"><span>✅ 1</span></div>
+        </div></div>
+      </div>
+      <div class="prompt rv" id="prompt">
+        <div class="sig"><span class="pulse"></span>TEKIJIN</div>
+        <p style="font-size:14.5px;margin-top:9px">解決したようですね。この会話を知識として残しますか？</p>
+        <p style="font-size:12.5px;color:var(--ink2);margin-top:5px">下書きはもう用意してあります。確認は30秒ほどです。</p>
+        <div class="btns"><button class="btn" data-go="2">下書きを見る</button><button class="btn ghost">残さない</button></div>
+        <div class="hint">スレッドに ✅ を付けるだけでも同じ処理が走ります</div>
+      </div>
+    </div>
+  </div>
+  <p class="note"><b>設計の意図：</b>①自動検知からの問いかけ、②絵文字リアクション、③無反応なら自動で下書き箱へ、の3段構え。どれか1つ通ればループは切れません。</p>
+</section>
+
+<!-- ============ 03 ============ -->
+<section class="scene" data-s="2">
+  <div class="eyebrow">03 — 抽出と修正</div>
+  <h2>どの発言から生まれたのかを、線で見せる</h2>
+  <p class="why">抽出が終わったあとも各項目はクリックで編集できます。カーソルを合わせると根拠の発言が左で光ります。</p>
+
+  <div class="card">
+    <div class="card-bar"><span class="dot"></span><span class="ch">知識の下書き</span>
+      <span class="right" id="e-status">未編集</span></div>
+    <div class="extract" id="extract">
+      <svg id="wires" aria-hidden="true"></svg>
+      <div class="src">
+        <div class="colhead">会話ログ<span class="meter"><i id="m1"></i></span></div>
+        <div class="srcline" data-l="0">docker compose up が失敗します。CIでは通るのにローカルだけ失敗する理由がわかりません。</div>
+        <div class="srcline" data-l="1">M1 Mac？</div>
+        <div class="srcline" data-l="2">ベースイメージがarm64に対応してないので</div>
+        <div class="srcline" data-l="3">platform: linux/amd64 を足してみて</div>
+        <div class="srcline" data-l="4">通りました！ありがとうございます 🙏</div>
+      </div>
+      <div class="dst">
+        <div class="colhead">抽出された知識</div>
+        <div class="record">
+          <div class="record-top"><span class="rid">DRAFT — 2026-08-25</span><span class="rstate">未確定</span></div>
+          <div class="record-in" id="rec"></div>
+        </div>
+      </div>
+    </div>
+    <div class="foot-act">
+      <span class="st" id="editcount">修正 0件</span>
+      <button class="replay" data-replay="2">↻ 抽出を再生</button>
+      <button class="btn sm ghost" id="reset">元に戻す</button>
+      <button class="btn sm" data-go="3">既存の知識と照合する</button>
+    </div>
+  </div>
+  <p class="note"><b>設計の意図：</b>全文編集のテキストエリアは出しません。確信度の低い項目にだけ「要確認」を出し、候補から選び直せるようにしています。</p>
+</section>
+
+<!-- ============ 04 ============ -->
+<section class="scene" data-s="3">
+  <div class="eyebrow">04 — 既存知識との突き合わせ</div>
+  <h2>「増えた」ではなく「何が変わるか」を出す</h2>
+  <p class="why">未解決の判断が残っている間は確定できません。実際にボタンを押して進めてみてください。</p>
+
+  <div class="card">
+    <div class="card-bar"><span class="dot"></span><span class="ch">既存の知識 1,284件と照合</span><span class="right" id="v-status">要判断 1件</span></div>
+    <div class="card-body">
+
+      <div class="verdict v-new" id="v0">
+        <div class="vhead"><span class="tag">新規</span>該当する既存記事なし。新しく追加します
+          <span class="vconf" style="color:var(--moss)">確信度<span class="bars" data-fill="4"><i></i><i></i><i></i><i></i><i></i></span></span></div>
+      </div>
+
+      <div class="verdict v-upd" id="v1">
+        <div class="vhead"><span class="tag">更新</span>既存記事に不足していた条件を補います
+          <span class="vconf" style="color:var(--amber)">確信度<span class="bars" data-fill="4"><i></i><i></i><i></i><i></i><i></i></span></span></div>
+        <div class="vbody">
+          <div class="srcdoc">開発環境セットアップ手順 / 最終更新 2024-11</div>
+          <div class="dline old"><span class="mk">−</span>docker compose up でそのまま起動できます。</div>
+          <div class="dline newl"><span class="mk">＋</span>docker compose up で起動できます。ただし Apple Silicon 機では platform の指定が必要です。</div>
+        </div>
+      </div>
+
+      <div class="verdict v-con" id="v2">
+        <div class="vhead"><span class="tag">矛盾</span>既存の記述と食い違っています
+          <span class="vconf" style="color:var(--enji)">確信度<span class="bars" data-fill="3"><i></i><i></i><i></i><i></i><i></i></span></span></div>
+        <div class="vbody" id="v2body">
+          <div class="srcdoc">Dockerイメージ運用ガイド / 最終更新 2023-06 ／ 著者：小林</div>
+          <div class="dline"><span class="mk">既存</span>ベースイメージはarm64対応済みのため、platform の指定は不要です。</div>
+          <div class="dline newl"><span class="mk">今回</span>arm64に未対応のため、platform: linux/amd64 の指定が必要です。</div>
+          <div class="ask2">
+            <div style="font-size:13.5px">田中さん、どちらが現在の正しい状態ですか？</div>
+            <div class="btns">
+              <button class="btn" data-fix="今回">今回の内容が正しい</button>
+              <button class="btn ghost" data-fix="既存">既存の記述が正しい</button>
+              <button class="btn ghost" data-fix="条件">場合による</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="btns" style="margin-top:18px">
+        <button class="btn" id="commit" disabled>確定して公開する</button>
+        <span style="font-size:12px;color:var(--ink3);align-self:center" id="blocker">未解決の判断が1件あります</span>
+      </div>
+    </div>
+  </div>
+  <p class="note"><b>設計の意図：</b>判定を人に委ねる形なので、AIが古い情報を誤って上書きする事故も防げます。</p>
+</section>
+
+<!-- ============ 05 ============ -->
+<section class="scene" data-s="4">
+  <div class="eyebrow">05 — 確定と還元</div>
+  <h2>質問した人と、答えた人に、別々のものを返す</h2>
+  <p class="why">新人には安心を、回答者には実利を。どちらにも点数は見せません。</p>
+
+  <div class="card">
+    <div class="card-bar"><span class="dot"></span><span class="ch">知識を追加しました</span>
+      <button class="replay" data-replay="4" style="margin-left:auto">↻ 再生</button></div>
+    <div class="sealwrap">
+      <div class="doc">
+        <div class="dt" id="c-title">—</div>
+        <div class="dm" id="c-meta">—</div>
+        <dl id="c-body"></dl>
+      </div>
+      <div class="sealbox">
+        <span class="ripple" id="ripple"></span>
+        <svg class="seal" id="seal" viewBox="0 0 100 100" aria-label="確定の印">
+          <rect x="4" y="4" width="92" height="92" rx="9" fill="none" stroke="#BE3A2B" stroke-width="6"/>
+          <rect x="14" y="14" width="72" height="72" rx="4" fill="none" stroke="#BE3A2B" stroke-width="1.6" opacity=".5"/>
+          <text x="50" y="44" text-anchor="middle" fill="#BE3A2B" style="font-family:'Noto Serif JP',serif;font-size:29px;font-weight:700">適</text>
+          <text x="50" y="79" text-anchor="middle" fill="#BE3A2B" style="font-family:'Noto Serif JP',serif;font-size:29px;font-weight:700">人</text>
+        </svg>
+      </div>
+    </div>
+    <div class="two">
+      <div>
+        <div class="role">質問した人 — 佐藤さん</div>
+        <div class="ok rv"><span class="mk2">✓</span><div>
+          <strong>あなたの質問が知識になりました</strong>
+          <p>次に同じことで詰まった人は、聞かずに解決できます。</p></div></div>
+        <p class="echo rv">この質問は、過去に3人が同じように聞いています。初歩的なことではありません。</p>
+      </div>
+      <div>
+        <div class="role">答えた人 — 田中さん</div>
+        <div class="ok rv"><span class="mk2">✓</span><div>
+          <strong>回答が知識として登録されました</strong>
+          <p id="c-conflict">この件について、同じ質問はもう届かなくなります。</p></div></div>
+        <div class="skillrow rv"><div class="lbl">得意分野に追加</div><div class="chips" id="c-skills"></div></div>
+        <div class="contrib rv">今月、あなたの回答が <b id="cnum">0</b> 人の役に立ちました。</div>
+        <p class="optout rv">内容に誤りがあれば修正できます。修正しない場合はこのまま公開されます。</p>
+      </div>
+    </div>
+    <div class="graph">
+      <div class="lbl">知識の広がり — 新しい記事が既存の3件とつながりました</div>
+      <svg id="gsvg" viewBox="0 0 600 120" preserveAspectRatio="xMidYMid meet" aria-label="知識のつながり"></svg>
+    </div>
+  </div>
+  <p class="note"><b>設計の意図：</b>回答者に毎回の承認を求めると、答える気そのものが失せます。公開はデフォルト、違う時だけ直せる形（opt-out）に。</p>
+</section>
+
+<div class="pager">
+  <button class="btn ghost sm" id="prev">← 前の画面</button>
+  <button class="btn sm" id="next">次の画面 →</button>
+  <span class="sp" id="pos">01 / 05</span>
+</div>
+</main>
+</div>
+
+<script>
+(function(){
+var RM=matchMedia('(prefers-reduced-motion: reduce)').matches;
+var T=[],cur=0;
+function t(f,ms){T.push(setTimeout(f,RM?0:ms))}
+function clr(){T.forEach(clearTimeout);T=[]}
+function stagger(list,cls,gap,start){
+  [].forEach.call(list,function(el,i){ el.classList.remove(cls); t(function(){el.classList.add(cls)},(start||0)+i*gap); });
+}
+function count(el,to,ms,suffix){
+  if(RM){el.textContent=to+(suffix||'');return}
+  var s=performance.now();
+  (function step(n){
+    var p=Math.min(1,(n-s)/ms), e=1-Math.pow(1-p,3);
+    el.textContent=Math.round(to*e)+(suffix||'');
+    if(p<1) requestAnimationFrame(step);
+  })(s);
+}
+
+/* ---------- state ---------- */
+var DEFAULT={
+  '質問':'docker compose up がローカル環境でのみ失敗する',
+  '状況':'Apple Silicon（M1 / M2）Mac、CI環境では成功',
+  '原因':'ベースイメージが arm64 に未対応',
+  '解決策':'compose に platform: linux/amd64 を指定する',
+  '回答者':'田中'
+};
+var state={rec:Object.assign({},DEFAULT),tags:['docker','m1-mac','環境構築'],edits:0,verdict:null};
+
+/* ---------- nav ---------- */
+var scenes=[].slice.call(document.querySelectorAll('.scene'));
+var steps=[].slice.call(document.querySelectorAll('.step'));
+var PLAY=[play0,play1,play2,play3,play4];
+function goTo(n){
+  n=Math.max(0,Math.min(4,n));clr();cur=n;
+  scenes.forEach(function(s,i){s.classList.toggle('on',i===n)});
+  steps.forEach(function(s,i){s.classList.toggle('on',i===n);s.classList.toggle('done',i<n)});
+  document.getElementById('prog').style.height=(n*47)+'px';
+  document.getElementById('pos').textContent='0'+(n+1)+' / 05';
+  scrollTo({top:0,behavior:RM?'auto':'smooth'});
+  PLAY[n]();
+}
+document.addEventListener('click',function(e){
+  var g=e.target.closest('[data-go]');if(g)goTo(+g.dataset.go);
+  var r=e.target.closest('[data-replay]');if(r){clr();PLAY[+r.dataset.replay]()}
+});
+document.getElementById('prev').onclick=function(){goTo(cur-1)};
+document.getElementById('next').onclick=function(){goTo(cur+1)};
+addEventListener('keydown',function(e){
+  var a=document.activeElement;
+  if(a&&(/INPUT|TEXTAREA/.test(a.tagName)||a.isContentEditable))return;
+  if(e.key==='ArrowRight')goTo(cur+1);if(e.key==='ArrowLeft')goTo(cur-1);
+});
+
+/* ================= 01 ================= */
+var PEOPLE=[
+  {n:'田中 健太',i:'田',r:'BACKEND / 6年目',fit:92,best:true,
+   ev:['docker関連で12件回答','docker-compose.yml を3日前に編集','同種のエラーを2024/11に解決'],
+   load:'今週の対応 2件',st:'オンライン',free:true},
+  {n:'小林 由紀',i:'小',r:'SRE / 8年目',fit:78,
+   ev:['CI/CDで24件回答','arm64ビルド基盤を構築'],
+   load:'今週の対応 5件・会議中（〜15:00）',st:'取り込み中',free:false},
+  {n:'森 拓也',i:'森',r:'BACKEND / 2年目',fit:61,
+   ev:['3ヶ月前に同じ環境構築を経験','新人からの質問に平均7分で返答'],
+   load:'今週の対応 0件',st:'オンライン',free:true}
+];
+var DRAFT={'起きていること':'docker compose up が失敗する','環境':'MacBook Pro (M2) / Docker Desktop 4.30',
+  '試したこと':'イメージの再ビルド、ビルドキャッシュの削除','詰まっている点':'CIでは成功するのに、ローカルだけ失敗する理由がわからない'};
+function play0(){}
+document.querySelectorAll('.samp').forEach(function(b){b.onclick=function(){document.getElementById('q').value=b.textContent}});
+document.getElementById('ask').onclick=function(){
+  clr();
+  document.getElementById('pipe').style.display='block';
+  document.getElementById('near').style.display='none';
+  document.getElementById('people-wrap').style.display='none';
+  document.getElementById('draft-wrap').innerHTML='';
+  ['p1','p2','p3'].forEach(function(id){var r=document.getElementById(id);r.className='prow';r.querySelector('.pi').textContent='–'});
+  document.getElementById('pc').textContent='0';
+  var st=document.getElementById('r-status');st.textContent='検索中…';st.classList.add('flash');
+  var p1=document.getElementById('p1');
+  p1.classList.add('act');p1.querySelector('.pi').innerHTML='<span class="spin"></span>';
+  count(document.getElementById('pc'),1284,1100,' 件');
+  t(function(){
+    p1.classList.add('ok');p1.querySelector('.pi').textContent='✓';
+    var p2=document.getElementById('p2');p2.classList.add('act');p2.querySelector('.pi').innerHTML='<span class="spin"></span>';
+  },1200);
+  t(function(){
+    var p2=document.getElementById('p2');p2.classList.add('miss');p2.querySelector('.pi').textContent='!';
+    p2.querySelector('.ptx').textContent='既存の知識では答えられないと判定';
+    document.getElementById('near').style.display='block';
+    var rows=document.querySelectorAll('.nm-row');
+    stagger(rows,'in',140,0);
+    [].forEach.call(rows,function(r,i){
+      var p=r.querySelector('.pct');
+      t(function(){count(p,+p.dataset.pct,600,'%')},160+i*140);
+    });
+    var p3=document.getElementById('p3');p3.classList.add('act');p3.querySelector('.pi').innerHTML='<span class="spin"></span>';
+  },2100);
+  t(function(){
+    var p3=document.getElementById('p3');p3.classList.add('ok');p3.querySelector('.pi').textContent='✓';
+    renderPeople();st.textContent='候補 3名';st.classList.remove('flash');
+  },3200);
+};
+function renderPeople(){
+  var box=document.getElementById('people');box.innerHTML='';
+  document.getElementById('people-wrap').style.display='block';
+  PEOPLE.forEach(function(p,k){
+    var el=document.createElement('div');el.className='person rv'+(p.best?' best':'');
+    el.innerHTML='<div class="p-top"><div class="p-av">'+p.i+'</div><div><div class="p-name">'+p.n+'</div>'+
+      '<div class="p-role">'+p.r+'</div></div><div class="p-fit"><div class="n">0</div><div class="k">適合度</div></div></div>'+
+      '<div class="fitbar"><i></i></div><div class="evid">'+
+      p.ev.map(function(e){return '<span class="ev">'+e+'</span>'}).join('')+
+      '<span class="ev '+(p.free?'free':'load')+'">'+p.load+'</span></div>'+
+      '<div class="p-act"><span class="st">'+p.st+'</span><button class="btn sm" data-p="'+k+'">この人に聞く</button></div>';
+    box.appendChild(el);
+    var d=k*180;
+    t(function(){
+      el.classList.add('in');
+      el.querySelector('.fitbar i').style.width=p.fit+'%';
+      count(el.querySelector('.p-fit .n'),p.fit,900);
+      stagger(el.querySelectorAll('.ev'),'in',90,260);
+    },60+d);
+  });
+  box.querySelectorAll('[data-p]').forEach(function(b){b.onclick=function(){showDraft(PEOPLE[+b.dataset.p])}});
+}
+function showDraft(p){
+  var w=document.getElementById('draft-wrap');
+  w.innerHTML='<div class="draft"><div class="draft-h"><span class="pulse"></span>'+p.n+'さんへの質問文を整えています…</div>'+
+    '<div class="draft-b"><div class="raw"><span class="k">あなたが書いた文</span>'+(document.getElementById('q').value||'—')+'</div>'+
+    Object.keys(DRAFT).map(function(k){return '<div class="dfield"><div class="k">'+k+'</div><div class="v" data-k="'+k+'"></div></div>'}).join('')+
+    '<div class="btns" id="dbtn" style="opacity:0"><button class="btn" data-go="1">この内容で送る</button>'+
+    '<button class="btn ghost">自分で書き直す</button></div>'+
+    '<div class="hint">同じ内容の質問を、過去に3人が聞いています。初歩的な質問ではありません。</div></div></div>';
+  if(!RM) w.scrollIntoView({behavior:'smooth',block:'nearest'});
+  t(function(){w.querySelector('.raw').classList.add('shrink')},350);
+  var d=550;
+  Object.keys(DRAFT).forEach(function(k){
+    t(function(){typeInto(w.querySelector('[data-k="'+k+'"]'),DRAFT[k])},d);
+    d+=260+DRAFT[k].length*16;
+  });
+  t(function(){
+    w.querySelector('.draft-h').innerHTML='<span class="pulse"></span>'+p.n+'さんへの質問文を整えました';
+    var b=w.querySelector('#dbtn');b.style.transition='opacity .4s';b.style.opacity='1';
+  },d);
+}
+function typeInto(el,text,done){
+  if(RM){el.textContent=text;if(done)done();return}
+  var n=0;
+  (function step(){
+    if(n>text.length){el.textContent=text;if(done)done();return}
+    el.innerHTML=text.slice(0,n).replace(/</g,'&lt;')+'<span class="caret"></span>';
+    n++;t(step,16);
+  })();
+}
+
+/* ================= 02 ================= */
+function play1(){
+  var msgs=document.querySelectorAll('#thread .msg');
+  var typing=document.getElementById('typing'),prompt=document.getElementById('prompt');
+  var scan=document.getElementById('scan'),rx=document.getElementById('rx');
+  [].forEach.call(msgs,function(m){m.classList.remove('in')});
+  typing.classList.remove('on');prompt.classList.remove('in');scan.classList.remove('go');rx.classList.remove('in');
+  t(function(){msgs[0].classList.add('in')},200);
+  t(function(){typing.classList.add('on')},900);
+  t(function(){typing.classList.remove('on');msgs[1].classList.add('in')},2100);
+  t(function(){msgs[2].classList.add('in')},2900);
+  t(function(){rx.classList.add('in')},3400);
+  t(function(){scan.classList.add('go')},3700);
+  t(function(){prompt.classList.add('in')},4700);
+}
+
+/* ================= 03 ================= */
+var SRC={'質問':[0],'状況':[1],'原因':[2],'解決策':[3],'回答者':[4,1]};
+var ALTS={'原因':[
+  {v:'ベースイメージが arm64 に未対応',m:'田中さんの発言から直接'},
+  {v:'Dockerfile の FROM が amd64 固定になっている',m:'推定・関連記事から'},
+  {v:'Docker Desktop の Rosetta 設定が無効',m:'推定・確信度低'}]};
+function buildRecord(){
+  var box=document.getElementById('rec');box.innerHTML='';
+  Object.keys(state.rec).forEach(function(k){
+    var f=document.createElement('div');f.className='field';f.dataset.k=k;
+    f.innerHTML='<div class="field-k">'+k+'</div><div><span class="field-v" contenteditable="plaintext-only" spellcheck="false"></span>'+
+      (ALTS[k]?'<button class="flag">要確認</button><div class="alts">'+
+      ALTS[k].map(function(a){return '<div class="alt" data-v="'+a.v+'">'+a.v+'<span class="m">'+a.m+'</span></div>'}).join('')+'</div>':'')+'</div>';
+    var v=f.querySelector('.field-v');
+    v.onfocus=function(){hi(SRC[k],true)};
+    v.onblur=function(){hi(SRC[k],false);var nv=v.textContent.trim();if(nv!==state.rec[k]){state.rec[k]=nv;state.edits++;upd()}};
+    f.onmouseenter=function(){hi(SRC[k],true)};
+    f.onmouseleave=function(){if(document.activeElement!==v)hi(SRC[k],false)};
+    var fl=f.querySelector('.flag');
+    if(fl)fl.onclick=function(){f.querySelector('.alts').classList.toggle('open')};
+    f.querySelectorAll('.alt').forEach(function(a){a.onclick=function(){
+      state.rec[k]=a.dataset.v;state.edits++;v.textContent=a.dataset.v;
+      f.querySelector('.alts').classList.remove('open');upd();
+    }});
+    box.appendChild(f);
+  });
+  var tf=document.createElement('div');tf.className='field';
+  tf.innerHTML='<div class="field-k">タグ</div><div class="chips" id="chips"></div>';box.appendChild(tf);
+  var nt=document.createElement('div');nt.className='editnote';
+  nt.textContent='項目をクリックすると直接書き換えられます。「要確認」は確信度が低い項目です。';box.appendChild(nt);
+  upd();
+}
+function play2(){
+  buildRecord();
+  document.getElementById('wires').innerHTML='';
+  document.getElementById('m1').style.width='0';
+  document.querySelectorAll('.srcline').forEach(function(l){l.classList.remove('hi','used')});
+  document.getElementById('chips').innerHTML='';
+  if(RM){
+    document.querySelectorAll('#rec .field').forEach(function(f){
+      f.classList.add('filled');
+      var v=f.querySelector('.field-v');if(v)v.textContent=state.rec[f.dataset.k];
+    });
+    document.getElementById('m1').style.width='100%';renderTags(false);return;
+  }
+  var keys=Object.keys(state.rec),d=420;
+  keys.forEach(function(k,idx){
+    t(function(){
+      var f=document.querySelector('#rec .field[data-k="'+k+'"]');
+      f.classList.add('filled');
+      (SRC[k]||[]).forEach(function(s){
+        var line=document.querySelector('.srcline[data-l="'+s+'"]');
+        if(line){line.classList.add('hi');wire(line,f)}
+      });
+      document.getElementById('m1').style.width=((idx+1)/6*100)+'%';
+      typeInto(f.querySelector('.field-v'),state.rec[k],function(){
+        (SRC[k]||[]).forEach(function(s){
+          var line=document.querySelector('.srcline[data-l="'+s+'"]');
+          if(line){line.classList.remove('hi');line.classList.add('used')}
+        });
+        if(k==='原因'){var fl=f.querySelector('.flag');if(fl)t(function(){fl.classList.add('in')},250)}
+      });
+    },d);
+    d+=340+state.rec[k].length*16;
+  });
+  t(function(){document.getElementById('m1').style.width='100%';renderTags(true)},d);
+}
+function wire(srcEl,dstEl){
+  var svg=document.getElementById('wires'),box=document.getElementById('extract').getBoundingClientRect();
+  if(box.width<720)return;
+  var a=srcEl.getBoundingClientRect(),b=dstEl.getBoundingClientRect();
+  var x1=a.right-box.left,y1=a.top-box.top+a.height/2,x2=b.left-box.left,y2=b.top-box.top+11,mx=(x1+x2)/2;
+  var p=document.createElementNS('http://www.w3.org/2000/svg','path');
+  p.setAttribute('d','M'+x1+','+y1+' C'+mx+','+y1+' '+mx+','+y2+' '+x2+','+y2);
+  svg.appendChild(p);
+  var len=p.getTotalLength();
+  p.style.strokeDasharray=len;p.style.strokeDashoffset=len;
+  p.style.transition='stroke-dashoffset .55s ease-out, opacity .7s .9s';
+  requestAnimationFrame(function(){p.style.strokeDashoffset=0});
+  t(function(){p.style.opacity='.18'},1050);
+}
+function renderTags(anim){
+  var c=document.getElementById('chips');if(!c)return;c.innerHTML='';
+  state.tags.forEach(function(tg,i){
+    var s=document.createElement('span');s.className='chip'+(anim?'':' in');
+    s.innerHTML=tg+' <button aria-label="'+tg+' を外す">×</button>';
+    s.querySelector('button').onclick=function(){state.tags.splice(i,1);state.edits++;renderTags(false);upd()};
+    c.appendChild(s);
+    if(anim)t(function(){s.classList.add('in')},i*130);
+  });
+  var add=document.createElement('span');add.className='chip add'+(anim?'':' in');add.textContent='+ 追加';
+  add.onclick=function(){var v=prompt('タグを追加');if(v&&v.trim()){state.tags.push(v.trim());state.edits++;renderTags(false);upd()}};
+  c.appendChild(add);
+  if(anim)t(function(){add.classList.add('in')},state.tags.length*130);
+}
+function hi(list,on){(list||[]).forEach(function(i){var el=document.querySelector('.srcline[data-l="'+i+'"]');if(el)el.classList.toggle('hi',on)})}
+function upd(){
+  document.getElementById('editcount').textContent='修正 '+state.edits+'件';
+  var s=document.getElementById('e-status');
+  s.textContent=state.edits?'編集あり':'未編集';
+  s.classList.toggle('flash',!!state.edits);
+}
+document.getElementById('reset').onclick=function(){
+  state.rec=Object.assign({},DEFAULT);state.tags=['docker','m1-mac','環境構築'];state.edits=0;clr();play2();
+};
+
+/* ================= 04 ================= */
+function play3(){
+  var vs=document.querySelectorAll('.verdict');
+  [].forEach.call(vs,function(v){v.classList.remove('in')});
+  document.querySelectorAll('.bars').forEach(function(b){b.querySelectorAll('i').forEach(function(i){i.classList.remove('f')})});
+  stagger(vs,'in',260,200);
+  [].forEach.call(vs,function(v,k){
+    var bars=v.querySelector('.bars');if(!bars)return;
+    var n=+bars.dataset.fill,its=bars.querySelectorAll('i');
+    for(var j=0;j<n;j++)(function(j){t(function(){its[j].classList.add('f')},520+k*260+j*80)})(j);
+  });
+  t(function(){document.getElementById('v2').classList.add('alert')},900);
+}
+document.querySelectorAll('[data-fix]').forEach(function(b){
+  b.onclick=function(){
+    state.verdict=b.dataset.fix;
+    var v2=document.getElementById('v2'),body=document.getElementById('v2body');
+    body.style.maxHeight=body.scrollHeight+'px';
+    requestAnimationFrame(function(){body.classList.add('collapse');body.style.maxHeight='0'});
+    t(function(){
+      v2.className='verdict v-done in';
+      v2.innerHTML='<div class="vhead"><span class="tag">解決済</span>矛盾を解消しました</div>'+
+        '<div class="resolved"><svg class="tick" viewBox="0 0 24 24"><path d="M4 12.5l5.2 5.2L20 7"/></svg>'+
+        '「'+({今回:'今回の内容が正しい',既存:'既存の記述が正しい',条件:'条件によって異なる'})[state.verdict]+
+        '」として記録。運用ガイドに注記を追加し、著者の小林さんに通知します。</div>';
+      var s=document.getElementById('v-status');s.textContent='要判断 0件';s.classList.add('flash');
+      var c=document.getElementById('commit');c.disabled=false;c.classList.add('wake');
+      document.getElementById('blocker').textContent='3件すべて判断済みです';
+    },480);
+  };
+});
+document.getElementById('commit').onclick=function(){goTo(4)};
+
+/* ================= 05 ================= */
+var G={nodes:[{x:80,y:38,l:'CI設定'},{x:195,y:88,l:'Docker運用'},{x:325,y:32,l:'環境構築'},
+  {x:450,y:82,l:'M1対応'},{x:545,y:35,l:'ビルド'}],newIdx:3,
+  edges:[[0,1],[1,2],[2,4]],newEdges:[[3,1],[3,2],[3,4]]};
+function drawGraph(){
+  var svg=document.getElementById('gsvg');svg.innerHTML='';
+  function ln(a,b,cls){
+    var l=document.createElementNS('http://www.w3.org/2000/svg','line');
+    l.setAttribute('x1',G.nodes[a].x);l.setAttribute('y1',G.nodes[a].y);
+    l.setAttribute('x2',G.nodes[b].x);l.setAttribute('y2',G.nodes[b].y);
+    if(cls)l.setAttribute('class',cls);svg.appendChild(l);return l;
+  }
+  G.edges.forEach(function(e){ln(e[0],e[1])});
+  G.nodes.forEach(function(n,i){
+    var c=document.createElementNS('http://www.w3.org/2000/svg','circle');
+    c.setAttribute('cx',n.x);c.setAttribute('cy',n.y);c.setAttribute('r',i===G.newIdx?0:5.5);
+    if(i===G.newIdx){c.setAttribute('class','newn');
+      c.style.transition='r .5s cubic-bezier(.2,1.6,.4,1)';
+      t(function(){c.setAttribute('r',8)},900);}
+    svg.appendChild(c);
+    var tx=document.createElementNS('http://www.w3.org/2000/svg','text');
+    tx.setAttribute('x',n.x);tx.setAttribute('y',n.y+21);tx.setAttribute('text-anchor','middle');
+    tx.textContent=n.l;svg.appendChild(tx);
+  });
+  G.newEdges.forEach(function(e,k){
+    var l=ln(e[0],e[1],'newe');
+    var len=Math.hypot(G.nodes[e[0]].x-G.nodes[e[1]].x,G.nodes[e[0]].y-G.nodes[e[1]].y);
+    if(RM)return;
+    l.style.strokeDasharray=len;l.style.strokeDashoffset=len;
+    l.style.transition='stroke-dashoffset .6s ease-out';
+    t(function(){l.style.strokeDashoffset=0},1150+k*200);
+  });
+}
+function play4(){
+  var dl=document.getElementById('c-body');dl.innerHTML='';
+  Object.keys(state.rec).forEach(function(k){
+    dl.innerHTML+='<dt>'+k+'</dt><dd>'+state.rec[k].replace(/</g,'&lt;')+'</dd>';
+  });
+  document.getElementById('c-title').textContent=state.rec['質問']||'（無題）';
+  document.getElementById('c-meta').textContent='確定 2026-08-25 14:16 ／ 参照元：#dev-help ／ 回答者：'+
+    (state.rec['回答者']||'—')+(state.edits?' ／ 人の手による修正 '+state.edits+'件':' ／ 修正なし');
+  var sk=document.getElementById('c-skills');sk.innerHTML='';
+  state.tags.forEach(function(tg,i){
+    var s=document.createElement('span');s.className='chip';
+    s.innerHTML=tg+' <button aria-label="'+tg+' を外す">×</button>';
+    s.querySelector('button').onclick=function(){s.remove()};
+    sk.appendChild(s);t(function(){s.classList.add('in')},1500+i*130);
+  });
+  document.getElementById('c-conflict').textContent=state.verdict
+    ?'古い運用ガイドとの矛盾も解消され、小林さんに通知しました。'
+    :'この件について、同じ質問はもう届かなくなります。';
+  var seal=document.getElementById('seal'),rip=document.getElementById('ripple');
+  seal.classList.remove('go');rip.classList.remove('go');
+  var rvs=document.querySelectorAll('[data-s="4"] .rv');
+  [].forEach.call(rvs,function(e){e.classList.remove('in')});
+  if(RM){seal.style.opacity='.92';[].forEach.call(rvs,function(e){e.classList.add('in')});drawGraph();
+    document.getElementById('cnum').textContent='14';return}
+  void seal.offsetWidth;
+  t(function(){seal.classList.add('go');rip.classList.add('go')},420);
+  stagger(rvs,'in',150,900);
+  t(function(){count(document.getElementById('cnum'),14,900)},1500);
+  drawGraph();
+}
+
+buildRecord();
+})();
+</script>
+</body>
+</html>

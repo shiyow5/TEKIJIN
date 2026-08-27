@@ -22,6 +22,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
         Employee,
         EmployeeProfile,
         KnowledgeUnit,
+        OfflineConsult,
         Project,
         ProjectMember,
         Question,
@@ -137,6 +138,33 @@ class DailyReportDTO:
             report_date=row.report_date,
             content=row.content,
             issue=row.issue,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class OfflineConsultDTO:
+    """A 直接相談 retrospective as topic evidence (#247).
+
+    ``topics`` are validated against ``TOPIC_VOCABULARY`` at the API boundary, so
+    the scorer joins on them directly (same contract as :class:`DailyReportDTO`).
+    ``resolution`` decides whether this counts at all — see
+    ``collect_topic_evidence``.
+    """
+
+    id: int
+    responder_id: int
+    topics: tuple[str, ...]
+    resolution: str
+    created_at: dt.datetime | None
+
+    @classmethod
+    def from_row(cls, row: OfflineConsult) -> OfflineConsultDTO:
+        return cls(
+            id=row.id,
+            responder_id=row.responder_id,
+            topics=tuple(row.topics or ()),
+            resolution=row.resolution,
+            created_at=row.created_at,
         )
 
 

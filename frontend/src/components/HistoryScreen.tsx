@@ -20,7 +20,7 @@
 import { useCurrentUser } from "@/components/CurrentUserProvider";
 import { HistoryRowOptionsMenu } from "@/components/HistoryRowOptionsMenu";
 import { PageBackLink } from "@/components/PageBackLink";
-import { getRecentQuestions } from "@/lib/api-client";
+import { useRecentQuestions } from "@/hooks/useRecentQuestions";
 import type { RecentQuestionItem } from "@/lib/api-types";
 import { formatDateTimeJst } from "@/lib/datetime";
 import Link from "next/link";
@@ -30,13 +30,6 @@ import { useEffect, useState } from "react";
 const HISTORY_LIMIT = 200;
 /** Cards per page (#397). */
 const HISTORY_PAGE_SIZE = 5;
-
-type Phase = "loading" | "ready" | "error";
-
-interface HistoryState {
-  phase: Phase;
-  items?: RecentQuestionItem[];
-}
 
 /** The resolution line: responder name, self / document self-resolve, or pending. */
 function resolutionNote(item: RecentQuestionItem): string {
@@ -85,7 +78,7 @@ function HistoryRow({
           (no session_id) stays a plain, non-interactive block, unchanged. */}
       {item.session_id ? (
         <Link
-          href={`/session/${encodeURIComponent(item.session_id)}?from=history`}
+          href={`/session/${encodeURIComponent(item.session_id)}/result?from=history`}
           className="block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         >
           {body}
@@ -106,28 +99,12 @@ function HistoryRow({
 
 export function HistoryScreen() {
   const { currentUserId } = useCurrentUser();
-  const [state, setState] = useState<HistoryState>({ phase: "loading" });
+  const [state, setState] = useRecentQuestions(currentUserId, { limit: HISTORY_LIMIT });
   const [page, setPage] = useState(0);
 
+  // A new fetch (acting user changed) always starts back at page 1.
   useEffect(() => {
-    if (currentUserId === null) {
-      setState({ phase: "loading" });
-      return;
-    }
-    let active = true;
-    setState({ phase: "loading" });
-    // A new fetch (acting user changed) always starts back at page 1.
     setPage(0);
-    getRecentQuestions(currentUserId, { limit: HISTORY_LIMIT })
-      .then((items) => {
-        if (active) setState({ phase: "ready", items });
-      })
-      .catch(() => {
-        if (active) setState({ phase: "error" });
-      });
-    return () => {
-      active = false;
-    };
   }, [currentUserId]);
 
   /** Drop a just-deleted question from the list without a full re-fetch. */
@@ -197,7 +174,7 @@ export function HistoryScreen() {
               <button
                 type="button"
                 disabled={safePage === 0}
-                onClick={() => setPage((p) => p - 1)}
+                onClick={() => setPage(safePage - 1)}
                 className="rounded-md border border-outline-variant px-sm py-xs text-on-surface-variant text-sm disabled:cursor-not-allowed disabled:opacity-50"
               >
                 前へ
@@ -208,7 +185,7 @@ export function HistoryScreen() {
               <button
                 type="button"
                 disabled={safePage + 1 >= pageCount}
-                onClick={() => setPage((p) => p + 1)}
+                onClick={() => setPage(safePage + 1)}
                 className="rounded-md border border-outline-variant px-sm py-xs text-on-surface-variant text-sm disabled:cursor-not-allowed disabled:opacity-50"
               >
                 次へ

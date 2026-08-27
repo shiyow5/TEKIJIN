@@ -23,6 +23,7 @@ import logging
 from collections.abc import Iterator
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
+from sqlalchemy.exc import IntegrityError
 from sse_starlette import EventSourceResponse
 
 from tekijin.api import schemas
@@ -42,10 +43,17 @@ from tekijin.auth.deps import (
     require_session_participant,
 )
 from tekijin.auth.principal import Principal
+from tekijin.config import get_settings
+from tekijin.data.consult import (
+    accepted_responder_id,
+    has_retrospective,
+    retrospective_context,
+)
 from tekijin.data.dashboard import dashboard_summary
 from tekijin.data.db import session_scope
 from tekijin.data.documents import get_document
 from tekijin.data.feedback import record_feedback
+from tekijin.data.handoff import question_consult_method
 from tekijin.data.history import question_asker_id, recent_questions_for_asker
 from tekijin.data.inbox import pending_handoffs_for_responder
 from tekijin.data.knowledge_library import get_qa_detail, list_knowledge
@@ -58,7 +66,13 @@ from tekijin.data.messages import (
 from tekijin.data.notifications import pending_decline_notifications_for_asker
 from tekijin.data.repository import Repository
 from tekijin.data.slack_channel_links import get_channel_link
-from tekijin.data.writes import ack_decline_notifications, delete_question, mark_self_resolved
+from tekijin.data.writes import (
+    ack_decline_notifications,
+    delete_question,
+    mark_self_resolved,
+    record_offline_consult,
+)
+from tekijin.scorer.topics import TOPIC_VOCABULARY
 from tekijin.slack.notify import relay_to_channel, schedule_pending_handoff
 
 logger = logging.getLogger(__name__)
@@ -140,10 +154,24 @@ def answer(
     (or admin) may supply one. The asker is a valid participant (they own the
     clarification reply), but must not be able to forge an answer in the responder's
     name — a mismatch is 403.
+
+    The OUTCOME itself carries the same rule, for the same reason. Accepting or
+    declining is the responder's act, and ``recommendations.outcome`` is the only
+    durable record that it happened: the dashboard's acceptance rate counts it, the
+    responder inbox is filtered by it (``outcome IS NULL``), and #247 uses it to
+    decide whom a retrospective may credit with expertise. Participant-level auth
+    alone let the ASKER post ``outcome="accepted"`` for their own question — a
+    hand-off "taken" by someone who never saw it. A ``reply`` (the clarification the
+    asker owns) is unaffected.
     """
 
     asker_id, responder_id = _service(request).session_participants(req.session_id)
     require_session_participant(principal, asker_id, responder_id)
+    if req.outcome is not None and not principal.may_act_as(responder_id or -1):
+        raise HTTPException(
+            status_code=403,
+            detail="承諾・辞退を登録できるのは取次ぎ先の担当者本人のみです。",
+        )
     if req.clean_answer_body is not None and not principal.may_act_as(responder_id or -1):
         raise HTTPException(
             status_code=403,
@@ -307,6 +335,34 @@ def handoff_draft(
     return schemas.AckResponse(session_id=req.session_id, status="draft_saved")
 
 
+@router.post("/handoff/structure", response_model=schemas.QuestionStructureResponse)
+def handoff_structure(
+    req: schemas.QuestionStructureRequest,
+    request: Request,
+    principal: Principal = Depends(require_principal),
+) -> schemas.QuestionStructureResponse:
+    """Re-draft the asker's raw question into the four hand-off fields on demand (#475).
+
+    The asker taps "AIに質問を整理してもらう" on the result screen; the model reshapes
+    the already-stored question into 起きていること / 環境 / 試したこと / 詰まっている点,
+    which the asker then edits before sending. Read-only and OUTSIDE the graph — it
+    never advances or persists state, and never runs on the C1 critical path
+    ([[tekijin-latency-and-streaming]]). 404 when the session has no question yet
+    (unknown / not started). Object-level auth (#241): only the session's
+    asker/responder (or admin) may structure it — the same rule as ``/handoff/draft``.
+    """
+
+    asker_id, responder_id = _service(request).session_participants(req.session_id)
+    require_session_participant(principal, asker_id, responder_id)
+    try:
+        return _service(request).structure_question(req.session_id)
+    except HandoffNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:  # unexpected: log detail, return a generic 500
+        logger.exception("POST /handoff/structure failed for session %s", req.session_id)
+        raise HTTPException(status_code=500, detail="内部エラーが発生しました") from exc
+
+
 @router.post("/handoff/select", response_model=schemas.HandoffSelectResponse)
 def handoff_select(
     req: schemas.HandoffSelectRequest,
@@ -462,7 +518,13 @@ def dashboard(
 
     with _generic_500("GET /dashboard"):
         with _service(request).session_factory() as session:
-            data = dashboard_summary(session, top_responders=top_responders)
+            data = dashboard_summary(
+                session,
+                top_responders=top_responders,
+                # Injected so the month boundary follows the service clock the
+                # rest of the run uses, not the process clock (#294).
+                now=_service(request).now(),
+            )
         return schemas.DashboardResponse(**data)
 
 
@@ -577,7 +639,6 @@ def knowledge(
     department: str | None = Query(default=None, min_length=1),
     topic: str | None = Query(default=None, min_length=1),
     since: dt.date | None = None,
-    until: dt.date | None = None,
     offset: int = Query(0, ge=0),
     limit: int = Query(8, ge=1, le=200),
     principal: Principal = Depends(require_principal),
@@ -604,7 +665,6 @@ def knowledge(
                 department=department,
                 topic=topic,
                 since=since,
-                until=until,
                 offset=offset,
                 limit=limit,
             )
@@ -748,6 +808,190 @@ def feedback(
                 actor_id=principal.employee_id,
             )
         return schemas.FeedbackAck(status="recorded")
+
+
+@router.get("/topics", response_model=schemas.TopicVocabularyResponse)
+def topics(principal: Principal = Depends(require_principal)) -> schemas.TopicVocabularyResponse:
+    """The closed topic vocabulary the scorer joins on (#247).
+
+    Static — it comes from ``scorer/topics.py``, not the database. Served so the
+    retrospective form can offer exactly the topics the scorer understands instead
+    of shipping a copy that drifts (#116). Behind auth like every other endpoint;
+    there is nothing sensitive here, but an unauthenticated hole is a hole.
+    """
+
+    return schemas.TopicVocabularyResponse(topics=list(TOPIC_VOCABULARY))
+
+
+@router.get(
+    "/consult-retrospective/{session_id}",
+    response_model=schemas.ConsultRetrospectiveContext,
+)
+def consult_retrospective_context(
+    session_id: str,
+    request: Request,
+    principal: Principal = Depends(require_principal),
+) -> schemas.ConsultRetrospectiveContext:
+    """What the 直接相談 write-up form is built from (#247).
+
+    Read from SQL rather than reusing ``GET /handoff``: that endpoint serves the
+    PENDING hand-off out of the checkpoint and 404s the moment the responder
+    records an outcome — which is precisely when a face-to-face consultation can
+    finally have happened. Building the form on it made the feature reachable only
+    in the window before the thing it documents took place.
+
+    404 for a session with no question; object-level auth mirrors the write side —
+    only the question's own asker (or an admin) may read it, since it names who
+    they consulted.
+    """
+
+    with (
+        _generic_500("GET /consult-retrospective"),
+        session_scope(_service(request).session_factory) as session,
+    ):
+        ctx = retrospective_context(session, session_id)
+        if ctx is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        require_can_act_as(principal, ctx["asker_id"])
+        responder = (
+            schemas.ConsultResponder(
+                person_id=schemas.format_employee_id(ctx["responder_id"]),
+                name=ctx["responder_name"] or "",
+            )
+            if ctx["responder_id"] is not None
+            else None
+        )
+        return schemas.ConsultRetrospectiveContext(
+            session_id=session_id,
+            question_id=ctx["question_id"],
+            question=ctx["question"],
+            consult_method=schemas.normalize_consult_method(ctx["consult_method"]),
+            responder=responder,
+            already_recorded=ctx["already_recorded"],
+        )
+
+
+@router.post("/consult-retrospective", response_model=schemas.ConsultRetrospectiveAck)
+def consult_retrospective(
+    req: schemas.ConsultRetrospectiveRequest,
+    request: Request,
+    principal: Principal = Depends(require_principal),
+) -> schemas.ConsultRetrospectiveAck:
+    """Record the asker's write-up of a face-to-face 直接相談 (#247).
+
+    A "direct" consultation (#245) produces no chat transcript, so the knowledge
+    it carried is lost and F-10 (回答を索引に追加し専門性の推定を更新) has nothing
+    to index. This endpoint is that missing record — and, unlike ``/feedback``, it
+    becomes EXPERTISE EVIDENCE for ``responder_id``, which is why the checks below
+    are stricter than "append-only, rate limited":
+
+    * ``asker_id`` is taken from the principal, never the body.
+    * Only the QUESTION'S OWN ASKER (or an admin) may write one — that settles WHO
+      may write.
+    * ``responder_id`` must equal the employee who ACCEPTED this question's
+      hand-off — that settles WHOM they may write about, which is the half that
+      actually guards the score. Authorising the author alone still let anyone
+      create a question and then credit any colleague (or themselves) with up to
+      ``OFFLINE_CONSULT_EVIDENCE_CAP`` consultations' worth of evidence on any
+      topic. Checking against the ACCEPTED row (not merely a shown recommendation)
+      also means the id is a real employee, so a bogus one is a 422 here instead of
+      an FK ``IntegrityError`` surfacing as a 500 (the shape #263 removed from
+      ``/feedback``). ``POST /handoff/select`` sets the precedent: a person id from
+      the client is checked against what the system actually offered.
+    * ``responder_id`` may not be the asker themselves (422). Unreachable while the
+      scorer excludes the asker from its own candidate pool, but stated locally so
+      the guarantee does not depend on another module's invariant.
+    * At most ONE write-up per question (409 on a second): exactly one hand-off is
+      ever accepted, so "the consultation" is singular, and repeating it would let
+      one real conversation fill the whole evidence cap.
+    * The question must have been handed off as ``direct``. A chat consultation
+      already has a transcript; a remembered summary layered on top of it is a
+      second, weaker copy of the same exchange.
+    * An unknown ``question_id`` is a 404 rather than a silently-dropped link (the
+      way ``/feedback`` treats it): a retrospective with no question is not a
+      weaker signal, it is an unverifiable one, so there is nothing to record.
+    * Topics are constrained to ``TOPIC_VOCABULARY`` by the request model — the
+      scorer joins on these strings, and free text would match nothing (#116).
+
+    Rate limited per actor with the feedback limiter's budget (60/60s), under a
+    SEPARATE key: both are asker-driven append-only writes at human speed, and one
+    write per finished consultation is far below that ceiling.
+    """
+
+    if not get_settings().consult_retrospective_enabled:
+        raise HTTPException(status_code=503, detail="ふりかえりの記録は現在無効です。")
+
+    limiter = request.app.state.feedback_rate_limiter
+    if not limiter.allow(f"consult-retrospective:{principal.employee_id}"):
+        raise HTTPException(status_code=429, detail="ふりかえりの送信が多すぎます。")
+
+    responder_id = _coerce_employee_id_or_422(req.responder_id, field="responder_id")
+
+    with _generic_500("POST /consult-retrospective"):
+        with session_scope(_service(request).session_factory) as session:
+            owner = question_asker_id(session, req.question_id)
+            if owner is None:
+                raise HTTPException(status_code=404, detail="question not found")
+            require_can_act_as(principal, owner)
+            if (
+                schemas.normalize_consult_method(question_consult_method(session, req.question_id))
+                != "direct"
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail="この依頼は直接相談ではないため、ふりかえりは記録できません。",
+                )
+            accepted = accepted_responder_id(session, req.question_id)
+            if accepted is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail="この依頼はまだ受諾されていないため、ふりかえりは記録できません。",
+                )
+            if has_retrospective(session, req.question_id):
+                # One accepted hand-off per question means one consultation; without
+                # this, the same real conversation could be written up
+                # ``OFFLINE_CONSULT_EVIDENCE_CAP`` times to reach the full cap.
+                raise HTTPException(
+                    status_code=409,
+                    detail="この依頼のふりかえりは、すでに記録されています。",
+                )
+            if responder_id == owner:
+                # Belt and braces. The check below would refuse this too — the
+                # scorer never puts the asker in its own candidate pool, so they
+                # can never be the accepting responder — but that is an invariant
+                # of a DIFFERENT module. Stated here so "you cannot credit
+                # yourself" is a local, readable rule rather than a consequence.
+                raise HTTPException(
+                    status_code=422,
+                    detail="自分自身を相談相手として記録することはできません。",
+                )
+            if responder_id != accepted:
+                raise HTTPException(
+                    status_code=422,
+                    detail="ふりかえりは、実際に相談を受けた相手についてのみ記録できます。",
+                )
+            try:
+                consult_id = record_offline_consult(
+                    session,
+                    question_id=req.question_id,
+                    responder_id=responder_id,
+                    asker_id=principal.employee_id,
+                    topics=req.topics,
+                    asked=req.asked,
+                    answer_body=req.answer_body,
+                    resolution=req.resolution,
+                )
+            except IntegrityError as exc:
+                # Two concurrent posts both clear the check above in separate
+                # transactions; the loser hits uq_offline_consults_question. Answer
+                # it the way the check does rather than letting a constraint
+                # violation surface as a 500 (the shape #263 removed from
+                # /feedback).
+                raise HTTPException(
+                    status_code=409,
+                    detail="この依頼のふりかえりは、すでに記録されています。",
+                ) from exc
+        return schemas.ConsultRetrospectiveAck(status="recorded", consult_id=consult_id)
 
 
 @router.get("/notifications", response_model=schemas.NotificationsResponse)

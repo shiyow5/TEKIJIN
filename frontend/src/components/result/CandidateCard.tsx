@@ -15,6 +15,7 @@
 
 import { ConfidenceGauge } from "@/components/result/ConfidenceGauge";
 import type { Recommendation } from "@/lib/api-types";
+import { REVEAL_CLASS, revealStyle } from "@/lib/motion";
 import { reasonLabel } from "@/lib/reasons";
 
 export interface CandidateCardProps {
@@ -59,7 +60,8 @@ export function CandidateCard({
 }: CandidateCardProps) {
   return (
     <article
-      className={`flex h-full flex-col rounded-xl border bg-surface-container-lowest p-md shadow-sm transition-colors ${
+      style={revealStyle(rank - 1)}
+      className={`flex h-full flex-col rounded-xl border bg-surface-container-lowest p-md shadow-sm transition-colors ${REVEAL_CLASS} ${
         selected ? "border-primary" : "border-outline-variant"
       }`}
     >
