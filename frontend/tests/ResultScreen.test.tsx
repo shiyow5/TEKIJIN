@@ -117,7 +117,11 @@ describe("ResultScreen — terminal-only replay (hard reload)", () => {
     renderResult(state({ terminal: true, done: { status: "sent" } }));
     expect(screen.getByText("依頼は送信済みです")).toBeInTheDocument();
     expect(screen.queryByText("結果を準備中…")).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "新しい質問をする" })).toBeInTheDocument();
+    // #510: both the top back link and the bottom CTA go home — a sent
+    // request is a completed task, so "質問一覧へ戻る"/`/questions` would be
+    // the wrong next step for either.
+    expect(screen.getByRole("link", { name: "新しい質問をする" })).toHaveAttribute("href", "/");
+    expect(screen.getByRole("link", { name: "ホームへ戻る" })).toHaveAttribute("href", "/");
   });
 
   it("shows a terminal message (off-topic / no candidate) replayed on reload", () => {
@@ -364,7 +368,7 @@ describe("ResultScreen — stream error", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent("時間をおいて再度お試しください");
     expect(screen.queryByText("結果を準備中…")).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "新しい質問をする" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "新しい質問をする" })).toHaveAttribute("href", "/");
   });
 });
 
@@ -535,6 +539,9 @@ describe("ResultScreen — main line (person)", () => {
     );
     expect(await screen.findByText("依頼を送りました")).toBeInTheDocument();
     expect(screen.getByText(/高梨さんに、この内容でお繋ぎしました/)).toBeInTheDocument();
+    // A completed hand-off's "新しい質問をする" CTA goes home, not back to the
+    // ask form — matches the identical CTA in ResultScreen's own terminal state.
+    expect(screen.getByRole("link", { name: "新しい質問をする" })).toHaveAttribute("href", "/");
   });
 
   it("shows full reason detail on all three candidates, not just the top pick (#204/#A2)", () => {

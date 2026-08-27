@@ -270,7 +270,7 @@ export function ProcessingScreen({
         ) : null}
         {stream.terminal || stream.error ? (
           <a
-            href="/questions"
+            href="/"
             className="min-h-[48px] rounded-full border border-outline px-lg py-sm text-on-surface-variant transition-colors hover:bg-surface-container-low"
           >
             新しい質問をする

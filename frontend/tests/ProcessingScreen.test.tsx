@@ -197,7 +197,7 @@ describe("ProcessingScreen", () => {
       state({ terminal: true, message: { status: "off_topic", message: "業務外の質問です" } }),
     );
     expect(screen.getByText("業務外の質問です")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "新しい質問をする" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "新しい質問をする" })).toHaveAttribute("href", "/");
     expect(screen.queryByTestId("active-step")).not.toBeInTheDocument();
   });
 
