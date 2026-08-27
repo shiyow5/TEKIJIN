@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import {
-  COMPLETED_PERSON_ROUTE_FRAMES,
   API_BASE,
+  COMPLETED_PERSON_ROUTE_FRAMES,
   RECENT_QUESTIONS,
   fulfillJson,
   fulfillSse,

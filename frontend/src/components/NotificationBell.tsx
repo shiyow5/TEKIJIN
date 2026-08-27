@@ -1,20 +1,24 @@
 "use client";
 
 /**
- * Decline-notification bell in the header (#E7).
+ * Notification bell in the header: decline (#E7), accepted, and incoming-request
+ * (#509) events.
  *
- * Paired with the automatic reroute (#206): when a candidate declines, the
- * backend has already moved on to the next one by the time this fires — so
- * this is a "here's what happened" surface, not a request for the asker to
- * manually act. Polls `GET /notifications` for the acting user (no push/SSE
- * channel exists for this low-frequency, non-critical signal) and shows a
- * badge + dropdown; opening an item acknowledges it (`POST /notifications/ack`)
- * so it does not reappear.
+ * Every acting user is both an asker and a potential responder, so this polls
+ * `GET /notifications` twice per cycle — once as asker (declined + accepted on
+ * their own questions) and once as responder (requests still awaiting their
+ * decision) — and merges both into one list (no push/SSE channel exists for
+ * this low-frequency, non-critical signal). Declined is paired with the
+ * automatic reroute (#206): the system has already moved on to the next
+ * candidate by the time it fires, so it — like the others — is a "here's what
+ * happened" surface, not a request to manually act. Shows a badge + dropdown;
+ * opening an item acknowledges it (`POST /notifications/ack`) so it does not
+ * reappear.
  */
 
 import { useCurrentUser } from "@/components/CurrentUserProvider";
 import { ackNotifications, getNotifications } from "@/lib/api-client";
-import type { DeclineNotification } from "@/lib/api-types";
+import type { Notification, NotificationAckRequest } from "@/lib/api-types";
 import Link from "next/link";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
@@ -65,7 +69,7 @@ function IconBell({ className }: { className: string }) {
 
 export function NotificationBell() {
   const { currentUserId } = useCurrentUser();
-  const [items, setItems] = useState<DeclineNotification[]>([]);
+  const [items, setItems] = useState<Notification[]>([]);
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
   // Panel left offset (relative to `containerRef`), clamped to the viewport.
@@ -87,12 +91,18 @@ export function NotificationBell() {
       return;
     }
     let active = true;
-    const askerId = currentUserId;
+    const userId = currentUserId;
 
     function poll() {
-      getNotifications(askerId)
-        .then((next) => {
-          if (active) setItems(next);
+      // Every acting user is both an asker and a potential responder, so both
+      // scopes are polled and merged (#509).
+      Promise.all([getNotifications({ askerId: userId }), getNotifications({ employeeId: userId })])
+        .then(([askerItems, responderItems]) => {
+          if (!active) return;
+          const merged = [...askerItems, ...responderItems].sort((a, b) =>
+            (b.created_at ?? "").localeCompare(a.created_at ?? ""),
+          );
+          setItems(merged);
         })
         .catch(() => {
           // Best-effort background signal: a transient failure just means the
@@ -176,13 +186,32 @@ export function NotificationBell() {
     };
   }, [open]);
 
-  function acknowledge(id: number) {
-    setItems((prev) => prev.filter((item) => item.id !== id));
-    if (currentUserId !== null) {
-      ackNotifications({ asker_id: currentUserId, ids: [id] }).catch(() => {
-        // Best-effort: a failed ack just means it may reappear on the next poll.
-      });
+  /**
+   * Where opening this item goes. "declined" is unchanged (#E7): the session
+   * it happened on, or nothing (a plain ack button) for a pre-session-tracking
+   * row. "accepted" (#509) sends the asker to the chat thread when the
+   * responder is reachable there, else straight to the session (direct
+   * consult never opens a thread — #245). "request_received" (#509) sends
+   * the responder to their inbox, where the pending item itself lives.
+   */
+  function hrefFor(item: Notification): string | null {
+    if (item.kind === "request_received") return "/inbox";
+    if (item.kind === "accepted" && item.consult_method !== "direct") {
+      return `/chat?thread=${item.id}`;
     }
+    return item.session_id ? `/session/${encodeURIComponent(item.session_id)}` : null;
+  }
+
+  function acknowledge(item: Notification) {
+    setItems((prev) => prev.filter((i) => i.id !== item.id));
+    if (currentUserId === null) return;
+    const request: NotificationAckRequest =
+      item.kind === "request_received"
+        ? { kind: item.kind, employee_id: currentUserId, ids: [item.id] }
+        : { kind: item.kind, asker_id: currentUserId, ids: [item.id] };
+    ackNotifications(request).catch(() => {
+      // Best-effort: a failed ack just means it may reappear on the next poll.
+    });
   }
 
   if (currentUserId === null) return null;
@@ -226,33 +255,36 @@ export function NotificationBell() {
             <p className="p-sm text-on-surface-variant text-sm">新しい通知はありません。</p>
           ) : (
             <ul className="flex flex-col gap-xs">
-              {items.map((item) => (
-                <li key={item.id}>
-                  {item.session_id ? (
-                    <Link
-                      href={`/session/${encodeURIComponent(item.session_id)}`}
-                      onClick={() => {
-                        acknowledge(item.id);
-                        setOpen(false);
-                      }}
-                      className="block rounded-md p-sm text-on-surface text-sm transition-colors hover:bg-surface-container-low"
-                    >
-                      {item.message}
-                    </Link>
-                  ) : (
-                    <div className="flex items-start justify-between gap-sm rounded-md p-sm text-on-surface text-sm">
-                      <span>{item.message}</span>
-                      <button
-                        type="button"
-                        onClick={() => acknowledge(item.id)}
-                        className="shrink-0 text-primary text-xs hover:underline"
+              {items.map((item) => {
+                const href = hrefFor(item);
+                return (
+                  <li key={item.id}>
+                    {href ? (
+                      <Link
+                        href={href}
+                        onClick={() => {
+                          acknowledge(item);
+                          setOpen(false);
+                        }}
+                        className="block rounded-md p-sm text-on-surface text-sm transition-colors hover:bg-surface-container-low"
                       >
-                        既読にする
-                      </button>
-                    </div>
-                  )}
-                </li>
-              ))}
+                        {item.message}
+                      </Link>
+                    ) : (
+                      <div className="flex items-start justify-between gap-sm rounded-md p-sm text-on-surface text-sm">
+                        <span>{item.message}</span>
+                        <button
+                          type="button"
+                          onClick={() => acknowledge(item)}
+                          className="shrink-0 text-primary text-xs hover:underline"
+                        >
+                          既読にする
+                        </button>
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>

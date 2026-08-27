@@ -364,7 +364,7 @@ describe("AppHeader", () => {
   it("shows the decline-notification bell for the acting user (#225)", async () => {
     useCurrentUserMock.mockReturnValue(ADMIN_READY);
     render(<AppHeader />);
-    await waitFor(() => expect(getNotificationsMock).toHaveBeenCalledWith("E001"));
+    await waitFor(() => expect(getNotificationsMock).toHaveBeenCalledWith({ askerId: "E001" }));
     expect(screen.getByRole("button", { name: "通知" })).toBeInTheDocument();
   });
 

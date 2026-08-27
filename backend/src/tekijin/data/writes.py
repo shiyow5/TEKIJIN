@@ -480,6 +480,51 @@ def ack_decline_notifications(session: Session, asker_id: int, ids: list[int]) -
     return cast("CursorResult[Any]", result).rowcount or 0
 
 
+def ack_accepted_notifications(session: Session, asker_id: int, ids: list[int]) -> int:
+    """Mark these accepted notifications seen, scoped to ``asker_id``'s own questions (#509).
+
+    Mirrors ``ack_decline_notifications``; see its docstring for the scoping
+    rationale. Returns the number of rows actually updated.
+    """
+
+    if not ids:
+        return 0
+    result = session.execute(
+        update(Recommendation)
+        .where(
+            Recommendation.id.in_(ids),
+            Recommendation.accepted_seen_at.is_(None),
+            Recommendation.question_id.in_(
+                select(Question.id).where(Question.asker_id == asker_id)
+            ),
+        )
+        .values(accepted_seen_at=func.now())
+    )
+    return cast("CursorResult[Any]", result).rowcount or 0
+
+
+def ack_request_notifications(session: Session, responder_id: int, ids: list[int]) -> int:
+    """Mark these incoming-request notifications seen, scoped to ``responder_id`` (#509).
+
+    ``Recommendation.employee_id`` already IS the responder, so unlike the
+    asker-side acks this needs no subquery — the row itself proves ownership.
+    Returns the number of rows actually updated.
+    """
+
+    if not ids:
+        return 0
+    result = session.execute(
+        update(Recommendation)
+        .where(
+            Recommendation.id.in_(ids),
+            Recommendation.request_seen_at.is_(None),
+            Recommendation.employee_id == responder_id,
+        )
+        .values(request_seen_at=func.now())
+    )
+    return cast("CursorResult[Any]", result).rowcount or 0
+
+
 def record_offline_consult(
     session: Session,
     *,

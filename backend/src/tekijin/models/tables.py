@@ -383,6 +383,14 @@ class Recommendation(Base):
     # NULL means "not yet seen"; only ever set on a rank==1, outcome=='declined'
     # row (the shape a decline notification is derived from).
     declined_seen_at: Mapped[dt.datetime | None] = mapped_column(DateTime)
+    # #509: when the asker acknowledged this acceptance in the notification bell.
+    # NULL means "not yet seen"; only ever set on an outcome=='accepted' row (at
+    # most one per question — see ``Message`` below).
+    accepted_seen_at: Mapped[dt.datetime | None] = mapped_column(DateTime)
+    # #509: when the responder acknowledged this incoming request in the
+    # notification bell. NULL means "not yet seen"; only ever set on the same
+    # rank==1, outcome IS NULL shape the inbox (`data.inbox`) lists as pending.
+    request_seen_at: Mapped[dt.datetime | None] = mapped_column(DateTime)
     # #518: when this row's outcome is 'referred', the employee the responder named
     # as more suitable ("他に適任者がいる → この人"). NULL for every other outcome.
     # Auditable record of the referral relationship (who referred whom); the actual

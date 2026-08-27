@@ -127,6 +127,7 @@ def test_unauthenticated_requests_are_401(seed_counts, engine, fake_embedder) ->
     assert client.get("/employees").status_code == 401
     assert client.get("/questions?asker_id=1").status_code == 401
     assert client.get("/notifications?asker_id=1").status_code == 401
+    assert client.get("/notifications?employee_id=1").status_code == 401
     assert client.get("/messages/threads?employee_id=1").status_code == 401
     assert client.get("/inbox?responder_id=1").status_code == 401
     assert client.get("/events/whatever").status_code == 401
@@ -192,14 +193,33 @@ def test_user_cannot_act_as_another_employee(seed_counts, engine, fake_embedder)
         ).status_code
         == 403
     )
-    # Decline notifications are the asker's own rows — reading or acking someone
-    # else's must be refused, not just filtered (#225).
+    # Decline/accepted notifications are the asker's own rows — reading or
+    # acking someone else's must be refused, not just filtered (#225/#509).
     assert client.get(f"/notifications?asker_id={emp.id}", headers=headers).status_code == 200
     assert client.get(f"/notifications?asker_id={other}", headers=headers).status_code == 403
     assert (
         client.post(
             "/notifications/ack",
             json={"asker_id": other, "ids": [1]},
+            headers=headers,
+        ).status_code
+        == 403
+    )
+    assert (
+        client.post(
+            "/notifications/ack",
+            json={"kind": "accepted", "asker_id": other, "ids": [1]},
+            headers=headers,
+        ).status_code
+        == 403
+    )
+    # Incoming-request notifications are the responder's own rows — same rule (#509).
+    assert client.get(f"/notifications?employee_id={emp.id}", headers=headers).status_code == 200
+    assert client.get(f"/notifications?employee_id={other}", headers=headers).status_code == 403
+    assert (
+        client.post(
+            "/notifications/ack",
+            json={"kind": "request_received", "employee_id": other, "ids": [1]},
             headers=headers,
         ).status_code
         == 403
