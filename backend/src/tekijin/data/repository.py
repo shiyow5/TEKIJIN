@@ -52,8 +52,29 @@ class Repository:
 
     # -- employees -------------------------------------------------------- #
     def list_employees(self) -> list[EmployeeDTO]:
-        rows = self._session.scalars(select(Employee).order_by(Employee.id)).all()
+        """Everyone who can still be recommended (#506).
+
+        This is the candidate pool the scorer runs over, so someone who has left
+        must not appear — a hand-off to them cannot be delivered, their Slack
+        link having been removed by the same departure. ``get_employee`` is
+        deliberately NOT filtered: their name still has to resolve, or the
+        questions and answers they left behind lose their author.
+        """
+
+        rows = self._session.scalars(
+            select(Employee).where(Employee.is_active.is_(True)).order_by(Employee.id)
+        ).all()
         return [EmployeeDTO.from_row(r) for r in rows]
+
+    def active_employee_ids(self) -> set[int]:
+        """Ids of everyone who may still be recommended (#506).
+
+        The retriever needs this rather than :meth:`list_employees` because it
+        builds its candidate list out of answers and profiles, not out of the
+        roster — filtering the roster alone left the real pool untouched.
+        """
+
+        return set(self._session.scalars(select(Employee.id).where(Employee.is_active.is_(True))))
 
     def get_employee(self, employee_id: int) -> EmployeeDTO | None:
         row = self._session.get(Employee, employee_id)

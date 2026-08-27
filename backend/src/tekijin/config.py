@@ -501,6 +501,27 @@ class Settings(BaseSettings):
     # is evidence for the people it would add.
     slack_user_sync_enabled: bool = False
 
+    # Let that sync CREATE an employee for a Slack member who has none (#406 /
+    # #402). A second flag on top of the first, because it is a much larger
+    # statement: "reconcile the links of people we already know" becomes
+    # "membership of this Slack workspace makes you an employee here", and that
+    # should not ride along with the smaller one. Until #402 there was no
+    # non-destructive way to add a person at all — ``make seed`` TRUNCATEs every
+    # table — so someone who joined Slack could never sign in.
+    #
+    # NOTE: a created colleague has no evidence, so ``topic_fit`` is 0 and the
+    # recommender will not surface them (#401). Creating the row makes them
+    # reachable; #404 (evidence from Slack) is what makes them recommendable.
+    slack_user_sync_create_employees: bool = False
+
+    # Company email domains a Slack member must be in before the sync will CREATE
+    # an employee for them. Empty allows any address, matching the other switches
+    # here (restricting is opt-in). Narrows, but does not close, the squatting
+    # risk documented in ``docs/slack-user-sync.md``: an address inside the
+    # company domain that nobody holds yet can still be claimed by whoever puts
+    # it on their Slack profile first.
+    slack_user_sync_allowed_domains: tuple[str, ...] = ()
+
     # FastAPI's auto-docs (``/docs``, ``/redoc``, ``/openapi.json``). Default OFF:
     # ``/openapi.json`` publishes every endpoint's path, parameters and types, which
     # is a map of the protected surface even though no data leaks. It was reachable

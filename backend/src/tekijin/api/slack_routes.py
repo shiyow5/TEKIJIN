@@ -541,6 +541,8 @@ def sync_users(
                 employee_by_slack_user=state.employee_by_slack_user,
                 expected_team_id=settings.slack_team_id,
                 admin_email=settings.admin_email,
+                create_missing=settings.slack_user_sync_create_employees,
+                allowed_create_domains=settings.slack_user_sync_allowed_domains,
             )
             applied = apply_sync_plan(session, plan, team_id=settings.slack_team_id, now=now)
     except (ValueError, IntegrityError) as exc:
@@ -555,13 +557,15 @@ def sync_users(
         ) from exc
 
     logger.info(
-        "Slack directory sync by admin: %s members, linked=%s unlinked=%s skipped=%s",
+        "Slack directory sync by admin: %s members, created=%s linked=%s unlinked=%s skipped=%s",
         len(members),
+        applied["created"],
         applied["linked"],
         applied["unlinked"],
         plan.skipped,
     )
     return schemas.SlackUserSyncResponse(
+        created=applied["created"],
         linked=applied["linked"],
         unlinked=applied["unlinked"],
         skipped=dict(plan.skipped),

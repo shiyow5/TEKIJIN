@@ -1036,6 +1036,7 @@ class SlackUserSyncResponse(BaseModel):
     every single member arrived without an address.
     """
 
+    created: int = 0
     linked: int
     unlinked: int
     skipped: dict[str, int] = Field(default_factory=dict)

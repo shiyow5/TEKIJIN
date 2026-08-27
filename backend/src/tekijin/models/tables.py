@@ -35,6 +35,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -69,6 +70,13 @@ class Employee(Base):
     # fixture that omits it) is valid; a NULL/blank hash simply never verifies, so
     # such an account cannot log in until seeded. Never exposed via EmployeeDTO.
     password_hash: Mapped[str | None] = mapped_column(String(255))
+    # Whether this person is still with the company (#506). Departure is NOT a
+    # delete: questions, answers and evidence all reference this row, and
+    # removing it would tear the history out of the product. Instead they leave
+    # the CANDIDATE POOL, so the recommender stops offering someone whose
+    # hand-off can no longer be delivered. Defaults to true — the synthetic
+    # roster predates the column, and a default of false would empty the pool.
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("true"))
 
 
 class EmployeeProfile(Base):

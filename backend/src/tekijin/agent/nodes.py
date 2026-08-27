@@ -394,9 +394,17 @@ class AgentNodes:
 
     # -- prior_answer (補助): pin the past responder, then hand off --------
     def prior_answer(self, state: AgentState) -> AgentState:
-        past = (state.get("retrieval") or empty_retrieval())["past_answers"]
+        retrieval = state.get("retrieval") or empty_retrieval()
+        past = retrieval["past_answers"]
         top = _top_by_score(past)
         responder_id = top.get("responder_id") if top else None
+        # The pin seats this person at rank 1, ahead of the scorer, so a departed
+        # colleague must not reach it (#506). Checked against `departed_people`
+        # rather than `candidate_people`: the pin deliberately reaches OUTSIDE
+        # the pool — handing off to whoever answered before even when they did
+        # not rank is the entire point — so pool membership is the wrong test.
+        if responder_id is not None and responder_id in (retrieval.get("departed_people") or []):
+            responder_id = None
         note = (
             f"過去に社員ID {responder_id} が類似の質問に回答しています。本人に取り次ぎます。"
             if responder_id is not None

@@ -13,7 +13,7 @@ so the whole run is reproducible.
 from __future__ import annotations
 
 import datetime as dt
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 
 # C5 route labels and responder outcomes, as closed sets so a typo is a type
 # error and the graph routers can validate against them.
@@ -59,6 +59,12 @@ class RetrievalResult(TypedDict):
     past_answers: list[PastAnswer]
     documents: list[DocumentHit]
     candidate_people: list[int]
+    # Responders of `past_answers` who have left (#506). Separate from
+    # `candidate_people` because the prior_answer pin deliberately reaches
+    # OUTSIDE that pool — its whole point is to hand off to whoever answered
+    # before, even when they did not rank. So the pin needs its own signal for
+    # "this person is gone", not pool membership.
+    departed_people: NotRequired[list[int]]
     answer_confidence: float
     document_confidence: float
     people_confidence: float
@@ -81,6 +87,7 @@ def empty_retrieval() -> RetrievalResult:
         "past_answers": [],
         "documents": [],
         "candidate_people": [],
+        "departed_people": [],
         "answer_confidence": 0.0,
         "document_confidence": 0.0,
         "people_confidence": 0.0,
