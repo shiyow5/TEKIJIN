@@ -19,6 +19,7 @@ import { PageBackLink } from "@/components/PageBackLink";
 import { RetrospectiveLink } from "@/components/RetrospectiveLink";
 import { useOptionalSessionId, useOptionalSessionStream } from "@/components/SessionStreamProvider";
 import { SourceCitations } from "@/components/SourceCitations";
+import { ThinkingSteps } from "@/components/ThinkingSteps";
 import { PersonRouteView } from "@/components/result/PersonRouteView";
 import type { EventStreamState } from "@/hooks/useEventStream";
 import type { ReactNode } from "react";
@@ -32,10 +33,36 @@ export interface ResultScreenProps {
 
 const EMPTY_STREAM: EventStreamState = { events: [], terminal: false };
 
-function ResultFrame({ children }: { children: ReactNode }) {
+function ResultFrame({
+  stream,
+  showProgress = true,
+  children,
+}: {
+  /** Accumulated stream state, for the thinking progress above the result. */
+  stream: EventStreamState;
+  /**
+   * Render the thinking steps above the content. Off for the hand-off main line
+   * (see the call site): `PersonRouteView` already shows the route reason and an
+   * EDITABLE draft, so the steps would repeat both — two drafts on one screen,
+   * one of them editable, is worse than the inconsistency it fixes.
+   */
+  showProgress?: boolean;
+  children: ReactNode;
+}) {
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col py-lg">
       <PageBackLink href="/" label="ホームへ戻る" />
+      {/* #512: the same steps the processing screen shows, from the progress the
+          backend replays on reconnect. Without this, a session reached from the
+          history list (which links straight here, #470) or reloaded showed the
+          outcome with no sign of how it was reached, and read as a different
+          screen. `showActiveStep` stays off: the spinner belongs to a run still
+          in flight, and this screen is reached after one. */}
+      {showProgress ? (
+        <section aria-label="AIの思考プロセス" className="mb-md">
+          <ThinkingSteps stream={stream} />
+        </section>
+      ) : null}
       {children}
     </div>
   );
@@ -156,7 +183,7 @@ export function ResultScreen({ streamState, sessionId }: ResultScreenProps) {
   // A failed stream can no longer advance: surface it before any data gating.
   if (stream.error) {
     return (
-      <ResultFrame>
+      <ResultFrame stream={stream}>
         <ResultError />
       </ResultFrame>
     );
@@ -166,7 +193,7 @@ export function ResultScreen({ streamState, sessionId }: ResultScreenProps) {
   // hard reload, must show its outcome rather than a stale route or 準備中.
   if (stream.terminal && (stream.done || stream.message)) {
     return (
-      <ResultFrame>
+      <ResultFrame stream={stream}>
         <ResultTerminal
           done={stream.done}
           message={stream.message}
@@ -180,7 +207,7 @@ export function ResultScreen({ streamState, sessionId }: ResultScreenProps) {
   const hasAnyData = hasMainLineData || Boolean(stream.route);
   if (!hasAnyData) {
     return (
-      <ResultFrame>
+      <ResultFrame stream={stream}>
         <ResultPending />
       </ResultFrame>
     );
@@ -188,7 +215,10 @@ export function ResultScreen({ streamState, sessionId }: ResultScreenProps) {
 
   if (hasMainLineData) {
     return (
-      <ResultFrame>
+      // The main line is the richer rendering of the same last two steps
+      // (candidates + draft) AND carries the route reason, so the step list would
+      // duplicate it rather than add anything (#512).
+      <ResultFrame stream={stream} showProgress={false}>
         {/* Keyed by the top candidate so a decline->reroute (new recommend/draft for
             a different person) remounts the whole view: it clears a stale "sent"
             confirmation and the previous selection/edit, making the reroute
@@ -206,7 +236,7 @@ export function ResultScreen({ streamState, sessionId }: ResultScreenProps) {
   }
 
   return (
-    <ResultFrame>
+    <ResultFrame stream={stream}>
       <ResultPending />
     </ResultFrame>
   );

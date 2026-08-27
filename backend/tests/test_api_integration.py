@@ -636,18 +636,77 @@ def test_reconnect_resends_pending_interrupt(seed_counts, engine, fake_embedder)
     )
     # send interrupt -> reconnect re-sends the candidates AND the draft, so a
     # client that reconnects (or one that reads after another consumer drained the
-    # live segment) can fully reconstruct the hand-off (#38 re-review).
+    # live segment) can fully reconstruct the hand-off (#38 re-review) — now
+    # preceded by the progress the run already produced (#512).
     client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "r1"})
     _events(client, "r1")
     again = _events(client, "r1")  # no /answer: reconnect
-    assert [e for e, _ in again] == ["recommend", "draft"]
-    assert again[0][1]["recommendations"][0]["person_id"] == "E001"
+    assert [e for e, _ in again] == ["understood", "route", "recommend", "draft"]
+    recommend = next(data for name, data in again if name == "recommend")
+    assert recommend["recommendations"][0]["person_id"] == "E001"
 
-    # ask interrupt -> reconnect re-sends the followup.
+    # ask interrupt -> reconnect re-sends the followup, after the one step that
+    # HAS run (c1). c5 has not run yet, so there is no route to claim.
     client.post("/ask", json={"asker_id": 10, "question": VAGUE_Q, "session_id": "r2"})
     _events(client, "r2")
     again2 = _events(client, "r2")
-    assert [e for e, _ in again2] == ["followup"]
+    assert [e for e, _ in again2] == ["understood", "followup"]
+
+
+def test_reconnect_replays_the_progress_a_client_already_missed(
+    seed_counts, engine, fake_embedder
+) -> None:
+    """#512: revisiting a session must show the same thinking steps as the live run.
+
+    The steps the UI renders are built from ``understood`` / ``route`` /
+    ``recommend`` / ``draft``. Before this, a reconnect re-sent only the pending
+    interrupt (or only the stored terminal), so returning to a session — from the
+    history list, from the result screen, or by reloading — produced a screen with
+    no progress on it at all, which reads as a different screen entirely.
+
+    The replayed payloads must equal the live ones: a reconstruction that merely
+    resembles the original is how the two screens drift apart again.
+    """
+    client = _client(
+        engine, fake_embedder, retriever=_FakeRetriever(people=[1]), scorer=_FakeScorer(_recs(1))
+    )
+    client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "prog"})
+    live = _events(client, "prog")
+    assert [e for e, _ in live] == ["understood", "route", "recommend", "draft"]
+
+    client.post("/answer", json={"session_id": "prog", "outcome": "accepted"})
+    _events(client, "prog")  # drains the live `done`
+
+    again = _events(client, "prog")  # reconnect AFTER completion
+    assert [e for e, _ in again] == ["understood", "route", "recommend", "draft", "done"]
+    replayed = {name: data for name, data in again}
+    for name, data in live:
+        assert replayed[name] == data, name
+
+    # Read-only: replaying progress must not re-run the graph or re-insert rows.
+    assert len(_recs_for(engine, _latest_question(engine).id)) == 1
+
+
+def test_progress_replay_does_not_invent_steps_the_run_never_reached(
+    seed_counts, engine, fake_embedder
+) -> None:
+    """A terminal reached before C5/C6/C7 replays only the steps that ran.
+
+    ``reset`` seeds `route`/`recommendations`/`draft` with defaults BEFORE C1, so a
+    naive "emit whatever is in the state" replay would announce 「経路を判断しました:
+    人に取り次ぐ」 on a question that was never routed.
+    """
+    # The default keyword intent stub marks 天気 out of scope -> off_topic terminal.
+    client = _client(engine, fake_embedder)
+    client.post("/ask", json={"asker_id": 10, "question": "今日の天気は？", "session_id": "ot"})
+    live = [e for e, _ in _events(client, "ot")]
+    assert live[-1] == "message"
+
+    again = [e for e, _ in _events(client, "ot")]
+    assert again == live  # same shape as the live run, nothing invented
+    assert "route" not in again
+    assert "recommend" not in again
+    assert "draft" not in again
 
 
 # --------------------------------------------------------------------------- #
@@ -4254,8 +4313,10 @@ def test_concurrent_events_no_double_insert(seed_counts, engine, fake_embedder) 
         streams = {a.result(), b.result()}
     full = ("understood", "route", "recommend", "draft")
     # One streamed the whole run; the other blocked on the lock, then reconnected
-    # at the send interrupt — which now replays recommend + draft (#38 re-review).
-    assert streams == {full, ("recommend", "draft")}
+    # at the send interrupt. Since #512 the reconnect rebuilds the whole progress,
+    # so both consumers see the identical sequence — which is the point: a second
+    # reader must not end up with a thinner view of the same run (#38 re-review).
+    assert streams == {full}
     assert len(_recs_for(engine, _latest_question(engine).id)) == 2  # inserted once
 
 
@@ -4331,8 +4392,10 @@ def test_reconnect_replays_done_after_completion(seed_counts, engine, fake_embed
     assert [e for e, _ in done] == ["done"]
 
     again = _events(client, "td")  # reconnect AFTER completion
-    assert [e for e, _ in again] == ["done"]  # terminal replayed (read-only)
-    assert again[0][1] == done[0][1]  # identical payload
+    # The terminal is replayed verbatim; since #512 the progress that preceded it
+    # live is rebuilt ahead of it, so the reconnecting client sees the same run.
+    assert [e for e, _ in again][-1] == "done"
+    assert dict(again)["done"] == done[0][1]  # identical terminal payload
     # replay must not re-run the graph / re-insert recommendations.
     assert len(_recs_for(engine, _latest_question(engine).id)) == 1
 
@@ -4347,8 +4410,14 @@ def test_reconnect_replays_terminal_message(seed_counts, engine, fake_embedder) 
     client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": "tmsg"})
     first = [e for e, _ in _events(client, "tmsg")]
     assert first[-1] == "message"
-    again = _events(client, "tmsg")
-    assert [e for e, _ in again] == ["message"]  # terminal message replayed
+    again = [e for e, _ in _events(client, "tmsg")]
+    assert again[-1] == "message"  # terminal message replayed
+    # ...after the progress that ran (#512). The live run also emitted an EMPTY
+    # `recommend` just before the terminal; that one is deliberately not replayed,
+    # because an empty C6 result is indistinguishable in the state from C6 never
+    # having run, and the terminal message already says "no candidate".
+    assert first == ["understood", "route", "recommend", "message"]
+    assert again == ["understood", "route", "message"]
 
 
 # --------------------------------------------------------------------------- #

@@ -148,15 +148,95 @@ def node_event(
     return None  # internal node: no event
 
 
+def progress_events(values: dict[str, Any]) -> list[ServerSentEvent]:
+    """Rebuild, in graph order, the progress a run already produced (#512).
+
+    The UI's thinking-progress list is derived entirely from ``understood`` /
+    ``route`` / ``recommend`` / ``draft``. Those are streamed once, live — so a
+    client that comes back to the session (from the history list, from the result
+    screen, or by reloading) used to receive only the pending interrupt or the
+    stored terminal, and rendered a screen with no progress on it at all. Every
+    field is already in the durable checkpoint, so the sequence can simply be
+    rebuilt from it: read-only, no re-run.
+
+    **Emit only what actually ran.** ``reset`` seeds `route`/`recommendations`/
+    `draft` with defaults BEFORE C1, so "emit whatever the state holds" would
+    announce 「経路を判断しました: 人に取り次ぐ」 on a question that was never
+    routed. Each source therefore has a marker that separates "did not run" from
+    "ran and produced nothing":
+
+    * ``route`` — ``route_reason``. ``reset`` leaves it ``""`` and every
+      ``RouteDecision`` carries a non-empty reason, so non-empty ⟺ C5 ran.
+    * ``draft`` — ``draft is not None``. ``reset`` leaves it ``None`` and C7
+      always writes a string (possibly empty), mirroring the live event, which
+      is emitted even for an empty draft.
+    * ``recommend`` — a non-empty list. C6 writing ``[]`` (the no_candidate case)
+      is indistinguishable from not having run, and the live empty ``recommend``
+      only precedes a terminal ``message`` that says the same thing, so it is not
+      worth replaying either way.
+    * ``reference`` (#413) — non-empty text, exactly as the live node's own gate.
+
+    ``understood`` is unconditional: every path that replays (a finished run, or
+    one paused at ``ask``/``send``) is downstream of C1 by construction.
+    """
+
+    out: list[ServerSentEvent] = [
+        _sse(
+            "understood",
+            schemas.UnderstoodData(
+                topics=values.get("topics", []),
+                products=values.get("products", []),
+                situation=values.get("situation"),
+                question_type=values.get("question_type"),
+                confidence=values.get("intent_confidence", 0.0),
+                similar_asker_count=values.get("similar_asker_count", 0),
+            ),
+        )
+    ]
+    if values.get("route_reason"):
+        out.append(
+            _sse(
+                "route",
+                schemas.RouteData(
+                    route=values.get("route", "person"),
+                    reason=values.get("route_reason", ""),
+                    confidence=values.get("route_confidence", 0.0),
+                ),
+            )
+        )
+    if values.get("additive_answer_text"):
+        out.append(
+            _sse(
+                "reference",
+                schemas.ReferenceData(
+                    answer=values.get("additive_answer_text") or "",
+                    citations=values.get("additive_citations") or [],
+                ),
+            )
+        )
+    recs = values.get("recommendations") or []
+    if recs:
+        # person_id -> external "E###" form, mirroring the live recommend event.
+        ext: list[Any] = [
+            {**rec, "person_id": schemas.format_employee_id(rec["person_id"])} for rec in recs
+        ]
+        out.append(_sse("recommend", schemas.RecommendData(recommendations=ext)))
+    if values.get("draft") is not None:
+        out.append(_sse("draft", schemas.DraftData(draft=values.get("draft") or "")))
+    return out
+
+
 def reconnect_events(next_node: str, values: dict[str, Any]) -> list[ServerSentEvent]:
-    """Re-emit the pending interrupt event(s) when a client reconnects to /events.
+    """Re-emit the pending INTERRUPT event when a client reconnects to /events.
 
     A session paused at ``ask`` re-sends the ``followup`` (from the saved state).
-    One paused at ``send`` re-sends BOTH the ``recommend`` (the current
-    candidates, from durable state) AND the ``draft`` — so a reconnect fully
-    reconstructs the hand-off even after a decline-driven reroute, and so a single
-    consumer draining the stream cannot leave a later reconnecting client without
-    the candidates (``ResultScreen`` reads candidates only from ``recommend``).
+    One paused at ``send`` needs no event of its own — the ``recommend`` and
+    ``draft`` that reconstruct the hand-off are part of the run's progress and
+    come from :func:`progress_events`, which the caller emits first (#512). That
+    still satisfies the guarantee this used to carry on its own: a client that
+    reconnects after another consumer drained the live segment gets the
+    candidates, which ``ResultScreen`` reads only from ``recommend``.
+
     Any other pending node yields nothing.
     """
 
@@ -170,17 +250,6 @@ def reconnect_events(next_node: str, values: dict[str, Any]) -> list[ServerSentE
                 ),
             )
         ]
-    if next_node == "send":
-        out: list[ServerSentEvent] = []
-        recs = values.get("recommendations") or []
-        if recs:
-            # person_id -> external "E###" form, mirroring the live recommend event.
-            ext: list[Any] = [
-                {**rec, "person_id": schemas.format_employee_id(rec["person_id"])} for rec in recs
-            ]
-            out.append(_sse("recommend", schemas.RecommendData(recommendations=ext)))
-        out.append(_sse("draft", schemas.DraftData(draft=values.get("draft") or "")))
-        return out
     return []
 
 
