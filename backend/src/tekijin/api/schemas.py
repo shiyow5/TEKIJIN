@@ -656,7 +656,7 @@ class KnowledgeItem(BaseModel):
     """
 
     source_id: str
-    kind: Literal["qa", "document"]
+    kind: Literal["qa", "document", "knowledge"]
     title: str
     summary: str = ""
     topics: list[str] = Field(default_factory=list)

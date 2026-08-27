@@ -72,11 +72,53 @@ function formatDate(iso: string | null | undefined): string {
 }
 
 /**
- * Deliberately minimal by request: no kind badge, no responder line — just
- * the title/summary/topics and a single unified "更新日" (the item's own
- * timestamp regardless of `kind`).
+ * Deliberately minimal by request: no responder line — just the title/summary/topics
+ * and a single unified "更新日" (the item's own timestamp regardless of `kind`).
+ *
+ * A ``"knowledge"`` item (#533 — a distilled, Slack-captured case) is shown NON-linked:
+ * its content (課題/打ち手/結果) is fully in the card, and there is no per-unit detail
+ * viewer to open. A small "ナレッジ" marker sets it apart from a linkable past-Q&A card.
  */
 function KnowledgeCard({ item }: { item: KnowledgeItem }) {
+  const article = (
+    <article className="flex h-full min-w-0 flex-col gap-sm overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest p-md transition-shadow hover:shadow-md">
+      {item.kind === "knowledge" ? (
+        <span className="w-fit rounded-full bg-tertiary-container px-sm py-[2px] font-bold text-on-tertiary-container text-xs">
+          ナレッジ
+        </span>
+      ) : null}
+      <h3 className="break-words font-bold text-base text-on-surface">{item.title}</h3>
+      {item.summary ? (
+        <p
+          className={`line-clamp-3 break-words text-on-surface-variant text-sm${
+            item.kind === "knowledge" ? " whitespace-pre-line" : ""
+          }`}
+        >
+          {item.summary}
+        </p>
+      ) : null}
+      {item.topics.length > 0 ? (
+        <div className="flex flex-wrap gap-xs">
+          {item.topics.map((topic) => (
+            <span
+              key={topic}
+              className="max-w-full break-words rounded-full bg-secondary-container px-xs py-[2px] text-on-secondary-container text-xs"
+            >
+              {topic}
+            </span>
+          ))}
+        </div>
+      ) : null}
+      <div className="mt-auto flex flex-wrap items-center gap-x-md gap-y-xs border-outline-variant border-t pt-sm text-on-surface-variant text-xs">
+        <span>更新日: {formatDate(item.resolved_at)}</span>
+      </div>
+    </article>
+  );
+
+  if (item.kind === "knowledge") {
+    return <div className="block h-full min-w-0 rounded-xl">{article}</div>;
+  }
+
   const href =
     item.kind === "qa"
       ? `/knowledge/${encodeURIComponent(item.source_id)}`
@@ -88,27 +130,7 @@ function KnowledgeCard({ item }: { item: KnowledgeItem }) {
       aria-label={`「${item.title}」を見る`}
       className="block h-full min-w-0 rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
     >
-      <article className="flex h-full min-w-0 flex-col gap-sm overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest p-md transition-shadow hover:shadow-md">
-        <h3 className="break-words font-bold text-base text-on-surface">{item.title}</h3>
-        {item.summary ? (
-          <p className="line-clamp-3 break-words text-on-surface-variant text-sm">{item.summary}</p>
-        ) : null}
-        {item.topics.length > 0 ? (
-          <div className="flex flex-wrap gap-xs">
-            {item.topics.map((topic) => (
-              <span
-                key={topic}
-                className="max-w-full break-words rounded-full bg-secondary-container px-xs py-[2px] text-on-secondary-container text-xs"
-              >
-                {topic}
-              </span>
-            ))}
-          </div>
-        ) : null}
-        <div className="mt-auto flex flex-wrap items-center gap-x-md gap-y-xs border-outline-variant border-t pt-sm text-on-surface-variant text-xs">
-          <span>更新日: {formatDate(item.resolved_at)}</span>
-        </div>
-      </article>
+      {article}
     </Link>
   );
 }

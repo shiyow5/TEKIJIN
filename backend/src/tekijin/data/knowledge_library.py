@@ -31,7 +31,13 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from tekijin.data.dashboard import _self_resolution_rate
-from tekijin.models.tables import Answer, Document, Employee, Question
+from tekijin.models.tables import Answer, Document, Employee, KnowledgeUnit, Question
+
+# Citation id prefix for a knowledge unit (mirrors ``knowledge.answer.KNOWLEDGE_CITATION_PREFIX``).
+# Inlined rather than imported: ``knowledge.answer`` pulls in the retrieval/self-answer
+# stack, which imports this data layer — importing it here would be a cycle. The prefix is
+# a stable wire contract (a citation's ``ku_{id}``), so duplicating the literal is safe.
+_KU_CITATION_PREFIX = "ku_"
 
 
 def _qa_items(
@@ -138,6 +144,67 @@ def _document_items(
     ]
 
 
+def _knowledge_unit_items(
+    session: Session, *, q: str | None, topic: str | None, since: dt.date | None
+) -> list[dict[str, Any]]:
+    """Approved knowledge-unit items (``kind="knowledge"``, #533), newest first.
+
+    Only ``review_status='approved'`` units — the same gate ``knowledge_answer`` uses,
+    so the library shows exactly what a self-answer may cite. ``source_id`` is the unit's
+    citation id (``ku_{id}``), matching ``SourceCitation.source_id`` for ``kind="knowledge"``
+    so a chat citation chip and this card point at the same unit. Units carry topics (so a
+    ``topic`` filter applies) but no department (a ``department`` filter excludes them, like
+    documents — the caller handles that). ``q`` matches the case text (problem/action/result).
+    """
+
+    stmt = (
+        select(
+            KnowledgeUnit.id,
+            KnowledgeUnit.problem,
+            KnowledgeUnit.action,
+            KnowledgeUnit.result,
+            KnowledgeUnit.topics,
+            KnowledgeUnit.created_at,
+        )
+        .where(KnowledgeUnit.review_status == "approved")
+        .order_by(KnowledgeUnit.created_at.desc(), KnowledgeUnit.id.desc())
+    )
+    if q:
+        like = f"%{q}%"
+        stmt = stmt.where(
+            KnowledgeUnit.problem.ilike(like)
+            | KnowledgeUnit.action.ilike(like)
+            | KnowledgeUnit.result.ilike(like)
+        )
+    if topic:
+        stmt = stmt.where(KnowledgeUnit.topics.any(topic))  # type: ignore[arg-type]
+    if since:
+        stmt = stmt.where(KnowledgeUnit.created_at >= since)
+
+    items: list[dict[str, Any]] = []
+    for unit_id, problem, action, result, topics, created_at in session.execute(stmt):
+        body_lines = []
+        if action:
+            body_lines.append(f"打ち手: {action}")
+        if result:
+            body_lines.append(f"結果: {result}")
+        items.append(
+            {
+                "source_id": f"{_KU_CITATION_PREFIX}{unit_id}",
+                "kind": "knowledge",
+                "title": problem or "（無題の知識）",
+                "summary": "\n".join(body_lines),
+                "topics": list(topics or []),
+                "responder_name": None,
+                "responder_department": None,
+                "resolved_at": created_at.isoformat() if created_at is not None else None,
+                "question_id": None,
+                "session_id": None,
+            }
+        )
+    return items
+
+
 def list_knowledge(
     session: Session,
     *,
@@ -148,16 +215,18 @@ def list_knowledge(
     offset: int = 0,
     limit: int = 50,
 ) -> tuple[list[dict[str, Any]], int, dict[str, Any]]:
-    """Answers + documents, round-robin interleaved (each kind newest-first
-    within itself), paged, plus a summary.
+    """Answers + documents + approved knowledge units (#533), round-robin
+    interleaved (each source newest-first within itself), paged, plus a summary.
 
     ``q`` is a case-insensitive substring match (question body for ``"qa"``,
-    title/body for ``"document"``); ``topic``/``department`` are QA-specific
-    (documents carry neither, so either filter excludes them entirely);
-    ``since`` bounds each item's own timestamp (the ANSWER's for ``"qa"``, the
-    document's ``updated_at`` for ``"document"``) and is the ONLY period bound:
-    the matching ``until`` was removed in #394 — no screen ever sent it, nothing
-    tested it, and it compared a TIMESTAMP column against a bare date, so
+    title/body for ``"document"``, problem/action/result for ``"knowledge"``).
+    ``department`` is QA-specific — documents and knowledge units carry no
+    department, so it excludes both. ``topic`` keeps QA and knowledge units
+    (both carry topics) but excludes documents (they have none). ``since`` bounds
+    each item's own timestamp (the ANSWER's for ``"qa"``, ``updated_at`` for
+    ``"document"``, ``created_at`` for ``"knowledge"``) and is the ONLY period
+    bound: the matching ``until`` was removed in #394 — no screen ever sent it,
+    nothing tested it, and it compared a TIMESTAMP column against a bare date, so
     ``until=<day>`` dropped everything answered after that day's 00:00.
     Re-adding an end bound means a half-open ``< until + 1 day`` (or a timestamp)
     plus the UI that sends it.
@@ -166,14 +235,24 @@ def list_knowledge(
     count of items matching the filters above, BEFORE the ``offset``/``limit``
     page cut. ``summary`` reuses the dashboard's self-resolution rate (no new
     aggregation logic for the side panel); ``total_items`` is the GLOBAL count
-    of answers + documents (independent of both the filters and the page),
-    matching the DoD's "蓄積件数" site-wide stat. Per-responder aggregates are
-    deliberately NOT part of this summary — that view belongs to ``/dashboard``,
+    of answers + documents + approved knowledge units (independent of both the
+    filters and the page), matching the DoD's "蓄積件数" site-wide stat.
+    Per-responder aggregates are deliberately NOT part of this summary — that view
+    belongs to ``/dashboard``,
     not a knowledge browser (PR #340 review).
     """
 
-    global_total = (session.scalar(select(func.count(func.distinct(Answer.question_id)))) or 0) + (
-        session.scalar(select(func.count()).select_from(Document)) or 0
+    global_total = (
+        (session.scalar(select(func.count(func.distinct(Answer.question_id)))) or 0)
+        + (session.scalar(select(func.count()).select_from(Document)) or 0)
+        + (
+            session.scalar(
+                select(func.count())
+                .select_from(KnowledgeUnit)
+                .where(KnowledgeUnit.review_status == "approved")
+            )
+            or 0
+        )
     )
     summary = {
         "total_items": global_total,
@@ -181,31 +260,34 @@ def list_knowledge(
     }
 
     qa_items = _qa_items(session, q=q, department=department, topic=topic, since=since)
+    # Documents and knowledge units carry no department, so a department filter excludes
+    # both. Knowledge units DO carry topics, so a topic filter still keeps them (documents
+    # never match a topic either way).
     doc_items = [] if (department or topic) else _document_items(session, q=q, since=since)
-    matching = _interleave(qa_items, doc_items)
+    ku_items = [] if department else _knowledge_unit_items(session, q=q, topic=topic, since=since)
+    matching = _interleave(qa_items, doc_items, ku_items)
     return matching[offset : offset + limit], len(matching), summary
 
 
-def _interleave(
-    qa_items: list[dict[str, Any]], doc_items: list[dict[str, Any]]
-) -> list[dict[str, Any]]:
-    """Round-robin qa/document (qa, doc, qa, doc, …), each kind's own
-    newest-first order preserved.
+def _interleave(*sources: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Round-robin the given source lists (qa, document, knowledge, …), each source's
+    own newest-first order preserved.
 
     A flat sort by timestamp would bury every document past the first page:
     the seed's documents are all older than its newest answers (docs are
     added far less often than Q&A), so a plain browse of the newest items
     showed only ``kind="qa"`` — no document ever reached the front page
-    without a keyword search (PR #340 review follow-up). This mirrors
-    ``collect_context_fragments`` (#69) — the self-answer composer's own
-    retrieval fragments — which round-robins the same two channels for the
-    same reason: neither source should crowd out the other by trending
-    newer.
+    without a keyword search (PR #340 review follow-up). Knowledge units (#533)
+    are likewise sparse and would be buried the same way, so they join the same
+    round-robin. This mirrors ``collect_context_fragments`` (#69) — the
+    self-answer composer's own retrieval fragments — which round-robins its
+    channels for the same reason: no source should crowd out the others by
+    trending newer.
     """
 
     interleaved: list[dict[str, Any]] = []
-    for qa, doc in zip_longest(qa_items, doc_items):
-        for item in (qa, doc):
+    for group in zip_longest(*sources):
+        for item in group:
             if item is not None:
                 interleaved.append(item)
     return interleaved
