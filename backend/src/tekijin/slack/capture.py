@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
+from collections.abc import Sequence
 
 from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
@@ -278,7 +279,15 @@ def _clip(value: str | None) -> str:
     return text_value
 
 
-def review_blocks(*, thread_id: int, problem, action, result, topics, source_id) -> list[dict]:
+def review_blocks(
+    *,
+    thread_id: int,
+    problem: str | None,
+    action: str | None,
+    result: str | None,
+    topics: Sequence[str] | None,
+    source_id: str,
+) -> list[dict]:
     """Block Kit that shows a draft's content in-thread with 承認する / 破棄する (#527).
 
     This is the "確認" surface: pressing 残す replaces the keep/discard prompt with this,

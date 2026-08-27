@@ -852,6 +852,7 @@ def _handle_knowledge_action(
             discard_thread_draft(session, thread_id)
             text = "この会話は知識として残しません。"
         else:  # unreachable: KNOWLEDGE_ACTION_IDS gates entry, but fail closed
+            logger.warning("Slack interactivity: unhandled knowledge action_id %s", action_id)
             text = _INTERACTIVITY_FAILURE_TEXT
 
     if response_url:
