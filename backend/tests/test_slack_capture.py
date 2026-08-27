@@ -476,13 +476,16 @@ def test_message_event_records_no_anchor_when_capture_disabled(
 # --------------------------------------------------------------------------- #
 # Slice B2: utterance detection + in-thread prompt + keep/discard (live DB)
 # --------------------------------------------------------------------------- #
-def test_is_solve_utterance_matches_resolution_not_bare_thanks() -> None:
+def test_is_solve_utterance_matches_resolution_not_generic_completion() -> None:
     from tekijin.slack.capture import is_solve_utterance
 
     assert is_solve_utterance("おかげさまで解決しました")
-    assert is_solve_utterance("MTUを下げたら動きました、助かりました")
-    assert is_solve_utterance("ありがとうございました")
-    # Bare mid-conversation politeness must NOT trigger (would prompt on every msg).
+    assert is_solve_utterance("MTUを下げたら動きました")
+    assert is_solve_utterance("設定を直したらできるようになりました")
+    # Generic completion / thanks must NOT trigger — they'd waste the one-shot prompt
+    # (#519 review): "資料ができました" is unrelated completion, thanks is just closing.
+    assert not is_solve_utterance("資料ができました")
+    assert not is_solve_utterance("ありがとうございました")
     assert not is_solve_utterance("ありがとうございます")
     assert not is_solve_utterance("確認してみます")
     assert not is_solve_utterance("")

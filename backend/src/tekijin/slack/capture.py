@@ -27,6 +27,7 @@ import json
 import logging
 import threading
 
+from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 
 from tekijin.config import Settings, get_settings
@@ -50,21 +51,22 @@ KNOWLEDGE_KEEP_ACTION = "tekijin_knowledge_keep"
 KNOWLEDGE_DISCARD_ACTION = "tekijin_knowledge_discard"
 KNOWLEDGE_ACTION_IDS = frozenset({KNOWLEDGE_KEEP_ACTION, KNOWLEDGE_DISCARD_ACTION})
 
-# Conservative solve-utterance markers (substring match). Deliberately requires an
-# explicit "it's resolved / it worked / it's fixed" — NOT bare thanks ("ありがとう"),
-# which is constant mid-conversation politeness and would prompt on every message.
+# Conservative solve-utterance markers (substring match). Deliberately RESOLUTION-
+# rooted — NOT generic completion/thanks. Excluded on purpose (#519 review): bare
+# "できました" (資料ができました / 予約ができました — unrelated completion) and
+# "ありがとうございました" (ordinary formal closing). Since dedup consumes the one
+# prompt per thread, a false trigger would waste it, so a marker must clearly mean
+# "the problem is solved / it works now", not merely "something finished / thanks".
 # Product-sensitive: keep tight, and only fires while the feature flag is on.
 _SOLVE_UTTERANCES: tuple[str, ...] = (
     "解決しました",
     "解決した",
     "解決です",
-    "できました",
+    "解決できました",
     "できるようになりました",
     "うまくいきました",
     "直りました",
     "動きました",
-    "助かりました",
-    "ありがとうございました",
 )
 
 
@@ -232,6 +234,12 @@ def capture_and_prompt(
     or a ✅ already captured it), this does nothing — so the prompt is posted at most
     once per thread rather than on every "解決しました". The draft is committed BEFORE
     the prompt is posted, so a fast button click always finds it.
+
+    The "no draft yet → create + prompt" check-then-act is made atomic per thread by
+    a transaction-scoped advisory lock (#519 review): two solve-utterances landing in
+    the same thread within the extractor's round-trip would otherwise both pass the
+    existence check and post two independent prompts. The second caller blocks on the
+    lock until the first commits, then sees the draft and returns without posting.
     """
 
     settings = settings or get_settings()
@@ -239,6 +247,11 @@ def capture_and_prompt(
         return None
 
     with session_scope(session_factory) as session:
+        # Namespaced (classid=476) so the per-thread lock cannot collide with any
+        # other advisory-lock user; released automatically at transaction end.
+        session.execute(
+            text("SELECT pg_advisory_xact_lock(:cls, :obj)"), {"cls": 476, "obj": thread_id}
+        )
         existing = get_knowledge_unit_by_source(
             session, SLACK_THREAD_SOURCE_TYPE, f"slack_thread_{thread_id}"
         )
@@ -249,6 +262,8 @@ def capture_and_prompt(
         if stored is None:
             return None
 
+    # Best-effort (never raises): if the post fails, the draft still sits in the
+    # review box (unreviewed) for the management UI (#477) — a lost prompt, not data.
     post_message(
         bot_token=settings.slack_bot_token,
         channel_id=channel_id,
