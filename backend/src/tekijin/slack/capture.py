@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
+from collections.abc import Sequence
 
 from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
@@ -46,10 +47,19 @@ logger = logging.getLogger(__name__)
 #: Slack reaction names (no colons) that mean "this thread is solved".
 SOLVE_REACTIONS = frozenset({"white_check_mark", "heavy_check_mark", "ok"})
 
-#: Interactivity action ids for the in-thread "keep / discard" knowledge prompt (#476).
+#: Interactivity action ids for the in-thread knowledge prompt. keep/discard is the
+#: first gate (#476); approve confirms the shown draft (#527 — the review loop runs in
+#: Slack, no web hop) and flips it to ``approved`` so retrieval/self-answer trust it.
 KNOWLEDGE_KEEP_ACTION = "tekijin_knowledge_keep"
 KNOWLEDGE_DISCARD_ACTION = "tekijin_knowledge_discard"
-KNOWLEDGE_ACTION_IDS = frozenset({KNOWLEDGE_KEEP_ACTION, KNOWLEDGE_DISCARD_ACTION})
+KNOWLEDGE_APPROVE_ACTION = "tekijin_knowledge_approve"
+KNOWLEDGE_ACTION_IDS = frozenset(
+    {KNOWLEDGE_KEEP_ACTION, KNOWLEDGE_DISCARD_ACTION, KNOWLEDGE_APPROVE_ACTION}
+)
+
+#: Cap each draft field shown in Slack so one long extraction can't blow past Slack's
+#: 3000-char/section limit or bury the buttons below the fold.
+_REVIEW_FIELD_MAX = 500
 
 #: Posted (utterance path) when an explicit "解決" produces no capturable case, so the
 #: solver is never met with silence (#525). A plain message — NOT the keep/discard
@@ -251,6 +261,71 @@ def _prompt_blocks(thread_id: int) -> list[dict]:
                     "type": "button",
                     "action_id": KNOWLEDGE_DISCARD_ACTION,
                     "text": {"type": "plain_text", "text": "残さない"},
+                    "value": value,
+                },
+            ],
+        },
+    ]
+
+
+def _clip(value: str | None) -> str:
+    """A draft field, trimmed to Slack's per-section budget, never blank."""
+
+    text_value = (value or "").strip()
+    if not text_value:
+        return "（記載なし）"
+    if len(text_value) > _REVIEW_FIELD_MAX:
+        return text_value[: _REVIEW_FIELD_MAX - 1] + "…"
+    return text_value
+
+
+def review_blocks(
+    *,
+    thread_id: int,
+    problem: str | None,
+    action: str | None,
+    result: str | None,
+    topics: Sequence[str] | None,
+    source_id: str,
+) -> list[dict]:
+    """Block Kit that shows a draft's content in-thread with 承認する / 破棄する (#527).
+
+    This is the "確認" surface: pressing 残す replaces the keep/discard prompt with this,
+    so the reviewer reads the extracted case and approves or discards it without leaving
+    Slack. Buttons carry ``thread_id`` (same provenance the keep/discard prompt used)."""
+
+    value = json.dumps({"thread_id": thread_id})
+    topic_line = "、".join(topics or []) or "（なし）"
+    return [
+        {
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": "*この下書きを確認してください*"},
+        },
+        {
+            "type": "section",
+            "fields": [
+                {"type": "mrkdwn", "text": f"*課題*\n{_clip(problem)}"},
+                {"type": "mrkdwn", "text": f"*対処*\n{_clip(action)}"},
+                {"type": "mrkdwn", "text": f"*結果*\n{_clip(result)}"},
+                {"type": "mrkdwn", "text": f"*トピック*\n{topic_line}"},
+            ],
+        },
+        {"type": "context", "elements": [{"type": "mrkdwn", "text": f"出典: {source_id}"}]},
+        {
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "action_id": KNOWLEDGE_APPROVE_ACTION,
+                    "text": {"type": "plain_text", "text": "承認する"},
+                    "style": "primary",
+                    "value": value,
+                },
+                {
+                    "type": "button",
+                    "action_id": KNOWLEDGE_DISCARD_ACTION,
+                    "text": {"type": "plain_text", "text": "破棄する"},
+                    "style": "danger",
                     "value": value,
                 },
             ],
