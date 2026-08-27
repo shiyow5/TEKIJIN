@@ -20,8 +20,11 @@ import { RetrospectiveLink } from "@/components/RetrospectiveLink";
 import { useOptionalSessionId, useOptionalSessionStream } from "@/components/SessionStreamProvider";
 import { SourceCitations } from "@/components/SourceCitations";
 import { ThinkingSteps } from "@/components/ThinkingSteps";
+import { CandidateCard } from "@/components/result/CandidateCard";
 import { PersonRouteView } from "@/components/result/PersonRouteView";
 import type { EventStreamState } from "@/hooks/useEventStream";
+import { fitPercents } from "@/lib/fit";
+import type { Recommendation } from "@/lib/api-types";
 import { useSearchParams } from "next/navigation";
 import type { ReactNode } from "react";
 
@@ -151,6 +154,47 @@ function ResultTerminal({
 }
 
 /**
+ * The candidates the run proposed, shown READ-ONLY under a completed outcome
+ * (#520).
+ *
+ * The confidence label, the fit gauge and the evidence only ever existed on the
+ * live main line, which a terminal outcome replaces — so once the request was
+ * sent, "なぜこの人なのか" could no longer be answered, from the history list or
+ * anywhere else. The data survives a reconnect since #512, so this is purely the
+ * missing exit.
+ *
+ * No `onSelect` / `onExclude`: a hand-off that already happened cannot be
+ * re-targeted, and `CandidateCard` renders display-only without them (its own
+ * docstring calls that "a static/replayed view"). Nothing is marked `selected`
+ * either — the stream carries who was RECOMMENDED, not who ultimately received
+ * it, and highlighting the top card would assert something we cannot check.
+ */
+function ReplayedCandidates({ recommendations }: { recommendations: Recommendation[] }) {
+  if (recommendations.length === 0) {
+    return null;
+  }
+  const fitValues = fitPercents(recommendations);
+  return (
+    <section className="mt-lg flex flex-col gap-sm">
+      <h2 className="font-bold text-lg text-on-surface">候補と根拠</h2>
+      <p className="text-on-surface-variant text-sm">この質問に対してAIが提示した候補です。</p>
+      <div className="grid grid-cols-1 gap-md md:grid-cols-3">
+        {recommendations.map((candidate, index) => (
+          <CandidateCard
+            key={candidate.person_id}
+            candidate={candidate}
+            rank={index + 1}
+            expanded={index === 0}
+            selected={false}
+            fitPercent={fitValues[index]}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/**
  * The stream failed (server `error` event or a permanently CLOSED connection).
  * `error` is deliberately non-terminal in the hook, so it is surfaced here
  * explicitly — otherwise the screen would stall on the pending placeholder that
@@ -206,6 +250,11 @@ export function ResultScreen({ streamState, sessionId }: ResultScreenProps) {
           message={stream.message}
           sessionId={effectiveSessionId ?? undefined}
         />
+        {/* #520: the outcome alone does not say why this person. Renders itself
+            away for a terminal that produced no candidates (off_topic /
+            no_candidate), where a header with nothing under it would read as
+            "the AI found people and is hiding them". */}
+        <ReplayedCandidates recommendations={recommendations} />
       </ResultFrame>
     );
   }
