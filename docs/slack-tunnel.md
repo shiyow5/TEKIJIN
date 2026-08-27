@@ -175,7 +175,7 @@ TEKIJIN_SLACK_CLIENT_ID=...
 TEKIJIN_SLACK_CLIENT_SECRET=...
 TEKIJIN_SLACK_SIGNING_SECRET=...
 TEKIJIN_SLACK_BOT_TOKEN=xoxb-...
-TEKIJIN_SLACK_FRONTEND_URL=http://100.118.131.67:13000
+TEKIJIN_SLACK_FRONTEND_URL=http://internship-dgx1.tail349bcd.ts.net:13000
 TEKIJIN_SLACK_TEAM_ID=T...
 ```
 
@@ -188,6 +188,14 @@ TEKIJIN_SLACK_TEAM_ID=T...
 > ```bash
 > curl -s -H "Authorization: Bearer $TEKIJIN_SLACK_BOT_TOKEN" \
 >   https://slack.com/api/auth.test | python3 -c 'import json,sys; print(json.load(sys.stdin)["team_id"])'
+> ```
+
+> **`TEKIJIN_CORS_ORIGINS` に MagicDNS 名のオリジンも入れる**（#484）。フロントを
+> どちらのアドレスで開いたかで `Origin` が変わり、**入っていない方で開くと API 呼び出しが
+> 全部ブロックされる**。移行中は両方を並べておくのが安全:
+>
+> ```bash
+> TEKIJIN_CORS_ORIGINS=["http://internship-dgx1.tail349bcd.ts.net:13000","http://100.118.131.67:13000","http://localhost:13000"]
 > ```
 
 > `docker-compose.yml` の `env_file` 設定は**このホストには効かない**。
