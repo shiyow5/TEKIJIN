@@ -1024,3 +1024,18 @@ class SlackUnlinkResponse(BaseModel):
     """Ack for ``POST /slack/unlink``."""
 
     ok: bool = True
+
+
+class SlackUserSyncResponse(BaseModel):
+    """What one run of the Slack directory sync did (``POST /slack/sync-users``).
+
+    ``skipped`` is deliberately part of the response rather than log-only: most
+    runs of a healthy sync change nothing, so "0 linked" is the normal answer and
+    carries no information on its own. The reasons are what tell an operator
+    whether nobody needed linking, or whether `users:read.email` is missing and
+    every single member arrived without an address.
+    """
+
+    linked: int
+    unlinked: int
+    skipped: dict[str, int] = Field(default_factory=dict)

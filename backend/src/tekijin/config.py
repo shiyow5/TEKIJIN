@@ -492,6 +492,15 @@ class Settings(BaseSettings):
     # to boot on the combination rather than trusting an operator to notice.
     slack_login_enabled: bool = False
 
+    # Treat the Slack workspace as the roster and reconcile `slack_links` against
+    # it on a schedule (#406 step 3). OFF by default, and not merely out of
+    # caution: #406 documents that registering everyone BEFORE evidence
+    # extraction (#404) lands gives each new colleague ``topic_fit = 0``, so the
+    # candidate list grows while the recommendation behind it does not — the
+    # screen gets busier and the answers get worse. Turn this on only once there
+    # is evidence for the people it would add.
+    slack_user_sync_enabled: bool = False
+
     # FastAPI's auto-docs (``/docs``, ``/redoc``, ``/openapi.json``). Default OFF:
     # ``/openapi.json`` publishes every endpoint's path, parameters and types, which
     # is a map of the protected surface even though no data leaks. It was reachable
