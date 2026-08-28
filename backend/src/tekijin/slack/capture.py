@@ -95,11 +95,11 @@ def _claim_no_case_notice(thread_id: int) -> bool:
 
 
 # Conservative solve-utterance markers (substring match). Deliberately RESOLUTION-
-# rooted — NOT generic completion/thanks. Excluded on purpose (#519 review): bare
-# "できました" (資料ができました / 予約ができました — unrelated completion) and
-# "ありがとうございました" (ordinary formal closing). Since dedup consumes the one
-# prompt per thread, a false trigger would waste it, so a marker must clearly mean
-# "the problem is solved / it works now", not merely "something finished / thanks".
+# rooted — NOT generic completion/thanks. Bare "できました" is excluded because it
+# also matches unrelated completion (資料ができました / 予約ができました). Thanks are
+# detected separately by :func:`is_thanks_utterance`: the event handler accepts them
+# only from the thread's asker, where thanking the responder is a useful conversation-
+# completion signal (#537), while a responder's ordinary closing remains a no-op.
 # Product-sensitive: keep tight, and only fires while the feature flag is on.
 _SOLVE_UTTERANCES: tuple[str, ...] = (
     "解決しました",
@@ -117,6 +117,21 @@ def is_solve_utterance(text: str) -> bool:
     """True when ``text`` reads as "this is resolved" (a capture trigger, #476)."""
     lowered = text or ""
     return any(marker in lowered for marker in _SOLVE_UTTERANCES)
+
+
+_THANKS_UTTERANCES: tuple[str, ...] = ("ありがとうございました", "ありがとうございます")
+
+
+def is_thanks_utterance(text: str) -> bool:
+    """True for an explicit Japanese thanks that may close an asker's thread.
+
+    This helper intentionally knows nothing about sender identity. The Slack event
+    handler combines it with ``sender_id == parties["asker_id"]`` so a responder's
+    polite closing cannot consume the thread's one-shot knowledge prompt (#537).
+    """
+
+    value = text or ""
+    return any(marker in value for marker in _THANKS_UTTERANCES)
 
 
 def _extract_thread_draft(
