@@ -61,7 +61,7 @@ test.describe("history", () => {
 
     await expect(page.getByRole("heading", { name: "依頼は送信済みです" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "候補と根拠" })).toBeVisible();
-    await expect(page.getByText("高梨 健太（最有力）")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "高梨 健太" })).toBeVisible();
     await expect(page.getByText("情報処理安全確保支援士を保有")).toBeVisible();
     // Read-only: a hand-off that already happened cannot be re-targeted.
     await expect(page.getByRole("button", { name: "選択する" })).toHaveCount(0);

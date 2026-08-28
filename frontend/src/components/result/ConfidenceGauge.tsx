@@ -125,6 +125,7 @@ export function ConfidenceGauge({ percent }: { percent?: number }) {
           {pct}
         </text>
       </svg>
+      <span className="font-bold text-xs">{level}</span>
     </span>
   );
 }

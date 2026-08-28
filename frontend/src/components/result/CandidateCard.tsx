@@ -71,7 +71,7 @@ export function CandidateCard({
         </div>
         <div className="min-w-0 flex-1">
           <h2 className="break-words font-bold text-lg text-on-surface leading-tight">
-            {rank === 1 ? `${candidate.name}（最有力）` : candidate.name}
+            {candidate.name}
           </h2>
           <p className="truncate text-on-surface-variant text-xs">
             {[candidate.dept, candidate.person_id].filter(Boolean).join(" / ")}

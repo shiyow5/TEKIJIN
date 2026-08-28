@@ -201,7 +201,7 @@ test.describe("asker flow", () => {
       page.getByRole("heading", { name: "この質問は、人に聞くのが確実です" }),
     ).toBeVisible();
     // The point of the feature: the SESSION comes back, not just the screen.
-    await expect(page.getByRole("heading", { name: /高梨 健太（最有力）/ })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "高梨 健太" })).toBeVisible();
     await expect(page.getByRole("textbox", { name: "聞き方の下書き" })).toHaveValue(/高梨さんへ。/);
   });
 
