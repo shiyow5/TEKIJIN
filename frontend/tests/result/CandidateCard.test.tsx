@@ -35,10 +35,11 @@ describe("CandidateCard — comparison info on non-top cards (#204)", () => {
       />,
     );
 
-    const heading = screen.getByRole("heading", { name: `${name}（最有力）` });
+    const heading = screen.getByRole("heading", { name });
     expect(heading).toHaveClass("break-words");
     expect(heading).not.toHaveClass("truncate");
     expect(screen.getByRole("img", { name: "適合度 50%（中）" })).toBeInTheDocument();
+    expect(screen.getByText("中")).toBeInTheDocument();
   });
 
   it("shows distance and load VALUES even when the card is not expanded", () => {

@@ -321,7 +321,7 @@ describe("ResultScreen — candidates after completion (#520)", () => {
   it("shows the candidates and their evidence under a completed hand-off", () => {
     renderResult(state({ ...SENT, recommend: { recommendations: THREE_CANDIDATES } }));
     expect(screen.getByText("依頼は送信済みです")).toBeInTheDocument();
-    expect(screen.getByText("高梨（最有力）")).toBeInTheDocument();
+    expect(screen.getByText("高梨")).toBeInTheDocument();
     expect(screen.getByText("鈴木")).toBeInTheDocument();
     // The evidence, not just the names — that is the part the outcome screen
     // could not answer. Regex: the card renders it as 「関連資格：第一種電気工事士」.
@@ -389,7 +389,7 @@ describe("ResultScreen — main line (person)", () => {
 
     expect(screen.getByText("この質問は、人に聞くのが確実です")).toBeInTheDocument();
     expect(screen.getByText("同様の案件担当者がいます")).toBeInTheDocument();
-    expect(screen.getByText("高梨（最有力）")).toBeInTheDocument();
+    expect(screen.getByText("高梨")).toBeInTheDocument();
     expect(screen.getByText("鈴木")).toBeInTheDocument();
     expect(screen.getByText("田中")).toBeInTheDocument();
     // 4th candidate is truncated (max 3)
@@ -424,7 +424,7 @@ describe("ResultScreen — main line (person)", () => {
     expect(screen.getByText("過去の回答 qa_42")).toBeInTheDocument();
     // ...without replacing the person hand-off main line.
     expect(screen.getByText("この質問は、人に聞くのが確実です")).toBeInTheDocument();
-    expect(screen.getByText("高梨（最有力）")).toBeInTheDocument();
+    expect(screen.getByText("高梨")).toBeInTheDocument();
   });
 
   it("omits the reference block when no additive answer arrived", () => {
@@ -511,7 +511,7 @@ describe("ResultScreen — main line (person)", () => {
       />,
     );
     expect(screen.queryByText("依頼を送りました")).not.toBeInTheDocument();
-    expect(screen.getByText("鈴木（最有力）")).toBeInTheDocument();
+    expect(screen.getByText("鈴木")).toBeInTheDocument();
   });
 
   it("confirms the send: POSTs the edited draft to the pending hand-off (#174)", async () => {
@@ -858,7 +858,7 @@ describe("ResultScreen — main line (person)", () => {
     await Promise.resolve();
 
     expect(screen.queryByText("依頼を送りました")).not.toBeInTheDocument();
-    expect(screen.getByText("鈴木（最有力）")).toBeInTheDocument();
+    expect(screen.getByText("鈴木")).toBeInTheDocument();
   });
 
   it("defaults to the main line when the route is unset but candidates exist", () => {
@@ -897,7 +897,7 @@ describe("ResultScreen — main line (person)", () => {
         draft: { draft: "x" },
       }),
     );
-    expect(screen.getByText("佐藤（最有力）")).toBeInTheDocument();
+    expect(screen.getByText("佐藤")).toBeInTheDocument();
     expect(screen.getByText("E020")).toBeInTheDocument();
     // The self-declared-skill reason label renders even without a detail string.
     expect(screen.getByText("自己申告")).toBeInTheDocument();

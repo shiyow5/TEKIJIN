@@ -47,6 +47,7 @@ describe("ConfidenceGauge", () => {
     render(<ConfidenceGauge percent={47} />);
     expect(screen.getByRole("img", { name: "適合度 47%（中）" })).toBeInTheDocument();
     expect(screen.getByText("47")).toBeInTheDocument();
+    expect(screen.getByText("中")).toBeInTheDocument();
   });
 
   it("animates the ring on mount when motion is allowed", async () => {
