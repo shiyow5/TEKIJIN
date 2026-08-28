@@ -130,8 +130,11 @@ def is_thanks_utterance(text: str) -> bool:
     polite closing cannot consume the thread's one-shot knowledge prompt (#537).
     """
 
-    value = text or ""
-    return any(marker in value for marker in _THANKS_UTTERANCES)
+    # Only a thanks that CLOSES the message is a completion signal. A prefix match
+    # such as "ありがとうございます。追加で質問があります" is still an active
+    # conversation and must not consume the thread's one-shot prompt.
+    value = (text or "").strip().rstrip("。．.!！?？、, \t\r\n")
+    return any(value.endswith(marker) for marker in _THANKS_UTTERANCES)
 
 
 def _extract_thread_draft(

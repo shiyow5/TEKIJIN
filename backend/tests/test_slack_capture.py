@@ -496,6 +496,7 @@ def test_is_solve_utterance_matches_resolution_not_generic_completion() -> None:
     assert not is_solve_utterance("")
     assert is_thanks_utterance("ご回答ありがとうございました。")
     assert is_thanks_utterance("ありがとうございます！")
+    assert not is_thanks_utterance("ありがとうございます。追加で質問があります")
     assert not is_thanks_utterance("承知しました")
 
 
