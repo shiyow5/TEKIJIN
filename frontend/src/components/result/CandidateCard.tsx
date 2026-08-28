@@ -1,10 +1,10 @@
 /**
  * One recommended person on the main-line result (product-spec 画面3).
  *
- * Shows the person id ("E###"), name, department, the fit signal (`confidence`
- * = 高/中/低 — the intended user-facing signal), and the evidence `reasons`. The
- * raw `score` is a weighted internal ranking value (not a percentage) and is
- * never shown. The top-ranked card is `expanded` (full reason detail); lower
+ * Shows the person id ("E###"), name, department, the score-derived fit percent,
+ * the separately-labelled evidence confidence, and the evidence `reasons`. The
+ * raw `score` is a weighted internal ranking value (not a percentage) and is never
+ * shown. The top-ranked card is `expanded` (full reason detail); lower
  * ranks show compact reason labels — EXCEPT the two comparison signals 距離
  * (proximity) and 現在の負荷 (load), whose values are shown on every card so the
  * asker can actually compare 2nd/3rd against the top pick (#204).
@@ -83,7 +83,7 @@ export function CandidateCard({
           <span aria-hidden="true" className="text-on-surface-variant text-xs">
             適合度
           </span>
-          <ConfidenceGauge level={candidate.confidence} percent={fitPercent} />
+          <ConfidenceGauge confidenceLevel={candidate.confidence} percent={fitPercent} />
         </div>
       </div>
 

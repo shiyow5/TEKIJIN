@@ -1,4 +1,4 @@
-import { MAX_COMPOSITE_SCORE, fitPercent, fitPercents, levelFraction } from "@/lib/fit";
+import { MAX_COMPOSITE_SCORE, fitLevel, fitPercent, fitPercents, levelFraction } from "@/lib/fit";
 import { describe, expect, it } from "vitest";
 
 describe("levelFraction", () => {
@@ -7,6 +7,22 @@ describe("levelFraction", () => {
     expect(levelFraction("中")).toBe(0.66);
     expect(levelFraction("低")).toBe(0.33);
     expect(levelFraction("不明")).toBe(0.5);
+  });
+});
+
+describe("fitLevel", () => {
+  it("uses the same 33/66 boundaries as the displayed fit magnitude", () => {
+    expect(fitLevel(0)).toBe("低");
+    expect(fitLevel(33)).toBe("低");
+    expect(fitLevel(34)).toBe("中");
+    expect(fitLevel(66)).toBe("中");
+    expect(fitLevel(67)).toBe("高");
+    expect(fitLevel(100)).toBe("高");
+  });
+
+  it("clamps out-of-range input before assigning a band", () => {
+    expect(fitLevel(-1)).toBe("低");
+    expect(fitLevel(101)).toBe("高");
   });
 });
 

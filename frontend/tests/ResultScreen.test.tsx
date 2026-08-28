@@ -394,11 +394,14 @@ describe("ResultScreen — main line (person)", () => {
     expect(screen.getByText("田中")).toBeInTheDocument();
     // 4th candidate is truncated (max 3)
     expect(screen.queryByText("山田")).not.toBeInTheDocument();
-    // fit signal is the score-derived 適合度% in the gauge, with the confidence
-    // label as a separate badge (#240); 高梨's score 0.92 normalises to 48% against
-    // the qsim-inclusive 1.9 ceiling (#498, 0.92/1.9). The visible ring number
-    // carries no "%" sign (the % lives only in the aria-label).
-    expect(screen.getByRole("img", { name: "適合度 48%・確信度 高" })).toBeInTheDocument();
+    // Fit number/band and evidence confidence are visibly separate (#540): 高梨's
+    // score 0.92 normalises to 48% (中) against the qsim-inclusive 1.9 ceiling,
+    // while its evidence confidence remains 高. The ring number carries no "%"
+    // sign (the % lives only in the aria-label).
+    expect(
+      screen.getByRole("img", { name: "適合度 48%（中）・根拠の確信度 高" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("確信度 高")).toBeInTheDocument();
     expect(screen.queryByText(/%/)).not.toBeInTheDocument();
     // reason labels (expanded top card shows detail)
     expect(screen.getByText("関連資格")).toBeInTheDocument();

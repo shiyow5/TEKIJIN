@@ -47,6 +47,19 @@ export function levelFraction(level: string): number {
   return LEVEL_FRACTION[level] ?? 0.5;
 }
 
+/** Qualitative band for the score-derived fit percent.
+ *
+ * Keep these boundaries aligned with the legacy fallback magnitudes above:
+ * 0–33=低, 34–66=中, 67–100=高. This label describes the SAME value as the
+ * number in the gauge; evidence confidence remains a separate axis (#540).
+ */
+export function fitLevel(percent: number): "高" | "中" | "低" {
+  const clamped = Math.max(0, Math.min(percent, 100));
+  if (clamped >= 67) return "高";
+  if (clamped >= 34) return "中";
+  return "低";
+}
+
 export interface FitInput {
   score: number;
   confidence: string;
