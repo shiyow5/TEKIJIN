@@ -145,6 +145,7 @@ def _resolved_thread(engine, seed_counts):
             slack_team_id=TEAM,
             now=NOW,
         )
+        upsert_slack_link(session, ASKER, slack_user_id="U_ASKER", slack_team_id=TEAM, now=NOW)
         upsert_slack_link(session, RESPONDER, slack_user_id="U_RESP", slack_team_id=TEAM, now=NOW)
         upsert_slack_link(session, BYSTANDER, slack_user_id="U_BYSTD", slack_team_id=TEAM, now=NOW)
     yield factory, thread_id
@@ -169,7 +170,9 @@ def _resolved_thread(engine, seed_counts):
         session.query(SlackChannelLink).filter(
             SlackChannelLink.slack_channel_id == CHANNEL
         ).delete()
-        session.query(SlackLink).filter(SlackLink.employee_id.in_([RESPONDER, BYSTANDER])).delete()
+        session.query(SlackLink).filter(
+            SlackLink.employee_id.in_([ASKER, RESPONDER, BYSTANDER])
+        ).delete()
         session.query(Employee).filter(Employee.id.in_([ASKER, RESPONDER, BYSTANDER])).delete()
 
 
@@ -436,12 +439,14 @@ def test_capture_falls_back_to_current_thread_without_anchor(_two_threads_one_ch
 # --------------------------------------------------------------------------- #
 # message mirroring records a per-message anchor (wiring, live DB)
 # --------------------------------------------------------------------------- #
-def _message_event(ts: str) -> dict:
+def _message_event(
+    ts: str, *, user: str = "U_RESP", text: str = "解決しました、ありがとうございます"
+) -> dict:
     return {
         "type": "message",
         "channel": CHANNEL,
-        "user": "U_RESP",
-        "text": "解決しました、ありがとうございます",
+        "user": user,
+        "text": text,
         "ts": ts,
     }
 
@@ -477,18 +482,42 @@ def test_message_event_records_no_anchor_when_capture_disabled(
 # Slice B2: utterance detection + in-thread prompt + keep/discard (live DB)
 # --------------------------------------------------------------------------- #
 def test_is_solve_utterance_matches_resolution_not_generic_completion() -> None:
-    from tekijin.slack.capture import is_solve_utterance
+    from tekijin.slack.capture import is_solve_utterance, is_thanks_utterance
 
     assert is_solve_utterance("おかげさまで解決しました")
     assert is_solve_utterance("MTUを下げたら動きました")
     assert is_solve_utterance("設定を直したらできるようになりました")
-    # Generic completion / thanks must NOT trigger — they'd waste the one-shot prompt
-    # (#519 review): "資料ができました" is unrelated completion, thanks is just closing.
+    # Generic completion remains excluded. Thanks has its own classifier because
+    # only the Slack event handler knows whether the sender is the asker (#537).
     assert not is_solve_utterance("資料ができました")
     assert not is_solve_utterance("ありがとうございました")
     assert not is_solve_utterance("ありがとうございます")
     assert not is_solve_utterance("確認してみます")
     assert not is_solve_utterance("")
+    assert is_thanks_utterance("ご回答ありがとうございました。")
+    assert is_thanks_utterance("ありがとうございます！")
+    assert not is_thanks_utterance("ありがとうございます。追加で質問があります")
+    assert not is_thanks_utterance("承知しました")
+
+
+def test_asker_thanks_schedules_prompt_but_responder_thanks_does_not(
+    _resolved_thread, monkeypatch
+) -> None:
+    factory, thread_id = _resolved_thread
+    calls: list[dict] = []
+    monkeypatch.setattr(slack_routes, "get_settings", _settings)
+    monkeypatch.setattr(slack_routes, "schedule_solve_prompt", lambda _sf, **kw: calls.append(kw))
+
+    slack_routes._handle_message_event(
+        factory,
+        _message_event("ts_asker_thanks", user="U_ASKER", text="ありがとうございました"),
+    )
+    slack_routes._handle_message_event(
+        factory,
+        _message_event("ts_responder_thanks", user="U_RESP", text="ありがとうございました"),
+    )
+
+    assert calls == [{"channel_id": CHANNEL, "thread_id": thread_id}]
 
 
 def test_capture_and_prompt_creates_draft_and_posts_prompt(_resolved_thread, monkeypatch) -> None:

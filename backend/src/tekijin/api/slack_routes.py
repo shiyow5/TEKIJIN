@@ -78,6 +78,7 @@ from tekijin.slack.capture import (
     SOLVE_REACTIONS,
     discard_thread_draft,
     is_solve_utterance,
+    is_thanks_utterance,
     review_blocks,
     schedule_solve_capture,
     schedule_solve_prompt,
@@ -635,11 +636,15 @@ def _handle_message_event(session_factory: sessionmaker[Session], event: dict) -
                     thread_id=thread_id,
                     now=now,
                 )
-            # #476 Screen 02: a "解決しました"-style message is a capture trigger — the
-            # sender is already a verified party of this thread. Defer the draft +
-            # in-thread prompt to a daemon thread (LLM + Slack post exceed the ~3s
-            # budget); scheduled AFTER this transaction commits.
-            if is_solve_utterance(text):
+            # #476/#537: an explicit resolution from either party, or an explicit
+            # thanks from the ASKER, is a capture trigger. Sender identity matters
+            # for thanks: a responder's polite closing is not evidence that the
+            # asker's problem is resolved. Defer the draft + in-thread prompt to a
+            # daemon thread (LLM + Slack post exceed the ~3s budget); scheduled
+            # AFTER this transaction commits.
+            if is_solve_utterance(text) or (
+                sender_id == parties["asker_id"] and is_thanks_utterance(text)
+            ):
                 prompt_thread_id = thread_id
 
     if prompt_thread_id is not None:
