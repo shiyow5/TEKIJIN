@@ -5,10 +5,10 @@
  *
  * Renders the **適合度 (fit)** as a radial ring that sweeps to the score-derived
  * fit percent on mount, with that number shown in the centre (具体的な数値を円の中に).
- * The magnitude is the absolute fit (`fitPercent`, normalised score) — decoupled
- * from the 高/中/低 confidence label since #240; the ring COLOUR and the adjacent
- * badge carry the confidence level separately, so a strong candidate on a
- * never-asked topic reads as a high gauge with a 低 badge rather than a 33% cap.
+ * The magnitude, colour and adjacent 高/中/低 are all the absolute fit
+ * (`fitPercent`, normalised score). Evidence confidence is deliberately a second,
+ * explicitly-labelled line since #240/#540: mixing its label/colour into the fit
+ * gauge made e.g. "47 高" look self-contradictory.
  *
  * Accessibility: the ring is `role="img"` with a text label carrying both the
  * level and the percent, and the level is also shown, so nothing depends on
@@ -17,7 +17,7 @@
  * of the server bundle.
  */
 
-import { levelFraction } from "@/lib/fit";
+import { fitLevel, levelFraction } from "@/lib/fit";
 import { useEffect, useRef, useState } from "react";
 
 /** Tailwind text-color token per level; the ring strokes `currentColor`. */
@@ -38,11 +38,21 @@ function prefersReducedMotion(): boolean {
   );
 }
 
-export function ConfidenceGauge({ level, percent }: { level: string; percent?: number }) {
-  // `percent` (relative fit across the shown candidates, #222) drives the ring +
-  // number when provided; otherwise fall back to the qualitative level's own
-  // magnitude. Color and the text label always come from the level.
-  const pct = Math.max(0, Math.min(percent ?? Math.round(levelFraction(level) * 100), 100));
+export function ConfidenceGauge({
+  confidenceLevel,
+  percent,
+}: {
+  confidenceLevel: string;
+  percent?: number;
+}) {
+  // The score-derived fit drives the ring, number, colour AND fit label. When no
+  // percent is available, preserve the legacy confidence-based magnitude only as
+  // a fallback. The evidence confidence is rendered separately below (#540).
+  const pct = Math.max(
+    0,
+    Math.min(percent ?? Math.round(levelFraction(confidenceLevel) * 100), 100),
+  );
+  const level = fitLevel(pct);
   const fraction = pct / 100;
   const colorClass = LEVEL_COLOR[level] ?? "text-on-surface-variant";
   const finalOffset = CIRCUMFERENCE * (1 - fraction);
@@ -83,7 +93,7 @@ export function ConfidenceGauge({ level, percent }: { level: string; percent?: n
   return (
     <span
       role="img"
-      aria-label={`適合度 ${pct}%・確信度 ${level}`}
+      aria-label={`適合度 ${pct}%（${level}）・根拠の確信度 ${confidenceLevel}`}
       className={`inline-flex items-center gap-xs ${colorClass}`}
     >
       <svg width="44" height="44" viewBox="0 0 40 40" aria-hidden="true" className="shrink-0">
@@ -124,7 +134,10 @@ export function ConfidenceGauge({ level, percent }: { level: string; percent?: n
           {pct}
         </text>
       </svg>
-      <span className="font-bold text-xs">{level}</span>
+      <span className="flex flex-col gap-0.5 text-xs leading-tight">
+        <span className="font-bold">{level}</span>
+        <span className="whitespace-nowrap text-on-surface-variant">確信度 {confidenceLevel}</span>
+      </span>
     </span>
   );
 }

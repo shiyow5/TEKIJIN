@@ -26,42 +26,61 @@ afterEach(() => vi.restoreAllMocks());
 describe("ConfidenceGauge", () => {
   it("exposes the level + percent as an accessible label and shows both", () => {
     setReducedMotion(false);
-    render(<ConfidenceGauge level="高" />);
+    render(<ConfidenceGauge confidenceLevel="高" />);
     // role=img label carries the level AND the concrete percent — nothing depends on color.
-    expect(screen.getByRole("img", { name: "適合度 100%・確信度 高" })).toBeInTheDocument();
-    expect(screen.getByText("高")).toBeInTheDocument();
+    expect(
+      screen.getByRole("img", { name: "適合度 100%（高）・根拠の確信度 高" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("確信度 高")).toBeInTheDocument();
     // The concrete number is shown inside the ring (円の中に数値, #適合度).
     expect(screen.getByText("100")).toBeInTheDocument();
   });
 
   it("shows the level's matching number inside the ring (中=66, 低=33)", () => {
     setReducedMotion(true);
-    const { rerender } = render(<ConfidenceGauge level="中" />);
+    const { rerender } = render(<ConfidenceGauge confidenceLevel="中" />);
     expect(screen.getByText("66")).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: "適合度 66%・確信度 中" })).toBeInTheDocument();
-    rerender(<ConfidenceGauge level="低" />);
+    expect(
+      screen.getByRole("img", { name: "適合度 66%（中）・根拠の確信度 中" }),
+    ).toBeInTheDocument();
+    rerender(<ConfidenceGauge confidenceLevel="低" />);
     expect(screen.getByText("33")).toBeInTheDocument();
+  });
+
+  it("keeps a medium fit and high evidence confidence visibly separate (#540)", () => {
+    setReducedMotion(true);
+    render(<ConfidenceGauge confidenceLevel="高" percent={47} />);
+    expect(
+      screen.getByRole("img", { name: "適合度 47%（中）・根拠の確信度 高" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("47")).toBeInTheDocument();
+    expect(screen.getByText("中")).toBeInTheDocument();
+    expect(screen.getByText("確信度 高")).toBeInTheDocument();
   });
 
   it("animates the ring on mount when motion is allowed", async () => {
     setReducedMotion(false);
-    render(<ConfidenceGauge level="中" />);
+    render(<ConfidenceGauge confidenceLevel="中" />);
     await waitFor(() => expect(animateMock).toHaveBeenCalledTimes(1));
   });
 
   it("does not animate under prefers-reduced-motion", async () => {
     setReducedMotion(true);
-    render(<ConfidenceGauge level="低" />);
+    render(<ConfidenceGauge confidenceLevel="低" />);
     // Give the (skipped) effect a tick; the animation must never fire.
     await new Promise((r) => setTimeout(r, 20));
     expect(animateMock).not.toHaveBeenCalled();
-    expect(screen.getByRole("img", { name: "適合度 33%・確信度 低" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("img", { name: "適合度 33%（低）・根拠の確信度 低" }),
+    ).toBeInTheDocument();
   });
 
   it("renders a neutral gauge (50) for an unknown level without crashing", () => {
     setReducedMotion(true);
-    render(<ConfidenceGauge level="不明" />);
-    expect(screen.getByRole("img", { name: "適合度 50%・確信度 不明" })).toBeInTheDocument();
+    render(<ConfidenceGauge confidenceLevel="不明" />);
+    expect(
+      screen.getByRole("img", { name: "適合度 50%（中）・根拠の確信度 不明" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("50")).toBeInTheDocument();
   });
 
@@ -70,7 +89,7 @@ describe("ConfidenceGauge", () => {
     animateMock.mockImplementation(() => {
       throw new Error("boom");
     });
-    render(<ConfidenceGauge level="高" />);
+    render(<ConfidenceGauge confidenceLevel="高" />);
     // 高 == full ring -> final strokeDashoffset 0; the .catch fallback applies it.
     await waitFor(() => {
       const arc = document.querySelector("circle[stroke-linecap='round']") as SVGCircleElement;
