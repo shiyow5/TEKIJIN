@@ -553,7 +553,7 @@ grounded 率: baseline **0.265** / +日報 **0.347** / **+チャット 0.286** /
 | `slack_login_enabled` | False（**本番 True**） | Slack でログイン |
 | `slack_user_sync_enabled` | False | ディレクトリ同期 |
 | `slack_user_sync_create_employees` | False | 同期で社員行を作る |
-| `slack_solve_capture_enabled` | False | ✅リアクションで知識下書き |
+| `slack_solve_capture_enabled` | False（DGXデプロイは True） | 解決表現・質問者の感謝・✅リアクションで知識下書き |
 | `expose_api_docs` | False | `/docs` を開ける |
 | `strict_auth` | False（**本番 True**） | 弱い認証設定で起動を拒否 |
 

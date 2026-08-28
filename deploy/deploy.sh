@@ -36,6 +36,10 @@ API_BASE_URL="${TEKIJIN_API_BASE_URL:-http://internship-dgx1.tail349bcd.ts.net:1
 FRONTEND_CONTAINER="${TEKIJIN_FRONTEND_CONTAINER:-tekijin_frontend}"
 PORT="${TEKIJIN_PORT:-18000}"
 FRONTEND_PORT="${TEKIJIN_FRONTEND_PORT:-13000}"
+# #529: solve capture has completed its staged rollout (#476/#519/#526/#530/#532).
+# Keep the application default OFF for local/offline environments, but enable it
+# on this production-specific DGX deploy path unless an operator explicitly opts out.
+SLACK_SOLVE_CAPTURE_ENABLED="${TEKIJIN_SLACK_SOLVE_CAPTURE_ENABLED:-true}"
 BACKUP_DIR="${DEPLOY_DIR}.prev"
 
 # Files that live ONLY in the deployed copy (secrets, build output, installed deps)
@@ -140,6 +144,7 @@ restart_backend() {
     # having to remember.
     setsid env -u RUNNER_TRACKING_ID \
       TEKIJIN_PORT="$PORT" TEKIJIN_VENV_PY="$VENV_PY" CUDA_VISIBLE_DEVICES="" \
+      TEKIJIN_SLACK_SOLVE_CAPTURE_ENABLED="$SLACK_SOLVE_CAPTURE_ENABLED" \
       bash -c 'exec deploy/start_backend.sh' >"${HOME}/backend.log" 2>&1 </dev/null &
   )
 }

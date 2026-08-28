@@ -37,6 +37,11 @@ logger = logging.getLogger(__name__)
 # DM-based predecessor this module replaced capped at the same length).
 _MAX_TEXT_LENGTH = 3000
 
+# #529: key lifecycle transitions shown in the shared pair channel. The initial
+# request is already posted by ``schedule_pending_handoff``; this message closes
+# the otherwise-silent gap between that request and the later conversation.
+HANDOFF_ACCEPTED_TEXT = "担当者が依頼を承諾しました。このチャンネルで相談を開始できます。"
+
 
 def _truncate(text: str) -> str:
     return text if len(text) <= _MAX_TEXT_LENGTH else f"{text[:_MAX_TEXT_LENGTH]}…"
@@ -155,8 +160,8 @@ def relay_to_channel(
 def schedule_channel_setup_and_draft(
     session_factory: sessionmaker[Session], *, thread_id: int, parties: dict, draft: str
 ) -> None:
-    """Fire-and-forget: set up (or reuse) this pair's Slack channel and post
-    the hand-off draft into it, without blocking the caller.
+    """Fire-and-forget: set up (or reuse) this pair's Slack channel, post the
+    initial draft when newly created, then announce acceptance without blocking.
 
     Used from ``AgentService._record_outcome``, which runs synchronously
     inside ``POST /answer``'s request/response cycle but has no
@@ -182,13 +187,23 @@ def schedule_channel_setup_and_draft(
                     is not None
                 )
                 channel_id = ensure_pair_channel(session, thread_id=thread_id, parties=parties)
-            if channel_id is not None and not had_channel:
-                settings = get_settings()
+            if channel_id is None:
+                return
+            settings = get_settings()
+            if not had_channel:
                 post_message(
                     bot_token=settings.slack_bot_token,
                     channel_id=channel_id,
                     text=_truncate(draft),
                 )
+            # Whether this channel was created now or reused, acceptance is a
+            # distinct user-visible transition. Post it separately so both the
+            # asker and responder see that the waiting phase ended (#529).
+            post_message(
+                bot_token=settings.slack_bot_token,
+                channel_id=channel_id,
+                text=HANDOFF_ACCEPTED_TEXT,
+            )
         except Exception:  # noqa: BLE001 - background thread boundary, must not crash silently
             logger.warning("Slack hand-off channel setup failed", exc_info=True)
 
