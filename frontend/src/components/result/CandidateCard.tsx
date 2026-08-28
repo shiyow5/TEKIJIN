@@ -65,21 +65,23 @@ export function CandidateCard({
         selected ? "border-primary" : "border-outline-variant"
       }`}
     >
-      <div className="mb-sm flex items-center gap-sm">
-        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-surface-variant font-bold text-lg text-on-surface-variant">
-          {avatarInitial(candidate.name)}
+      <div className="mb-sm flex flex-col gap-sm">
+        <div className="flex items-start gap-sm">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-surface-variant font-bold text-lg text-on-surface-variant">
+            {avatarInitial(candidate.name)}
+          </div>
+          <div className="min-w-0 flex-1">
+            <h2 className="break-words font-bold text-lg text-on-surface leading-tight">
+              {rank === 1 ? `${candidate.name}（最有力）` : candidate.name}
+            </h2>
+            <p className="truncate text-on-surface-variant text-xs">
+              {[candidate.dept, candidate.person_id].filter(Boolean).join(" / ")}
+            </p>
+          </div>
         </div>
-        <div className="flex min-w-0 flex-col">
-          <h2 className="truncate font-bold text-lg text-on-surface leading-tight">
-            {rank === 1 ? `${candidate.name}（最有力）` : candidate.name}
-          </h2>
-          <p className="truncate text-on-surface-variant text-xs">
-            {[candidate.dept, candidate.person_id].filter(Boolean).join(" / ")}
-          </p>
-        </div>
-        {/* Confidence gauge in normal flex flow (shrink-0) so it can never overlap
-            the name — the label is aria-hidden since the gauge already labels it. */}
-        <div className="ml-auto flex shrink-0 items-center gap-xs">
+        {/* Keep the metric in its own row: the confidence explanation must never
+            consume the candidate-name column and trigger an ellipsis. */}
+        <div className="flex items-center justify-end gap-xs">
           <span aria-hidden="true" className="text-on-surface-variant text-xs">
             適合度
           </span>
