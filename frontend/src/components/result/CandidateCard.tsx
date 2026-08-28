@@ -65,27 +65,23 @@ export function CandidateCard({
         selected ? "border-primary" : "border-outline-variant"
       }`}
     >
-      <div className="mb-sm flex flex-col gap-sm">
-        <div className="flex items-start gap-sm">
-          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-surface-variant font-bold text-lg text-on-surface-variant">
-            {avatarInitial(candidate.name)}
-          </div>
-          <div className="min-w-0 flex-1">
-            <h2 className="break-words font-bold text-lg text-on-surface leading-tight">
-              {rank === 1 ? `${candidate.name}（最有力）` : candidate.name}
-            </h2>
-            <p className="truncate text-on-surface-variant text-xs">
-              {[candidate.dept, candidate.person_id].filter(Boolean).join(" / ")}
-            </p>
-          </div>
+      <div className="mb-sm flex items-start gap-sm">
+        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-surface-variant font-bold text-lg text-on-surface-variant">
+          {avatarInitial(candidate.name)}
         </div>
-        {/* Keep the metric in its own row: the confidence explanation must never
-            consume the candidate-name column and trigger an ellipsis. */}
-        <div className="flex items-center justify-end gap-xs">
+        <div className="min-w-0 flex-1">
+          <h2 className="break-words font-bold text-lg text-on-surface leading-tight">
+            {rank === 1 ? `${candidate.name}（最有力）` : candidate.name}
+          </h2>
+          <p className="truncate text-on-surface-variant text-xs">
+            {[candidate.dept, candidate.person_id].filter(Boolean).join(" / ")}
+          </p>
+        </div>
+        <div className="ml-auto flex shrink-0 items-center gap-xs">
           <span aria-hidden="true" className="text-on-surface-variant text-xs">
             適合度
           </span>
-          <ConfidenceGauge confidenceLevel={candidate.confidence} percent={fitPercent} />
+          <ConfidenceGauge percent={fitPercent} />
         </div>
       </div>
 

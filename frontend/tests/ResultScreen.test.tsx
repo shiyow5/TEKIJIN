@@ -398,10 +398,7 @@ describe("ResultScreen — main line (person)", () => {
     // score 0.92 normalises to 48% (中) against the qsim-inclusive 1.9 ceiling,
     // while its evidence confidence remains 高. The ring number carries no "%"
     // sign (the % lives only in the aria-label).
-    expect(
-      screen.getByRole("img", { name: "適合度 48%（中）・根拠の確信度 高" }),
-    ).toBeInTheDocument();
-    expect(screen.getByText("確信度 高")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "適合度 48%（中）" })).toBeInTheDocument();
     expect(screen.queryByText(/%/)).not.toBeInTheDocument();
     // reason labels (expanded top card shows detail)
     expect(screen.getByText("関連資格")).toBeInTheDocument();

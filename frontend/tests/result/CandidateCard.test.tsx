@@ -24,7 +24,7 @@ function candidate(partial: Partial<Recommendation> = {}): Recommendation {
 const fullText = (text: string) => (_: string, el: Element | null) => el?.textContent === text;
 
 describe("CandidateCard — comparison info on non-top cards (#204)", () => {
-  it("does not truncate a candidate name when the confidence explanation is shown", () => {
+  it("keeps a long candidate name visible beside the fit gauge", () => {
     const name = "非常に長い候補者名でも省略しない確認用の名前";
     render(
       <CandidateCard
@@ -38,7 +38,7 @@ describe("CandidateCard — comparison info on non-top cards (#204)", () => {
     const heading = screen.getByRole("heading", { name: `${name}（最有力）` });
     expect(heading).toHaveClass("break-words");
     expect(heading).not.toHaveClass("truncate");
-    expect(screen.getByText("確信度 高")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "適合度 50%（中）" })).toBeInTheDocument();
   });
 
   it("shows distance and load VALUES even when the card is not expanded", () => {
