@@ -17,7 +17,7 @@
  * of the server bundle.
  */
 
-import { fitLevel, levelFraction } from "@/lib/fit";
+import { fitLevel } from "@/lib/fit";
 import { useEffect, useRef, useState } from "react";
 
 /** Tailwind text-color token per level; the ring strokes `currentColor`. */
@@ -38,20 +38,11 @@ function prefersReducedMotion(): boolean {
   );
 }
 
-export function ConfidenceGauge({
-  confidenceLevel,
-  percent,
-}: {
-  confidenceLevel: string;
-  percent?: number;
-}) {
+export function ConfidenceGauge({ percent }: { percent?: number }) {
   // The score-derived fit drives the ring, number, colour AND fit label. When no
   // percent is available, preserve the legacy confidence-based magnitude only as
   // a fallback. The evidence confidence is rendered separately below (#540).
-  const pct = Math.max(
-    0,
-    Math.min(percent ?? Math.round(levelFraction(confidenceLevel) * 100), 100),
-  );
+  const pct = Math.max(0, Math.min(percent ?? 50, 100));
   const level = fitLevel(pct);
   const fraction = pct / 100;
   const colorClass = LEVEL_COLOR[level] ?? "text-on-surface-variant";
@@ -93,7 +84,7 @@ export function ConfidenceGauge({
   return (
     <span
       role="img"
-      aria-label={`適合度 ${pct}%（${level}）・根拠の確信度 ${confidenceLevel}`}
+      aria-label={`適合度 ${pct}%（${level}）`}
       className={`inline-flex items-center gap-xs ${colorClass}`}
     >
       <svg width="44" height="44" viewBox="0 0 40 40" aria-hidden="true" className="shrink-0">
@@ -134,10 +125,6 @@ export function ConfidenceGauge({
           {pct}
         </text>
       </svg>
-      <span className="flex flex-col gap-0.5 text-xs leading-tight">
-        <span className="font-bold">{level}</span>
-        <span className="whitespace-nowrap text-on-surface-variant">確信度 {confidenceLevel}</span>
-      </span>
     </span>
   );
 }
