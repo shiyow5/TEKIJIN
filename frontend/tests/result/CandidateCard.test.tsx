@@ -24,6 +24,23 @@ function candidate(partial: Partial<Recommendation> = {}): Recommendation {
 const fullText = (text: string) => (_: string, el: Element | null) => el?.textContent === text;
 
 describe("CandidateCard — comparison info on non-top cards (#204)", () => {
+  it("does not truncate a candidate name when the confidence explanation is shown", () => {
+    const name = "非常に長い候補者名でも省略しない確認用の名前";
+    render(
+      <CandidateCard
+        candidate={candidate({ name, confidence: "高" })}
+        rank={1}
+        expanded={true}
+        selected={true}
+      />,
+    );
+
+    const heading = screen.getByRole("heading", { name: `${name}（最有力）` });
+    expect(heading).toHaveClass("break-words");
+    expect(heading).not.toHaveClass("truncate");
+    expect(screen.getByText("確信度 高")).toBeInTheDocument();
+  });
+
   it("shows distance and load VALUES even when the card is not expanded", () => {
     render(<CandidateCard candidate={candidate()} rank={2} expanded={false} selected={false} />);
     // 距離 and 現在の負荷 details are shown so 2nd/3rd can be compared to the top.
