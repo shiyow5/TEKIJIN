@@ -44,6 +44,7 @@ LAUNCH_FILES = (
     REPO / "deploy" / "start_backend.sh",
     REPO / "backend" / "Dockerfile",
 )
+DEPLOY_SCRIPT = REPO / "deploy" / "deploy.sh"
 
 # The app target every launch names. `pkill -f 'uvicorn tekijin.main:app'` in
 # deploy.sh matches this text too but starts nothing, so callers that kill are
@@ -97,6 +98,18 @@ def test_no_launch_path_runs_more_than_one_worker() -> None:
                     "Uvicorn then defaults to $WEB_CONCURRENCY, which the container inherits from "
                     ".env — pass --workers 1 explicitly."
                 )
+
+
+def test_dgx_deploy_enables_slack_solve_capture_by_default() -> None:
+    """The DGX rollout must not depend on a manually-maintained host environment.
+
+    The application-level default intentionally stays off for local/offline runs,
+    so the production deploy path owns the explicit opt-out default (#529).
+    """
+
+    content = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+    assert 'SLACK_SOLVE_CAPTURE_ENABLED="${TEKIJIN_SLACK_SOLVE_CAPTURE_ENABLED:-true}"' in content
+    assert 'TEKIJIN_SLACK_SOLVE_CAPTURE_ENABLED="$SLACK_SOLVE_CAPTURE_ENABLED"' in content
 
 
 def _covers(pattern: str, path: str) -> bool:

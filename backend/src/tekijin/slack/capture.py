@@ -71,6 +71,15 @@ _NO_CASE_NOTICE = (
     "要点を書き添えて改めてお知らせいただくと、次回から蓄積できます。"
 )
 
+# #529: visible lifecycle around the slow LLM extraction. Without the first
+# message a solve utterance appears ignored for several seconds; without the
+# failure message it can remain stuck at "creating" after a transient error.
+CAPTURE_STARTED_TEXT = "解決を確認しました。会話を整理して知識の下書きを作成しています…"
+CAPTURE_READY_TEXT = "会話から知識の下書きを作成しました。この会話を知識として残しますか？"
+CAPTURE_FAILED_TEXT = (
+    "知識の下書きを作成できませんでした。少し時間をおいて、もう一度解決をお知らせください。"
+)
+
 # Threads already given a no-case notice, so repeated solve-utterances on a thread that
 # never yields a case don't spam it (#525 review). The success path dedups on its
 # persisted draft; the no-case path has no draft to check, and a persisted "declined"
@@ -80,6 +89,13 @@ _NO_CASE_NOTICE = (
 # concurrent utterances on the same thread post at most one notice.
 _no_case_notified: set[int] = set()
 _no_case_notified_lock = threading.Lock()
+
+# One extraction-start narrative per thread/process. A skipped non-case retains
+# the claim so repeated closing phrases do not spam progress. A transient error
+# releases it so an explicit retry can narrate a fresh attempt. Successful captures
+# are durably deduped by their KnowledgeUnit before this set is consulted.
+_capture_progress_notified: set[int] = set()
+_capture_progress_notified_lock = threading.Lock()
 
 
 def _claim_no_case_notice(thread_id: int) -> bool:
@@ -92,6 +108,19 @@ def _claim_no_case_notice(thread_id: int) -> bool:
             return False
         _no_case_notified.add(thread_id)
         return True
+
+
+def _claim_capture_progress(thread_id: int) -> bool:
+    with _capture_progress_notified_lock:
+        if thread_id in _capture_progress_notified:
+            return False
+        _capture_progress_notified.add(thread_id)
+        return True
+
+
+def _release_capture_progress(thread_id: int) -> None:
+    with _capture_progress_notified_lock:
+        _capture_progress_notified.discard(thread_id)
 
 
 # Conservative solve-utterance markers (substring match). Deliberately RESOLUTION-
@@ -260,9 +289,7 @@ def _prompt_blocks(thread_id: int) -> list[dict]:
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": (
-                    "この会話を *知識として残しますか？* 下書きは用意済みです（確認は30秒ほど）。"
-                ),
+                "text": f"*{CAPTURE_READY_TEXT}* 確認は30秒ほどです。",
             },
         },
         {
@@ -378,8 +405,9 @@ def capture_and_prompt(
     When the model declines the thread as not-a-case (#525), no draft is created but the
     solver still gets one short notice — never silence — deduped per thread in-process
     (:func:`_claim_no_case_notice`) since there is no persisted draft to dedup on. A
-    transient extraction *error* (not a decision) stays silent so the next utterance can
-    retry. The flag-off and existing-draft paths remain silent, exactly as before.
+    transient extraction *error* (not a decision) closes the visible progress state
+    with a retry notice; the next utterance can then retry. The flag-off and
+    existing-draft paths remain silent, exactly as before.
     """
 
     settings = settings or get_settings()
@@ -397,8 +425,27 @@ def capture_and_prompt(
         )
         if existing is not None:
             return None  # already captured + prompted for this thread (stay silent)
+        progress_claimed = _claim_capture_progress(thread_id)
+        if progress_claimed:
+            post_message(
+                bot_token=settings.slack_bot_token,
+                channel_id=channel_id,
+                text=CAPTURE_STARTED_TEXT,
+            )
         extractor = extractor or CaseExtractor(settings=settings)
-        stored, counts = _extract_thread_draft(session, thread_id, extractor)
+        try:
+            stored, counts = _extract_thread_draft(session, thread_id, extractor)
+        except Exception:
+            # A DB/model exception escapes the extraction boundary. The outer
+            # scheduler logs it, but the user must not be left at "作成中".
+            if progress_claimed:
+                post_message(
+                    bot_token=settings.slack_bot_token,
+                    channel_id=channel_id,
+                    text=CAPTURE_FAILED_TEXT,
+                )
+                _release_capture_progress(thread_id)
+            raise
 
     # Best-effort posts (never raise): a lost post is a lost message, not lost data.
     if stored is None:
@@ -406,14 +453,24 @@ def capture_and_prompt(
         # not be met with silence, so tell the solver why nothing was saved. A plain
         # notice — there is no draft to keep, so no keep/discard prompt. Only for a
         # genuine decision (skipped), at most once per thread; a transient error
-        # (errored) or an unassemblable thread (counts is None) stays silent so the
-        # next utterance retries rather than showing a wrong "見つからなかった" reason.
+        # (errored) or an unassemblable thread (counts is None) gets a separate
+        # retry notice rather than the factually wrong "見つからなかった" reason.
         if counts is not None and counts.get("skipped") and _claim_no_case_notice(thread_id):
             post_message(
                 bot_token=settings.slack_bot_token,
                 channel_id=channel_id,
                 text=_NO_CASE_NOTICE,
             )
+        elif (counts is None or counts.get("errored")) and progress_claimed:
+            # Unlike a deliberate non-case, a transient failure may succeed on an
+            # explicit retry. Close the visible "creating" state and release only
+            # THIS attempt's claim so that retry can narrate itself again (#529).
+            post_message(
+                bot_token=settings.slack_bot_token,
+                channel_id=channel_id,
+                text=CAPTURE_FAILED_TEXT,
+            )
+            _release_capture_progress(thread_id)
         return None
 
     # A draft exists (committed above, so a fast button click always finds it): offer
@@ -421,7 +478,7 @@ def capture_and_prompt(
     post_message(
         bot_token=settings.slack_bot_token,
         channel_id=channel_id,
-        text="この会話を知識として残しますか？",
+        text=CAPTURE_READY_TEXT,
         blocks=_prompt_blocks(thread_id),
     )
     return stored

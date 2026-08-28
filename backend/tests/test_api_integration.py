@@ -1586,9 +1586,11 @@ def test_accepting_a_chat_handoff_sets_up_the_pair_channel_and_posts_the_draft(
     monkeypatch, seed_counts, engine, fake_embedder
 ) -> None:
     """#hand-off-chat: accepting (with BOTH parties Slack-linked) creates their
-    shared private channel, invites them, and posts the draft into it — a
-    background thread (see `schedule_channel_setup_and_draft`), so this waits
-    briefly for it to land rather than asserting immediately."""
+    shared private channel, invites them, then posts the draft and acceptance
+    progress into it — a background thread (see `schedule_channel_setup_and_draft`),
+    so this waits briefly for both messages to land rather than asserting immediately."""
+
+    from tekijin.slack.notify import HANDOFF_ACCEPTED_TEXT
 
     with get_sessionmaker(engine)() as session:
         upsert_slack_link(session, 1, slack_user_id="U_RESPONDER", slack_team_id="T1", now=NOW)
@@ -1628,7 +1630,7 @@ def test_accepting_a_chat_handoff_sets_up_the_pair_channel_and_posts_the_draft(
             0
         ]["thread_id"]
 
-        assert _wait_until(lambda: len(posted) == 1)
+        assert _wait_until(lambda: len(posted) == 2)
     finally:
         get_settings.cache_clear()
 
@@ -1636,7 +1638,10 @@ def test_accepting_a_chat_handoff_sets_up_the_pair_channel_and_posts_the_draft(
     assert invited == [
         {"bot_token": "xoxb-test", "channel_id": "C1", "user_ids": ["U_ASKER", "U_RESPONDER"]}
     ]
-    assert posted == [{"bot_token": "xoxb-test", "channel_id": "C1", "text": draft}]
+    assert posted == [
+        {"bot_token": "xoxb-test", "channel_id": "C1", "text": draft},
+        {"bot_token": "xoxb-test", "channel_id": "C1", "text": HANDOFF_ACCEPTED_TEXT},
+    ]
 
     with get_sessionmaker(engine)() as session:
         link = get_channel_link(session, 1, 10)
@@ -2434,7 +2439,10 @@ def test_accepting_a_second_chat_handoff_between_the_same_pair_reuses_the_channe
     monkeypatch, seed_counts, engine, fake_embedder
 ) -> None:
     """Consulting the same colleague again doesn't create a second channel —
-    the existing one is reused and current_thread_id moves to the new thread."""
+    the existing one is reused, current_thread_id moves to the new thread, and each
+    acceptance still gets a visible lifecycle message."""
+
+    from tekijin.slack.notify import HANDOFF_ACCEPTED_TEXT
 
     with get_sessionmaker(engine)() as session:
         upsert_slack_link(session, 1, slack_user_id="U_RESPONDER", slack_team_id="T1", now=NOW)
@@ -2443,12 +2451,13 @@ def test_accepting_a_second_chat_handoff_between_the_same_pair_reuses_the_channe
     _reset_channel_link(engine, 1, 10)
 
     created: list[dict] = []
+    posted: list[dict] = []
     monkeypatch.setattr(
         "tekijin.slack.notify.create_private_channel",
         lambda **kw: (created.append(kw), "C1")[1],
     )
     monkeypatch.setattr("tekijin.slack.notify.invite_to_channel", lambda **kw: True)
-    monkeypatch.setattr("tekijin.slack.notify.post_message", lambda **kw: None)
+    monkeypatch.setattr("tekijin.slack.notify.post_message", lambda **kw: posted.append(kw))
     monkeypatch.setenv("TEKIJIN_SLACK_BOT_TOKEN", "xoxb-test")
     get_settings.cache_clear()
     try:
@@ -2459,24 +2468,29 @@ def test_accepting_a_second_chat_handoff_between_the_same_pair_reuses_the_channe
             scorer=_FakeScorer(_recs(1, 2, 3)),
         )
 
-        def _accept(session_id: str) -> int:
-            client.post("/ask", json={"asker_id": 10, "question": GOOD_Q, "session_id": session_id})
+        def _accept(session_id: str, question: str = GOOD_Q) -> tuple[int, str]:
+            client.post(
+                "/ask", json={"asker_id": 10, "question": question, "session_id": session_id}
+            )
             _events(client, session_id)
+            draft = client.get(f"/handoff/{session_id}").json()["draft"]
             client.post("/answer", json={"session_id": session_id, "outcome": "accepted"})
             _events(client, session_id)
-            return client.get("/messages/threads", params={"employee_id": "E010"}).json()["items"][
-                0
-            ]["thread_id"]
+            thread_id = client.get("/messages/threads", params={"employee_id": "E010"}).json()[
+                "items"
+            ][0]["thread_id"]
+            return thread_id, draft
 
-        first_thread_id = _accept("msg-reuse1")
+        first_thread_id, first_draft = _accept("msg-reuse1")
 
         def _channel_ready() -> bool:
             with get_sessionmaker(engine)() as session:
                 return get_channel_link(session, 1, 10) is not None
 
         assert _wait_until(_channel_ready)
+        assert _wait_until(lambda: len(posted) == 2)
 
-        second_thread_id = _accept("msg-reuse2")
+        second_thread_id, second_draft = _accept("msg-reuse2", f"{GOOD_Q} 前回とは別件です。")
         assert second_thread_id != first_thread_id
 
         def _current_thread_is_second() -> bool:
@@ -2485,11 +2499,21 @@ def test_accepting_a_second_chat_handoff_between_the_same_pair_reuses_the_channe
                 return link is not None and link.current_thread_id == second_thread_id
 
         assert _wait_until(_current_thread_is_second)
+        assert _wait_until(lambda: len(posted) == 3)
     finally:
         get_settings.cache_clear()
 
     # Only ONE channel ever created — the second accept reused it.
     assert created == [{"bot_token": "xoxb-test", "name": "tekijin-1-10"}]
+    assert [post["text"] for post in posted] == [
+        # A newly-created channel receives its draft before the acceptance marker.
+        first_draft,
+        HANDOFF_ACCEPTED_TEXT,
+        # A reused channel does not duplicate the draft, only the new acceptance.
+        HANDOFF_ACCEPTED_TEXT,
+    ]
+    assert second_draft not in [post["text"] for post in posted]
+    assert all(post["channel_id"] == "C1" for post in posted)
     with get_sessionmaker(engine)() as session:
         link = get_channel_link(session, 1, 10)
         assert link.slack_channel_id == "C1"

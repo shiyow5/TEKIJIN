@@ -524,6 +524,7 @@ def test_capture_and_prompt_creates_draft_and_posts_prompt(_resolved_thread, mon
     from tekijin.slack import capture as capture_mod
 
     factory, thread_id = _resolved_thread
+    capture_mod._capture_progress_notified.discard(thread_id)
     posts: list[dict] = []
     monkeypatch.setattr(capture_mod, "post_message", lambda **kw: posts.append(kw))
 
@@ -538,10 +539,12 @@ def test_capture_and_prompt_creates_draft_and_posts_prompt(_resolved_thread, mon
     with session_scope(factory) as session:
         unit = get_knowledge_unit_by_source(session, "slack_thread", f"slack_thread_{thread_id}")
     assert unit is not None and unit.review_status == "unreviewed"
-    # Exactly one prompt, carrying the two keep/discard action ids + the thread_id.
-    assert len(posts) == 1
+    # The immediate progress post precedes the prompt carrying the keep/discard actions.
+    assert len(posts) == 2
+    assert posts[0]["text"] == capture_mod.CAPTURE_STARTED_TEXT
+    assert posts[1]["text"] == capture_mod.CAPTURE_READY_TEXT
     action_ids = [
-        e["action_id"] for b in posts[0]["blocks"] if b["type"] == "actions" for e in b["elements"]
+        e["action_id"] for b in posts[1]["blocks"] if b["type"] == "actions" for e in b["elements"]
     ]
     assert set(action_ids) == {"tekijin_knowledge_keep", "tekijin_knowledge_discard"}
 
@@ -550,6 +553,7 @@ def test_capture_and_prompt_dedups_when_draft_exists(_resolved_thread, monkeypat
     from tekijin.slack import capture as capture_mod
 
     factory, thread_id = _resolved_thread
+    capture_mod._capture_progress_notified.discard(thread_id)
     posts: list[dict] = []
     monkeypatch.setattr(capture_mod, "post_message", lambda **kw: posts.append(kw))
     capture_mod.capture_and_prompt(
@@ -568,7 +572,7 @@ def test_capture_and_prompt_dedups_when_draft_exists(_resolved_thread, monkeypat
         settings=_settings(),
     )
     assert again is None
-    assert len(posts) == 1  # only the first prompt
+    assert len(posts) == 2  # only the first attempt's progress + prompt
 
 
 def test_capture_and_prompt_notifies_when_no_case(_resolved_thread, monkeypatch) -> None:
@@ -583,6 +587,7 @@ def test_capture_and_prompt_notifies_when_no_case(_resolved_thread, monkeypatch)
 
     factory, thread_id = _resolved_thread
     capture_mod._no_case_notified.discard(thread_id)  # isolate from other tests' state
+    capture_mod._capture_progress_notified.discard(thread_id)
     posts: list[dict] = []
     monkeypatch.setattr(capture_mod, "post_message", lambda **kw: posts.append(kw))
 
@@ -597,10 +602,11 @@ def test_capture_and_prompt_notifies_when_no_case(_resolved_thread, monkeypatch)
     with session_scope(factory) as session:
         unit = get_knowledge_unit_by_source(session, "slack_thread", f"slack_thread_{thread_id}")
     assert unit is None  # nothing stored
-    # Exactly one message: the plain no-case notice, carrying no keep/discard buttons.
-    assert len(posts) == 1
-    assert not posts[0].get("blocks")
-    assert posts[0]["text"] == capture_mod._NO_CASE_NOTICE
+    # Progress is closed by the plain no-case notice, which has no action buttons.
+    assert len(posts) == 2
+    assert posts[0]["text"] == capture_mod.CAPTURE_STARTED_TEXT
+    assert not posts[1].get("blocks")
+    assert posts[1]["text"] == capture_mod._NO_CASE_NOTICE
 
 
 def test_capture_and_prompt_no_case_notice_dedups_per_thread(_resolved_thread, monkeypatch) -> None:
@@ -611,6 +617,7 @@ def test_capture_and_prompt_no_case_notice_dedups_per_thread(_resolved_thread, m
 
     factory, thread_id = _resolved_thread
     capture_mod._no_case_notified.discard(thread_id)
+    capture_mod._capture_progress_notified.discard(thread_id)
     posts: list[dict] = []
     monkeypatch.setattr(capture_mod, "post_message", lambda **kw: posts.append(kw))
 
@@ -623,17 +630,18 @@ def test_capture_and_prompt_no_case_notice_dedups_per_thread(_resolved_thread, m
             settings=_settings(),
         )
         assert again is None
-    assert len(posts) == 1  # notified once, then silent
+    assert len(posts) == 2  # one progress + one no-case notice, then silent
 
 
-def test_capture_and_prompt_silent_on_extraction_error(_resolved_thread, monkeypatch) -> None:
-    """#525 review: a transient extraction ERROR (not a "not a case" decision) must not
-    post the no-case notice — its "見つからなかった" reason would be factually wrong."""
+def test_capture_and_prompt_notifies_on_extraction_error(_resolved_thread, monkeypatch) -> None:
+    """#529: an extraction error closes progress with a retry notice, never the
+    factually-wrong no-case notice, and a later utterance may retry."""
 
     from tekijin.slack import capture as capture_mod
 
     factory, thread_id = _resolved_thread
     capture_mod._no_case_notified.discard(thread_id)
+    capture_mod._capture_progress_notified.discard(thread_id)
     posts: list[dict] = []
     monkeypatch.setattr(capture_mod, "post_message", lambda **kw: posts.append(kw))
 
@@ -649,8 +657,13 @@ def test_capture_and_prompt_silent_on_extraction_error(_resolved_thread, monkeyp
         settings=_settings(),
     )
     assert stored is None
-    assert posts == []  # silent on error; the next utterance can retry
+    assert [post["text"] for post in posts] == [
+        capture_mod.CAPTURE_STARTED_TEXT,
+        capture_mod.CAPTURE_FAILED_TEXT,
+    ]
+    assert all(not post.get("blocks") for post in posts)
     assert thread_id not in capture_mod._no_case_notified  # not consumed by an error
+    assert thread_id not in capture_mod._capture_progress_notified  # retry can narrate again
 
 
 def test_knowledge_discard_marks_draft_rejected(_resolved_thread) -> None:
