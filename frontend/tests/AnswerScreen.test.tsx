@@ -148,15 +148,25 @@ describe("AnswerScreen", () => {
     );
   });
 
-  it("links back to the inbox after answering (#126: label matches destination)", async () => {
+  it("links back to the inbox after answering in standalone view (#126: label matches destination)", async () => {
     getHandoffMock.mockResolvedValue(HANDOFF);
-    render(<AnswerScreen sessionId="s1" />);
+    render(<AnswerScreen sessionId="s1" showBackLink />);
     await screen.findByText("UTM移行時の注意点について");
     fireEvent.click(screen.getByRole("button", { name: "引き受ける" }));
 
     const back = await screen.findByRole("link", { name: "受信箱へ戻る" });
     expect(back).toHaveAttribute("href", "/inbox");
     expect(screen.getAllByRole("link", { name: "受信箱へ戻る" })).toHaveLength(1);
+  });
+
+  it("hides the inbox back-link after answering when embedded (#513: showBackLink defaults false)", async () => {
+    getHandoffMock.mockResolvedValue(HANDOFF);
+    render(<AnswerScreen sessionId="s1" />);
+    await screen.findByText("UTM移行時の注意点について");
+    fireEvent.click(screen.getByRole("button", { name: "引き受ける" }));
+
+    await screen.findByRole("heading", { name: /お引き受け/ });
+    expect(screen.queryByRole("link", { name: "受信箱へ戻る" })).toBeNull();
   });
 
   it("links to the chat thread after accepting when a recommendation_id is present (#224)", async () => {
@@ -181,7 +191,7 @@ describe("AnswerScreen", () => {
     await screen.findByText("UTM移行時の注意点について");
     fireEvent.click(screen.getByRole("button", { name: "今は難しい" }));
 
-    await screen.findByRole("link", { name: "受信箱へ戻る" });
+    await screen.findByRole("heading", { name: "承知しました" });
     expect(screen.queryByRole("link", { name: "チャットを開く" })).toBeNull();
   });
 
@@ -243,6 +253,22 @@ describe("AnswerScreen", () => {
 
     await screen.findByRole("alert");
     expect(screen.queryByRole("link", { name: "チャット一覧を見る" })).toBeNull();
+  });
+
+  it("hides the inbox back-link on a load error when embedded (#513: showBackLink defaults false)", async () => {
+    getHandoffMock.mockRejectedValue(new Error("network"));
+    render(<AnswerScreen sessionId="s1" />);
+
+    await screen.findByRole("alert");
+    expect(screen.queryByRole("link", { name: "受信箱へ戻る" })).toBeNull();
+  });
+
+  it("still shows the inbox back-link on a load error in standalone view (#513: showBackLink)", async () => {
+    getHandoffMock.mockRejectedValue(new Error("network"));
+    render(<AnswerScreen sessionId="s1" showBackLink />);
+
+    const back = await screen.findByRole("link", { name: "受信箱へ戻る" });
+    expect(back).toHaveAttribute("href", "/inbox");
   });
 
   it("handles a handoff with no responder, empty slots and no reasons", async () => {
