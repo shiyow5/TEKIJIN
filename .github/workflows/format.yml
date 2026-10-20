@@ -2,12 +2,9 @@ name: Format Check
 
 on:
   pull_request:
-    paths:
-      - "backend/**"
-      - "frontend/**"
-      - "Makefile"
-      - ".github/workflows/format.yml"
-      - ".github/actions/**"
+    # パスでは絞らない。どのPRでもワークフローを起動し、どのジョブを動かすかは
+    # changes ジョブ(Detect Changed Areas)が判定する。動かないジョブは skipped になり、
+    # develop の必須チェックを満たす。ここで絞ると docs だけのPRで結果が返らず、マージできなくなる。
   push:
     branches: [main, develop]
     paths:
