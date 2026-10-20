@@ -2,22 +2,9 @@ name: Test
 
 on:
   pull_request:
-    paths:
-      - "backend/**"
-      - "frontend/**"
-      - "Makefile"
-      # #101: the pgvector image pin lives here AND in docker-compose.yml, and
-      # `test_pgvector_image_pin.py` requires them to agree. A compose-only PR has
-      # to start this workflow, or the guard is unreachable exactly when it matters
-      # — the same shape as the Makefile-only hole in #309.
-      - "docker-compose.yml"
-      # #76: `test_single_worker_pin.py` reads deploy/start_backend.sh (the launch
-      # path systemd and deploy.sh both exec). A deploy-only PR — "bump --workers
-      # for throughput" is exactly that shape — must start this workflow, or the
-      # guard is unreachable when it matters. Same hole as Makefile-only in #309.
-      - "deploy/**"
-      - ".github/workflows/test.yml"
-      - ".github/actions/**"
+    # パスでは絞らない。どのPRでもワークフローを起動し、どのジョブを動かすかは
+    # changes ジョブ(Detect Changed Areas)が判定する。動かないジョブは skipped になり、
+    # develop の必須チェックを満たす。ここで絞ると docs だけのPRで結果が返らず、マージできなくなる。
   push:
     branches: [main, develop]
     paths:
