@@ -615,7 +615,7 @@
     "klass": "normal",
     "c1_variant": "enum",
     "raw_extra": null,
-    "arguments": "{\n  \"topics\": [\n    \"ECサイト構築\",\n    \"システム開発・API\"\n  ],\n  \"products\": [\n    \"たのめーる\"\n  ],\n  \"situation\": \"たのめーるの注文情報を社内システムと連携し、業務を自動化したいというご相談\",\n  \"question_type\": \"技術相談\",\n  \"out_of_scope\": false,\n  \"confidence\": 0.95\n}",
+    "arguments": "{\n  \"topics\": [\n    \"ECサイト構築\",\n    \"システム開発・API\"\n  ],\n  \"products\": [\n    \"おとどけーな\"\n  ],\n  \"situation\": \"おとどけーなの注文情報を社内システムと連携し、業務を自動化したいというご相談\",\n  \"question_type\": \"技術相談\",\n  \"out_of_scope\": false,\n  \"confidence\": 0.95\n}",
     "content": "",
     "reasoning": "",
     "finish_reason": "stop",

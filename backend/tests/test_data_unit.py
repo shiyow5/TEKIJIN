@@ -119,7 +119,7 @@ def test_all_fixtures_load() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# #326: 営業部日報の SPR 訪問日報フォーマット
+# #326: 営業部日報の CRS 訪問日報フォーマット
 # --------------------------------------------------------------------------- #
 def _sales_and_other_reports() -> tuple[list[dict], list[dict]]:
     fixtures_dir = get_settings().fixtures_dir
@@ -133,8 +133,8 @@ def _sales_and_other_reports() -> tuple[list[dict], list[dict]]:
     return sales, other
 
 
-def test_sales_daily_reports_use_spr_visit_format() -> None:
-    """営業部の日報はすべて SPR 訪問日報フォーマット、他部署は不変（#326）。"""
+def test_sales_daily_reports_use_crs_visit_format() -> None:
+    """営業部の日報はすべて CRS 訪問日報フォーマット、他部署は不変（#326）。"""
     sales, other = _sales_and_other_reports()
     for d in sales:
         c = d["content"]
@@ -143,7 +143,7 @@ def test_sales_daily_reports_use_spr_visit_format() -> None:
         # 粒度は 1〜2 文（実態）。見出し＋詳細で過剰に長くならない。
         assert len(c) <= 160, c
         assert d["issue"], "営業日報は課題タグを持つ"
-    # 他部署の日報は SPR 見出しを持たない（不変性の担保）。
+    # 他部署の日報は CRS 見出しを持たない（不変性の担保）。
     assert not any(d["content"].startswith("【訪問】") for d in other)
 
 
@@ -156,7 +156,7 @@ def test_daily_reports_have_precomputed_topics() -> None:
 
 
 def test_sales_daily_reports_carry_topic_keywords() -> None:
-    """SPR 日報がトピック語を含み、証拠被覆に寄与する（#326・ADR-0006）。"""
+    """CRS 日報がトピック語を含み、証拠被覆に寄与する（#326・ADR-0006）。"""
     sales, _ = _sales_and_other_reports()
     # build_fixtures の TOPICS 語彙（SALES_TOPIC_SCRIPT の課題句/商材句が含む）。
     keys = (

@@ -171,7 +171,7 @@ flowchart TD
 
 - **目的**: クエリに近い「過去QA」「社内文書」「人」を高速に絞り込む。
 - **構成**: Dense(pgvector) と Sparse(BM25 + SudachiPy) を **重み付き RRF(k=60)** で統合
-  （`score(d)=Σ_r w_r/(k+rank_r(d))`）。型番・社内用語（例「たよれーる」「SPR」）は BM25 が拾う。
+  （`score(d)=Σ_r w_r/(k+rank_r(d))`）。型番・社内用語（例「まもりーな」「CRS」）は BM25 が拾う。
 - **重み**: dense チャネル=1.0、**BM25=`bm25_weight`（既定 0.2、#68）**。等重み RRF は評価セット v2
   （症状語クエリ）で BM25 の弱い順位を dense と同格に扱い層2 R@3 が -0.128 だったため下げた。
   BM25 は消さない（型番・製品名で効く）。dense 信号強度に応じた適応重みは #114。
@@ -519,7 +519,7 @@ event: error         data: {"error":"内部エラーが発生しました"}
 | 出力形式 | **LangChain `model.with_structured_output(PydanticSchema)` で強制**。自由文で返させない（C1・C2・C7'）。スキーマは `backend/src/tekijin/llm/schemas.py` に集約 |
 | ハルシネーション抑制 | 「わからない場合は out_of_scope / sufficient=false を返す」を明示。**創作させない**。C7' 自己回答は**提供根拠のみ**から回答し、根拠が無ければ `grounded=false`（無出典の断定を出さない・#291） |
 | 参考データの無害化 | C7'（`<evidence>`）・#70 critic（`<candidates>`）は外部データをタグで囲み `_fence_safe` で命令注入を封じる（#282） |
-| few-shot | 大塚商会の実商材（複合機/UTM/たのめーる/たよれーる/SPR）を例に数件 |
+| few-shot | OA機器・IT商材（複合機/UTM/おとどけーな/まもりーな/CRS。固有の商品名は架空）を例に数件 |
 | 言語 | 日本語。敬体。社内用語を保持（SudachiPy mode C と整合） |
 | バージョン管理 | プロンプトは `backend/agent/prompts/` でファイル管理し、変更を追える（発表素材にも） |
 | 温度 | C1・C2 は低温（決定性重視）、C7 は中温（自然さ） |
@@ -580,7 +580,7 @@ event: error         data: {"error":"内部エラーが発生しました"}
   段が本番の日報埋め込みを冪等に計算する（初回 3070 行・以降 no-op）
 - ~~**C6 質問一致項（#405 qsim）**（`question_fit_enabled`）~~：**解決済み。既定ON**（実 E2E Hit@3 0.742→0.788）
 - **証拠十分性クリティック #70 の有効化**（`answerability_enabled`）：DGX の閾値スイープ後（現状 net+6 だが recall 毀損あり）
-- トピックのタクソノミ語彙（大塚商会の商材体系から種を作る。15_専門性推定とグラフ成長 §1）
+- トピックのタクソノミ語彙（OA機器・IT商材の販社の商材体系を想定して種を作る。15_専門性推定とグラフ成長 §1）
 - LangGraph / LangChain の**固定バージョン**（着手時に context7 等で当該版のAPIを確認して pin）
 - checkpointer を最初から Postgres にするか、InMemorySaver で始めて後で差し替えるか（工数次第）
 
