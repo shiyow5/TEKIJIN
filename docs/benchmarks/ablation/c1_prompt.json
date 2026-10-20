@@ -615,7 +615,7 @@
     "klass": "normal",
     "c1_variant": "prompt",
     "raw_extra": null,
-    "arguments": "{\n  \"topics\": [\n    \"システム開発・API\",\n    \"業務効率化コンサル\"\n  ],\n  \"products\": [\n    \"たのめーる\"\n  ],\n  \"situation\": \"たのめーると社内システムを接続し注文業務を自動化したいという相談\",\n  \"question_type\": \"技術相談\",\n  \"out_of_scope\": false,\n  \"confidence\": 0.9\n}",
+    "arguments": "{\n  \"topics\": [\n    \"システム開発・API\",\n    \"業務効率化コンサル\"\n  ],\n  \"products\": [\n    \"おとどけーな\"\n  ],\n  \"situation\": \"おとどけーなと社内システムを接続し注文業務を自動化したいという相談\",\n  \"question_type\": \"技術相談\",\n  \"out_of_scope\": false,\n  \"confidence\": 0.9\n}",
     "content": "",
     "reasoning": "",
     "finish_reason": "stop",

@@ -125,7 +125,7 @@ def test_rrf_rejects_non_finite_weight() -> None:
 _CORPUS = [
     ("d_vpn", "リモートアクセスVPNの設定手順とトラブルシューティング"),
     ("d_model", "RX-3000の見積を作成する方法"),
-    ("d_jargon", "たよれーるの契約更新について社内で確認する"),
+    ("d_jargon", "まもりーなの契約更新について社内で確認する"),
     ("d_other", "経費精算の締め切りは月末です"),
 ]
 
@@ -140,7 +140,7 @@ def test_bm25_matches_model_number() -> None:
 
 def test_bm25_matches_inhouse_jargon() -> None:
     index = BM25Index.build(_CORPUS)
-    hits = index.search("たよれーる 契約", top_k=3)
+    hits = index.search("まもりーな 契約", top_k=3)
     assert hits[0][0] == "d_jargon"
 
 
@@ -184,7 +184,7 @@ def test_bm25_cache_reuses_index_until_content_changes() -> None:
 
     clear_bm25_cache()
     try:
-        docs = [("a", "RX-3000 の設定"), ("b", "たよれーる 導入")]
+        docs = [("a", "RX-3000 の設定"), ("b", "まもりーな 導入")]
         first = cached_bm25_index("answers", iter(docs))
         # Identical corpus -> the SAME index object (no re-tokenization / re-fit).
         assert cached_bm25_index("answers", iter(docs)) is first
@@ -208,7 +208,7 @@ def test_shared_tokenizer_is_thread_safe() -> None:
 
     tok = SudachiTokenizer()
     tok.tokenize("初期化")  # warm the shared dictionary once
-    texts = ["RX-3000の設定変更", "たよれーる導入の見積", "VPN機器の3拠点接続"] * 60
+    texts = ["RX-3000の設定変更", "まもりーな導入の見積", "VPN機器の3拠点接続"] * 60
     errors: list[str] = []
 
     def worker() -> None:

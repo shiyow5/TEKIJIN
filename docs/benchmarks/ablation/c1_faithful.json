@@ -615,7 +615,7 @@
     "klass": "normal",
     "c1_variant": "product",
     "raw_extra": null,
-    "arguments": "{\n  \"topics\": [\n    \"業務自動化\",\n    \"システム連携\",\n    \"API統合\"\n  ],\n  \"products\": [\n    \"たのめーる\"\n  ],\n  \"situation\": \"社内システムと外部サービス（たのめーる）の注文処理を自動化したいという相談\",\n  \"question_type\": \"技術相談\",\n  \"out_of_scope\": false,\n  \"confidence\": 0.95\n}",
+    "arguments": "{\n  \"topics\": [\n    \"業務自動化\",\n    \"システム連携\",\n    \"API統合\"\n  ],\n  \"products\": [\n    \"おとどけーな\"\n  ],\n  \"situation\": \"社内システムと外部サービス（おとどけーな）の注文処理を自動化したいという相談\",\n  \"question_type\": \"技術相談\",\n  \"out_of_scope\": false,\n  \"confidence\": 0.95\n}",
     "content": "",
     "reasoning": "",
     "finish_reason": "stop",
