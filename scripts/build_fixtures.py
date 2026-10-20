@@ -214,7 +214,7 @@ SALES_ISSUE_BY_PURPOSE = {
 }
 
 
-def sales_spr_report(report, emp_name, rep_topics):
+def sales_crs_report(report, emp_name, rep_topics):
     """営業部の日報1件を CRS 訪問日報フォーマットの短文へ変換する。
 
     返り値は ``(content, issue)``。乱数は日報IDで決まる専用インスタンス（グローバル random を
@@ -700,7 +700,7 @@ def main():
         eid = name2id[d["name"]]
         if eid in sales_ids:
             # #326: 営業部の日報は CRS 訪問日報フォーマットへ差し替える（他部署は不変）。
-            content, issue = sales_spr_report(d, id2emp[eid]["name"], sales_rep_topics[eid])
+            content, issue = sales_crs_report(d, id2emp[eid]["name"], sales_rep_topics[eid])
         else:
             content = d["content"]
             issue = None

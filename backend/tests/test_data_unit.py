@@ -133,7 +133,7 @@ def _sales_and_other_reports() -> tuple[list[dict], list[dict]]:
     return sales, other
 
 
-def test_sales_daily_reports_use_spr_visit_format() -> None:
+def test_sales_daily_reports_use_crs_visit_format() -> None:
     """営業部の日報はすべて CRS 訪問日報フォーマット、他部署は不変（#326）。"""
     sales, other = _sales_and_other_reports()
     for d in sales:

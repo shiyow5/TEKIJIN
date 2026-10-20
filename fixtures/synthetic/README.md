@@ -78,7 +78,7 @@ python3 scripts/build_fixtures.py     # fixtures/source/ を入力に、ここ�
     トピック証拠を補強する（案件に無い偽の専門性を作らない）。実データ・実顧客名は使わず、OA機器・IT商材販社の一般的な
     商材レンジ（CRM・営業支援 / 業務効率化コンサル / 契約書管理 / 基幹システム / ネットワーク・VPN 等）で合成。
     乱数は日報IDで決まる専用インスタンス（グローバル `random` 非消費＝他データの件数を一切ずらさない）。
-    ガードは `backend/tests/test_data_unit.py::test_sales_daily_reports_use_spr_visit_format` ほか。
+    ガードは `backend/tests/test_data_unit.py::test_sales_daily_reports_use_crs_visit_format` ほか。
 - **questions**: `id, asker_id, body, topics[], status(="answered"), created_at`
 - **answers**: `id, question_id, responder_id, body, created_at, reuse_count(0〜8), was_helpful(≈7割 true), topic`
   - **全40名が最低1回は `responder_id` に登場**する（少数者の埋没を防ぐため、未カバー社員は
