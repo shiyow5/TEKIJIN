@@ -807,7 +807,7 @@
         "enable_thinking": true
       }
     },
-    "arguments": "{\n  \"topics\": [\n    \"API連携\",\n    \"注文自動化\"\n  ],\n  \"products\": [\n    \"たのめーる\"\n  ],\n  \"situation\": \"たのめーるの注文を社内システムと繋いで自動化したい\",\n  \"question_type\": \"技術相談\",\n  \"out_of_scope\": false,\n  \"confidence\": 0.9\n}",
+    "arguments": "{\n  \"topics\": [\n    \"API連携\",\n    \"注文自動化\"\n  ],\n  \"products\": [\n    \"おとどけーな\"\n  ],\n  \"situation\": \"おとどけーなの注文を社内システムと繋いで自動化したい\",\n  \"question_type\": \"技術相談\",\n  \"out_of_scope\": false,\n  \"confidence\": 0.9\n}",
     "content": "",
     "reasoning": "",
     "finish_reason": "stop",

@@ -1,7 +1,7 @@
 """Sparse (lexical) retrieval with BM25 over SudachiPy tokens.
 
 Dense vectors miss exact-match signals — model numbers, product names, and
-in-house jargon ("RX-3000", "たよれーる", "SPR") — so those are recovered by
+in-house jargon ("RX-3000", "まもりーな", "CRS") — so those are recovered by
 term-frequency search (technical-spec §3.4). Japanese has no whitespace word
 boundaries, so text is first segmented with SudachiPy in split **mode C**, which
 keeps compound words intact (good for jargon), then scored with

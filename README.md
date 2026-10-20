@@ -140,3 +140,8 @@ GitHub-hosted の `ubuntu-latest` で動作します（追加のランナー設�
 
 - 秘密情報（`.env`、サービスアカウント JSON 等）はコミットしないこと。`.gitignore` で除外済み。
 - 設定値のひな型は `.env.example` を参照。
+
+## ライセンス
+
+[MIT License](LICENSE)。`fixtures/` のデータはすべて合成で、実在の個人・顧客は含みません。
+商品名や社内システム名（「おとどけーな」「まもりーな」「CRS」など）も架空です。
