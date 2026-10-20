@@ -159,7 +159,7 @@ export function AnswerScreen({ sessionId, showBackLink = false, onDone }: Answer
             with no way back to the conversation. The chat list finds it without
             needing the (now-consumed) session id (#224). */}
         {errorKind === "gone" ? <ChatCta href="/chat" label="チャット一覧を見る" /> : null}
-        <BackLink />
+        {showBackLink ? <BackLink /> : null}
       </Centered>
     );
   }
@@ -174,7 +174,7 @@ export function AnswerScreen({ sessionId, showBackLink = false, onDone }: Answer
         handoff.consult_method !== "direct" ? (
           <ChatCta href={`/chat?thread=${handoff.recommendation_id}`} label="チャットを開く" />
         ) : null}
-        <BackLink />
+        {showBackLink ? <BackLink /> : null}
       </Centered>
     );
   }
