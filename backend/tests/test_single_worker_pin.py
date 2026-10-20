@@ -143,8 +143,9 @@ def test_editing_only_a_launch_path_still_runs_these_tests() -> None:
     for launch in LAUNCH_FILES:
         path = launch.relative_to(REPO).as_posix()
         for event in ("pull_request", "push"):
-            patterns = triggers[event]["paths"]
-            assert any(_covers(p, path) for p in patterns), (
+            # No `paths:` means the trigger fires for every change (#550).
+            patterns = (triggers[event] or {}).get("paths")
+            assert patterns is None or any(_covers(p, path) for p in patterns), (
                 f"a {path}-only change does not start the Test workflow on {event}"
             )
         assert any(_covers(p, path) for p in backend_filter), (

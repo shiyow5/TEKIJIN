@@ -123,7 +123,9 @@ def test_editing_only_compose_or_the_makefile_still_runs_the_backend_tests() -> 
 
     for path in ("docker-compose.yml", "Makefile"):
         for event in ("pull_request", "push"):
-            assert path in triggers[event]["paths"], (
+            # No `paths:` means the trigger fires for every change (#550).
+            paths = (triggers[event] or {}).get("paths")
+            assert paths is None or path in paths, (
                 f"a {path}-only change does not start the Test workflow on {event}"
             )
         assert path in backend_filter, (
